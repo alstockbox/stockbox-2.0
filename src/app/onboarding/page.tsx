@@ -1,0 +1,42 @@
+import type { Metadata } from "next";
+import { ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, Container, Section } from "@/components/ui/card";
+import { saveOnboardingAction } from "@/lib/profile/actions";
+import { requireUser } from "@/lib/auth/session";
+
+export const metadata: Metadata = { title: "Set up your research profile" };
+
+export default async function OnboardingPage() {
+  await requireUser();
+  return (
+    <Section className="min-h-[72vh]">
+      <Container className="max-w-3xl">
+        <p className="text-sm font-semibold text-[#e1cb95]">Two quick choices</p>
+        <h1 className="serif mt-2 text-4xl font-semibold text-[#f4efe5]">Shape the research view around you.</h1>
+        <p className="mt-3 text-sm leading-6 text-[#9aa7b8]">Your profile changes presentation and score weights, never the underlying financial facts.</p>
+        <form action={saveOnboardingAction} className="mt-8 space-y-5">
+          <Card>
+            <fieldset>
+              <legend className="text-lg font-semibold text-[#f4efe5]">Experience</legend>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {["beginner", "intermediate", "advanced"].map((value) => (
+                  <label key={value} className="flex cursor-pointer items-center gap-3 rounded-md border border-white/10 bg-white/5 p-4 capitalize text-[#d6deea]">
+                    <input type="radio" name="experience" value={value} defaultChecked={value === "intermediate"} />{value}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </Card>
+          <Card>
+            <label className="block text-lg font-semibold text-[#f4efe5]" htmlFor="investmentProfile">Investment profile</label>
+            <select id="investmentProfile" name="investmentProfile" defaultValue="balanced" className="mt-4 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]">
+              <option value="balanced">Balanced</option><option value="long_term">Long-term</option><option value="short_term">Short-term</option><option value="growth">Growth</option><option value="value">Value / valuation</option><option value="quality">Quality</option><option value="dividend">Dividend</option>
+            </select>
+          </Card>
+          <Button>Save profile <ArrowRight className="h-4 w-4" aria-hidden="true" /></Button>
+        </form>
+      </Container>
+    </Section>
+  );
+}

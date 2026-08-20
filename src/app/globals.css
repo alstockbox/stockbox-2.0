@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+:root {
+  --stockbox-navy: #07111f;
+  --stockbox-navy-2: #0d1c2e;
+  --stockbox-ink: #111827;
+  --stockbox-gold: #b99b5f;
+  --stockbox-cognac: #8b5e3c;
+  --stockbox-paper: #f4efe5;
+  --stockbox-muted: #9aa7b8;
+  --stockbox-border: rgba(244, 239, 229, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(7, 17, 31, 0.96), rgba(5, 9, 16, 0.98)),
+    radial-gradient(circle at 15% 0%, rgba(185, 155, 95, 0.11), transparent 28%);
+  color: var(--stockbox-paper);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--stockbox-gold);
+  outline-offset: 2px;
+}
+
+.serif {
+  font-family: var(--font-playfair), Georgia, serif;
+}
+
+.surface {
+  border: 1px solid var(--stockbox-border);
+  background: rgba(13, 28, 46, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+
+.subtle-grid {
+  background-image:
+    linear-gradient(rgba(244, 239, 229, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(244, 239, 229, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.number {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
