@@ -272,13 +272,51 @@ create table public.admin_alert_deliveries (
   provider_message_id text
 );
 
-insert into public.plans (key, name, monthly_price_sek, entitlements) values
-  ('free', 'Free', 0, '{"monthlyAnalyses":5,"deepAnalyses":1,"watchlistItems":5,"batchRows":0,"portfolios":1,"aiAssistant":false,"hourlyAlerts":false}'),
-  ('basic', 'Basic', 79, '{"monthlyAnalyses":30,"deepAnalyses":8,"watchlistItems":20,"batchRows":10,"portfolios":2,"aiAssistant":false,"hourlyAlerts":false}'),
-  ('standard', 'Standard', 149, '{"monthlyAnalyses":100,"deepAnalyses":30,"watchlistItems":75,"batchRows":50,"portfolios":5,"aiAssistant":true,"hourlyAlerts":true}'),
-  ('premium', 'Premium', 299, '{"monthlyAnalyses":300,"deepAnalyses":120,"watchlistItems":250,"batchRows":250,"portfolios":15,"aiAssistant":true,"hourlyAlerts":true}'),
-  ('elite', 'Elite', 599, '{"monthlyAnalyses":1000,"deepAnalyses":400,"watchlistItems":1000,"batchRows":1000,"portfolios":50,"aiAssistant":true,"hourlyAlerts":true}')
-on conflict (key) do update set name = excluded.name, monthly_price_sek = excluded.monthly_price_sek, entitlements = excluded.entitlements, updated_at = now();
+insert into public.plans
+  (key, name, monthly_price_sek, entitlements, active)
+values
+  (
+    'free',
+    'Free',
+    0,
+    '{"monthlyAnalyses":5,"deepAnalyses":1,"watchlistItems":5,"batchRows":0,"portfolios":1,"aiAssistant":false,"hourlyAlerts":false}',
+    true
+  ),
+  (
+    'basic',
+    'Basic',
+    79,
+    '{"monthlyAnalyses":30,"deepAnalyses":8,"watchlistItems":20,"batchRows":10,"portfolios":2,"aiAssistant":false,"hourlyAlerts":false}',
+    true
+  ),
+  (
+    'standard',
+    'Standard',
+    0,
+    '{"monthlyAnalyses":100,"deepAnalyses":30,"watchlistItems":75,"batchRows":50,"portfolios":5,"aiAssistant":true,"hourlyAlerts":true}',
+    false
+  ),
+  (
+    'premium',
+    'Premium',
+    0,
+    '{"monthlyAnalyses":300,"deepAnalyses":120,"watchlistItems":250,"batchRows":250,"portfolios":15,"aiAssistant":true,"hourlyAlerts":true}',
+    false
+  ),
+  (
+    'elite',
+    'Elite',
+    0,
+    '{"monthlyAnalyses":1000,"deepAnalyses":400,"watchlistItems":1000,"batchRows":1000,"portfolios":50,"aiAssistant":true,"hourlyAlerts":true}',
+    false
+  )
+on conflict (key) do update
+set
+  name = excluded.name,
+  monthly_price_sek = excluded.monthly_price_sek,
+  entitlements = excluded.entitlements,
+  active = excluded.active,
+  updated_at = now();
 
 create or replace function private.handle_new_user()
 returns trigger
