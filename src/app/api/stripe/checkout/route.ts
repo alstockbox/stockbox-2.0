@@ -1,4 +1,4 @@
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import { z } from "zod";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { requireUser } from "@/lib/auth/session";
@@ -8,7 +8,7 @@ import {
   reportBillingReadiness,
   SUBSCRIPTIONS_UNAVAILABLE_MESSAGE
 } from "@/lib/billing/readiness";
-import { getStripe, randomIntegrationIdentifier } from "@/lib/billing/stripe";
+import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import {
   getUserSubscription,
   isCurrentBasicSubscription
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
   const stripeCustomerId = subscriptionLookup.subscription?.stripeCustomerId ?? null;
 
-  const params: Stripe.Checkout.SessionCreateParams & { integration_identifier: string } = {
+  const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${env.NEXT_PUBLIC_APP_URL}/settings/billing?checkout=success`,
@@ -101,8 +101,7 @@ export async function POST(request: Request) {
         userId: user.id,
         plan: plan.key
       }
-    },
-    integration_identifier: randomIntegrationIdentifier()
+    }
   };
 
   try {
@@ -111,9 +110,12 @@ export async function POST(request: Request) {
 
     return Response.json({ url: session.url });
   } catch (error) {
-    console.error("[billing] Stripe Checkout Session creation failed.", {
-      errorType: error instanceof Error ? error.name : "unknown"
-    });
+    const diagnostic = getSafeStripeErrorDiagnostic(error);
+    const logMessage = diagnostic.restrictedKeyPermissionError
+      ? "[billing] Stripe Checkout restricted-key permission denied. Grant the permission identified by the Stripe error code or parameter."
+      : "[billing] Stripe Checkout Session creation failed.";
+
+    console.error(logMessage, diagnostic);
     return Response.json(
       { error: SUBSCRIPTIONS_UNAVAILABLE_MESSAGE },
       { status: 503 }

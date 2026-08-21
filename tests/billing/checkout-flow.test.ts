@@ -23,7 +23,14 @@ vi.mock("@/lib/billing/readiness", async () => {
 });
 vi.mock("@/lib/billing/stripe", () => ({
   getStripe: mocks.getStripe,
-  randomIntegrationIdentifier: vi.fn(() => "stockbox_checkout_abcdefgh")
+  getSafeStripeErrorDiagnostic: vi.fn(() => ({
+    type: "StripePermissionError",
+    code: "permission_denied",
+    param: "checkout.sessions",
+    requestId: "req_test",
+    message: "Permission denied.",
+    restrictedKeyPermissionError: true
+  }))
 }));
 vi.mock("@/lib/billing/subscriptions", async () => {
   const actual = await vi.importActual<typeof import("@/lib/billing/subscriptions")>(
@@ -92,6 +99,62 @@ describe("Basic checkout flow", () => {
       url: "https://checkout.stripe.test/session"
     });
     expect(mocks.createSession).toHaveBeenCalledOnce();
+    expect(mocks.createSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_basic", quantity: 1 }],
+      success_url: "https://stockbox.test/settings/billing?checkout=success",
+      cancel_url: "https://stockbox.test/pricing?checkout=cancelled",
+      customer: undefined,
+      customer_email: "user@example.com",
+      client_reference_id: "user_1",
+      discounts: [{ coupon: "coupon_launch" }],
+      metadata: {
+        userId: "user_1",
+        plan: "basic",
+        offer: "basic_launch_3_months"
+      },
+      subscription_data: {
+        metadata: {
+          userId: "user_1",
+          plan: "basic"
+        }
+      }
+    });
+    expect(mocks.createSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      "integration_identifier"
+    );
+  });
+
+  it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.getUserSubscription.mockResolvedValue({
+      ok: true,
+      subscription: {
+        planKey: "free",
+        status: "active",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        currentPeriodEnd: null,
+        createdAt: null
+      }
+    });
+    mocks.createSession.mockRejectedValue(new Error("not logged"));
+
+    const response = await POST(checkoutRequest());
+
+    expect(response.status).toBe(503);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("restricted-key permission denied"),
+      {
+        type: "StripePermissionError",
+        code: "permission_denied",
+        param: "checkout.sessions",
+        requestId: "req_test",
+        message: "Permission denied.",
+        restrictedKeyPermissionError: true
+      }
+    );
+    consoleError.mockRestore();
   });
 
   it("routes an active Basic user to billing management without creating Checkout", async () => {
