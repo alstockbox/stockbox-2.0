@@ -18,7 +18,7 @@ create table public.profiles (
 create table public.plans (
   key text primary key,
   name text not null,
-  monthly_price_sek integer not null check (monthly_price_sek >= 0),
+  monthly_price_sek integer check (monthly_price_sek >= 0),
   entitlements jsonb not null default '{}'::jsonb,
   active boolean not null default true,
   updated_at timestamptz not null default now()
@@ -278,7 +278,7 @@ values
   (
     'free',
     'Free',
-    0,
+    null,
     '{"monthlyAnalyses":5,"deepAnalyses":1,"watchlistItems":5,"batchRows":0,"portfolios":1,"aiAssistant":false,"hourlyAlerts":false}',
     true
   ),
@@ -292,14 +292,14 @@ values
   (
     'standard',
     'Standard',
-    0,
+    null,
     '{"monthlyAnalyses":100,"deepAnalyses":30,"watchlistItems":75,"batchRows":50,"portfolios":5,"aiAssistant":true,"hourlyAlerts":true}',
     false
   ),
   (
     'premium',
     'Premium',
-    0,
+    null,
     '{"monthlyAnalyses":300,"deepAnalyses":120,"watchlistItems":250,"batchRows":250,"portfolios":15,"aiAssistant":true,"hourlyAlerts":true}',
     false
   ),

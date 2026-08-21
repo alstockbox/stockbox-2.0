@@ -4,6 +4,8 @@ export type StripePriceEnv =
   | "STRIPE_PRICE_STANDARD_MONTHLY"
   | "STRIPE_PRICE_PREMIUM_MONTHLY"
   | "STRIPE_PRICE_ELITE_MONTHLY";
+export type StripeCouponEnv = "STRIPE_COUPON_BASIC_LAUNCH";
+export type CommercialStatus = "active" | "inactive";
 
 export type Entitlements = {
   monthlyAnalyses: number;
@@ -18,8 +20,15 @@ export type Entitlements = {
 export type Plan = {
   key: PlanKey;
   name: string;
-  monthlyPriceSek: number;
+  commercialStatus: CommercialStatus;
+  monthlyPriceSek: number | null;
   stripeEnv?: StripePriceEnv;
+  launchOffer?: {
+    monthlyPriceSek: number;
+    durationMonths: number;
+    thenMonthlyPriceSek: number;
+    stripeCouponEnv: StripeCouponEnv;
+  };
   entitlements: Entitlements;
   highlight?: boolean;
 };
@@ -28,6 +37,7 @@ export const plans: Plan[] = [
   {
     key: "free",
     name: "Free",
+    commercialStatus: "active",
     monthlyPriceSek: 0,
     entitlements: {
       monthlyAnalyses: 5,
@@ -42,8 +52,15 @@ export const plans: Plan[] = [
   {
     key: "basic",
     name: "Basic",
+    commercialStatus: "active",
     monthlyPriceSek: 79,
     stripeEnv: "STRIPE_PRICE_BASIC_MONTHLY",
+    launchOffer: {
+      monthlyPriceSek: 49,
+      durationMonths: 3,
+      thenMonthlyPriceSek: 79,
+      stripeCouponEnv: "STRIPE_COUPON_BASIC_LAUNCH"
+    },
     entitlements: {
       monthlyAnalyses: 30,
       deepAnalyses: 8,
@@ -57,9 +74,9 @@ export const plans: Plan[] = [
   {
     key: "standard",
     name: "Standard",
-    monthlyPriceSek: 149,
+    commercialStatus: "inactive",
+    monthlyPriceSek: null,
     stripeEnv: "STRIPE_PRICE_STANDARD_MONTHLY",
-    highlight: true,
     entitlements: {
       monthlyAnalyses: 100,
       deepAnalyses: 30,
@@ -73,7 +90,8 @@ export const plans: Plan[] = [
   {
     key: "premium",
     name: "Premium",
-    monthlyPriceSek: 299,
+    commercialStatus: "inactive",
+    monthlyPriceSek: null,
     stripeEnv: "STRIPE_PRICE_PREMIUM_MONTHLY",
     entitlements: {
       monthlyAnalyses: 300,
@@ -88,7 +106,8 @@ export const plans: Plan[] = [
   {
     key: "elite",
     name: "Elite",
-    monthlyPriceSek: 599,
+    commercialStatus: "inactive",
+    monthlyPriceSek: null,
     stripeEnv: "STRIPE_PRICE_ELITE_MONTHLY",
     entitlements: {
       monthlyAnalyses: 1000,
@@ -102,8 +121,25 @@ export const plans: Plan[] = [
   }
 ];
 
+export const commerciallyActivePlans = plans.filter(
+  (plan) => plan.commercialStatus === "active" && plan.monthlyPriceSek !== null
+);
+
+export function findPlan(key: string): Plan | null {
+  return plans.find((plan) => plan.key === key) ?? null;
+}
+
+export function isPlanPurchasable(plan: Plan): boolean {
+  return (
+    plan.commercialStatus === "active" &&
+    plan.key !== "free" &&
+    plan.monthlyPriceSek !== null &&
+    Boolean(plan.stripeEnv)
+  );
+}
+
 export function getPlan(key: PlanKey) {
-  return plans.find((plan) => plan.key === key) ?? plans[0];
+  return findPlan(key) ?? plans[0];
 }
 
 export function getPlanByStripePrice(priceId: string | null | undefined, env = process.env): Plan | null {

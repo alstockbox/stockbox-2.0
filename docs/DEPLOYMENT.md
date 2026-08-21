@@ -20,7 +20,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 1. Create a production Supabase project.
 2. Store project URL, anon key, service-role key, and database connection values in the deployment environment.
-3. Apply database migrations.
+3. Apply all database migrations, including `20260821020000_p0_billing_state.sql`.
 4. Enable RLS on user-owned tables and write explicit policies.
 5. Configure Auth site URL and redirect URLs for production and preview domains.
 6. Configure email/SMTP settings if Supabase default emails are not acceptable.
@@ -33,11 +33,11 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 ## Stripe Setup
 
-1. Create products/prices for Free, Basic, Standard, Premium, and Elite.
+1. Create the Basic recurring price at 79 SEK/month and a repeating three-month coupon that reduces the first three payments to 49 SEK/month. Keep Standard, Premium, and Elite unpriced and inactive.
 2. Configure checkout success/cancel URLs.
 3. Configure billing portal.
 4. Create production webhook endpoint for subscription, invoice, checkout, customer, and payment events.
-5. Store a least-privilege restricted server key, price IDs, and webhook signing secret in environment variables.
+5. Store a least-privilege restricted server key, the Basic price ID, Basic launch coupon ID, and webhook signing secret in environment variables.
 6. Implement idempotent webhook handling and entitlement sync from Stripe events.
 7. Verify in test mode before live mode:
    - checkout starts;

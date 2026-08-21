@@ -26,4 +26,4 @@ News, batch execution, AI assistant, referrals, affiliates, and Stock Battle def
 
 ## ADR-007: Pricing is configuration
 
-Plan limits live in one typed catalog and in the plans table. Current SEK prices are launch proposals and require owner confirmation before Stripe products are created.
+Plan limits and commercial status live in one typed catalog and in the plans table. Free and Basic are active. Basic is 79 SEK/month with a 49 SEK/month launch offer for the first three months. Standard, Premium, and Elite remain unpriced and inactive until explicitly approved.

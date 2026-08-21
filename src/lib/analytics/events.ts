@@ -25,13 +25,14 @@ export function captureServerEvent(
   event: AnalyticsEvent,
   properties: Record<string, unknown> = {}
 ) {
-  if (!process.env.NEXT_PUBLIC_POSTHOG_KEY) return;
+  const env = getServerEnv();
+  if (!env.NEXT_PUBLIC_POSTHOG_KEY) return;
 
-  void fetch(`${process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://app.posthog.com"}/capture/`, {
+  void fetch(`${env.NEXT_PUBLIC_POSTHOG_HOST}/capture/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      api_key: process.env.NEXT_PUBLIC_POSTHOG_KEY,
+      api_key: env.NEXT_PUBLIC_POSTHOG_KEY,
       event,
       properties: {
         distinct_id: properties.userId ?? "anonymous",
@@ -40,3 +41,4 @@ export function captureServerEvent(
     })
   }).catch(() => undefined);
 }
+import { getServerEnv } from "@/lib/env/server";
