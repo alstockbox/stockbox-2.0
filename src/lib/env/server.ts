@@ -59,10 +59,9 @@ export function isStripeConfigured() {
   return Boolean(env.STRIPE_RESTRICTED_KEY && env.STRIPE_WEBHOOK_SECRET);
 }
 
-export function isBasicLaunchCheckoutConfigured() {
-  const env = getServerEnv();
+export function isBasicLaunchCheckoutConfigured(env = getServerEnv()) {
   return Boolean(
-    isStripeConfigured() &&
+    env.STRIPE_RESTRICTED_KEY &&
       env.STRIPE_PRICE_BASIC_MONTHLY &&
       env.STRIPE_COUPON_BASIC_LAUNCH
   );
