@@ -1,32 +1,43 @@
 import { requireUser } from "@/lib/auth/session";
 import { getStripe } from "@/lib/billing/stripe";
+import { getUserSubscription } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST() {
   const user = await requireUser();
   const stripe = getStripe();
-  const supabase = createAdminClient();
+  const subscriptionLookup = await getUserSubscription(user.id);
 
-  if (!stripe || !supabase) {
-    return Response.json({ error: "Billing is not configured." }, { status: 503 });
+  if (!stripe || !subscriptionLookup.ok) {
+    return Response.json(
+      { error: "Billing management is temporarily unavailable. Please try again shortly." },
+      { status: 503 }
+    );
   }
 
-  const { data } = await supabase
-    .from("subscriptions")
-    .select("stripe_customer_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!data?.stripe_customer_id) {
-    return Response.json({ error: "No Stripe customer is attached to this account." }, { status: 404 });
+  const stripeCustomerId = subscriptionLookup.subscription?.stripeCustomerId;
+  if (!stripeCustomerId) {
+    return Response.json(
+      { error: "No subscription billing profile is available for this account." },
+      { status: 404 }
+    );
   }
 
   const env = getServerEnv();
-  const portal = await stripe.billingPortal.sessions.create({
-    customer: data.stripe_customer_id,
-    return_url: `${env.NEXT_PUBLIC_APP_URL}/dashboard`
-  });
+  try {
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: `${env.NEXT_PUBLIC_APP_URL}/settings/billing`
+    });
 
-  return Response.json({ url: portal.url });
+    return Response.json({ url: portal.url });
+  } catch (error) {
+    console.error("[billing] Stripe Customer Portal Session creation failed.", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
+    return Response.json(
+      { error: "Billing management is temporarily unavailable. Please try again shortly." },
+      { status: 503 }
+    );
+  }
 }

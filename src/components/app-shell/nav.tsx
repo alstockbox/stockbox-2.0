@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { BarChart3, Bell, BriefcaseBusiness, CreditCard, Gauge, LayoutDashboard, ShieldCheck } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
@@ -35,6 +35,15 @@ export async function AppNav() {
               {item.label}
             </Link>
           ))}
+          {user ? (
+            <Link
+              href="/settings/billing"
+              className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-sm text-[#c9d2df] hover:bg-white/8 sm:px-3"
+            >
+              <CreditCard className="h-4 w-4" aria-hidden="true" />
+              Billing
+            </Link>
+          ) : null}
           {user?.role === "admin" ? (
             <Link
               href="/admin"
@@ -64,7 +73,7 @@ export async function AppNav() {
       </div>
       {!isSupabaseConfigured() ? (
         <div className="border-t border-[#b99b5f]/20 bg-[#b99b5f]/10 px-4 py-2 text-center text-xs text-[#e1cb95]">
-          Supabase is not configured, so auth and persistence are in setup-required mode.
+          Account features are temporarily unavailable. Please try again shortly.
         </div>
       ) : null}
     </header>

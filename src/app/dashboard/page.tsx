@@ -4,6 +4,7 @@ import { ArrowRight, BarChart3, Clock3, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
+import { effectivePlanKey, getUserSubscription } from "@/lib/billing/subscriptions";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -11,9 +12,16 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const user = await getCurrentUser();
   const supabase = user ? await createClient() : null;
-  const { data: analyses } = supabase
-    ? await supabase.from("analyses").select("id,ticker,company_name,recommendation,score,confidence,created_at").order("created_at", { ascending: false }).limit(8)
-    : { data: [] };
+  const [analysesResult, subscriptionLookup] = await Promise.all([
+    supabase
+      ? supabase.from("analyses").select("id,ticker,company_name,recommendation,score,confidence,created_at").order("created_at", { ascending: false }).limit(8)
+      : Promise.resolve({ data: [] }),
+    user ? getUserSubscription(user.id) : Promise.resolve(null)
+  ]);
+  const analyses = analysesResult.data;
+  const planKey = subscriptionLookup?.ok
+    ? effectivePlanKey(subscriptionLookup.subscription)
+    : null;
 
   return (
     <Section>
@@ -28,7 +36,7 @@ export default async function DashboardPage() {
           <>
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
               <Card><BarChart3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">Saved analyses</p><p className="number mt-1 text-3xl font-semibold">{analyses?.length ?? 0}</p></Card>
-              <Card><Clock3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">Current plan</p><p className="mt-1 text-xl font-semibold">Free or synced subscription</p></Card>
+              <Card><Clock3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">Current plan</p><p className="mt-1 text-xl font-semibold">{planKey ? (planKey === "basic" ? "Basic" : "Free") : "Unavailable"}</p><Link href={planKey === "basic" ? "/settings/billing" : "/pricing"} className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{planKey === "basic" ? "Manage plan" : "View plans"}</Link></Card>
               <Card><Search className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">Default workflow</p><p className="mt-1 text-xl font-semibold">Search → analyze</p></Card>
             </div>
             <section className="mt-10"><h2 className="text-lg font-semibold text-[#f4efe5]">Recent research</h2>
