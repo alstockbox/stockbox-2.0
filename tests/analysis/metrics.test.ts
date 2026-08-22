@@ -77,4 +77,29 @@ describe("computeFinancialMetrics", () => {
       ]),
     );
   });
+
+  it("uses explicit annual growth fallback but no mismatched annual balance for TTM returns", () => {
+    const trailingTwelveMonths = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_Q3_9M" as const,
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      provenance: {
+        revenue: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+        grossProfit: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+        operatingIncome: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+        netIncome: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+        operatingCashFlow: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+        capitalExpenditures: { source: "fixture", valueKind: "derived" as const, periodBasis: "TTM_Q3_9M" as const, currentYtdDurationDays: 272 },
+      },
+    };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, trailingTwelveMonths });
+
+    expect(metrics.growth.revenueGrowthBasis).toBe("ANNUAL_YOY");
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(0.2, 5);
+    expect(metrics.ratios.returnOnEquity).toBeNull();
+    expect(metrics.ratios.returnOnAssets).toBeNull();
+    expect(metrics.ratios.returnOnInvestedCapital).toBeNull();
+  });
 });

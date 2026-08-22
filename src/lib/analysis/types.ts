@@ -46,6 +46,8 @@ export type AnalysisArchetype =
 
 export type MetricValueKind = "reported" | "derived" | "estimated" | "fallback";
 
+export type FinancialPeriodBasis = "FY" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
+
 export type MetricProvenance = {
   source: string;
   provider?: string;
@@ -56,6 +58,10 @@ export type MetricProvenance = {
   periodEnd?: string;
   filedAt?: string;
   form?: string;
+  accession?: string;
+  periodBasis?: FinancialPeriodBasis;
+  currentYtdDurationDays?: number;
+  priorYtdDurationDays?: number;
   valueKind: MetricValueKind;
   inputs?: string[];
   note?: string;
@@ -136,6 +142,7 @@ export type CompanyFundamentals = {
   analysisArchetype?: AnalysisArchetype;
   annualPeriods?: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
+  priorTrailingTwelveMonths?: FinancialPeriod;
   diagnostics?: AnalysisDiagnostics;
 };
 
@@ -309,6 +316,11 @@ export type FinancialPeriod = {
   periodStartDate?: string;
   filedDate?: string;
   form?: string;
+  periodBasis?: FinancialPeriodBasis;
+  currentYtdDurationDays?: number;
+  priorYtdDurationDays?: number;
+  ttmConstructionMethod?: string;
+  balanceSheetDate?: string;
   currency?: string;
   revenue?: number | null;
   grossProfit?: number | null;
@@ -395,6 +407,7 @@ export type FinancialAnalysisInput = {
   company: CompanyProfile;
   annualPeriods: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
+  priorTrailingTwelveMonths?: FinancialPeriod;
   market?: FinancialMarketSnapshot;
   estimates?: ForwardEstimates;
   dcfAssumptions?: DcfInputAssumptions;
@@ -420,6 +433,8 @@ export type GrowthMetrics = {
   freeCashFlowCagr3y: number | null;
   revenueCagr5y: number | null;
   freeCashFlowPerShareCagr3y: number | null;
+  revenueGrowthBasis: "TTM_YOY" | "ANNUAL_YOY" | "UNAVAILABLE";
+  freeCashFlowGrowthBasis: "TTM_YOY" | "ANNUAL_YOY" | "UNAVAILABLE";
 };
 
 export type RatioMetrics = {
@@ -597,6 +612,10 @@ export type AnalysisDiagnostics = {
   dataAgeDays: number | null;
   ttmStatus: "available" | "annual_fallback" | "unavailable";
   providerDiagnostics: ProviderDiagnostic[];
+  financialFlowPeriodEnd?: string | null;
+  financialFlowPeriodBasis?: FinancialPeriodBasis | null;
+  balanceSheetPeriodEnd?: string | null;
+  marketPriceDate?: string | null;
 };
 
 export type AnalysisScenario = {

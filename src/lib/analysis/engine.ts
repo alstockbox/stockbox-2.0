@@ -6,7 +6,7 @@ import { detectFinancialRedFlags } from "./flags";
 import { isFiniteNumber } from "./math";
 import { computeFinancialMetrics } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
-import { reconcileFinancialData, reconciliationConfidence } from "./reconciliation";
+import { reconcileFinancialData, reconciliationConfidence, ttmPeriodBasisCheck } from "./reconciliation";
 import { buildAnalysisScenarios } from "./scenarios";
 import { computeScores } from "./scoring";
 import type {
@@ -81,6 +81,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
     },
     annualPeriods: fundamentals?.annualPeriods ?? fundamentals?.annual.map(mapLegacyPeriod) ?? [],
     trailingTwelveMonths: fundamentals?.trailingTwelveMonths,
+    priorTrailingTwelveMonths: fundamentals?.priorTrailingTwelveMonths,
     market: input.market ? {
       price: input.market.price,
       currency: input.market.currency || null,
@@ -113,16 +114,24 @@ function diagnosticDates(input: FinancialAnalysisInput) {
     dataAgeDays: Number.isFinite(periodTime) ? Math.max(0, Math.floor((analysisTime - periodTime) / 86_400_000)) : null,
     ttmStatus: input.trailingTwelveMonths ? "available" as const : input.annualPeriods.length ? "annual_fallback" as const : "unavailable" as const,
     providerDiagnostics: input.providerDiagnostics ?? [],
+    financialFlowPeriodEnd: latestFinancialPeriodEnd,
+    financialFlowPeriodBasis: input.trailingTwelveMonths?.periodBasis ?? (latestAnnualPeriodEnd ? "FY" : null),
+    balanceSheetPeriodEnd: input.trailingTwelveMonths?.balanceSheetDate ?? latestAnnualPeriodEnd,
+    marketPriceDate: input.market?.priceDate ?? null,
   };
 }
 
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
-  const metrics = computeFinancialMetrics(input);
+  const ttmConsistency = ttmPeriodBasisCheck(input.trailingTwelveMonths);
+  const calculationInput = ttmConsistency.status === "warning"
+    ? { ...input, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
+    : input;
+  const metrics = computeFinancialMetrics(calculationInput);
   const reconciliation = reconcileFinancialData(input, metrics);
-  const scores = computeScores(input, metrics, { reconciliation: reconciliationConfidence(reconciliation) });
-  const archetype = resolveArchetype(input.company);
+  const scores = computeScores(calculationInput, metrics, { reconciliation: reconciliationConfidence(reconciliation) });
+  const archetype = resolveArchetype(calculationInput.company);
   const redFlags = detectFinancialRedFlags(metrics, archetype);
-  const dcf = computeDcfRange(input, metrics);
+  const dcf = computeDcfRange(calculationInput, metrics);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
   const scenarios = buildAnalysisScenarios(metrics, scores, dcf);
   const missing = [...metrics.missingData, ...scores.missingData, ...dcf.missingData];
@@ -144,7 +153,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     missingData: [...uniqueMissing.values()],
     dataCoverage: scores.dataCoverage,
     confidenceBreakdown: scores.confidenceBreakdown,
-    diagnostics: diagnosticDates(input),
+    diagnostics: diagnosticDates(calculationInput),
     reconciliation,
     provenance: metrics.provenance,
   };

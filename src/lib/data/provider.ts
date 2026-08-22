@@ -4,11 +4,13 @@ import type {
   AnalysisSource,
   AnalysisType,
   CompanySearchResult,
-  InvestmentProfile
+  InvestmentProfile,
+  MarketSnapshot
 } from "@/lib/analysis/types";
-import { isFinancialProviderConfigured } from "@/lib/env/server";
+import { getMarketDataProvider, isFinancialProviderConfigured } from "@/lib/env/server";
 import { fetchCompanyFundamentalsResult, searchCompanies as searchSecCompanies } from "./sec";
 import { fetchStooqMarketData, mapStooqSymbol } from "./stooq";
+import { providerDiagnostic, type AdapterResult } from "./providers";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
@@ -16,6 +18,19 @@ export type ProviderResult<T> =
 
 export async function searchCompanies(query: string) {
   return searchSecCompanies(query);
+}
+
+export async function fetchConfiguredMarketData(
+  company: CompanySearchResult,
+): Promise<AdapterResult<MarketSnapshot>> {
+  const selectedProvider = getMarketDataProvider();
+  if (selectedProvider === "stooq") return fetchStooqMarketData(company);
+  return {
+    ok: false,
+    reason: "not_configured",
+    message: "Market data is disabled for this deployment.",
+    diagnostic: providerDiagnostic("disabled", "market_data", "unavailable", "not_configured"),
+  };
 }
 
 export async function analyzeCompany({
@@ -42,7 +57,7 @@ export async function analyzeCompany({
 
   const [fundamentalsResult, marketResult] = await Promise.all([
     fetchCompanyFundamentalsResult(company),
-    fetchStooqMarketData(company)
+    fetchConfiguredMarketData(company)
   ]);
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const market = marketResult.ok ? marketResult.data : null;
@@ -59,7 +74,7 @@ export async function analyzeCompany({
     warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);
   }
 
-  if (market) {
+  if (market && marketResult.diagnostic.provider === "Stooq") {
     sources.push({
       name: "Stooq end-of-day market data",
       url: `https://stooq.com/q/d/l/?s=${encodeURIComponent(mapStooqSymbol(company)?.symbol ?? company.ticker.toLowerCase())}&i=d`,

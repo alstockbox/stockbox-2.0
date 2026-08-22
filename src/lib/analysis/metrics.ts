@@ -42,6 +42,24 @@ function average(a: number | null | undefined, b: number | null | undefined): nu
   return isFiniteNumber(a) && isFiniteNumber(b) ? (a + b) / 2 : null;
 }
 
+function comparableBalancePeriods(current: FinancialPeriod | null, prior: FinancialPeriod | null): boolean {
+  const currentEnd = current?.balanceSheetDate ?? current?.periodEndDate;
+  const priorEnd = prior?.balanceSheetDate ?? prior?.periodEndDate;
+  if (!currentEnd || !priorEnd) return false;
+  const gap = (Date.parse(currentEnd) - Date.parse(priorEnd)) / 86_400_000;
+  return Number.isFinite(gap) && gap >= 330 && gap <= 400;
+}
+
+function comparableTtmPeriods(current: FinancialPeriod | null, prior: FinancialPeriod | null): boolean {
+  if (!current?.periodEndDate || !prior?.periodEndDate || !current.periodBasis || current.periodBasis !== prior.periodBasis) return false;
+  if (!isFiniteNumber(current.currentYtdDurationDays) || !isFiniteNumber(prior.currentYtdDurationDays)) return false;
+  const endGap = (Date.parse(current.periodEndDate) - Date.parse(prior.periodEndDate)) / 86_400_000;
+  return Number.isFinite(endGap)
+    && endGap >= 330
+    && endGap <= 400
+    && Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
+}
+
 function investedCapital(period: FinancialPeriod | null): number | null {
   if (!period || !isFiniteNumber(period.totalDebt) || !isFiniteNumber(period.totalEquity) || !isFiniteNumber(period.cashAndEquivalents)) {
     return null;
@@ -151,6 +169,14 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const latestAnnual = annual.at(-1) ?? null;
   const previousAnnual = annual.at(-2) ?? null;
   const latest = input.trailingTwelveMonths ?? latestAnnual;
+  const priorTtmCandidate = input.trailingTwelveMonths ? input.priorTrailingTwelveMonths ?? null : null;
+  const priorTtm = comparableTtmPeriods(latest, priorTtmCandidate) ? priorTtmCandidate : null;
+  const growthComparison = priorTtm ?? previousAnnual;
+  const growthLatest = priorTtm ? latest : latestAnnual;
+  const trendComparison = input.trailingTwelveMonths ? priorTtm : previousAnnual;
+  const returnBalanceComparison = input.trailingTwelveMonths
+    ? comparableBalancePeriods(latest, priorTtm) ? priorTtm : null
+    : previousAnnual;
   const missingData: MissingDataItem[] = [];
   if (!latest) addMissingData(missingData, "annualPeriods", "No reliable financial period is available.", "metric", "high");
 
@@ -167,14 +193,14 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       ? operatingIncome + latest.depreciationAndAmortization
       : null,
   );
-  const averageCapital = average(investedCapital(latest), investedCapital(previousAnnual));
-  const averageEquity = average(latest?.totalEquity, previousAnnual?.totalEquity);
-  const averageAssets = average(latest?.totalAssets, previousAnnual?.totalAssets);
+  const averageCapital = average(investedCapital(latest), investedCapital(returnBalanceComparison));
+  const averageEquity = average(latest?.totalEquity, returnBalanceComparison?.totalEquity);
+  const averageAssets = average(latest?.totalAssets, returnBalanceComparison?.totalAssets);
   const nopat = isFiniteNumber(operatingIncome) ? operatingIncome * (1 - tax.rate) : null;
   const grossMargin = safeDivide(latest?.grossProfit, revenue);
   const operatingMargin = safeDivide(operatingIncome, revenue);
-  const priorGrossMargin = safeDivide(previousAnnual?.grossProfit, previousAnnual?.revenue);
-  const priorOperatingMargin = safeDivide(previousAnnual?.operatingIncome, previousAnnual?.revenue);
+  const priorGrossMargin = safeDivide(trendComparison?.grossProfit, trendComparison?.revenue);
+  const priorOperatingMargin = safeDivide(trendComparison?.operatingIncome, trendComparison?.revenue);
   const annualFcfs = annual.map(deriveSimpleFreeCashFlow);
   const threeYearPrior = annual.at(-4) ?? null;
   const fiveYearPrior = annual.at(-6) ?? null;
@@ -182,7 +208,10 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const priorFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(threeYearPrior), threeYearPrior?.sharesDiluted);
   const marketCap = deriveMarketCap(input, latest);
   const dividends = isFiniteNumber(latest?.dividendsPaid) ? Math.abs(latest.dividendsPaid) : null;
-  const priorDividends = isFiniteNumber(previousAnnual?.dividendsPaid) ? Math.abs(previousAnnual.dividendsPaid) : null;
+  const dividendGrowthLatest = priorTtm
+    ? dividends
+    : isFiniteNumber(latestAnnual?.dividendsPaid) ? Math.abs(latestAnnual.dividendsPaid) : null;
+  const priorDividends = isFiniteNumber(growthComparison?.dividendsPaid) ? Math.abs(growthComparison.dividendsPaid) : null;
   const threeYearDividends = isFiniteNumber(threeYearPrior?.dividendsPaid) ? Math.abs(threeYearPrior.dividendsPaid) : null;
   const netDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
     ? latest.totalDebt - latest.cashAndEquivalents
@@ -191,20 +220,22 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const assumedWacc = input.dcfAssumptions?.discountRate;
 
   const growth = {
-    revenueGrowthYoY: calculateGrowth(latestAnnual?.revenue, previousAnnual?.revenue),
+    revenueGrowthYoY: calculateGrowth(growthLatest?.revenue, growthComparison?.revenue),
     revenueCagr3y: calculateCagr(threeYearPrior?.revenue, latestAnnual?.revenue, 3),
     revenueCagr5y: calculateCagr(fiveYearPrior?.revenue, latestAnnual?.revenue, 5),
     epsGrowthYoY: calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted),
     epsCagr3y: calculateCagr(threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted, 3),
-    freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(latestAnnual), deriveSimpleFreeCashFlow(previousAnnual)),
+    freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(growthLatest), deriveSimpleFreeCashFlow(growthComparison)),
     freeCashFlowCagr3y: calculateCagr(deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual), 3),
     freeCashFlowPerShareCagr3y: calculateCagr(priorFcfPerShare, latestFcfPerShare, 3),
+    revenueGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
+    freeCashFlowGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
   };
 
   const valuation = deriveValuationMetrics(input, latest, simpleFcf, growth.epsGrowthYoY);
   const metrics: FinancialMetrics = {
     latestPeriod: latest,
-    previousPeriod: previousAnnual,
+    previousPeriod: growthComparison,
     margins: {
       grossMargin,
       operatingMargin,
@@ -261,7 +292,7 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       dividendYield: safeDivide(dividends, marketCap),
       dividendPayoutRatio: safeDivide(dividends, netIncome),
       freeCashFlowPayoutRatio: safeDivide(dividends, simpleFcf),
-      dividendGrowthYoY: calculateGrowth(dividends, priorDividends),
+      dividendGrowthYoY: calculateGrowth(dividendGrowthLatest, priorDividends),
       dividendCagr3y: calculateCagr(threeYearDividends, dividends, 3),
     },
     provenance: {
@@ -269,6 +300,24 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], "CFO - abs(capex)"),
       fcff: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"]),
       marketCap: derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]),
+      revenueGrowthYoY: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          growthLatest?.periodEndDate,
+          ["latestRevenue", "priorComparableRevenue"],
+          growth.revenueGrowthBasis === "TTM_YOY" ? "TTM versus prior comparable TTM" : "Annual YoY fallback",
+        ),
+        periodBasis: growth.revenueGrowthBasis === "TTM_YOY" ? latest?.periodBasis : "FY",
+      },
+      freeCashFlowGrowthYoY: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          growthLatest?.periodEndDate,
+          ["latestSimpleFreeCashFlow", "priorComparableSimpleFreeCashFlow"],
+          growth.freeCashFlowGrowthBasis === "TTM_YOY" ? "TTM versus prior comparable TTM" : "Annual YoY fallback",
+        ),
+        periodBasis: growth.freeCashFlowGrowthBasis === "TTM_YOY" ? latest?.periodBasis : "FY",
+      },
     },
     missingData,
   };
@@ -277,7 +326,10 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   addMissingIfNull(missingData, simpleFcf, "simpleFreeCashFlow", "CFO and capex are required for simple free cash flow.", "high");
   addMissingIfNull(missingData, valuation.marketCap, "marketCap", "Market cap requires a reported value or both price and shares.");
   addMissingIfNull(missingData, valuation.enterpriseValue, "enterpriseValue", "EV requires market cap, reported debt and reported cash.");
-  addMissingIfNull(missingData, growth.revenueGrowthYoY, "revenueGrowthYoY", "Two positive, aligned annual revenue periods are required.");
+  addMissingIfNull(missingData, growth.revenueGrowthYoY, "revenueGrowthYoY", "Two positive, comparable annual or TTM revenue periods are required.");
+  if (input.trailingTwelveMonths && !returnBalanceComparison) {
+    addMissingData(missingData, "returnMetricAverageBalances", "Comparable current and prior-year instant balance dates are required for TTM ROE, ROA and ROIC.", "metric", "high");
+  }
   if (tax.source === "fallback_assumption") {
     addMissingData(missingData, "normalizedTaxRate", "No stable reported effective tax rate; a labelled 21% fallback is used only for FCFF.", "dcf", "medium");
   }

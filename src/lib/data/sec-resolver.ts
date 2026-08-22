@@ -32,6 +32,10 @@ export type ResolvedSecFact = SecFactUnit & {
   concept: string;
   unit: string;
   conceptPriority: number;
+  periodBasis?: "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
+  currentYtdDurationDays?: number;
+  priorYtdDurationDays?: number;
+  ttmConstructionMethod?: string;
 };
 
 const annualForms = new Set(["10-K", "10-K/A", "20-F", "20-F/A", "40-F"]);
@@ -80,37 +84,78 @@ export function resolveAnnualFacts(facts: SecCompanyFacts, spec: ConceptSpec): M
   return new Map([...byEnd.entries()].sort(([left], [right]) => left.localeCompare(right)));
 }
 
-export function resolveTtmFact(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact | null {
-  if (spec.kind !== "duration") return null;
-  const latestAnnual = [...resolveAnnualFacts(facts, spec).values()].sort((a, b) => a.end.localeCompare(b.end)).at(-1);
-  if (!latestAnnual) return null;
+export function resolveInstantFacts(facts: SecCompanyFacts, spec: ConceptSpec): Map<string, ResolvedSecFact> {
+  if (spec.kind !== "instant") return new Map();
+  const byEnd = new Map<string, ResolvedSecFact>();
+  for (const candidate of collectCandidates(facts, spec)) {
+    if (!annualForms.has(candidate.form ?? "") && !quarterlyForms.has(candidate.form ?? "")) continue;
+    byEnd.set(candidate.end, betterFact(byEnd.get(candidate.end), candidate));
+  }
+  return new Map([...byEnd.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function durationClass(days: number): ResolvedSecFact["periodBasis"] | null {
+  if (days >= 70 && days <= 110) return "TTM_Q1_3M";
+  if (days >= 150 && days <= 200) return "TTM_Q2_6M";
+  if (days >= 230 && days <= 300) return "TTM_Q3_9M";
+  return null;
+}
+
+function preferredYtdFacts(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact[] {
   const byIdentity = new Map<string, ResolvedSecFact>();
   for (const candidate of collectCandidates(facts, spec)) {
     if (!quarterlyForms.has(candidate.form ?? "") || !candidate.start) continue;
     const days = daysBetween(candidate.start, candidate.end);
-    if (!Number.isFinite(days) || days < 70 || days > 300) continue;
-    byIdentity.set(`${candidate.start}|${candidate.end}`, betterFact(byIdentity.get(`${candidate.start}|${candidate.end}`), candidate));
+    if (!durationClass(days)) continue;
+    const identity = `${candidate.start}|${candidate.end}`;
+    byIdentity.set(identity, betterFact(byIdentity.get(identity), candidate));
   }
-  const candidates = [...byIdentity.values()].filter((fact) => fact.end > latestAnnual.end).sort((a, b) => a.end.localeCompare(b.end));
-  const current = candidates.at(-1);
-  if (!current?.start) return null;
-  const currentDays = daysBetween(current.start, current.end);
-  const prior = [...byIdentity.values()]
-    .filter((fact) => {
-      if (!fact.start) return false;
-      const endGap = daysBetween(fact.end, current.end);
-      return endGap >= 330 && endGap <= 400 && Math.abs(daysBetween(fact.start, fact.end) - currentDays) <= 15;
-    })
-    .sort((a, b) => a.end.localeCompare(b.end))
-    .at(-1);
-  if (!prior) return null;
-  return {
-    ...current,
-    start: latestAnnual.start,
-    val: latestAnnual.val + current.val - prior.val,
-    concept: `TTM(${latestAnnual.concept}+${current.concept}-${prior.concept})`,
-    conceptPriority: Math.min(latestAnnual.conceptPriority, current.conceptPriority, prior.conceptPriority),
-  };
+  const byEnd = new Map<string, ResolvedSecFact[]>();
+  for (const fact of byIdentity.values()) byEnd.set(fact.end, [...(byEnd.get(fact.end) ?? []), fact]);
+  return [...byEnd.entries()].sort(([left], [right]) => left.localeCompare(right)).flatMap(([, candidates]) => {
+    const longestDays = Math.max(...candidates.map((candidate) => daysBetween(candidate.start as string, candidate.end)));
+    const longest = candidates.filter((candidate) => daysBetween(candidate.start as string, candidate.end) === longestDays);
+    const selected = longest.reduce<ResolvedSecFact | undefined>((best, candidate) => betterFact(best, candidate), undefined);
+    return selected ? [{ ...selected, periodBasis: durationClass(longestDays) ?? undefined }] : [];
+  });
+}
+
+export function resolveTtmFacts(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact[] {
+  if (spec.kind !== "duration") return [];
+  const annual = [...resolveAnnualFacts(facts, spec).values()].sort((a, b) => a.end.localeCompare(b.end));
+  const ytd = preferredYtdFacts(facts, spec);
+  return ytd.flatMap((current) => {
+    if (!current.start || !current.periodBasis) return [];
+    const currentDays = daysBetween(current.start, current.end);
+    const prior = ytd
+      .filter((candidate) => {
+        if (!candidate.start || candidate.periodBasis !== current.periodBasis) return false;
+        const endGap = daysBetween(candidate.end, current.end);
+        return endGap >= 330 && endGap <= 400 && Math.abs(daysBetween(candidate.start, candidate.end) - currentDays) <= 15;
+      })
+      .sort((left, right) => left.end.localeCompare(right.end))
+      .at(-1);
+    if (!prior?.start) return [];
+    const fiscalYear = annual.filter((fact) => fact.end > prior.end && fact.end < current.end).at(-1);
+    if (!fiscalYear) return [];
+    const priorDays = daysBetween(prior.start, prior.end);
+    return [{
+      ...current,
+      start: undefined,
+      form: "TTM",
+      val: fiscalYear.val + current.val - prior.val,
+      concept: `TTM(${fiscalYear.concept}+${current.concept}-${prior.concept})`,
+      conceptPriority: Math.min(fiscalYear.conceptPriority, current.conceptPriority, prior.conceptPriority),
+      periodBasis: current.periodBasis,
+      currentYtdDurationDays: currentDays,
+      priorYtdDurationDays: priorDays,
+      ttmConstructionMethod: "latest FY + current comparable YTD - prior comparable YTD",
+    }];
+  });
+}
+
+export function resolveTtmFact(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact | null {
+  return resolveTtmFacts(facts, spec).at(-1) ?? null;
 }
 
 export function secFactProvenance(fact: ResolvedSecFact, valueKind: "reported" | "derived" = "reported"): MetricProvenance {
@@ -124,6 +169,11 @@ export function secFactProvenance(fact: ResolvedSecFact, valueKind: "reported" |
     periodEnd: fact.end,
     filedAt: fact.filed,
     form: fact.form,
+    accession: fact.accn,
+    periodBasis: fact.periodBasis,
+    currentYtdDurationDays: fact.currentYtdDurationDays,
+    priorYtdDurationDays: fact.priorYtdDurationDays,
+    note: fact.ttmConstructionMethod,
     valueKind,
   };
 }

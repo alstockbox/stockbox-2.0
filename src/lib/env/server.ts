@@ -2,6 +2,15 @@ import { z } from "zod";
 
 export const DEFAULT_POSTHOG_HOST = "https://app.posthog.com";
 
+const marketDataProviderSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().toLowerCase();
+    return normalized || undefined;
+  },
+  z.enum(["stooq", "disabled"]).default("stooq")
+);
+
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   NEXT_PUBLIC_SITE_NAME: z.string().default("StockBox"),
@@ -16,7 +25,7 @@ const envSchema = z.object({
   STRIPE_PRICE_PREMIUM_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional().or(z.literal("")),
   SEC_USER_AGENT: z.string().optional().or(z.literal("")),
-  MARKET_DATA_PROVIDER: z.string().default("stooq"),
+  MARKET_DATA_PROVIDER: marketDataProviderSchema,
   NEWS_PROVIDER: z.string().default("disabled"),
   NEWS_API_KEY: z.string().optional().or(z.literal("")),
   AI_PROVIDER: z.string().default("disabled"),
@@ -86,6 +95,10 @@ export function getSecUserAgent(env = getServerEnv()) {
 
 export function isFinancialProviderConfigured(env = getServerEnv()) {
   return Boolean(getSecUserAgent(env));
+}
+
+export function getMarketDataProvider(env = getServerEnv()) {
+  return env.MARKET_DATA_PROVIDER;
 }
 
 export function adminEmails() {

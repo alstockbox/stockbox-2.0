@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POSTHOG_HOST,
+  getMarketDataProvider,
   getSecUserAgent,
   isBasicLaunchCheckoutConfigured,
   isFinancialProviderConfigured,
@@ -19,6 +20,19 @@ describe("server environment parsing", () => {
   it("keeps a valid custom PostHog host", () => {
     const env = parseServerEnv({ NEXT_PUBLIC_POSTHOG_HOST: "https://eu.posthog.com" });
     expect(env.NEXT_PUBLIC_POSTHOG_HOST).toBe("https://eu.posthog.com");
+  });
+
+  it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the documented Stooq default", (provider) => {
+    const env = parseServerEnv({ MARKET_DATA_PROVIDER: provider });
+    expect(getMarketDataProvider(env)).toBe("stooq");
+  });
+
+  it.each(["stooq", " STOOQ "])("normalizes an enabled Stooq provider value of %s", (provider) => {
+    expect(getMarketDataProvider(parseServerEnv({ MARKET_DATA_PROVIDER: provider }))).toBe("stooq");
+  });
+
+  it("preserves an explicitly disabled market provider", () => {
+    expect(getMarketDataProvider(parseServerEnv({ MARKET_DATA_PROVIDER: " disabled " }))).toBe("disabled");
   });
 
   it("enables Basic checkout without requiring a webhook secret", () => {

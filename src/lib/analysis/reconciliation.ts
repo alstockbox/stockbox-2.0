@@ -1,6 +1,37 @@
 import { deriveSimpleFreeCashFlow } from "./metrics";
 import { isFiniteNumber } from "./math";
-import type { FinancialAnalysisInput, FinancialMetrics, ReconciliationCheck } from "./types";
+import type { FinancialAnalysisInput, FinancialMetrics, FinancialPeriod, ReconciliationCheck } from "./types";
+
+const ttmFlowFields = [
+  "revenue",
+  "grossProfit",
+  "operatingIncome",
+  "netIncome",
+  "operatingCashFlow",
+  "capitalExpenditures",
+] as const;
+
+export function ttmPeriodBasisCheck(period: FinancialPeriod | undefined): ReconciliationCheck {
+  if (!period || period.form !== "TTM") {
+    return { code: "ttm_period_basis_consistency", status: "unavailable", message: "No TTM period is in use." };
+  }
+  const presentFields = ttmFlowFields.filter((field) => isFiniteNumber(period[field]));
+  const bases = presentFields.map((field) => period.provenance?.[field]?.periodBasis).filter(Boolean);
+  const durations = presentFields
+    .map((field) => period.provenance?.[field]?.currentYtdDurationDays)
+    .filter((value): value is number => isFiniteNumber(value));
+  const basisConsistent = Boolean(period.periodBasis) && bases.length === presentFields.length
+    && bases.every((basis) => basis === period.periodBasis);
+  const durationConsistent = durations.length === presentFields.length
+    && Math.max(...durations) - Math.min(...durations) <= 15;
+  return {
+    code: "ttm_period_basis_consistency",
+    status: basisConsistent && durationConsistent ? "pass" : "warning",
+    message: basisConsistent && durationConsistent
+      ? `All TTM flow metrics use ${period.periodBasis} with comparable cumulative durations.`
+      : "TTM flow metrics do not share one comparable cumulative period basis; annual fallback is required.",
+  };
+}
 
 function relativeDifference(left: number, right: number): number {
   return Math.abs(left - right) / Math.max(Math.abs(left), Math.abs(right), 1);
@@ -24,6 +55,7 @@ export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: F
   const simpleFcf = deriveSimpleFreeCashFlow(latest);
   const shares = input.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null;
   const checks = [
+    ttmPeriodBasisCheck(input.trailingTwelveMonths),
     compare(
       "balance_sheet_equation",
       "Assets versus liabilities plus equity",
@@ -72,6 +104,29 @@ export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: F
     });
   } else {
     checks.push({ code: "currency_alignment", status: "unavailable", message: "Currency alignment could not be checked." });
+  }
+  if (input.trailingTwelveMonths?.periodEndDate) {
+    const flowEnd = input.trailingTwelveMonths.periodEndDate;
+    const balanceEnd = input.trailingTwelveMonths.balanceSheetDate;
+    const lag = balanceEnd ? (Date.parse(flowEnd) - Date.parse(balanceEnd)) / 86_400_000 : Number.NaN;
+    checks.push({
+      code: "balance_sheet_freshness",
+      status: Number.isFinite(lag) && lag >= 0 && lag <= 45 ? "pass" : "warning",
+      message: Number.isFinite(lag) && lag >= 0 && lag <= 45
+        ? "Balance-sheet facts align with the TTM flow endpoint."
+        : `Balance-sheet facts are ${Number.isFinite(lag) ? Math.round(lag) : "an unknown number of"} days older than the TTM flow endpoint.`,
+    });
+    const priorBalanceEnd = input.priorTrailingTwelveMonths?.balanceSheetDate;
+    const balanceGap = balanceEnd && priorBalanceEnd
+      ? (Date.parse(balanceEnd) - Date.parse(priorBalanceEnd)) / 86_400_000
+      : Number.NaN;
+    checks.push({
+      code: "return_metric_balance_alignment",
+      status: Number.isFinite(balanceGap) && balanceGap >= 330 && balanceGap <= 400 ? "pass" : "warning",
+      message: Number.isFinite(balanceGap) && balanceGap >= 330 && balanceGap <= 400
+        ? "TTM return metrics use current and prior-year comparable instant balances."
+        : "Comparable prior-year instant balances are unavailable for TTM return metrics.",
+    });
   }
   return checks;
 }

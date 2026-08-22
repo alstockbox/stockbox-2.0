@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getMarketDataProvider: vi.fn(),
   getSecUserAgent: vi.fn(),
   getServerEnv: vi.fn()
 }));
 
 vi.mock("@/lib/env/server", () => ({
+  getMarketDataProvider: mocks.getMarketDataProvider,
   getSecUserAgent: mocks.getSecUserAgent,
   getServerEnv: mocks.getServerEnv
 }));
@@ -15,6 +17,7 @@ import { dynamic, GET } from "../../src/app/api/health/providers/route";
 describe("provider health diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getMarketDataProvider.mockReturnValue("stooq");
   });
 
   it("returns only non-sensitive explicit SEC status", async () => {
@@ -62,5 +65,16 @@ describe("provider health diagnostics", () => {
       marketProvider: "stooq"
     }));
     expect(JSON.stringify(payload)).not.toContain("alerts@stockbox.test");
+  });
+
+  it("reports an explicitly disabled market adapter", async () => {
+    mocks.getServerEnv.mockReturnValue({ SEC_USER_AGENT: "", MARKET_DATA_PROVIDER: "disabled" });
+    mocks.getSecUserAgent.mockReturnValue(null);
+    mocks.getMarketDataProvider.mockReturnValue("disabled");
+
+    const payload = await GET().json();
+
+    expect(payload.marketProvider).toBe("disabled");
+    expect(payload.providers.marketData).toEqual(expect.objectContaining({ id: "disabled", configured: false }));
   });
 });

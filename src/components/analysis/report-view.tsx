@@ -7,7 +7,7 @@ import { Meter } from "@/components/ui/meter";
 import { ScoreChart } from "./score-chart";
 
 const metricLabels: Record<keyof Metrics, string> = {
-  revenueGrowth1y: "Revenue growth 1Y",
+  revenueGrowth1y: "Revenue growth annual YoY",
   revenueCagr3y: "Revenue CAGR 3Y",
   epsGrowth1y: "EPS growth 1Y",
   grossMargin: "Gross margin",
@@ -80,6 +80,11 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
   const showNumbers = mode === "pro" || report.analysisType !== "summary";
   const showValuation = mode === "pro" || report.analysisType === "deep";
   const engine = report.engine;
+  const growthBasis = engine?.metrics.growth.revenueGrowthBasis;
+  const displayedMetricLabels = {
+    ...metricLabels,
+    revenueGrowth1y: growthBasis === "TTM_YOY" ? "Revenue growth TTM YoY" : "Revenue growth annual YoY",
+  };
   const scoreAvailable = report.score.score !== null;
   return (
     <div className="space-y-5">
@@ -110,7 +115,11 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
           {report.dataCoverage !== undefined || report.dataAsOf ? (
             <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#9aa7b8]">
               {report.dataCoverage !== undefined ? <span>Data coverage {formatPercent(report.dataCoverage, 0)}</span> : null}
-              {report.dataAsOf ? <span>Data as of {report.dataAsOf}</span> : null}
+              {engine?.diagnostics.financialFlowPeriodEnd ? (
+                <span>{engine.diagnostics.financialFlowPeriodBasis === "FY" ? "Financial flow FY" : "Financial flow TTM"} through {engine.diagnostics.financialFlowPeriodEnd}</span>
+              ) : report.dataAsOf ? <span>Financial data through {report.dataAsOf}</span> : null}
+              {engine?.diagnostics.balanceSheetPeriodEnd ? <span>Balance sheet as of {engine.diagnostics.balanceSheetPeriodEnd}</span> : null}
+              {engine?.diagnostics.marketPriceDate ? <span>Market price as of {engine.diagnostics.marketPriceDate}</span> : null}
               {report.modelVersion ? <span>{report.modelVersion}</span> : null}
             </div>
           ) : null}
@@ -204,7 +213,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {(Object.keys(report.metrics) as Array<keyof Metrics>).map((key) => (
             <div key={key} className="rounded-md border border-white/10 bg-white/5 p-3">
-              <p className="text-xs text-[#9aa7b8]">{metricLabels[key]}</p>
+              <p className="text-xs text-[#9aa7b8]">{displayedMetricLabels[key]}</p>
               <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
                 {formatMetric(key, report.metrics[key])}
               </p>
@@ -292,7 +301,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
           <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">Metric sources and reconciliation</summary>
           <div className="mt-3 space-y-2 text-xs leading-5 text-[#9aa7b8]">
             {Object.entries(engine.provenance).map(([metric, source]) => (
-              <p key={metric}><span className="font-semibold text-[#c9d2df]">{metric}</span>: {source.source}{source.concept ? ` / ${source.concept}` : ""}{source.periodEnd ? ` / ${source.periodEnd}` : ""} ({source.valueKind})</p>
+              <p key={metric}><span className="font-semibold text-[#c9d2df]">{metric}</span>: {source.source}{source.concept ? ` / ${source.concept}` : ""}{source.periodEnd ? ` / ${source.periodEnd}` : ""}{source.periodBasis ? ` / ${source.periodBasis}` : ""} ({source.valueKind})</p>
             ))}
             {engine.reconciliation.map((check) => <p key={check.code}>{check.status}: {check.message}</p>)}
           </div>
@@ -322,6 +331,15 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
             <p className="text-sm text-[#9aa7b8]">No source was attached to this report.</p>
           )}
         </div>
+        {showExplainability && report.providerDiagnostics?.length ? (
+          <div className="mt-4 space-y-2 text-xs leading-5 text-[#9aa7b8]">
+            {report.providerDiagnostics.map((diagnostic) => (
+              <p key={`${diagnostic.provider}-${diagnostic.capability}`}>
+                <span className="font-semibold text-[#c9d2df]">{diagnostic.provider}</span>: {diagnostic.status}{diagnostic.reason ? ` (${diagnostic.reason})` : ""}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {report.score.missingData.length ? (
           <div className="mt-5 rounded-md border border-[#b99b5f]/20 bg-[#b99b5f]/10 p-3">
             <p className="text-sm font-semibold text-[#e1cb95]">Missing Data</p>

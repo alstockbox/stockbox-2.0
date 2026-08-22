@@ -108,9 +108,11 @@ function standardDimensions(input: FinancialAnalysisInput, metrics: FinancialMet
   const latestPeriod = m.latestPeriod?.periodEndDate;
   const c = (label: string, value: number | null, score: number | null, weight: number) =>
     contributor({ label, value, score, weight, period: latestPeriod });
+  const revenueGrowthLabel = m.growth.revenueGrowthBasis === "TTM_YOY" ? "Revenue growth TTM YoY" : "Revenue growth annual YoY";
+  const fcfGrowthLabel = m.growth.freeCashFlowGrowthBasis === "TTM_YOY" ? "FCF growth TTM YoY" : "FCF growth annual YoY";
   return {
     growth: dimension("growth", [
-      c("Revenue growth YoY", m.growth.revenueGrowthYoY, scoreHigherIsBetter(m.growth.revenueGrowthYoY, b.revenueGrowthWeak, b.revenueGrowthStrong), 0.3),
+      c(revenueGrowthLabel, m.growth.revenueGrowthYoY, scoreHigherIsBetter(m.growth.revenueGrowthYoY, b.revenueGrowthWeak, b.revenueGrowthStrong), 0.3),
       c("Revenue CAGR 3Y", m.growth.revenueCagr3y, scoreHigherIsBetter(m.growth.revenueCagr3y, 0, b.revenueGrowthStrong), 0.3),
       c("EPS CAGR 3Y", m.growth.epsCagr3y, scoreHigherIsBetter(m.growth.epsCagr3y, -0.03, 0.18), 0.2),
       c("FCF/share CAGR 3Y", m.growth.freeCashFlowPerShareCagr3y, scoreHigherIsBetter(m.growth.freeCashFlowPerShareCagr3y, -0.03, 0.15), 0.2),
@@ -136,7 +138,7 @@ function standardDimensions(input: FinancialAnalysisInput, metrics: FinancialMet
     cashFlow: dimension("cashFlow", [
       c("Simple FCF margin", m.margins.freeCashFlowMargin, scoreHigherIsBetter(m.margins.freeCashFlowMargin, -0.02, 0.18), 0.3),
       c("CFO margin", m.margins.operatingCashFlowMargin, scoreHigherIsBetter(m.margins.operatingCashFlowMargin, 0, 0.2), 0.25),
-      c("FCF growth", m.growth.freeCashFlowGrowthYoY, scoreHigherIsBetter(m.growth.freeCashFlowGrowthYoY, -0.15, 0.2), 0.2),
+      c(fcfGrowthLabel, m.growth.freeCashFlowGrowthYoY, scoreHigherIsBetter(m.growth.freeCashFlowGrowthYoY, -0.15, 0.2), 0.2),
       c("FCF / net income", m.cashFlow.freeCashFlowToNetIncome, scoreTargetRange(m.cashFlow.freeCashFlowToNetIncome, 0, 0.8, 1.4, 2.5), 0.25),
     ], "Cash generation, growth and accounting conversion are scored separately."),
     earningsQuality: dimension("earningsQuality", [
