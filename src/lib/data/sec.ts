@@ -1,4 +1,4 @@
-import { getServerEnv } from "@/lib/env/server";
+import { getSecUserAgent } from "@/lib/env/server";
 import type { AnnualFinancials, CompanyFundamentals, CompanySearchResult } from "@/lib/analysis/types";
 import { commonCompanies } from "./common-companies";
 
@@ -28,11 +28,12 @@ type SecCompanyFacts = {
 const secBase = "https://data.sec.gov";
 
 function secHeaders() {
-  const env = getServerEnv();
-  if (!env.SEC_USER_AGENT) return null;
+  const userAgent = getSecUserAgent();
+  if (!userAgent) return null;
   return {
-    "User-Agent": env.SEC_USER_AGENT,
-    Accept: "application/json"
+    "User-Agent": userAgent,
+    Accept: "application/json",
+    "Accept-Encoding": "gzip, deflate"
   };
 }
 

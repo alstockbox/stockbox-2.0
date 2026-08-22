@@ -67,9 +67,25 @@ export function isBasicLaunchCheckoutConfigured(env = getServerEnv()) {
   );
 }
 
-export function isFinancialProviderConfigured() {
-  const env = getServerEnv();
-  return Boolean(env.SEC_USER_AGENT);
+export function getSecUserAgent(env = getServerEnv()) {
+  const explicit = env.SEC_USER_AGENT?.trim();
+  if (explicit) return explicit;
+
+  const adminAlertEmail = env.ADMIN_ALERT_EMAIL?.trim();
+  if (adminAlertEmail) return `StockBox/1.0 ${adminAlertEmail}`;
+
+  const adminEmail = (env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim())
+    .find(Boolean);
+
+  if (adminEmail) return `StockBox/1.0 ${adminEmail}`;
+
+  return null;
+}
+
+export function isFinancialProviderConfigured(env = getServerEnv()) {
+  return Boolean(getSecUserAgent(env));
 }
 
 export function adminEmails() {

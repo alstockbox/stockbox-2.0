@@ -34,7 +34,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
   const canAnalyze = Boolean(selected) && financialConfigured && !isPending;
 
   const helperText = !financialConfigured
-    ? "Set SEC_USER_AGENT to enable live SEC filings and market analysis."
+    ? "Live financial data is not configured for this deployment. An administrator must configure the SEC provider."
     : !selected
       ? "Search and select a company."
       : `${selected.name} selected.`;
@@ -179,7 +179,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
       {!financialConfigured ? (
         <SetupNotice
           title="Live analysis provider setup required"
-          detail="Add SEC_USER_AGENT to .env.local with a compliant contact string. Until then StockBox will search common companies but will not run live analysis."
+          detail="Live financial data is unavailable until an administrator configures the SEC provider for this deployment."
         />
       ) : null}
 

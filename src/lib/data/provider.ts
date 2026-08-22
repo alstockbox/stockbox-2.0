@@ -34,9 +34,9 @@ export async function analyzeCompany({
   if (!isFinancialProviderConfigured()) {
     return {
       ok: false,
-      error: "SEC_USER_AGENT is required before live financial analysis can run.",
+      error: "Live financial data is not configured for this deployment.",
       sources,
-      warnings: ["Financial provider disabled because the SEC user agent is not configured."]
+      warnings: ["Financial provider disabled because no SEC contact is configured."]
     };
   }
 

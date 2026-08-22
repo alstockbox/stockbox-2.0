@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POSTHOG_HOST,
+  getSecUserAgent,
   isBasicLaunchCheckoutConfigured,
+  isFinancialProviderConfigured,
   parseServerEnv
 } from "../../src/lib/env/server";
 
@@ -43,5 +45,48 @@ describe("server environment parsing", () => {
     values[missingKey] = undefined;
 
     expect(isBasicLaunchCheckoutConfigured(parseServerEnv(values))).toBe(false);
+  });
+
+  it("configures SEC from an explicit user agent", () => {
+    const env = parseServerEnv({ SEC_USER_AGENT: "  StockBox/2.0 ops@stockbox.test  " });
+
+    expect(getSecUserAgent(env)).toBe("StockBox/2.0 ops@stockbox.test");
+    expect(isFinancialProviderConfigured(env)).toBe(true);
+  });
+
+  it("configures SEC from the admin alert email", () => {
+    const env = parseServerEnv({ ADMIN_ALERT_EMAIL: "alerts@stockbox.test" });
+
+    expect(getSecUserAgent(env)).toBe("StockBox/1.0 alerts@stockbox.test");
+    expect(isFinancialProviderConfigured(env)).toBe(true);
+  });
+
+  it("configures SEC from the first admin email", () => {
+    const env = parseServerEnv({
+      ADMIN_EMAILS: " , owner@stockbox.test, second@stockbox.test"
+    });
+
+    expect(getSecUserAgent(env)).toBe("StockBox/1.0 owner@stockbox.test");
+    expect(isFinancialProviderConfigured(env)).toBe(true);
+  });
+
+  it("leaves SEC unconfigured without a usable contact", () => {
+    const env = parseServerEnv({
+      SEC_USER_AGENT: "   ",
+      ADMIN_EMAILS: " , "
+    });
+
+    expect(getSecUserAgent(env)).toBeNull();
+    expect(isFinancialProviderConfigured(env)).toBe(false);
+  });
+
+  it("prioritizes the explicit SEC user agent over email fallbacks", () => {
+    const env = parseServerEnv({
+      SEC_USER_AGENT: "StockBox/3.0 explicit@stockbox.test",
+      ADMIN_ALERT_EMAIL: "alerts@stockbox.test",
+      ADMIN_EMAILS: "owner@stockbox.test"
+    });
+
+    expect(getSecUserAgent(env)).toBe("StockBox/3.0 explicit@stockbox.test");
   });
 });

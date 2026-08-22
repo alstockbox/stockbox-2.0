@@ -4,6 +4,7 @@ import { Container, Section } from "@/components/ui/card";
 import { isFinancialProviderConfigured } from "@/lib/env/server";
 
 export const metadata: Metadata = { title: "Analyze" };
+export const dynamic = "force-dynamic";
 
 export default function AnalyzePage() {
   return (
