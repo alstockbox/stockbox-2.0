@@ -164,6 +164,63 @@ describe("Stripe subscription webhook", () => {
     );
   });
 
+  it("replaces historical Stripe IDs when a canceled user resubscribes", async () => {
+    rows[0] = {
+      ...rows[0],
+      plan_key: "basic",
+      status: "canceled",
+      stripe_customer_id: "cus_historical",
+      stripe_subscription_id: "sub_historical",
+      stripe_price_id: "price_basic"
+    };
+
+    const response = await deliver(
+      subscription({ id: "sub_new", customer: "cus_new", status: "active" })
+    );
+
+    expect(response.status).toBe(200);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "existing_row",
+      user_id: "user_1",
+      plan_key: "basic",
+      status: "active",
+      stripe_customer_id: "cus_new",
+      stripe_subscription_id: "sub_new",
+      stripe_price_id: "price_basic",
+      current_period_end: new Date(1_800_000_000 * 1000).toISOString()
+    });
+  });
+
+  it("stores canceled status for customer.subscription.deleted", async () => {
+    rows[0] = {
+      ...rows[0],
+      plan_key: "basic",
+      status: "active",
+      stripe_customer_id: "cus_historical",
+      stripe_subscription_id: "sub_historical",
+      stripe_price_id: "price_basic"
+    };
+
+    const response = await deliver(
+      subscription({
+        id: "sub_historical",
+        customer: "cus_historical",
+        status: "active"
+      }),
+      "customer.subscription.deleted"
+    );
+
+    expect(response.status).toBe(200);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      plan_key: "basic",
+      status: "canceled",
+      stripe_customer_id: "cus_historical",
+      stripe_subscription_id: "sub_historical"
+    });
+  });
+
   it("returns 500 and logs safe diagnostics when Supabase upsert fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     upsertError = {

@@ -11,7 +11,8 @@ import {
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import {
   getUserSubscription,
-  isCurrentBasicSubscription
+  isCurrentBasicSubscription,
+  reusableStripeCustomerId
 } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
 
@@ -80,15 +81,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const stripeCustomerId = subscriptionLookup.subscription?.stripeCustomerId ?? null;
+  const stripeCustomerId = reusableStripeCustomerId(subscriptionLookup.subscription);
 
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${env.NEXT_PUBLIC_APP_URL}/settings/billing?checkout=success`,
     cancel_url: `${env.NEXT_PUBLIC_APP_URL}/pricing?checkout=cancelled`,
-    customer: stripeCustomerId ?? undefined,
-    customer_email: stripeCustomerId ? undefined : user.email ?? undefined,
+    ...(stripeCustomerId
+      ? { customer: stripeCustomerId }
+      : { customer_email: user.email ?? undefined }),
     client_reference_id: user.id,
     discounts: couponId ? [{ coupon: couponId }] : undefined,
     metadata: {

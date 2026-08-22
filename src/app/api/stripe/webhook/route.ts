@@ -18,7 +18,15 @@ function sanitizeSupabaseErrorMessage(message: string) {
     .slice(0, 500);
 }
 
-async function syncSubscription(subscription: Stripe.Subscription) {
+type SubscriptionEventType =
+  | "customer.subscription.created"
+  | "customer.subscription.updated"
+  | "customer.subscription.deleted";
+
+async function syncSubscription(
+  subscription: Stripe.Subscription,
+  eventType: SubscriptionEventType
+) {
   const firstItem = subscription.items.data[0];
   const priceId = firstItem?.price.id;
   const plan = getPlanByStripePrice(priceId);
@@ -62,7 +70,10 @@ async function syncSubscription(subscription: Stripe.Subscription) {
             : subscription.customer.id,
         stripe_price_id: priceId,
         plan_key: plan.key,
-        status: subscription.status,
+        status:
+          eventType === "customer.subscription.deleted"
+            ? "canceled"
+            : subscription.status,
         current_period_end: firstItem?.current_period_end
           ? new Date(firstItem.current_period_end * 1000).toISOString()
           : null,
@@ -106,7 +117,7 @@ export async function POST(request: Request) {
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
       try {
-        await syncSubscription(event.data.object as Stripe.Subscription);
+        await syncSubscription(event.data.object as Stripe.Subscription, event.type);
       } catch {
         return Response.json(
           { error: "Webhook processing failed." },

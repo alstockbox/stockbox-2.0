@@ -23,6 +23,14 @@ export function isCurrentBasicSubscription(subscription: UserSubscription | null
   );
 }
 
+export function reusableStripeCustomerId(
+  subscription: UserSubscription | null
+): string | null {
+  if (!subscription?.stripeCustomerId) return null;
+  if (TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)) return null;
+  return subscription.stripeCustomerId;
+}
+
 export function effectivePlanKey(subscription: UserSubscription | null): "free" | "basic" {
   return isCurrentBasicSubscription(subscription) ? "basic" : "free";
 }

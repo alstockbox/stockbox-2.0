@@ -104,7 +104,6 @@ describe("Basic checkout flow", () => {
       line_items: [{ price: "price_basic", quantity: 1 }],
       success_url: "https://stockbox.test/settings/billing?checkout=success",
       cancel_url: "https://stockbox.test/pricing?checkout=cancelled",
-      customer: undefined,
       customer_email: "user@example.com",
       client_reference_id: "user_1",
       discounts: [{ coupon: "coupon_launch" }],
@@ -123,7 +122,33 @@ describe("Basic checkout flow", () => {
     expect(mocks.createSession.mock.calls[0]?.[0]).not.toHaveProperty(
       "integration_identifier"
     );
+    expect(mocks.createSession.mock.calls[0]?.[0]).not.toHaveProperty("customer");
   });
+
+  it.each(["canceled", "incomplete_expired"])(
+    "opens Checkout without reusing the customer after Basic becomes %s",
+    async (status) => {
+      mocks.getUserSubscription.mockResolvedValue({
+        ok: true,
+        subscription: {
+          planKey: "basic",
+          status,
+          stripeCustomerId: "cus_historical",
+          stripeSubscriptionId: "sub_historical",
+          currentPeriodEnd: null,
+          createdAt: null
+        }
+      });
+
+      const response = await POST(checkoutRequest());
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSession).toHaveBeenCalledOnce();
+      const params = mocks.createSession.mock.calls[0]?.[0];
+      expect(params).not.toHaveProperty("customer");
+      expect(params).toHaveProperty("customer_email", "user@example.com");
+    }
+  );
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);

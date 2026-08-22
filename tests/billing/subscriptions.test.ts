@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   effectivePlanKey,
   isCurrentBasicSubscription,
+  reusableStripeCustomerId,
   type UserSubscription
 } from "../../src/lib/billing/subscriptions";
 
@@ -23,6 +24,7 @@ describe("subscription state", () => {
       const subscription = basicSubscription(status);
       expect(isCurrentBasicSubscription(subscription)).toBe(true);
       expect(effectivePlanKey(subscription)).toBe("basic");
+      expect(reusableStripeCustomerId(subscription)).toBe("cus_test");
     }
   );
 
@@ -32,6 +34,11 @@ describe("subscription state", () => {
       const subscription = basicSubscription(status);
       expect(isCurrentBasicSubscription(subscription)).toBe(false);
       expect(effectivePlanKey(subscription)).toBe("free");
+      expect(reusableStripeCustomerId(subscription)).toBeNull();
     }
   );
+
+  it("does not invent a reusable customer for a missing subscription", () => {
+    expect(reusableStripeCustomerId(null)).toBeNull();
+  });
 });
