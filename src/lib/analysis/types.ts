@@ -25,11 +25,49 @@ export type InvestmentProfile =
   | "balanced";
 
 export type Recommendation =
+  | "No Rating"
   | "Strong Buy"
   | "Buy"
   | "Hold"
   | "Sell"
   | "Strong Sell";
+
+export type AnalysisArchetype =
+  | "standard"
+  | "software_growth"
+  | "bank"
+  | "insurer"
+  | "reit"
+  | "utility"
+  | "cyclical"
+  | "pre_revenue_biotech"
+  | "holding_company"
+  | "unknown";
+
+export type MetricValueKind = "reported" | "derived" | "estimated" | "fallback";
+
+export type MetricProvenance = {
+  source: string;
+  provider?: string;
+  taxonomy?: "us-gaap" | "ifrs-full" | "dei" | string;
+  concept?: string;
+  unit?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  filedAt?: string;
+  form?: string;
+  valueKind: MetricValueKind;
+  inputs?: string[];
+  note?: string;
+};
+
+export type ProviderDiagnostic = {
+  provider: string;
+  capability: "search" | "fundamentals" | "market_data" | "estimates";
+  status: "available" | "partial" | "unavailable" | "unsupported";
+  reason?: string;
+  observedAt: string;
+};
 
 export type CompanySearchResult = {
   ticker: string;
@@ -49,7 +87,7 @@ export type AnalysisSource = {
 export type MarketSnapshot = {
   ticker: string;
   price: number | null;
-  currency: string;
+  currency: string | null;
   date: string | null;
   volume: number | null;
   yearHigh: number | null;
@@ -72,6 +110,19 @@ export type AnnualFinancials = {
   debt: number | null;
   equity: number | null;
   interestExpense: number | null;
+  periodEndDate?: string;
+  pretaxIncome?: number | null;
+  incomeTaxExpense?: number | null;
+  costOfRevenue?: number | null;
+  ebitda?: number | null;
+  currentAssets?: number | null;
+  currentLiabilities?: number | null;
+  dividendsPaid?: number | null;
+  stockBasedCompensation?: number | null;
+  researchAndDevelopment?: number | null;
+  sharesDiluted?: number | null;
+  currentSharesOutstanding?: number | null;
+  provenance?: Record<string, MetricProvenance>;
 };
 
 export type CompanyFundamentals = {
@@ -81,6 +132,11 @@ export type CompanyFundamentals = {
   sector: string | null;
   industry: string | null;
   annual: AnnualFinancials[];
+  sic?: string;
+  analysisArchetype?: AnalysisArchetype;
+  annualPeriods?: FinancialPeriod[];
+  trailingTwelveMonths?: FinancialPeriod;
+  diagnostics?: AnalysisDiagnostics;
 };
 
 export type AnalysisInput = {
@@ -89,6 +145,7 @@ export type AnalysisInput = {
   fundamentals: CompanyFundamentals | null;
   analysisType: AnalysisType;
   investmentProfile: InvestmentProfile;
+  providerDiagnostics?: ProviderDiagnostic[];
 };
 
 export type Metrics = {
@@ -143,6 +200,9 @@ export type ScoreContributor = {
   score: number | null;
   weight: number;
   impact: "positive" | "negative" | "neutral";
+  availability?: "available" | "missing" | "unsuitable";
+  source?: string;
+  period?: string;
 };
 
 export type ScoreDimension = {
@@ -153,11 +213,16 @@ export type ScoreDimension = {
   rationale?: string;
   contributors?: ScoreContributor[];
   missingData?: MissingDataItem[];
+  rawScore?: number | null;
+  adjustedScore?: number | null;
+  coverage?: number;
+  plannedWeight?: number;
+  availableWeight?: number;
 };
 
 export type StockBoxScore = {
-  score: number;
-  personalizedScore: number;
+  score: number | null;
+  personalizedScore: number | null;
   confidence: number;
   dimensions: ScoreDimension[];
   missingData: string[];
@@ -217,6 +282,14 @@ export type AnalysisReport = {
   scenarios: Scenario[];
   sources: AnalysisSource[];
   disclaimer: string;
+  modelVersion?: string;
+  reportSchemaVersion?: string;
+  analysisArchetype?: AnalysisArchetype;
+  dataCoverage?: number;
+  dataAsOf?: string | null;
+  confidenceBreakdown?: ConfidenceBreakdown;
+  providerDiagnostics?: ProviderDiagnostic[];
+  engine?: FinancialAnalysisResult;
 };
 
 export type CompanyProfile = {
@@ -226,14 +299,20 @@ export type CompanyProfile = {
   industry?: string;
   currency?: string;
   investmentProfile?: InvestmentProfile;
+  analysisArchetype?: AnalysisArchetype;
+  sic?: string;
 };
 
 export type FinancialPeriod = {
   fiscalYear?: number;
   periodEndDate?: string;
+  periodStartDate?: string;
+  filedDate?: string;
+  form?: string;
   currency?: string;
   revenue?: number | null;
   grossProfit?: number | null;
+  costOfRevenue?: number | null;
   operatingIncome?: number | null;
   ebitda?: number | null;
   netIncome?: number | null;
@@ -245,11 +324,31 @@ export type FinancialPeriod = {
   totalDebt?: number | null;
   totalEquity?: number | null;
   totalAssets?: number | null;
+  totalLiabilities?: number | null;
   currentAssets?: number | null;
   currentLiabilities?: number | null;
   interestExpense?: number | null;
+  pretaxIncome?: number | null;
+  incomeTaxExpense?: number | null;
+  depreciationAndAmortization?: number | null;
   dividendsPaid?: number | null;
   sharesDiluted?: number | null;
+  currentSharesOutstanding?: number | null;
+  restrictedCash?: number | null;
+  marketableSecurities?: number | null;
+  shortTermDebt?: number | null;
+  longTermDebt?: number | null;
+  commercialPaper?: number | null;
+  currentPortionLongTermDebt?: number | null;
+  stockBasedCompensation?: number | null;
+  researchAndDevelopment?: number | null;
+  accountsReceivable?: number | null;
+  inventory?: number | null;
+  netBorrowing?: number | null;
+  fundsFromOperations?: number | null;
+  adjustedFundsFromOperations?: number | null;
+  tangibleBookValue?: number | null;
+  provenance?: Record<string, MetricProvenance>;
 };
 
 export type FinancialMarketSnapshot = {
@@ -258,6 +357,11 @@ export type FinancialMarketSnapshot = {
   enterpriseValue?: number | null;
   sharesOutstanding?: number | null;
   beta?: number | null;
+  currency?: string | null;
+  priceDate?: string | null;
+  volume?: number | null;
+  yearHigh?: number | null;
+  yearLow?: number | null;
   pricePerformance?: {
     oneMonth?: number | null;
     threeMonth?: number | null;
@@ -281,6 +385,10 @@ export type DcfInputAssumptions = {
   fcfGrowthRates?: number[] | null;
   netDebt?: number | null;
   sharesOutstanding?: number | null;
+  riskFreeRate?: number | null;
+  equityRiskPremium?: number | null;
+  countryRiskPremium?: number | null;
+  preTaxCostOfDebt?: number | null;
 };
 
 export type FinancialAnalysisInput = {
@@ -291,6 +399,7 @@ export type FinancialAnalysisInput = {
   estimates?: ForwardEstimates;
   dcfAssumptions?: DcfInputAssumptions;
   analysisDate?: string;
+  providerDiagnostics?: ProviderDiagnostic[];
 };
 
 export type MarginMetrics = {
@@ -309,6 +418,8 @@ export type GrowthMetrics = {
   epsCagr3y: number | null;
   freeCashFlowGrowthYoY: number | null;
   freeCashFlowCagr3y: number | null;
+  revenueCagr5y: number | null;
+  freeCashFlowPerShareCagr3y: number | null;
 };
 
 export type RatioMetrics = {
@@ -323,6 +434,27 @@ export type RatioMetrics = {
   cashConversion: number | null;
   cashToDebt: number | null;
   equityToAssets: number | null;
+  returnOnInvestedCapitalSpread: number | null;
+};
+
+export type CashFlowQualityMetrics = {
+  simpleFreeCashFlow: number | null;
+  fcff: number | null;
+  fcfe: number | null;
+  normalizedTaxRate: number | null;
+  taxRateSource: "reported_normalized" | "fallback_assumption" | "unavailable";
+  cfoToNetIncome: number | null;
+  freeCashFlowToNetIncome: number | null;
+  accrualRatio: number | null;
+  stockBasedCompensationToRevenue: number | null;
+  operatingMarginStability: number | null;
+  grossMarginStability: number | null;
+  freeCashFlowStability: number | null;
+  dividendYield: number | null;
+  dividendPayoutRatio: number | null;
+  freeCashFlowPayoutRatio: number | null;
+  dividendGrowthYoY: number | null;
+  dividendCagr3y: number | null;
 };
 
 export type ValuationMetrics = {
@@ -353,7 +485,18 @@ export type FinancialMetrics = {
   ratios: RatioMetrics;
   valuation: ValuationMetrics;
   trends: TrendMetrics;
+  cashFlow: CashFlowQualityMetrics;
+  provenance: Record<string, MetricProvenance>;
   missingData: MissingDataItem[];
+};
+
+export type ConfidenceBreakdown = {
+  dataCoverage: number;
+  dataFreshness: number;
+  sourceQuality: number;
+  reconciliation: number;
+  estimateAvailability: number;
+  valuationInputs: number;
 };
 
 export type ScoreResult = {
@@ -361,7 +504,10 @@ export type ScoreResult = {
   personalizedScore: number | null;
   investmentProfile: InvestmentProfile;
   sector: Sector;
+  analysisArchetype: AnalysisArchetype;
   confidence: number;
+  confidenceBreakdown: ConfidenceBreakdown;
+  dataCoverage: number;
   dimensions: Record<ScoreDimensionKey, ScoreDimension>;
   shortTermScore: number | null;
   longTermScore: number | null;
@@ -430,6 +576,27 @@ export type DcfRangeResult = {
   high: number | null;
   scenarios: DcfScenarioResult[];
   missingData: MissingDataItem[];
+  currentPrice?: number | null;
+  impliedUpside?: number | null;
+  terminalValueShare?: number | null;
+  sensitivity?: Array<{ discountRate: number; terminalGrowthRate: number; perShareValue: number }>;
+  assumptionNotes?: string[];
+  confidence?: number;
+};
+
+export type ReconciliationCheck = {
+  code: string;
+  status: "pass" | "warning" | "unavailable";
+  message: string;
+  differenceRatio?: number;
+};
+
+export type AnalysisDiagnostics = {
+  latestFinancialPeriodEnd: string | null;
+  latestAnnualPeriodEnd: string | null;
+  dataAgeDays: number | null;
+  ttmStatus: "available" | "annual_fallback" | "unavailable";
+  providerDiagnostics: ProviderDiagnostic[];
 };
 
 export type AnalysisScenario = {
@@ -449,6 +616,8 @@ export type AnalysisScenario = {
 
 export type FinancialAnalysisResult = {
   modelVersion: string;
+  reportSchemaVersion: string;
+  analysisArchetype: AnalysisArchetype;
   metrics: FinancialMetrics;
   scores: ScoreResult;
   redFlags: RedFlag[];
@@ -456,4 +625,9 @@ export type FinancialAnalysisResult = {
   dcf: DcfRangeResult;
   scenarios: AnalysisScenario[];
   missingData: MissingDataItem[];
+  dataCoverage: number;
+  confidenceBreakdown: ConfidenceBreakdown;
+  diagnostics: AnalysisDiagnostics;
+  reconciliation: ReconciliationCheck[];
+  provenance: Record<string, MetricProvenance>;
 };

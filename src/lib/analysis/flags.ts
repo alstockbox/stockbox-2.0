@@ -1,4 +1,4 @@
-import type { FinancialMetrics, Flag, Metrics, RedFlag } from "./types";
+import type { AnalysisArchetype, FinancialMetrics, Flag, Metrics, RedFlag } from "./types";
 
 export function detectRedFlags(metrics: Metrics): Flag[] {
   const flags: Flag[] = [];
@@ -93,7 +93,10 @@ export function detectGreenFlags(metrics: Metrics): Flag[] {
   return flags;
 }
 
-export function detectFinancialRedFlags(metrics: FinancialMetrics): RedFlag[] {
+export function detectFinancialRedFlags(
+  metrics: FinancialMetrics,
+  archetype: AnalysisArchetype = "standard",
+): RedFlag[] {
   const flags: RedFlag[] = [];
 
   if (metrics.growth.revenueGrowthYoY !== null && metrics.growth.revenueGrowthYoY < -0.12) {
@@ -118,7 +121,8 @@ export function detectFinancialRedFlags(metrics: FinancialMetrics): RedFlag[] {
     });
   }
 
-  if (metrics.ratios.netDebtToEbitda !== null && metrics.ratios.netDebtToEbitda > 5) {
+  const corporateLeverageApplies = !["bank", "insurer", "reit", "holding_company"].includes(archetype);
+  if (corporateLeverageApplies && metrics.ratios.netDebtToEbitda !== null && metrics.ratios.netDebtToEbitda > 5) {
     flags.push({
       code: "high_leverage",
       label: "High leverage",
@@ -129,7 +133,7 @@ export function detectFinancialRedFlags(metrics: FinancialMetrics): RedFlag[] {
     });
   }
 
-  if (metrics.ratios.interestCoverage !== null && metrics.ratios.interestCoverage < 1.5) {
+  if (corporateLeverageApplies && metrics.ratios.interestCoverage !== null && metrics.ratios.interestCoverage < 1.5) {
     flags.push({
       code: "low_interest_coverage",
       label: "Low interest coverage",
@@ -159,6 +163,39 @@ export function detectFinancialRedFlags(metrics: FinancialMetrics): RedFlag[] {
       metric: "sharesDilutionYoY",
       value: metrics.trends.sharesDilutionYoY,
       rationale: "Diluted shares outstanding increased by more than 8% year over year.",
+    });
+  }
+
+  if (metrics.cashFlow.accrualRatio !== null && metrics.cashFlow.accrualRatio > 0.12) {
+    flags.push({
+      code: "large_accrual_gap",
+      label: "Large accrual gap",
+      severity: "high",
+      metric: "accrualRatio",
+      value: metrics.cashFlow.accrualRatio,
+      rationale: "Net income materially exceeds operating cash flow relative to average assets.",
+    });
+  }
+
+  if (metrics.cashFlow.stockBasedCompensationToRevenue !== null && metrics.cashFlow.stockBasedCompensationToRevenue > 0.2) {
+    flags.push({
+      code: "sbc_burden",
+      label: "High stock-based compensation burden",
+      severity: "medium",
+      metric: "stockBasedCompensationToRevenue",
+      value: metrics.cashFlow.stockBasedCompensationToRevenue,
+      rationale: "Stock-based compensation exceeds 20% of revenue.",
+    });
+  }
+
+  if (metrics.trends.operatingMarginChangeYoY !== null && metrics.trends.operatingMarginChangeYoY < -0.05) {
+    flags.push({
+      code: "margin_compression",
+      label: "Operating margin compression",
+      severity: "medium",
+      metric: "operatingMarginChangeYoY",
+      value: metrics.trends.operatingMarginChangeYoY,
+      rationale: "Operating margin contracted by more than five percentage points.",
     });
   }
 

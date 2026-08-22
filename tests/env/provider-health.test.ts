@@ -33,11 +33,13 @@ describe("provider health diagnostics", () => {
     const serialized = JSON.stringify(payload);
 
     expect(dynamic).toBe("force-dynamic");
-    expect(payload).toEqual({
+    expect(payload).toEqual(expect.objectContaining({
       secConfigured: true,
       secUserAgentExplicit: true,
       marketProvider: "stooq"
-    });
+    }));
+    expect(payload.providers.fundamentals.capabilities.supportsFundamentals).toBe(true);
+    expect(payload.providers.marketData.capabilities.supportsMarketData).toBe(true);
     expect(serialized).not.toContain("secret-contact@stockbox.test");
     expect(serialized).not.toContain("alerts@stockbox.test");
     expect(serialized).not.toContain("owner@stockbox.test");
@@ -54,11 +56,11 @@ describe("provider health diagnostics", () => {
 
     const payload = await GET().json();
 
-    expect(payload).toEqual({
+    expect(payload).toEqual(expect.objectContaining({
       secConfigured: true,
       secUserAgentExplicit: false,
       marketProvider: "stooq"
-    });
+    }));
     expect(JSON.stringify(payload)).not.toContain("alerts@stockbox.test");
   });
 });

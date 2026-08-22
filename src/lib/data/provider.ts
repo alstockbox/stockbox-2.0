@@ -7,8 +7,8 @@ import type {
   InvestmentProfile
 } from "@/lib/analysis/types";
 import { isFinancialProviderConfigured } from "@/lib/env/server";
-import { fetchCompanyFundamentals, searchCompanies as searchSecCompanies } from "./sec";
-import { fetchMarketSnapshot } from "./stooq";
+import { fetchCompanyFundamentalsResult, searchCompanies as searchSecCompanies } from "./sec";
+import { fetchStooqMarketData, mapStooqSymbol } from "./stooq";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
@@ -40,10 +40,13 @@ export async function analyzeCompany({
     };
   }
 
-  const [fundamentals, market] = await Promise.all([
-    fetchCompanyFundamentals(company),
-    fetchMarketSnapshot(company.ticker)
+  const [fundamentalsResult, marketResult] = await Promise.all([
+    fetchCompanyFundamentalsResult(company),
+    fetchStooqMarketData(company)
   ]);
+  const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
+  const market = marketResult.ok ? marketResult.data : null;
+  const providerDiagnostics = [fundamentalsResult.diagnostic, marketResult.diagnostic];
 
   if (fundamentals) {
     sources.push({
@@ -53,18 +56,18 @@ export async function analyzeCompany({
       freshness: "SEC XBRL facts, cached up to 12 hours."
     });
   } else {
-    warnings.push("Fundamental data is unavailable for this company.");
+    warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);
   }
 
   if (market) {
     sources.push({
       name: "Stooq end-of-day market data",
-      url: `https://stooq.com/q/d/l/?s=${company.ticker.toLowerCase()}.us&i=d`,
+      url: `https://stooq.com/q/d/l/?s=${encodeURIComponent(mapStooqSymbol(company)?.symbol ?? company.ticker.toLowerCase())}&i=d`,
       accessedAt,
       freshness: "End-of-day market data, cached up to 15 minutes."
     });
   } else {
-    warnings.push("Market price history is unavailable for this ticker.");
+    warnings.push(`Market price history is unavailable: ${marketResult.ok ? "unknown provider error" : marketResult.message}`);
   }
 
   if (!fundamentals && !market) {
@@ -81,7 +84,8 @@ export async function analyzeCompany({
     market,
     fundamentals,
     analysisType,
-    investmentProfile
+    investmentProfile,
+    providerDiagnostics
   });
   report.sources = sources;
   report.score.missingData = [...new Set([...report.score.missingData, ...warnings])];

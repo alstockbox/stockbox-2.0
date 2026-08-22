@@ -38,14 +38,15 @@ describe("SEC provider requests", () => {
     expect(companies).toHaveLength(2);
     expect(mocks.fetch).toHaveBeenCalledWith(
       "https://www.sec.gov/files/company_tickers.json",
-      {
+      expect.objectContaining({
         headers: {
           "User-Agent": "StockBox/1.0 ops@stockbox.test",
           Accept: "application/json",
           "Accept-Encoding": "gzip, deflate"
         },
-        next: { revalidate: 60 * 60 * 24 }
-      }
+        next: { revalidate: 60 * 60 * 24 },
+        signal: expect.any(AbortSignal)
+      })
     );
   });
 

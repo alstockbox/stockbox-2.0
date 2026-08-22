@@ -79,6 +79,8 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
   const showExplainability = mode === "pro" || report.analysisType === "deep";
   const showNumbers = mode === "pro" || report.analysisType !== "summary";
   const showValuation = mode === "pro" || report.analysisType === "deep";
+  const engine = report.engine;
+  const scoreAvailable = report.score.score !== null;
   return (
     <div className="space-y-5">
       <Card className="p-6">
@@ -88,6 +90,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
               <Badge>{report.ticker}</Badge>
               <Badge>{report.analysisType}</Badge>
               <Badge>{report.investmentProfile.replace("_", " ")}</Badge>
+              {report.analysisArchetype ? <Badge>{report.analysisArchetype.replaceAll("_", " ")}</Badge> : null}
             </div>
             <h1 className="serif mt-4 text-3xl font-semibold text-[#f4efe5]">{report.companyName}</h1>
             <p className="mt-3 max-w-3xl text-lg leading-8 text-[#d6deea]">{report.oneSentence}</p>
@@ -95,13 +98,22 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
           <div className="grid min-w-56 grid-cols-2 gap-3 text-center">
             <div className="rounded-md border border-[#b99b5f]/30 bg-[#b99b5f]/10 p-4">
               <p className="text-xs text-[#e1cb95]">StockBox Score</p>
-              <p className="number mt-1 text-4xl font-semibold text-[#f4efe5]">{report.score.score}</p>
+              <p className={`${scoreAvailable ? "number text-4xl" : "text-lg"} mt-1 font-semibold text-[#f4efe5]`}>
+                {scoreAvailable ? report.score.score : "No Rating"}
+              </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-[#9aa7b8]">Confidence</p>
               <p className="number mt-1 text-4xl font-semibold text-[#f4efe5]">{report.score.confidence}%</p>
             </div>
           </div>
+          {report.dataCoverage !== undefined || report.dataAsOf ? (
+            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#9aa7b8]">
+              {report.dataCoverage !== undefined ? <span>Data coverage {formatPercent(report.dataCoverage, 0)}</span> : null}
+              {report.dataAsOf ? <span>Data as of {report.dataAsOf}</span> : null}
+              {report.modelVersion ? <span>{report.modelVersion}</span> : null}
+            </div>
+          ) : null}
         </div>
       </Card>
 
@@ -112,10 +124,14 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
             <Badge>{report.recommendation}</Badge>
           </div>
           <p className="mt-3 text-sm leading-6 text-[#c9d2df]">{report.summary}</p>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <Meter value={report.score.score} label="General score" />
-            <Meter value={report.score.personalizedScore} label="Personalized score" />
-          </div>
+          {report.score.score !== null && report.score.personalizedScore !== null ? (
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <Meter value={report.score.score} label="General score" />
+              <Meter value={report.score.personalizedScore} label="Personalized score" />
+            </div>
+          ) : (
+            <p className="mt-5 text-sm text-[#e1cb95]">Weighted coverage is below the rating threshold.</p>
+          )}
         </Card>
 
         <Card>
@@ -146,7 +162,20 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
                     {dimension.score === null ? "Unavailable" : Math.round(dimension.score)}
                   </p>
                 </div>
+                {dimension.coverage !== undefined ? (
+                  <p className="mt-1 text-xs text-[#9aa7b8]">Coverage {formatPercent(dimension.coverage, 0)}</p>
+                ) : null}
                 <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{dimension.rationale}</p>
+                {report.analysisType === "deep" && dimension.contributors?.length ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs font-semibold text-[#e1cb95]">Contributors</summary>
+                    <div className="mt-2 space-y-1 text-xs text-[#9aa7b8]">
+                      {dimension.contributors.map((item) => (
+                        <p key={item.label}>{item.label}: {item.availability === "available" ? `${Math.round(item.score ?? 0)}/100` : item.availability ?? "missing"}</p>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
               </div>
             ))}
           </div>
@@ -179,6 +208,11 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
               <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
                 {formatMetric(key, report.metrics[key])}
               </p>
+              {report.metrics[key] === null && engine ? (
+                <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">
+                  {engine.missingData.find((item) => item.field.toLowerCase().includes(key.toLowerCase()))?.reason ?? "Required source inputs were not reported or the metric is unsuitable."}
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -205,31 +239,64 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
       </Card>
 
       {showValuation ? <Card>
-        <h2 className="text-lg font-semibold text-[#f4efe5]">DCF / Intrinsic Value</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-[#f4efe5]">Valuation</h2>
+          {engine ? <Badge>{engine.dcf.status}</Badge> : null}
+        </div>
+        {engine ? <p className="mt-2 text-sm text-[#9aa7b8]">{engine.dcf.method}</p> : null}
         {report.dcf.suitable ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-md border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-[#9aa7b8]">Bear</p>
               <p className="number mt-1 text-xl font-semibold text-[#f4efe5]">
-                {formatCompactCurrency(report.dcf.bear)}
+                {formatCompactCurrency(report.dcf.bear, engine?.dcf.currency)}
               </p>
             </div>
             <div className="rounded-md border border-[#b99b5f]/30 bg-[#b99b5f]/10 p-4">
               <p className="text-xs text-[#e1cb95]">Base</p>
               <p className="number mt-1 text-xl font-semibold text-[#f4efe5]">
-                {formatCompactCurrency(report.dcf.base)}
+                {formatCompactCurrency(report.dcf.base, engine?.dcf.currency)}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-[#9aa7b8]">Bull</p>
               <p className="number mt-1 text-xl font-semibold text-[#f4efe5]">
-                {formatCompactCurrency(report.dcf.bull)}
+                {formatCompactCurrency(report.dcf.bull, engine?.dcf.currency)}
               </p>
             </div>
           </div>
         ) : (
           <p className="mt-3 text-sm leading-6 text-[#c9d2df]">{report.dcf.reason}</p>
         )}
+        {engine?.dcf.assumptionNotes?.length ? (
+          <details className="mt-4 rounded-md border border-white/10 bg-white/5 p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">Assumptions and sensitivity</summary>
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-[#9aa7b8]">
+              {engine.dcf.assumptionNotes.map((note) => <li key={note}>{note}</li>)}
+            </ul>
+          </details>
+        ) : null}
+      </Card> : null}
+
+      {showExplainability && engine ? <Card>
+        <h2 className="text-lg font-semibold text-[#f4efe5]">Methodology and Provenance</h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Object.entries(report.confidenceBreakdown ?? {}).map(([key, value]) => (
+            <div key={key} className="rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs capitalize text-[#9aa7b8]">{key.replace(/([A-Z])/g, " $1")}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{value}%</p>
+            </div>
+          ))}
+        </div>
+        <details className="mt-4 rounded-md border border-white/10 bg-white/5 p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">Metric sources and reconciliation</summary>
+          <div className="mt-3 space-y-2 text-xs leading-5 text-[#9aa7b8]">
+            {Object.entries(engine.provenance).map(([metric, source]) => (
+              <p key={metric}><span className="font-semibold text-[#c9d2df]">{metric}</span>: {source.source}{source.concept ? ` / ${source.concept}` : ""}{source.periodEnd ? ` / ${source.periodEnd}` : ""} ({source.valueKind})</p>
+            ))}
+            {engine.reconciliation.map((check) => <p key={check.code}>{check.status}: {check.message}</p>)}
+          </div>
+        </details>
       </Card> : null}
 
       <Card>

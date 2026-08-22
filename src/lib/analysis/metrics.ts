@@ -2,6 +2,7 @@ import type {
   FinancialAnalysisInput,
   FinancialMetrics,
   FinancialPeriod,
+  MetricProvenance,
   MissingDataItem,
   ValuationMetrics,
 } from "./types";
@@ -9,41 +10,130 @@ import {
   addMissingData,
   calculateCagr,
   calculateGrowth,
+  clamp,
   firstFinite,
   isFiniteNumber,
   safeDivide,
 } from "./math";
 
-const DEFAULT_TAX_RATE = 0.21;
+const FALLBACK_TAX_RATE = 0.21;
 
 function periodSortValue(period: FinancialPeriod): number {
-  if (isFiniteNumber(period.fiscalYear)) {
-    return period.fiscalYear;
-  }
-
-  if (period.periodEndDate) {
-    const timestamp = Date.parse(period.periodEndDate);
-    return Number.isFinite(timestamp) ? timestamp : 0;
-  }
-
-  return 0;
+  const date = period.periodEndDate ? Date.parse(period.periodEndDate) : Number.NaN;
+  return Number.isFinite(date) ? date : period.fiscalYear ?? 0;
 }
 
 export function sortFinancialPeriods(periods: FinancialPeriod[]): FinancialPeriod[] {
   return [...periods].sort((a, b) => periodSortValue(a) - periodSortValue(b));
 }
 
-export function deriveFreeCashFlow(period: FinancialPeriod | null | undefined): number | null {
+export function deriveSimpleFreeCashFlow(period: FinancialPeriod | null | undefined): number | null {
   if (!period) return null;
-  if (isFiniteNumber(period.freeCashFlow)) return period.freeCashFlow;
+  if (isFiniteNumber(period.operatingCashFlow) && isFiniteNumber(period.capitalExpenditures)) {
+    return period.operatingCashFlow - Math.abs(period.capitalExpenditures);
+  }
+  return isFiniteNumber(period.freeCashFlow) ? period.freeCashFlow : null;
+}
 
-  if (!isFiniteNumber(period.operatingCashFlow) || !isFiniteNumber(period.capitalExpenditures)) {
+/** @deprecated Use deriveSimpleFreeCashFlow and name the cash-flow concept explicitly. */
+export const deriveFreeCashFlow = deriveSimpleFreeCashFlow;
+
+function average(a: number | null | undefined, b: number | null | undefined): number | null {
+  return isFiniteNumber(a) && isFiniteNumber(b) ? (a + b) / 2 : null;
+}
+
+function investedCapital(period: FinancialPeriod | null): number | null {
+  if (!period || !isFiniteNumber(period.totalDebt) || !isFiniteNumber(period.totalEquity) || !isFiniteNumber(period.cashAndEquivalents)) {
     return null;
   }
+  const value = period.totalDebt + period.totalEquity - period.cashAndEquivalents;
+  return value > 0 ? value : null;
+}
 
-  return period.capitalExpenditures < 0
-    ? period.operatingCashFlow + period.capitalExpenditures
-    : period.operatingCashFlow - period.capitalExpenditures;
+export function normalizedTaxRate(periods: FinancialPeriod[]): {
+  rate: number;
+  source: "reported_normalized" | "fallback_assumption";
+} {
+  const rates = periods
+    .slice(-5)
+    .map((period) => safeDivide(period.incomeTaxExpense, period.pretaxIncome))
+    .filter((rate): rate is number => rate !== null && rate >= -0.1 && rate <= 0.6);
+  if (rates.length > 0) {
+    const mean = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
+    return { rate: clamp(mean, 0.05, 0.4), source: "reported_normalized" };
+  }
+  return { rate: FALLBACK_TAX_RATE, source: "fallback_assumption" };
+}
+
+function deriveFcff(period: FinancialPeriod | null, taxRate: number): number | null {
+  if (!period || !isFiniteNumber(period.operatingCashFlow) || !isFiniteNumber(period.capitalExpenditures) || !isFiniteNumber(period.interestExpense)) {
+    return null;
+  }
+  return period.operatingCashFlow + Math.abs(period.interestExpense) * (1 - taxRate) - Math.abs(period.capitalExpenditures);
+}
+
+function deriveFcfe(period: FinancialPeriod | null): number | null {
+  const simpleFcf = deriveSimpleFreeCashFlow(period);
+  if (!isFiniteNumber(simpleFcf) || !isFiniteNumber(period?.netBorrowing)) return null;
+  return simpleFcf + period.netBorrowing;
+}
+
+function stability(values: Array<number | null>): number | null {
+  const available = values.filter(isFiniteNumber);
+  if (available.length < 3) return null;
+  const mean = available.reduce((sum, value) => sum + value, 0) / available.length;
+  const scale = Math.max(Math.abs(mean), 0.01);
+  const variance = available.reduce((sum, value) => sum + (value - mean) ** 2, 0) / available.length;
+  return clamp(1 - Math.sqrt(variance) / scale, 0, 1);
+}
+
+function deriveMarketCap(input: FinancialAnalysisInput, latest: FinancialPeriod | null): number | null {
+  if (isFiniteNumber(input.market?.marketCap)) return input.market.marketCap;
+  const shares = firstFinite(input.market?.sharesOutstanding, latest?.currentSharesOutstanding, latest?.sharesDiluted);
+  return isFiniteNumber(input.market?.price) && isFiniteNumber(shares) ? input.market.price * shares : null;
+}
+
+function deriveEnterpriseValue(input: FinancialAnalysisInput, latest: FinancialPeriod | null, marketCap: number | null): number | null {
+  if (isFiniteNumber(input.market?.enterpriseValue)) return input.market.enterpriseValue;
+  if (!isFiniteNumber(marketCap) || !isFiniteNumber(latest?.totalDebt) || !isFiniteNumber(latest.cashAndEquivalents)) return null;
+  return marketCap + latest.totalDebt - latest.cashAndEquivalents;
+}
+
+function deriveValuationMetrics(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+  simpleFcf: number | null,
+  epsGrowth: number | null,
+): ValuationMetrics {
+  const marketCap = deriveMarketCap(input, latest);
+  const enterpriseValue = deriveEnterpriseValue(input, latest, marketCap);
+  const revenue = latest?.revenue ?? null;
+  const netIncome = latest?.netIncome ?? null;
+  const equity = latest?.totalEquity ?? null;
+  const ebitda = firstFinite(
+    latest?.ebitda,
+    isFiniteNumber(latest?.operatingIncome) && isFiniteNumber(latest?.depreciationAndAmortization)
+      ? latest.operatingIncome + latest.depreciationAndAmortization
+      : null,
+  );
+  const pe = isFiniteNumber(netIncome) && netIncome > 0 ? safeDivide(marketCap, netIncome) : null;
+  const growth = firstFinite(input.estimates?.nextYearEpsGrowth, epsGrowth);
+  return {
+    marketCap,
+    enterpriseValue,
+    priceEarnings: pe,
+    priceSales: isFiniteNumber(revenue) && revenue > 0 ? safeDivide(marketCap, revenue) : null,
+    priceBook: isFiniteNumber(equity) && equity > 0 ? safeDivide(marketCap, equity) : null,
+    evSales: isFiniteNumber(revenue) && revenue > 0 ? safeDivide(enterpriseValue, revenue) : null,
+    evEbitda: isFiniteNumber(ebitda) && ebitda > 0 ? safeDivide(enterpriseValue, ebitda) : null,
+    freeCashFlowYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(simpleFcf, marketCap) : null,
+    earningsYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(netIncome, marketCap) : null,
+    peg: isFiniteNumber(pe) && isFiniteNumber(growth) && growth > 0 ? pe / (growth * 100) : null,
+  };
+}
+
+function derivedProvenance(source: string, periodEnd: string | undefined, inputs: string[], note?: string): MetricProvenance {
+  return { source, valueKind: "derived", periodEnd, inputs, note };
 }
 
 function addMissingIfNull(
@@ -51,187 +141,145 @@ function addMissingIfNull(
   value: number | null,
   field: string,
   reason: string,
+  severity: "low" | "medium" | "high" = "medium",
 ): void {
-  if (value === null) {
-    addMissingData(missingData, field, reason, "metric", "medium");
-  }
-}
-
-function deriveMarketCap(input: FinancialAnalysisInput, latest: FinancialPeriod | null): number | null {
-  const explicitMarketCap = input.market?.marketCap;
-  if (isFiniteNumber(explicitMarketCap)) return explicitMarketCap;
-
-  const price = input.market?.price;
-  const shares = firstFinite(input.market?.sharesOutstanding, latest?.sharesDiluted);
-
-  if (isFiniteNumber(price) && isFiniteNumber(shares)) {
-    return price * shares;
-  }
-
-  return null;
-}
-
-function deriveEnterpriseValue(
-  input: FinancialAnalysisInput,
-  latest: FinancialPeriod | null,
-  marketCap: number | null,
-): number | null {
-  const explicitEnterpriseValue = input.market?.enterpriseValue;
-  if (isFiniteNumber(explicitEnterpriseValue)) return explicitEnterpriseValue;
-  if (!isFiniteNumber(marketCap)) return null;
-
-  const debt = latest?.totalDebt ?? 0;
-  const cash = latest?.cashAndEquivalents ?? 0;
-  return marketCap + (isFiniteNumber(debt) ? debt : 0) - (isFiniteNumber(cash) ? cash : 0);
-}
-
-function deriveValuationMetrics(
-  input: FinancialAnalysisInput,
-  latest: FinancialPeriod | null,
-  revenue: number | null,
-  ebitda: number | null,
-  netIncome: number | null,
-  equity: number | null,
-  freeCashFlow: number | null,
-  epsGrowth: number | null,
-): ValuationMetrics {
-  const marketCap = deriveMarketCap(input, latest);
-  const enterpriseValue = deriveEnterpriseValue(input, latest, marketCap);
-  const priceEarnings = netIncome && netIncome > 0 ? safeDivide(marketCap, netIncome) : null;
-  const earningsYield = marketCap && marketCap > 0 ? safeDivide(netIncome, marketCap) : null;
-  const peGrowthRate = firstFinite(input.estimates?.nextYearEpsGrowth, epsGrowth);
-  const peg =
-    priceEarnings !== null && peGrowthRate !== null && peGrowthRate > 0
-      ? priceEarnings / (peGrowthRate * 100)
-      : null;
-
-  return {
-    marketCap,
-    enterpriseValue,
-    priceEarnings,
-    priceSales: revenue && revenue > 0 ? safeDivide(marketCap, revenue) : null,
-    priceBook: equity && equity > 0 ? safeDivide(marketCap, equity) : null,
-    evSales: revenue && revenue > 0 ? safeDivide(enterpriseValue, revenue) : null,
-    evEbitda: ebitda && ebitda > 0 ? safeDivide(enterpriseValue, ebitda) : null,
-    freeCashFlowYield: marketCap && marketCap > 0 ? safeDivide(freeCashFlow, marketCap) : null,
-    earningsYield,
-    peg,
-  };
+  if (value === null) addMissingData(missingData, field, reason, "metric", severity);
 }
 
 export function computeFinancialMetrics(input: FinancialAnalysisInput): FinancialMetrics {
-  const annualPeriods = sortFinancialPeriods(input.annualPeriods);
-  const latestAnnual = annualPeriods.at(-1) ?? null;
-  const previousAnnual = annualPeriods.at(-2) ?? null;
-  const threeYearPrior = annualPeriods.at(-4) ?? null;
+  const annual = sortFinancialPeriods(input.annualPeriods);
+  const latestAnnual = annual.at(-1) ?? null;
+  const previousAnnual = annual.at(-2) ?? null;
   const latest = input.trailingTwelveMonths ?? latestAnnual;
-  const previous = previousAnnual;
   const missingData: MissingDataItem[] = [];
+  if (!latest) addMissingData(missingData, "annualPeriods", "No reliable financial period is available.", "metric", "high");
 
-  if (!latest) {
-    addMissingData(missingData, "annualPeriods", "At least one financial period is required.", "metric", "high");
-  }
-
+  const simpleFcf = deriveSimpleFreeCashFlow(latest);
+  const tax = normalizedTaxRate(annual);
+  const fcff = deriveFcff(latest, tax.rate);
+  const fcfe = deriveFcfe(latest);
   const revenue = latest?.revenue ?? null;
-  const previousRevenue = previous?.revenue ?? null;
-  const grossProfit = latest?.grossProfit ?? null;
-  const previousGrossProfit = previous?.grossProfit ?? null;
-  const operatingIncome = latest?.operatingIncome ?? null;
-  const previousOperatingIncome = previous?.operatingIncome ?? null;
-  const ebitda = latest?.ebitda ?? null;
   const netIncome = latest?.netIncome ?? null;
-  const operatingCashFlow = latest?.operatingCashFlow ?? null;
-  const freeCashFlow = deriveFreeCashFlow(latest);
-  const equity = latest?.totalEquity ?? null;
-  const assets = latest?.totalAssets ?? null;
-  const debt = latest?.totalDebt ?? null;
-  const cash = latest?.cashAndEquivalents ?? null;
-  const currentAssets = latest?.currentAssets ?? null;
-  const currentLiabilities = latest?.currentLiabilities ?? null;
-  const interestExpense = latest?.interestExpense ?? null;
-  const investedCapital =
-    isFiniteNumber(debt) || isFiniteNumber(equity) || isFiniteNumber(cash)
-      ? (debt ?? 0) + (equity ?? 0) - (cash ?? 0)
-      : null;
-  const nopat = isFiniteNumber(operatingIncome) ? operatingIncome * (1 - DEFAULT_TAX_RATE) : null;
-  const latestGrossMargin = safeDivide(grossProfit, revenue);
-  const previousGrossMargin = safeDivide(previousGrossProfit, previousRevenue);
-  const latestOperatingMargin = safeDivide(operatingIncome, revenue);
-  const previousOperatingMargin = safeDivide(previousOperatingIncome, previousRevenue);
+  const operatingIncome = latest?.operatingIncome ?? null;
+  const ebitda = firstFinite(
+    latest?.ebitda,
+    isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.depreciationAndAmortization)
+      ? operatingIncome + latest.depreciationAndAmortization
+      : null,
+  );
+  const averageCapital = average(investedCapital(latest), investedCapital(previousAnnual));
+  const averageEquity = average(latest?.totalEquity, previousAnnual?.totalEquity);
+  const averageAssets = average(latest?.totalAssets, previousAnnual?.totalAssets);
+  const nopat = isFiniteNumber(operatingIncome) ? operatingIncome * (1 - tax.rate) : null;
+  const grossMargin = safeDivide(latest?.grossProfit, revenue);
+  const operatingMargin = safeDivide(operatingIncome, revenue);
+  const priorGrossMargin = safeDivide(previousAnnual?.grossProfit, previousAnnual?.revenue);
+  const priorOperatingMargin = safeDivide(previousAnnual?.operatingIncome, previousAnnual?.revenue);
+  const annualFcfs = annual.map(deriveSimpleFreeCashFlow);
+  const threeYearPrior = annual.at(-4) ?? null;
+  const fiveYearPrior = annual.at(-6) ?? null;
+  const latestFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(latestAnnual), latestAnnual?.sharesDiluted);
+  const priorFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(threeYearPrior), threeYearPrior?.sharesDiluted);
+  const marketCap = deriveMarketCap(input, latest);
+  const dividends = isFiniteNumber(latest?.dividendsPaid) ? Math.abs(latest.dividendsPaid) : null;
+  const priorDividends = isFiniteNumber(previousAnnual?.dividendsPaid) ? Math.abs(previousAnnual.dividendsPaid) : null;
+  const threeYearDividends = isFiniteNumber(threeYearPrior?.dividendsPaid) ? Math.abs(threeYearPrior.dividendsPaid) : null;
+  const netDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
+    ? latest.totalDebt - latest.cashAndEquivalents
+    : null;
+  const roic = isFiniteNumber(averageCapital) && averageCapital > 0 ? safeDivide(nopat, averageCapital) : null;
+  const assumedWacc = input.dcfAssumptions?.discountRate;
 
   const growth = {
     revenueGrowthYoY: calculateGrowth(latestAnnual?.revenue, previousAnnual?.revenue),
     revenueCagr3y: calculateCagr(threeYearPrior?.revenue, latestAnnual?.revenue, 3),
+    revenueCagr5y: calculateCagr(fiveYearPrior?.revenue, latestAnnual?.revenue, 5),
     epsGrowthYoY: calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted),
     epsCagr3y: calculateCagr(threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted, 3),
-    freeCashFlowGrowthYoY: calculateGrowth(deriveFreeCashFlow(latestAnnual), deriveFreeCashFlow(previousAnnual)),
-    freeCashFlowCagr3y: calculateCagr(deriveFreeCashFlow(threeYearPrior), deriveFreeCashFlow(latestAnnual), 3),
+    freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(latestAnnual), deriveSimpleFreeCashFlow(previousAnnual)),
+    freeCashFlowCagr3y: calculateCagr(deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual), 3),
+    freeCashFlowPerShareCagr3y: calculateCagr(priorFcfPerShare, latestFcfPerShare, 3),
   };
 
-  const ratios = {
-    currentRatio: safeDivide(currentAssets, currentLiabilities),
-    debtToEquity: equity && equity > 0 ? safeDivide(debt, equity) : null,
-    netDebt: isFiniteNumber(debt) || isFiniteNumber(cash) ? (debt ?? 0) - (cash ?? 0) : null,
-    netDebtToEbitda:
-      ebitda && ebitda > 0
-        ? safeDivide((debt ?? 0) - (cash ?? 0), ebitda)
-        : null,
-    interestCoverage:
-      isFiniteNumber(operatingIncome) && isFiniteNumber(interestExpense) && interestExpense !== 0
-        ? operatingIncome / Math.abs(interestExpense)
-        : null,
-    returnOnEquity: equity && equity > 0 ? safeDivide(netIncome, equity) : null,
-    returnOnAssets: assets && assets > 0 ? safeDivide(netIncome, assets) : null,
-    returnOnInvestedCapital:
-      investedCapital && investedCapital > 0 ? safeDivide(nopat, investedCapital) : null,
-    cashConversion: netIncome && netIncome > 0 ? safeDivide(freeCashFlow, netIncome) : null,
-    cashToDebt: debt && debt > 0 ? safeDivide(cash, debt) : null,
-    equityToAssets: assets && assets > 0 ? safeDivide(equity, assets) : null,
-  };
-
+  const valuation = deriveValuationMetrics(input, latest, simpleFcf, growth.epsGrowthYoY);
   const metrics: FinancialMetrics = {
     latestPeriod: latest,
-    previousPeriod: previous,
+    previousPeriod: previousAnnual,
     margins: {
-      grossMargin: latestGrossMargin,
-      operatingMargin: latestOperatingMargin,
+      grossMargin,
+      operatingMargin,
       ebitdaMargin: safeDivide(ebitda, revenue),
       netMargin: safeDivide(netIncome, revenue),
-      freeCashFlowMargin: safeDivide(freeCashFlow, revenue),
-      operatingCashFlowMargin: safeDivide(operatingCashFlow, revenue),
+      freeCashFlowMargin: safeDivide(simpleFcf, revenue),
+      operatingCashFlowMargin: safeDivide(latest?.operatingCashFlow, revenue),
     },
     growth,
-    ratios,
-    valuation: deriveValuationMetrics(
-      input,
-      latest,
-      revenue,
-      ebitda,
-      netIncome,
-      equity,
-      freeCashFlow,
-      growth.epsGrowthYoY,
-    ),
+    ratios: {
+      currentRatio: safeDivide(latest?.currentAssets, latest?.currentLiabilities),
+      debtToEquity: isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest?.totalEquity) && latest.totalEquity > 0
+        ? latest.totalDebt / latest.totalEquity
+        : null,
+      netDebt,
+      netDebtToEbitda: isFiniteNumber(netDebt) && isFiniteNumber(ebitda) && ebitda > 0 ? netDebt / ebitda : null,
+      interestCoverage: isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.interestExpense) && latest.interestExpense !== 0
+        ? operatingIncome / Math.abs(latest.interestExpense)
+        : null,
+      returnOnEquity: isFiniteNumber(averageEquity) && averageEquity > 0 ? safeDivide(netIncome, averageEquity) : null,
+      returnOnAssets: isFiniteNumber(averageAssets) && averageAssets > 0 ? safeDivide(netIncome, averageAssets) : null,
+      returnOnInvestedCapital: roic,
+      returnOnInvestedCapitalSpread: isFiniteNumber(roic) && isFiniteNumber(assumedWacc) ? roic - assumedWacc : null,
+      cashConversion: safeDivide(simpleFcf, netIncome),
+      cashToDebt: safeDivide(latest?.cashAndEquivalents, latest?.totalDebt),
+      equityToAssets: safeDivide(latest?.totalEquity, latest?.totalAssets),
+    },
+    valuation,
     trends: {
-      operatingMarginChangeYoY:
-        latestOperatingMargin !== null && previousOperatingMargin !== null
-          ? latestOperatingMargin - previousOperatingMargin
-          : null,
-      grossMarginChangeYoY:
-        latestGrossMargin !== null && previousGrossMargin !== null
-          ? latestGrossMargin - previousGrossMargin
-          : null,
+      operatingMarginChangeYoY: isFiniteNumber(operatingMargin) && isFiniteNumber(priorOperatingMargin)
+        ? operatingMargin - priorOperatingMargin
+        : null,
+      grossMarginChangeYoY: isFiniteNumber(grossMargin) && isFiniteNumber(priorGrossMargin)
+        ? grossMargin - priorGrossMargin
+        : null,
       revenueAcceleration: null,
       sharesDilutionYoY: calculateGrowth(latestAnnual?.sharesDiluted, previousAnnual?.sharesDiluted),
+    },
+    cashFlow: {
+      simpleFreeCashFlow: simpleFcf,
+      fcff,
+      fcfe,
+      normalizedTaxRate: tax.rate,
+      taxRateSource: tax.source,
+      cfoToNetIncome: safeDivide(latest?.operatingCashFlow, netIncome),
+      freeCashFlowToNetIncome: safeDivide(simpleFcf, netIncome),
+      accrualRatio: isFiniteNumber(netIncome) && isFiniteNumber(latest?.operatingCashFlow) && isFiniteNumber(averageAssets)
+        ? (netIncome - latest.operatingCashFlow) / averageAssets
+        : null,
+      stockBasedCompensationToRevenue: safeDivide(latest?.stockBasedCompensation, revenue),
+      operatingMarginStability: stability(annual.slice(-5).map((period) => safeDivide(period.operatingIncome, period.revenue))),
+      grossMarginStability: stability(annual.slice(-5).map((period) => safeDivide(period.grossProfit, period.revenue))),
+      freeCashFlowStability: stability(annualFcfs.slice(-5)),
+      dividendYield: safeDivide(dividends, marketCap),
+      dividendPayoutRatio: safeDivide(dividends, netIncome),
+      freeCashFlowPayoutRatio: safeDivide(dividends, simpleFcf),
+      dividendGrowthYoY: calculateGrowth(dividends, priorDividends),
+      dividendCagr3y: calculateCagr(threeYearDividends, dividends, 3),
+    },
+    provenance: {
+      ...(latest?.provenance ?? {}),
+      simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], "CFO - abs(capex)"),
+      fcff: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"]),
+      marketCap: derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]),
     },
     missingData,
   };
 
-  addMissingIfNull(missingData, revenue, "revenue", "Revenue is required for margin and sales multiple calculations.");
-  addMissingIfNull(missingData, freeCashFlow, "freeCashFlow", "Free cash flow is required for FCF yield, DCF and cash conversion.");
-  addMissingIfNull(missingData, metrics.valuation.marketCap, "marketCap", "Market capitalization is required for valuation ratios.");
-  addMissingIfNull(missingData, growth.revenueGrowthYoY, "revenueGrowthYoY", "Two positive annual revenue values are required for YoY growth.");
-  addMissingIfNull(missingData, growth.revenueCagr3y, "revenueCagr3y", "Four annual periods with positive revenue are required for 3-year CAGR.");
-
+  addMissingIfNull(missingData, revenue, "revenue", "Revenue is unavailable for the latest reliable period.", "high");
+  addMissingIfNull(missingData, simpleFcf, "simpleFreeCashFlow", "CFO and capex are required for simple free cash flow.", "high");
+  addMissingIfNull(missingData, valuation.marketCap, "marketCap", "Market cap requires a reported value or both price and shares.");
+  addMissingIfNull(missingData, valuation.enterpriseValue, "enterpriseValue", "EV requires market cap, reported debt and reported cash.");
+  addMissingIfNull(missingData, growth.revenueGrowthYoY, "revenueGrowthYoY", "Two positive, aligned annual revenue periods are required.");
+  if (tax.source === "fallback_assumption") {
+    addMissingData(missingData, "normalizedTaxRate", "No stable reported effective tax rate; a labelled 21% fallback is used only for FCFF.", "dcf", "medium");
+  }
   return metrics;
 }

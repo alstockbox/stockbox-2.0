@@ -29,6 +29,8 @@ describe("DCF calculations", () => {
     expect(result.low).toBeLessThan(result.mid as number);
     expect(result.mid).toBeLessThan(result.high as number);
     expect(result.scenarios[1].assumptions.forecastYears).toBe(5);
+    expect(result.scenarios[1].assumptions.baseFreeCashFlow).toBeCloseTo(320 + 16 * 0.79 - 60, 5);
+    expect(result.assumptionNotes).toEqual(expect.arrayContaining([expect.stringContaining("Fallback") ]));
   });
 
   it("refuses DCF when positive FCF or shares are missing", () => {
@@ -38,7 +40,7 @@ describe("DCF calculations", () => {
     expect(result.low).toBeNull();
     expect(result.missingData).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: "baseFreeCashFlow", impact: "dcf" }),
+        expect.objectContaining({ field: "baseFcff", impact: "dcf" }),
         expect.objectContaining({ field: "sharesOutstanding", impact: "dcf" }),
       ]),
     );

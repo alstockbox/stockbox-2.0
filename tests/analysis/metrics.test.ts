@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeFinancialMetrics } from "../../src/lib/analysis";
-import { durableCompounderInput, missingDataInput } from "./fixtures";
+import { appleFy2025Input, durableCompounderInput, missingDataInput } from "./fixtures";
 
 describe("computeFinancialMetrics", () => {
   it("calculates deterministic margins, growth, ratios and valuation metrics", () => {
@@ -20,12 +20,42 @@ describe("computeFinancialMetrics", () => {
     expect(metrics.ratios.netDebt).toBe(40);
     expect(metrics.ratios.netDebtToEbitda).toBeCloseTo(40 / 372, 5);
     expect(metrics.ratios.interestCoverage).toBeCloseTo(312 / 16, 5);
-    expect(metrics.ratios.returnOnInvestedCapital).toBeCloseTo((312 * 0.79) / (220 + 620 - 180), 5);
+    const currentCapital = 220 + 620 - 180;
+    const priorCapital = 200 + 430 - 120;
+    expect(metrics.ratios.returnOnInvestedCapital).toBeCloseTo((312 * 0.79) / ((currentCapital + priorCapital) / 2), 5);
     expect(metrics.ratios.cashConversion).toBeCloseTo(260 / 240, 5);
 
     expect(metrics.valuation.priceEarnings).toBeCloseTo(3060 / 240, 5);
     expect(metrics.valuation.evEbitda).toBeCloseTo(3100 / 372, 5);
     expect(metrics.valuation.freeCashFlowYield).toBeCloseTo(260 / 3060, 5);
+  });
+
+  it("reconciles the Apple FY2025 golden financial statement values", () => {
+    const metrics = computeFinancialMetrics(appleFy2025Input);
+
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(0.0643, 3);
+    expect(metrics.margins.grossMargin).toBeCloseTo(0.4691, 3);
+    expect(metrics.margins.operatingMargin).toBeCloseTo(0.3197, 3);
+    expect(metrics.margins.netMargin).toBeCloseTo(0.2692, 3);
+    expect(metrics.cashFlow.simpleFreeCashFlow).toBe(98_767_000_000);
+    expect(metrics.cashFlow.simpleFreeCashFlow).not.toBeCloseTo(124_197_000_000, -6);
+    expect(metrics.cashFlow.freeCashFlowToNetIncome).toBeCloseTo(0.882, 3);
+    expect(metrics.latestPeriod?.epsDiluted).toBe(7.46);
+  });
+
+  it("subtracts capex exactly once for positive and negative provider signs", () => {
+    const positive = computeFinancialMetrics({ ...durableCompounderInput, annualPeriods: [{ ...durableCompounderInput.annualPeriods.at(-1)!, capitalExpenditures: 60 }] });
+    const negative = computeFinancialMetrics({ ...durableCompounderInput, annualPeriods: [{ ...durableCompounderInput.annualPeriods.at(-1)!, capitalExpenditures: -60 }] });
+    expect(positive.cashFlow.simpleFreeCashFlow).toBe(260);
+    expect(negative.cashFlow.simpleFreeCashFlow).toBe(260);
+  });
+
+  it("does not assume missing debt is zero for net debt or enterprise value", () => {
+    const latest = { ...durableCompounderInput.annualPeriods.at(-1)!, totalDebt: null };
+    const input = { ...durableCompounderInput, annualPeriods: [latest], market: { ...durableCompounderInput.market, enterpriseValue: null } };
+    const metrics = computeFinancialMetrics(input);
+    expect(metrics.ratios.netDebt).toBeNull();
+    expect(metrics.valuation.enterpriseValue).toBeNull();
   });
 
   it("reports missing or unsafe denominators instead of producing misleading growth", () => {

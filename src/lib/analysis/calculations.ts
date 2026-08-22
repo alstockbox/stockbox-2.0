@@ -41,7 +41,7 @@ export function cagr(current: number | null | undefined, previous: number | null
 
 export function freeCashFlow(operatingCashFlow: number | null, capex: number | null) {
   if (operatingCashFlow === null || capex === null) return null;
-  return operatingCashFlow + capex;
+  return operatingCashFlow - Math.abs(capex);
 }
 
 export function latestAnnual(annual: AnnualFinancials[]) {

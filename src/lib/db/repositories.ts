@@ -1,6 +1,7 @@
 import type { AnalysisReport, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPlan } from "@/lib/billing/plans";
+import { MODEL_VERSION } from "@/lib/analysis/config";
 
 export async function upsertProfile(input: {
   userId: string;
@@ -45,7 +46,14 @@ export async function persistAnalysis(input: {
       personalized_score: input.report.score.personalizedScore,
       confidence: input.report.score.confidence,
       recommendation: input.report.recommendation,
-      model_version: "stockbox-v0.1.0",
+      model_version: input.report.modelVersion ?? MODEL_VERSION,
+      report_schema_version: input.report.reportSchemaVersion ?? null,
+      analysis_archetype: input.report.analysisArchetype ?? null,
+      data_coverage: input.report.dataCoverage ?? null,
+      provider_diagnostics: input.report.providerDiagnostics ?? [],
+      source_provenance: input.report.engine?.provenance ?? {},
+      valuation_method: input.report.engine?.dcf.method ?? null,
+      valuation_status: input.report.engine?.dcf.status ?? null,
       report: input.report,
       provider_warnings: input.rawProviderWarnings
     })
@@ -143,7 +151,7 @@ export async function reserveAdminAlert(report: AnalysisReport) {
   const { error } = await supabase.from("admin_alert_deliveries").insert({
     analysis_id: report.id,
     ticker: report.ticker,
-    model_version: "stockbox-v0.1.0",
+    model_version: report.modelVersion ?? MODEL_VERSION,
   });
   return !error;
 }
