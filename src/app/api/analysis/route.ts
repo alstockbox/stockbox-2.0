@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   }
 
   const user = await getCurrentUser();
-  if (user) {
+  if (user && user.role !== "admin") {
     const entitlement = await checkAnalysisEntitlement({ userId: user.id, analysisType: body.data.analysisType });
     if (!entitlement.allowed) {
       captureServerEvent("paywall_viewed", { userId: user.id, analysisType: body.data.analysisType, plan: entitlement.plan });
