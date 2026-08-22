@@ -12,6 +12,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "allowScripts": {
+    "unrs-resolver@1.12.2": true
+  },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.112.3",
