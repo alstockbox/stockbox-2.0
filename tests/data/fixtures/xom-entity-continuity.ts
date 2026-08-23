@@ -50,7 +50,6 @@ export const xomSuccessorFacts: SecCompanyFacts = {
   facts: { "us-gaap": {
     Revenues: successorDuration(190),
     GrossProfit: successorDuration(55),
-    OperatingIncomeLoss: successorDuration(31),
     NetIncomeLoss: successorDuration(23),
     NetCashProvidedByUsedInOperatingActivities: successorDuration(35),
     PaymentsToAcquirePropertyPlantAndEquipment: successorDuration(12),

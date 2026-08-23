@@ -29,13 +29,16 @@ function securityType(company: CompanySearchResult): NonNullable<CompanySearchRe
   return "Common Stock";
 }
 
-function enrich(company: CompanySearchResult, providerId: string): CompanySearchResult {
+function enrich(
+  company: CompanySearchResult,
+  provider: Pick<CompanySearchProvider, "id" | "capabilities">,
+): CompanySearchResult {
   const identity = entityIdentityFor(company);
   const cik = identity?.currentCik ?? company.cik;
   const type = securityType(company);
-  const providerIds = new Set([...(company.providerCapabilities?.providerIds ?? []), providerId]);
+  const providerIds = new Set([...(company.providerCapabilities?.providerIds ?? []), provider.id]);
   const fundamentalsSupported = company.providerCapabilities?.fundamentals
-    ?? (providerId === "curated-catalog" && Boolean(cik));
+    ?? (provider.capabilities.supportsFundamentals && Boolean(cik));
   if (fundamentalsSupported) providerIds.add("sec-companyfacts");
   return {
     ...company,
@@ -113,7 +116,7 @@ export const curatedCompanySearchProvider: CompanySearchProvider = {
   async search(): Promise<AdapterResult<CompanySearchResult[]>> {
     return {
       ok: true,
-      data: commonCompanies.map((company) => enrich(company, "curated-catalog")),
+      data: commonCompanies.map((company) => enrich(company, curatedCompanySearchProvider)),
       diagnostic: providerDiagnostic("Curated company catalog", "search", "available"),
     };
   },
@@ -126,7 +129,7 @@ export const secCompanySearchProvider: CompanySearchProvider = {
     const companies = await fetchSecTickerUniverse();
     return {
       ok: true,
-      data: companies.map((company) => enrich(company, "sec-ticker-universe")),
+      data: companies.map((company) => enrich(company, secCompanySearchProvider)),
       diagnostic: providerDiagnostic("SEC ticker universe", "search", "available"),
     };
   },
@@ -144,7 +147,7 @@ export async function searchCompanyCatalog(
   for (const [providerIndex, result] of providerResults.entries()) {
     if (!result.ok) continue;
     for (const company of result.data) {
-      const enriched = enrich(company, providers[providerIndex].id);
+      const enriched = enrich(company, providers[providerIndex]);
       const key = `${enriched.entityId ?? `${enriched.country ?? "unknown"}:unknown-issuer`}:${normalizedTicker(enriched.canonicalTicker ?? enriched.ticker)}:${enriched.securityType}`;
       merged.set(key, mergeCompany(merged.get(key), enriched));
     }

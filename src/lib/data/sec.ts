@@ -1,5 +1,6 @@
 import { classifyCompany } from "@/lib/analysis/archetypes";
 import type {
+  AnalysisArchetype,
   AnnualFinancials,
   CompanyFundamentals,
   CompanySearchResult,
@@ -276,39 +277,61 @@ function balanceSnapshotAt(maps: FactMaps, targetEnd: string): Partial<Financial
   };
 }
 
-function buildTtmPeriods(facts: SecCompanyFacts, instantMaps: FactMaps): {
+const TTM_FLOW_KEYS = [
+  "revenue", "costOfRevenue", "grossProfit", "operatingIncome", "netIncome", "pretaxIncome",
+  "incomeTaxExpense", "operatingCashFlow", "capitalExpenditures", "interestExpense",
+  "depreciationAndAmortization", "dividendsPaid", "stockBasedCompensation", "researchAndDevelopment",
+] as const;
+
+type TtmFlowKey = typeof TTM_FLOW_KEYS[number];
+
+const TTM_REQUIREMENT_PROFILES: Record<AnalysisArchetype, readonly TtmFlowKey[]> = {
+  standard: ["revenue", "netIncome"],
+  software_growth: ["revenue", "netIncome"],
+  cyclical: ["revenue", "netIncome"],
+  bank: ["revenue", "netIncome"],
+  insurer: ["revenue", "netIncome"],
+  reit: ["revenue", "netIncome"],
+  utility: ["revenue", "netIncome"],
+  pre_revenue_biotech: ["netIncome"],
+  holding_company: ["revenue", "netIncome"],
+  unknown: ["revenue", "netIncome"],
+};
+
+function hasComparableTtmDuration(anchor: ResolvedSecFact, candidate: ResolvedSecFact): boolean {
+  return candidate.end === anchor.end
+    && candidate.periodBasis === anchor.periodBasis
+    && Number.isFinite(anchor.currentYtdDurationDays)
+    && Number.isFinite(candidate.currentYtdDurationDays)
+    && Number.isFinite(anchor.priorYtdDurationDays)
+    && Number.isFinite(candidate.priorYtdDurationDays)
+    && Math.abs((anchor.currentYtdDurationDays as number) - (candidate.currentYtdDurationDays as number)) <= 15
+    && Math.abs((anchor.priorYtdDurationDays as number) - (candidate.priorYtdDurationDays as number)) <= 15;
+}
+
+function buildTtmPeriods(
+  facts: SecCompanyFacts,
+  instantMaps: FactMaps,
+  archetype: AnalysisArchetype,
+): {
   current?: FinancialPeriod;
   prior?: FinancialPeriod;
 } {
-  const ttmKeys = [
-    "revenue", "costOfRevenue", "grossProfit", "operatingIncome", "netIncome", "pretaxIncome",
-    "incomeTaxExpense", "operatingCashFlow", "capitalExpenditures", "interestExpense",
-    "depreciationAndAmortization", "dividendsPaid", "stockBasedCompensation", "researchAndDevelopment",
-  ] as const;
   const series = Object.fromEntries(
-    ttmKeys.map((key) => [key, resolveTtmFacts(facts, SEC_CONCEPTS[key] as ConceptSpec)]),
-  ) as Record<typeof ttmKeys[number], ResolvedSecFact[]>;
-  const requiredKeys = ["revenue", "operatingIncome", "netIncome", "operatingCashFlow", "capitalExpenditures"] as const;
-  const coherent = series.revenue.flatMap((revenueFact) => {
-    if (!revenueFact.periodBasis) return [];
-    const required = Object.fromEntries(requiredKeys.map((key) => [
+    TTM_FLOW_KEYS.map((key) => [key, resolveTtmFacts(facts, SEC_CONCEPTS[key] as ConceptSpec)]),
+  ) as Record<TtmFlowKey, ResolvedSecFact[]>;
+  const requiredKeys = TTM_REQUIREMENT_PROFILES[archetype];
+  const anchorKey = requiredKeys[0];
+  const coherent = series[anchorKey].flatMap((anchorFact) => {
+    if (!anchorFact.periodBasis) return [];
+    const requiredFacts = requiredKeys.map((key) =>
+      series[key].find((fact) => hasComparableTtmDuration(anchorFact, fact))
+    );
+    if (requiredFacts.some((fact) => !fact)) return [];
+    const resolved = Object.fromEntries(TTM_FLOW_KEYS.map((key) => [
       key,
-      series[key].find((fact) => fact.end === revenueFact.end && fact.periodBasis === revenueFact.periodBasis),
-    ])) as Record<typeof requiredKeys[number], ResolvedSecFact | undefined>;
-    if (Object.values(required).some((fact) => !fact)) return [];
-    const requiredFacts = Object.values(required) as ResolvedSecFact[];
-    const currentDurations = requiredFacts.map((fact) => fact.currentYtdDurationDays as number);
-    const priorDurations = requiredFacts.map((fact) => fact.priorYtdDurationDays as number);
-    if (
-      currentDurations.some((days) => !Number.isFinite(days))
-      || priorDurations.some((days) => !Number.isFinite(days))
-      || Math.max(...currentDurations) - Math.min(...currentDurations) > 15
-      || Math.max(...priorDurations) - Math.min(...priorDurations) > 15
-    ) return [];
-    const resolved = Object.fromEntries(ttmKeys.map((key) => [
-      key,
-      series[key].find((fact) => fact.end === revenueFact.end && fact.periodBasis === revenueFact.periodBasis) ?? null,
-    ])) as Record<typeof ttmKeys[number], ResolvedSecFact | null>;
+      series[key].find((fact) => hasComparableTtmDuration(anchorFact, fact)) ?? null,
+    ])) as Record<TtmFlowKey, ResolvedSecFact | null>;
     const provenance: Record<string, MetricProvenance> = {};
     for (const [key, fact] of Object.entries(resolved)) if (fact) provenance[key] = secFactProvenance(fact, "derived");
     const value = (key: keyof typeof resolved) => resolved[key]?.val ?? null;
@@ -321,26 +344,26 @@ function buildTtmPeriods(facts: SecCompanyFacts, instantMaps: FactMaps): {
         source: "StockBox SEC resolver",
         provider: "sec",
         valueKind: "derived",
-        periodEnd: revenueFact.end,
-        periodBasis: revenueFact.periodBasis,
-        currentYtdDurationDays: revenueFact.currentYtdDurationDays,
-        priorYtdDurationDays: revenueFact.priorYtdDurationDays,
+        periodEnd: anchorFact.end,
+        periodBasis: anchorFact.periodBasis,
+        currentYtdDurationDays: anchorFact.currentYtdDurationDays,
+        priorYtdDurationDays: anchorFact.priorYtdDurationDays,
         inputs: ["revenue", "costOfRevenue"],
       };
     }
-    const balance = balanceSnapshotAt(instantMaps, revenueFact.end);
+    const balance = balanceSnapshotAt(instantMaps, anchorFact.end);
     return [{
       ...balance,
       fiscalYear: undefined,
       periodStartDate: undefined,
-      periodEndDate: revenueFact.end,
-      filedDate: revenueFact.filed,
+      periodEndDate: anchorFact.end,
+      filedDate: anchorFact.filed,
       form: "TTM",
-      periodBasis: revenueFact.periodBasis,
-      currentYtdDurationDays: revenueFact.currentYtdDurationDays,
-      priorYtdDurationDays: revenueFact.priorYtdDurationDays,
-      ttmConstructionMethod: revenueFact.ttmConstructionMethod,
-      currency: revenueFact.unit === "USD" ? "USD" : undefined,
+      periodBasis: anchorFact.periodBasis,
+      currentYtdDurationDays: anchorFact.currentYtdDurationDays,
+      priorYtdDurationDays: anchorFact.priorYtdDurationDays,
+      ttmConstructionMethod: anchorFact.ttmConstructionMethod,
+      currency: anchorFact.unit === "USD" ? "USD" : undefined,
       revenue,
       costOfRevenue: cost,
       grossProfit,
@@ -405,7 +428,10 @@ function toLegacy(period: FinancialPeriod): AnnualFinancials {
   };
 }
 
-export function resolveSecFinancialPeriods(facts: SecCompanyFacts): {
+export function resolveSecFinancialPeriods(
+  facts: SecCompanyFacts,
+  archetype: AnalysisArchetype = "standard",
+): {
   annualPeriods: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
@@ -418,7 +444,7 @@ export function resolveSecFinancialPeriods(facts: SecCompanyFacts): {
     ...annualMaps.assets.keys(),
     ...annualMaps.operatingCashFlow.keys(),
   ])].sort().slice(-6);
-  const ttm = buildTtmPeriods(facts, instantMaps);
+  const ttm = buildTtmPeriods(facts, instantMaps, archetype);
   return {
     annualPeriods: periodEnds.map((end) => periodFromMaps(annualMaps, end)),
     trailingTwelveMonths: ttm.current,
@@ -448,9 +474,12 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
     return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
   }
   const facts = mergeSecCompanyFacts(availableFactSets);
-  const { annualPeriods, trailingTwelveMonths, priorTrailingTwelveMonths } = resolveSecFinancialPeriods(facts);
-  const latestAnnualPeriodEnd = annualPeriods.at(-1)?.periodEndDate ?? null;
   const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: identity ? company.name : facts.entityName || company.name });
+  const { annualPeriods, trailingTwelveMonths, priorTrailingTwelveMonths } = resolveSecFinancialPeriods(
+    facts,
+    classification.analysisArchetype,
+  );
+  const latestAnnualPeriodEnd = annualPeriods.at(-1)?.periodEndDate ?? null;
   const diagnostic = { provider: "SEC Companyfacts", capability: "fundamentals" as const, status: annualPeriods.length ? "available" as const : "partial" as const, reason: trailingTwelveMonths ? undefined : "ttm_unavailable_annual_fallback", observedAt };
   return {
     ok: true,

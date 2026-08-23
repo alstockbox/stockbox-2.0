@@ -188,7 +188,7 @@ const ifrs = (concept: string): ConceptAlias => ({ taxonomy: "ifrs-full", concep
 const dei = (concept: string): ConceptAlias => ({ taxonomy: "dei", concept });
 
 export const SEC_CONCEPTS = {
-  revenue: { kind: "duration", units: ["USD"], aliases: [us("RevenueFromContractWithCustomerExcludingAssessedTax"), us("Revenues"), us("SalesRevenueNet"), us("SalesRevenueGoodsNet"), ifrs("Revenue")] },
+  revenue: { kind: "duration", units: ["USD"], aliases: [us("RevenueFromContractWithCustomerExcludingAssessedTax"), us("Revenues"), us("RevenuesNetOfInterestExpense"), us("SalesRevenueNet"), us("SalesRevenueGoodsNet"), ifrs("Revenue")] },
   costOfRevenue: { kind: "duration", units: ["USD"], aliases: [us("CostOfRevenue"), us("CostOfGoodsAndServicesSold"), ifrs("CostOfSales")] },
   grossProfit: { kind: "duration", units: ["USD"], aliases: [us("GrossProfit"), ifrs("GrossProfit")] },
   operatingIncome: { kind: "duration", units: ["USD"], aliases: [us("OperatingIncomeLoss"), ifrs("ProfitLossFromOperatingActivities")] },

@@ -16,4 +16,11 @@ describe("deterministic SIC classification", () => {
   it("keeps unknown classification honest", () => {
     expect(classifyCompany({ sic: "9999", sicDescription: "Unclassified" })).toMatchObject({ analysisArchetype: "unknown", sector: "other" });
   });
+
+  it("classifies NNN's SEC SIC as a REIT", () => {
+    expect(classifyCompany({ sic: "6798", name: "NNN REIT, INC." })).toMatchObject({
+      analysisArchetype: "reit",
+      sector: "realEstate",
+    });
+  });
 });

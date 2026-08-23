@@ -20,7 +20,12 @@ export type ProviderFailureReason =
   | "rate_limited"
   | "upstream_error"
   | "empty_response"
-  | "malformed_response"
+  | "unexpected_content_type"
+  | "unexpected_columns"
+  | "html_response"
+  | "invalid_row"
+  | "future_date"
+  | "impossible_price"
   | "not_found";
 
 export type AdapterResult<T> =
@@ -42,6 +47,11 @@ export interface FundamentalsProvider {
 export interface MarketDataProvider {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;
+  readonly source?: (company: CompanySearchResult) => {
+    name: string;
+    url: string;
+    freshness: string;
+  };
   fetchMarketData(company: CompanySearchResult): Promise<AdapterResult<MarketSnapshot>>;
 }
 

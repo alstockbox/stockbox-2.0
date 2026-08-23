@@ -1,12 +1,36 @@
 import type { CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
-import { providerDiagnostic, type AdapterResult, type MarketDataProvider, type ProviderCapabilities, type ProviderFailureReason } from "./providers";
+import {
+  providerDiagnostic,
+  type AdapterResult,
+  type MarketDataProvider,
+  type ProviderCapabilities,
+  type ProviderFailureReason,
+} from "./providers";
 
 type PriceRow = { date: string; close: number; volume: number | null };
 type StooqSymbol = { symbol: string; currency: string | null };
+type ResponseFormat = "csv" | "html" | "text" | "empty" | "unknown";
+type CsvFailureReason =
+  | "unexpected_columns"
+  | "invalid_row"
+  | "future_date"
+  | "impossible_price";
+type CsvParseResult =
+  | { ok: true; rows: PriceRow[]; headerColumns: string[] }
+  | { ok: false; reason: CsvFailureReason; headerColumns: string[] };
 
+const STOOQ_PROVIDER_ID = "stooq-eod";
 const STOOQ_TIMEOUT_MS = 8_000;
 const STOOQ_RETRIES = 2;
+const MAX_REASONABLE_CLOSE = 1_000_000_000;
 const US_EXCHANGES = new Set(["US", "NYSE", "NASDAQ", "NYSE AMERICAN", "AMEX"]);
+const CSV_CONTENT_TYPES = new Set([
+  "application/csv",
+  "application/octet-stream",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "text/plain",
+]);
 
 export const STOOQ_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["US"],
@@ -25,25 +49,119 @@ export function mapStooqSymbol(company: Pick<CompanySearchResult, "ticker" | "co
   return { symbol: `${ticker.replace(/\./g, "-")}.us`, currency: "USD" };
 }
 
-export function parseStooqCsv(csv: string): PriceRow[] | null {
-  const body = csv.trim();
-  if (!body || /\bN\/D\b/i.test(body) || /exceeded|rate.?limit/i.test(body)) return null;
-  const [header, ...lines] = body.split(/\r?\n/);
-  const columns = header?.split(",").map((item) => item.trim().toLowerCase()) ?? [];
-  const expected = ["date", "open", "high", "low", "close", "volume"];
-  if (columns.length < expected.length || expected.some((column, index) => columns[index] !== column)) return null;
-  const rows = lines.map((line) => line.split(",")).map(([date, , , , close, volume]) => ({
-    date: date?.trim(),
-    close: Number(close),
-    volume: volume && volume !== "N/D" ? Number(volume) : null,
-  }));
-  if (rows.some((row) => !/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(row.close) || row.close <= 0 || (row.volume !== null && !Number.isFinite(row.volume)))) return null;
-  return rows;
+function splitCsvRow(line: string): string[] {
+  const values: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      values.push(value.trim());
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  values.push(value.trim());
+  return values;
+}
+
+function normalizedBody(csv: string): string {
+  return csv.replace(/^\uFEFF/, "").trim();
+}
+
+function parseStooqCsvResult(csv: string, now = new Date()): CsvParseResult {
+  const body = normalizedBody(csv);
+  const [header = "", ...lines] = body.split(/\r?\n/);
+  const headerColumns = splitCsvRow(header).map((item) => item.trim().toLowerCase());
+  const dateIndex = headerColumns.indexOf("date");
+  const closeIndex = headerColumns.indexOf("close");
+  const volumeIndex = headerColumns.indexOf("volume");
+  if (dateIndex < 0 || closeIndex < 0) {
+    return { ok: false, reason: "unexpected_columns", headerColumns };
+  }
+
+  const currentDate = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`);
+  const rowsByDate = new Map<string, PriceRow>();
+  for (const line of lines.filter((item) => item.trim())) {
+    const values = splitCsvRow(line);
+    const date = values[dateIndex]?.trim() ?? "";
+    const closeText = values[closeIndex]?.trim() ?? "";
+    const volumeText = volumeIndex >= 0 ? values[volumeIndex]?.trim() ?? "" : "";
+    const dateValue = Date.parse(`${date}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date)
+      || !Number.isFinite(dateValue)
+      || new Date(dateValue).toISOString().slice(0, 10) !== date
+    ) {
+      return { ok: false, reason: "invalid_row", headerColumns };
+    }
+    if (dateValue > currentDate) return { ok: false, reason: "future_date", headerColumns };
+
+    const close = Number(closeText);
+    if (!Number.isFinite(close) || close <= 0 || close > MAX_REASONABLE_CLOSE) {
+      return { ok: false, reason: "impossible_price", headerColumns };
+    }
+    const volume = !volumeText || /^N\/D$/i.test(volumeText) ? null : Number(volumeText);
+    if (volume !== null && (!Number.isFinite(volume) || volume < 0)) {
+      return { ok: false, reason: "invalid_row", headerColumns };
+    }
+    rowsByDate.set(date, { date, close, volume });
+  }
+  const rows = [...rowsByDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+  return rows.length
+    ? { ok: true, rows, headerColumns }
+    : { ok: false, reason: "invalid_row", headerColumns };
+}
+
+export function parseStooqCsv(csv: string, now = new Date()): PriceRow[] | null {
+  const parsed = parseStooqCsvResult(csv, now);
+  return parsed.ok ? parsed.rows : null;
+}
+
+function responseFormat(body: string, contentType: string | null): ResponseFormat {
+  const normalized = normalizedBody(body);
+  if (!normalized) return "empty";
+  if (/text\/html/i.test(contentType ?? "") || /^<!doctype html|^<html/i.test(normalized)) return "html";
+  const firstLine = normalized.split(/\r?\n/, 1)[0] ?? "";
+  const columns = splitCsvRow(firstLine).map((item) => item.toLowerCase());
+  if (columns.includes("date") && columns.includes("close")) return "csv";
+  if ((contentType ?? "").toLowerCase().startsWith("text/")) return "text";
+  return "unknown";
+}
+
+function contentLength(response: Response, body?: string): number | null {
+  const header = response.headers.get("content-length");
+  const declared = header === null ? Number.NaN : Number(header);
+  return Number.isFinite(declared) && declared >= 0 ? declared : body?.length ?? null;
+}
+
+function safeProviderDiagnostic(input: {
+  httpStatus: number | null;
+  contentType: string | null;
+  contentLength: number | null;
+  symbol: string;
+  responseFormat: ResponseFormat;
+  headerColumns: string[];
+  parseFailure: ProviderFailureReason;
+}): void {
+  console.error("Market data provider response rejected", {
+    ...input,
+    resolvedProvider: STOOQ_PROVIDER_ID,
+  });
 }
 
 function performance(rows: PriceRow[], tradingDays: number): number | null {
+  if (rows.length <= tradingDays) return null;
   const latest = rows.at(-1);
-  const prior = rows.at(Math.max(0, rows.length - 1 - tradingDays));
+  const prior = rows.at(rows.length - 1 - tradingDays);
   return latest && prior && prior.close > 0 ? latest.close / prior.close - 1 : null;
 }
 
@@ -52,7 +170,26 @@ function delay(milliseconds: number) {
 }
 
 function failure(reason: ProviderFailureReason, message: string): AdapterResult<MarketSnapshot> {
-  return { ok: false, reason, message, diagnostic: providerDiagnostic("Stooq", "market_data", reason === "unsupported_symbol" ? "unsupported" : "unavailable", reason) };
+  return {
+    ok: false,
+    reason,
+    message,
+    diagnostic: providerDiagnostic(
+      "Stooq",
+      "market_data",
+      reason === "unsupported_symbol" ? "unsupported" : "unavailable",
+      reason,
+    ),
+  };
+}
+
+function parseFailureMessage(reason: ProviderFailureReason): string {
+  if (reason === "html_response") return "Stooq returned HTML instead of market data.";
+  if (reason === "unexpected_content_type") return "Stooq returned an unsupported response content type.";
+  if (reason === "unexpected_columns") return "Stooq returned CSV without the required Date and Close columns.";
+  if (reason === "future_date") return "Stooq returned a future-dated market observation.";
+  if (reason === "impossible_price") return "Stooq returned an invalid market price.";
+  return "Stooq returned invalid market data rows.";
 }
 
 export async function fetchStooqMarketData(
@@ -71,17 +208,62 @@ export async function fetchStooqMarketData(
         signal: controller.signal,
         next: { revalidate: 60 * 15 },
       });
+      const responseContentType = response.headers.get("content-type");
       if (!response.ok) {
         lastReason = response.status === 429 ? "rate_limited" : response.status >= 500 ? "upstream_error" : "not_found";
-        if (response.status < 500 && response.status !== 429) return failure(lastReason, "Stooq did not return market history for this symbol.");
+        safeProviderDiagnostic({
+          httpStatus: response.status,
+          contentType: responseContentType,
+          contentLength: contentLength(response),
+          symbol: mapped.symbol,
+          responseFormat: "unknown",
+          headerColumns: [],
+          parseFailure: lastReason,
+        });
+        if (response.status < 500 && response.status !== 429) {
+          return failure(lastReason, "Stooq did not return market history for this symbol.");
+        }
       } else {
         const body = await response.text();
-        if (!body.trim()) return failure("empty_response", "Stooq returned an empty response.");
-        if (/exceeded|rate.?limit/i.test(body)) lastReason = "rate_limited";
-        else if (/\bN\/D\b/i.test(body)) return failure("not_found", "Stooq reported no data for this symbol.");
+        const format = responseFormat(body, responseContentType);
+        const headerColumns = format === "html" || format === "empty"
+          ? []
+          : splitCsvRow(normalizedBody(body).split(/\r?\n/, 1)[0] ?? "");
+        let parseFailure: ProviderFailureReason | null = null;
+        if (format === "empty") parseFailure = "empty_response";
+        else if (/exceeded|rate.?limit/i.test(body)) parseFailure = "rate_limited";
+        else if (/^\s*N\/D\s*$/i.test(body)) parseFailure = "not_found";
+        else if (format === "html") parseFailure = "html_response";
         else {
-          const rows = parseStooqCsv(body);
-          if (!rows?.length) return failure("malformed_response", "Stooq returned malformed market data.");
+          const mediaType = responseContentType?.split(";", 1)[0]?.trim().toLowerCase() ?? null;
+          if (mediaType && !CSV_CONTENT_TYPES.has(mediaType)) parseFailure = "unexpected_content_type";
+        }
+        const parsed = parseFailure ? null : parseStooqCsvResult(body);
+        if (!parseFailure && parsed && !parsed.ok) parseFailure = parsed.reason;
+        if (parseFailure) {
+          safeProviderDiagnostic({
+            httpStatus: response.status,
+            contentType: responseContentType,
+            contentLength: contentLength(response, body),
+            symbol: mapped.symbol,
+            responseFormat: format,
+            headerColumns: parsed?.headerColumns ?? headerColumns,
+            parseFailure,
+          });
+          if (["rate_limited", "upstream_error"].includes(parseFailure)) {
+            lastReason = parseFailure;
+          } else {
+            return failure(
+              parseFailure,
+              parseFailure === "empty_response"
+                ? "Stooq returned an empty response."
+                : parseFailure === "not_found"
+                  ? "Stooq reported no data for this symbol."
+                  : parseFailureMessage(parseFailure),
+            );
+          }
+        } else if (parsed?.ok) {
+          const rows = parsed.rows;
           const latest = rows.at(-1) as PriceRow;
           const year = rows.slice(-252);
           const yearStart = rows.find((row) => row.date.startsWith(latest.date.slice(0, 4)));
@@ -111,12 +293,20 @@ export async function fetchStooqMarketData(
       }
     } catch (error) {
       lastReason = error instanceof Error && error.name === "AbortError" ? "timeout" : "upstream_error";
+      safeProviderDiagnostic({
+        httpStatus: null,
+        contentType: null,
+        contentLength: null,
+        symbol: mapped.symbol,
+        responseFormat: "unknown",
+        headerColumns: [],
+        parseFailure: lastReason,
+      });
     } finally {
       clearTimeout(timeout);
     }
     if (attempt < retries) await delay(150 * 2 ** attempt);
   }
-  console.error("Stooq provider request failed", { symbol: mapped.symbol, reason: lastReason });
   return failure(lastReason, lastReason === "timeout" ? "Stooq request timed out." : "Stooq market data is temporarily unavailable.");
 }
 
@@ -127,7 +317,14 @@ export async function fetchMarketSnapshot(company: CompanySearchResult | string)
 }
 
 export const stooqMarketDataProvider: MarketDataProvider = {
-  id: "stooq-eod",
+  id: STOOQ_PROVIDER_ID,
   capabilities: STOOQ_CAPABILITIES,
+  source(company) {
+    return {
+      name: "Stooq end-of-day market data",
+      url: `https://stooq.com/q/d/l/?s=${encodeURIComponent(mapStooqSymbol(company)?.symbol ?? company.ticker.toLowerCase())}&i=d`,
+      freshness: "End-of-day market data, cached up to 15 minutes.",
+    };
+  },
   fetchMarketData: fetchStooqMarketData,
 };

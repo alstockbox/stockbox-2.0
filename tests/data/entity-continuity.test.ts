@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computeFinancialMetrics } from "../../src/lib/analysis";
 import { mergeSecCompanyFacts, resolveSecFinancialPeriods } from "../../src/lib/data/sec";
 import { nvdaModernCompanyFacts } from "./fixtures/nvda-modern-companyfacts";
 import { xomPredecessorFacts, xomSuccessorFacts } from "./fixtures/xom-entity-continuity";
@@ -30,6 +31,10 @@ describe("SEC freshness and entity continuity", () => {
     expect(periods.trailingTwelveMonths).toEqual(expect.objectContaining({
       periodEndDate: "2026-06-30",
       revenue: 380,
+      netIncome: 44,
+      operatingIncome: null,
+      operatingCashFlow: 66,
+      capitalExpenditures: 24,
       balanceSheetDate: "2026-06-30",
     }));
     expect(periods.trailingTwelveMonths?.provenance?.revenue.sourceCiks).toEqual([
@@ -38,5 +43,14 @@ describe("SEC freshness and entity continuity", () => {
     ]);
     expect(periods.annualPeriods[0].provenance?.revenue.sourceCik).toBe("0000034088");
     expect(periods.trailingTwelveMonths?.provenance?.totalAssets.sourceCik).toBe("0002115436");
+
+    const metrics = computeFinancialMetrics({
+      company: { ticker: "XOM", analysisArchetype: "cyclical", sector: "energy" },
+      ...periods,
+      analysisDate: "2026-08-23T00:00:00.000Z",
+    });
+    expect(metrics.latestPeriod?.periodEndDate).toBe("2026-06-30");
+    expect(metrics.margins.operatingMargin).toBeNull();
+    expect(metrics.cashFlow.simpleFreeCashFlow).toBe(42);
   });
 });

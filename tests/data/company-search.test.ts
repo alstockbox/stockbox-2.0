@@ -13,6 +13,10 @@ describe("company search catalog", () => {
       { ticker: "JPM", name: "JPMORGAN CHASE & CO", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "JPM-PD", name: "JPMorgan Chase Preferred Depositary Shares", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", exchange: "NASDAQ", country: "US" },
+      { ticker: "NNN", name: "NNN REIT, INC.", cik: "0000751364", exchange: "NYSE", country: "US" },
+      { ticker: "O", name: "REALTY INCOME CORP", cik: "0000726728", exchange: "NYSE", country: "US" },
+      { ticker: "PLD", name: "Prologis, Inc.", cik: "0001045609", exchange: "NYSE", country: "US" },
+      { ticker: "AHR", name: "American Healthcare REIT, Inc.", cik: "0001632970", exchange: "NYSE", country: "US" },
       { ticker: "ZZZZ", name: "Unverified SEC Registrant", cik: "0009999999", exchange: "NYSE", country: "US" },
     ]);
   });
@@ -49,11 +53,22 @@ describe("company search catalog", () => {
     }));
   });
 
-  it("does not claim fundamentals support merely because SEC search returns a CIK", async () => {
-    const [unverified] = await searchCompanyCatalog("ZZZZ");
-    expect(unverified).toEqual(expect.objectContaining({
-      cik: "0009999999",
-      providerCapabilities: expect.objectContaining({ fundamentals: false }),
+  it.each([
+    ["NNN", "0000751364"],
+    ["O", "0000726728"],
+    ["PLD", "0001045609"],
+    ["AHR", "0001632970"],
+    ["NVDA", "0001045810"],
+    ["JPM", "0000019617"],
+    ["AAPL", "0000320193"],
+  ])("propagates SEC fundamentals capability for %s", async (ticker, cik) => {
+    const [company] = await searchCompanyCatalog(ticker);
+    expect(company).toEqual(expect.objectContaining({
+      cik,
+      providerCapabilities: expect.objectContaining({
+        fundamentals: true,
+        providerIds: expect.arrayContaining(["sec-companyfacts", "sec-ticker-universe"]),
+      }),
     }));
   });
 });

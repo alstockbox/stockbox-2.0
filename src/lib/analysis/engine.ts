@@ -120,6 +120,52 @@ function diagnosticDates(input: FinancialAnalysisInput, freshness = assessDataFr
   };
 }
 
+function specializedMissingData(
+  archetype: ReturnType<typeof resolveArchetype>,
+  latest: FinancialPeriod | null,
+): MissingDataItem[] {
+  if (archetype === "bank") {
+    return [
+      ["netInterestMargin", "Net interest margin (NIM)"],
+      ["cet1CapitalRatio", "CET1 capital ratio"],
+      ["grossLoans", "Gross loans"],
+      ["deposits", "Deposits"],
+      ["nonperformingLoans", "Nonperforming loans"],
+      ["netChargeOffs", "Net charge-offs"],
+      ["tangibleCommonEquity", "Tangible common equity / tangible book value"],
+    ].flatMap(([field, label]) => {
+      if (field === "tangibleCommonEquity" && isFiniteNumber(latest?.tangibleBookValue)) return [];
+      return [{
+        field,
+        reason: `${label} is unavailable from the current specialized bank-data provider phase.`,
+        impact: "metric" as const,
+        severity: "medium" as const,
+      }];
+    });
+  }
+  if (archetype === "reit") {
+    const missing: MissingDataItem[] = [];
+    if (!isFiniteNumber(latest?.fundsFromOperations)) {
+      missing.push({
+        field: "fundsFromOperations",
+        reason: "Provider-reported FFO is unavailable; GAAP EPS is not substituted for FFO.",
+        impact: "metric",
+        severity: "high",
+      });
+    }
+    if (!isFiniteNumber(latest?.adjustedFundsFromOperations)) {
+      missing.push({
+        field: "adjustedFundsFromOperations",
+        reason: "Provider-reported AFFO is unavailable; GAAP EPS is not substituted for AFFO.",
+        impact: "metric",
+        severity: "high",
+      });
+    }
+    return missing;
+  }
+  return [];
+}
+
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
   const ttmConsistency = ttmPeriodBasisCheck(input.trailingTwelveMonths);
   const periodConsistentInput = ttmConsistency.status === "warning"
@@ -149,7 +195,17 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
   const dcf = computeDcfRange(calculationInput, metrics);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
   const scenarios = freshness.dataStatus === "stale" ? [] : buildAnalysisScenarios(metrics, scores, dcf);
-  const missing = [...metrics.missingData, ...scores.missingData, ...dcf.missingData];
+  const unsuitableCorporateFields = new Set(
+    ["bank", "insurer", "reit"].includes(archetype)
+      ? ["simpleFreeCashFlow", "enterpriseValue", "normalizedTaxRate"]
+      : [],
+  );
+  const missing = [
+    ...specializedMissingData(archetype, metrics.latestPeriod),
+    ...metrics.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
+    ...scores.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
+    ...dcf.missingData,
+  ];
   if (freshness.dataStatus === "stale") {
     missing.push({
       field: "staleFinancialData",

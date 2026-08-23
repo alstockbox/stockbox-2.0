@@ -20,6 +20,15 @@ describe("archetype-specific analysis", () => {
     expect(result.dcf.status).toBe("inappropriate");
     expect(result.dcf.method).toContain("Residual income");
     expect(result.scores.dimensions.financialHealth.contributors?.some((item) => item.label === "Net debt / EBITDA")).toBe(false);
+    expect(result.missingData.map((item) => item.field)).toEqual(expect.arrayContaining([
+      "netInterestMargin",
+      "cet1CapitalRatio",
+      "grossLoans",
+      "deposits",
+      "nonperformingLoans",
+      "netChargeOffs",
+      "tangibleCommonEquity",
+    ]));
   });
 
   it("routes a P&C insurer to equity-oriented valuation", () => {
@@ -32,6 +41,10 @@ describe("archetype-specific analysis", () => {
     const result = asArchetype("reit", { company: { sector: "realEstate" } });
     expect(result.dcf.method).toBe("AFFO / NAV");
     expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["FFO yield"]);
+    expect(result.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "fundsFromOperations", reason: expect.stringContaining("not substituted") }),
+      expect.objectContaining({ field: "adjustedFundsFromOperations", reason: expect.stringContaining("not substituted") }),
+    ]));
   });
 
   it("adds dilution and SBC discipline for software growth", () => {

@@ -5,13 +5,14 @@ import type {
   AnalysisType,
   CompanySearchResult,
   InvestmentProfile,
-  MarketSnapshot
+  MarketSnapshot,
+  ProviderDiagnostic,
 } from "@/lib/analysis/types";
 import { getMarketDataProvider, isFinancialProviderConfigured } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
-import { fetchStooqMarketData, mapStooqSymbol } from "./stooq";
-import { providerDiagnostic, type AdapterResult } from "./providers";
+import { stooqMarketDataProvider } from "./stooq";
+import { providerDiagnostic, type AdapterResult, type MarketDataProvider } from "./providers";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
@@ -21,17 +22,78 @@ export async function searchCompanies(query: string) {
   return searchCompanyCatalog(query);
 }
 
-export async function fetchConfiguredMarketData(
-  company: CompanySearchResult,
-): Promise<AdapterResult<MarketSnapshot>> {
-  const selectedProvider = getMarketDataProvider();
-  if (selectedProvider === "stooq") return fetchStooqMarketData(company);
+type MarketDataResolution = {
+  result: AdapterResult<MarketSnapshot>;
+  diagnostics: ProviderDiagnostic[];
+  source?: Omit<AnalysisSource, "accessedAt">;
+};
+
+function unavailableMarketData(): AdapterResult<MarketSnapshot> {
   return {
     ok: false,
     reason: "not_configured",
     message: "Market data is disabled for this deployment.",
     diagnostic: providerDiagnostic("disabled", "market_data", "unavailable", "not_configured"),
   };
+}
+
+async function resolveMarketDataFromProviders(
+  company: CompanySearchResult,
+  providers: MarketDataProvider[],
+): Promise<MarketDataResolution> {
+  if (!providers.length) {
+    const result = unavailableMarketData();
+    return { result, diagnostics: [result.diagnostic] };
+  }
+  const diagnostics: ProviderDiagnostic[] = [];
+  let lastResult: AdapterResult<MarketSnapshot> = unavailableMarketData();
+  for (const provider of providers) {
+    let result: AdapterResult<MarketSnapshot>;
+    try {
+      result = await provider.fetchMarketData(company);
+    } catch {
+      result = {
+        ok: false,
+        reason: "upstream_error",
+        message: "The configured market-data provider failed unexpectedly.",
+        diagnostic: providerDiagnostic(provider.id, "market_data", "unavailable", "upstream_error"),
+      };
+      console.error("Market data provider failed unexpectedly", {
+        resolvedProvider: provider.id,
+        symbol: company.canonicalTicker ?? company.ticker,
+        reason: "upstream_error",
+      });
+    }
+    diagnostics.push(result.diagnostic);
+    if (result.ok) {
+      return {
+        result,
+        diagnostics,
+        source: provider.source?.(company),
+      };
+    }
+    lastResult = result;
+  }
+  return { result: lastResult, diagnostics };
+}
+
+export async function fetchMarketDataFromProviders(
+  company: CompanySearchResult,
+  providers: MarketDataProvider[],
+): Promise<AdapterResult<MarketSnapshot>> {
+  return (await resolveMarketDataFromProviders(company, providers)).result;
+}
+
+async function resolveConfiguredMarketData(company: CompanySearchResult): Promise<MarketDataResolution> {
+  const selectedProvider = getMarketDataProvider();
+  const providers = selectedProvider === "stooq" ? [stooqMarketDataProvider] : [];
+  return resolveMarketDataFromProviders(company, providers);
+}
+
+export async function fetchConfiguredMarketData(
+  company: CompanySearchResult,
+): Promise<AdapterResult<MarketSnapshot>> {
+  return (await resolveConfiguredMarketData(company)).result;
 }
 
 export async function analyzeCompany({
@@ -64,13 +126,14 @@ export async function analyzeCompany({
     };
   }
 
-  const [fundamentalsResult, marketResult] = await Promise.all([
+  const [fundamentalsResult, marketResolution] = await Promise.all([
     fetchCompanyFundamentalsResult(company),
-    fetchConfiguredMarketData(company)
+    resolveConfiguredMarketData(company)
   ]);
+  const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const market = marketResult.ok ? marketResult.data : null;
-  const providerDiagnostics = [fundamentalsResult.diagnostic, marketResult.diagnostic];
+  const providerDiagnostics = [fundamentalsResult.diagnostic, ...marketResolution.diagnostics];
 
   if (fundamentals) {
     for (const sourceCik of fundamentals.sourceCiks ?? [fundamentals.cik].filter(Boolean) as string[]) {
@@ -85,13 +148,13 @@ export async function analyzeCompany({
     warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);
   }
 
-  if (market && marketResult.diagnostic.provider === "Stooq") {
-    sources.push({
-      name: "Stooq end-of-day market data",
-      url: `https://stooq.com/q/d/l/?s=${encodeURIComponent(mapStooqSymbol(company)?.symbol ?? company.ticker.toLowerCase())}&i=d`,
-      accessedAt,
-      freshness: "End-of-day market data, cached up to 15 minutes."
-    });
+  if (market) {
+    if (marketResolution.source) {
+      sources.push({
+        ...marketResolution.source,
+        accessedAt,
+      });
+    }
   } else {
     warnings.push(`Market price history is unavailable: ${marketResult.ok ? "unknown provider error" : marketResult.message}`);
   }
