@@ -4,6 +4,17 @@ function normalized(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+export function securitySelectionKey(company: CompanySearchResult): string {
+  return [
+    company.entityId ?? "",
+    company.canonicalTicker ?? company.ticker,
+    company.securityType ?? "Other",
+    company.exchange ?? "",
+  ]
+    .map(normalized)
+    .join("|");
+}
+
 export function formattedCompanySelection(company: CompanySearchResult): string {
   return `${company.canonicalTicker ?? company.ticker} - ${company.name}`;
 }

@@ -17,6 +17,7 @@ import { ReportView } from "./report-view";
 import {
   formattedCompanySelection,
   queryRepresentsSelection,
+  securitySelectionKey,
   selectionAfterQueryChange,
   supportsLiveFundamentals,
 } from "./analysis-workbench-state";
@@ -40,6 +41,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
   const searchRequest = useRef(0);
 
   const canAnalyze = Boolean(selected) && supportsLiveFundamentals(selected) && financialConfigured && !isPending;
+  const selectedSecurityKey = selected ? securitySelectionKey(selected) : null;
 
   const helperText = !financialConfigured
     ? "Live financial data is not configured for this deployment. An administrator must configure the SEC provider."
@@ -70,7 +72,8 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
     setReport(null);
     setError(null);
     setIsSearching(false);
-    setHighlightedIndex(results.findIndex((result) => result.entityId === company.entityId));
+    const selectionKey = securitySelectionKey(company);
+    setHighlightedIndex(results.findIndex((result) => securitySelectionKey(result) === selectionKey));
   }
 
   useEffect(() => {
@@ -188,14 +191,14 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
             <div id="company-search-results" role="listbox" className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {results.map((company, index) => (
                 <button
-                  key={`${company.ticker}-${company.cik ?? company.name}`}
+                  key={securitySelectionKey(company)}
                   id={`company-result-${index}`}
                   type="button"
                   role="option"
-                  aria-selected={selected?.entityId === company.entityId}
+                  aria-selected={selectedSecurityKey === securitySelectionKey(company)}
                   onClick={() => selectCompany(company)}
                   className={`rounded-md border p-3 text-left text-sm transition ${
-                    selected?.entityId === company.entityId
+                    selectedSecurityKey === securitySelectionKey(company)
                       ? "border-[#b99b5f]/60 bg-[#b99b5f]/15"
                       : highlightedIndex === index
                         ? "border-white/30 bg-white/10"
