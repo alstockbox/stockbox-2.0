@@ -12,6 +12,7 @@ export type SecFactUnit = {
   accn?: string;
   frame?: string;
   val: number;
+  sourceCik?: string;
 };
 
 export type SecCompanyFacts = {
@@ -36,6 +37,7 @@ export type ResolvedSecFact = SecFactUnit & {
   currentYtdDurationDays?: number;
   priorYtdDurationDays?: number;
   ttmConstructionMethod?: string;
+  sourceCiks?: string[];
 };
 
 const annualForms = new Set(["10-K", "10-K/A", "20-F", "20-F/A", "40-F"]);
@@ -150,6 +152,7 @@ export function resolveTtmFacts(facts: SecCompanyFacts, spec: ConceptSpec): Reso
       currentYtdDurationDays: currentDays,
       priorYtdDurationDays: priorDays,
       ttmConstructionMethod: "latest FY + current comparable YTD - prior comparable YTD",
+      sourceCiks: [...new Set([fiscalYear.sourceCik, current.sourceCik, prior.sourceCik].filter((cik): cik is string => Boolean(cik)))],
     }];
   });
 }
@@ -170,6 +173,8 @@ export function secFactProvenance(fact: ResolvedSecFact, valueKind: "reported" |
     filedAt: fact.filed,
     form: fact.form,
     accession: fact.accn,
+    sourceCik: fact.sourceCik,
+    sourceCiks: fact.sourceCiks ?? (fact.sourceCik ? [fact.sourceCik] : undefined),
     periodBasis: fact.periodBasis,
     currentYtdDurationDays: fact.currentYtdDurationDays,
     priorYtdDurationDays: fact.priorYtdDurationDays,
@@ -193,7 +198,7 @@ export const SEC_CONCEPTS = {
   epsDiluted: { kind: "duration", units: ["USD/shares", "USD-per-shares"], aliases: [us("EarningsPerShareDiluted"), ifrs("DilutedEarningsLossPerShare")] },
   sharesDiluted: { kind: "duration", units: ["shares"], aliases: [us("WeightedAverageNumberOfDilutedSharesOutstanding"), ifrs("AdjustedWeightedAverageShares")] },
   operatingCashFlow: { kind: "duration", units: ["USD"], aliases: [us("NetCashProvidedByUsedInOperatingActivities"), ifrs("CashFlowsFromUsedInOperatingActivities")] },
-  capitalExpenditures: { kind: "duration", units: ["USD"], aliases: [us("PaymentsToAcquirePropertyPlantAndEquipment"), us("PaymentsForAdditionsToPropertyPlantAndEquipment"), ifrs("PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")] },
+  capitalExpenditures: { kind: "duration", units: ["USD"], aliases: [us("PaymentsToAcquirePropertyPlantAndEquipment"), us("PaymentsForAdditionsToPropertyPlantAndEquipment"), us("PaymentsToAcquireProductiveAssets"), ifrs("PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities")] },
   interestExpense: { kind: "duration", units: ["USD"], aliases: [us("InterestExpenseNonOperating"), us("InterestExpense"), ifrs("FinanceCosts")] },
   depreciationAndAmortization: { kind: "duration", units: ["USD"], aliases: [us("DepreciationDepletionAndAmortization"), us("DepreciationDepletionAndAmortizationPropertyPlantAndEquipment"), ifrs("DepreciationAndAmortisationExpense")] },
   dividendsPaid: { kind: "duration", units: ["USD"], aliases: [us("PaymentsOfDividends"), us("PaymentsOfDividendsCommonStock"), ifrs("DividendsPaidClassifiedAsFinancingActivities")] },

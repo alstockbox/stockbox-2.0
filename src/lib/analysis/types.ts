@@ -1,6 +1,7 @@
 export type AnalysisType = "summary" | "numbers" | "deep";
 export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 export type UiMode = "simple" | "pro";
+export type DataStatus = "current" | "stale" | "unavailable";
 
 export type Sector =
   | "technology"
@@ -59,6 +60,8 @@ export type MetricProvenance = {
   filedAt?: string;
   form?: string;
   accession?: string;
+  sourceCik?: string;
+  sourceCiks?: string[];
   periodBasis?: FinancialPeriodBasis;
   currentYtdDurationDays?: number;
   priorYtdDurationDays?: number;
@@ -77,10 +80,19 @@ export type ProviderDiagnostic = {
 
 export type CompanySearchResult = {
   ticker: string;
+  canonicalTicker?: string;
   name: string;
   cik?: string;
   exchange?: string;
   country?: string;
+  entityId?: string;
+  securityType?: "Common Stock" | "Preferred" | "ETF/Fund" | "ADR" | "Other";
+  providerCapabilities?: {
+    fundamentals: boolean;
+    marketData: boolean;
+    providerIds: string[];
+  };
+  searchAliases?: string[];
 };
 
 export type AnalysisSource = {
@@ -135,6 +147,8 @@ export type CompanyFundamentals = {
   ticker: string;
   name: string;
   cik?: string;
+  sourceCiks?: string[];
+  entityId?: string;
   sector: string | null;
   industry: string | null;
   annual: AnnualFinancials[];
@@ -294,6 +308,7 @@ export type AnalysisReport = {
   analysisArchetype?: AnalysisArchetype;
   dataCoverage?: number;
   dataAsOf?: string | null;
+  dataStatus?: DataStatus;
   confidenceBreakdown?: ConfidenceBreakdown;
   providerDiagnostics?: ProviderDiagnostic[];
   engine?: FinancialAnalysisResult;
@@ -616,6 +631,13 @@ export type AnalysisDiagnostics = {
   financialFlowPeriodBasis?: FinancialPeriodBasis | null;
   balanceSheetPeriodEnd?: string | null;
   marketPriceDate?: string | null;
+  dataStatus: DataStatus;
+  financialFlowAgeDays?: number | null;
+  balanceSheetAgeDays?: number | null;
+  marketPriceAgeDays?: number | null;
+  financialFlowStatus?: "current" | "stale" | "unavailable";
+  balanceSheetStatus?: "current" | "stale" | "unavailable";
+  marketPriceStatus?: "current" | "stale" | "unavailable";
 };
 
 export type AnalysisScenario = {
@@ -637,6 +659,7 @@ export type FinancialAnalysisResult = {
   modelVersion: string;
   reportSchemaVersion: string;
   analysisArchetype: AnalysisArchetype;
+  dataStatus: DataStatus;
   metrics: FinancialMetrics;
   scores: ScoreResult;
   redFlags: RedFlag[];

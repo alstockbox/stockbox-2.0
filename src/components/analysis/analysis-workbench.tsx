@@ -1,7 +1,7 @@
 "use client";
 
 import { Search, Sparkles } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type {
   AnalysisReport,
   AnalysisType,
@@ -14,6 +14,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SetupNotice } from "@/components/ui/setup-notice";
 import { ReportView } from "./report-view";
+import {
+  formattedCompanySelection,
+  queryRepresentsSelection,
+  selectionAfterQueryChange,
+  supportsLiveFundamentals,
+} from "./analysis-workbench-state";
 
 type ApiResult =
   | { ok: true; data: AnalysisReport; warnings: string[]; persisted: boolean }
@@ -22,7 +28,9 @@ type ApiResult =
 export function AnalysisWorkbench({ financialConfigured }: { financialConfigured: boolean }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanySearchResult[]>(commonCompanies.slice(0, 6));
-  const [selected, setSelected] = useState<CompanySearchResult | null>(commonCompanies[0] ?? null);
+  const [selected, setSelected] = useState<CompanySearchResult | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [isSearching, setIsSearching] = useState(false);
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
   const [investmentProfile, setInvestmentProfile] = useState<InvestmentProfile>("balanced");
   const [mode, setMode] = useState<UiMode>("simple");
@@ -31,27 +39,92 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
   const [isPending, startTransition] = useTransition();
   const searchRequest = useRef(0);
 
-  const canAnalyze = Boolean(selected) && financialConfigured && !isPending;
+  const canAnalyze = Boolean(selected) && supportsLiveFundamentals(selected) && financialConfigured && !isPending;
 
   const helperText = !financialConfigured
     ? "Live financial data is not configured for this deployment. An administrator must configure the SEC provider."
     : !selected
       ? "Search and select a company."
-      : `${selected.name} selected.`;
+      : !supportsLiveFundamentals(selected)
+        ? "Company found — live fundamentals not yet supported for this market."
+        : `${selected.canonicalTicker ?? selected.ticker} - ${selected.name}${selected.exchange ? ` - ${selected.exchange}` : ""} selected.`;
 
-  async function searchCompanies(value: string) {
+  function updateQuery(value: string) {
+    const nextSelected = selectionAfterQueryChange(selected, value);
+    if (selected && !nextSelected) {
+      setSelected(null);
+      setReport(null);
+    }
     setQuery(value);
-    const requestId = searchRequest.current + 1;
-    searchRequest.current = requestId;
+    setError(null);
+    setHighlightedIndex(-1);
     if (value.trim().length < 2) {
       setResults(commonCompanies.slice(0, 6));
+      setIsSearching(false);
+    }
+  }
+
+  function selectCompany(company: CompanySearchResult) {
+    setSelected(company);
+    setQuery(formattedCompanySelection(company));
+    setReport(null);
+    setError(null);
+    setIsSearching(false);
+    setHighlightedIndex(results.findIndex((result) => result.entityId === company.entityId));
+  }
+
+  useEffect(() => {
+    if (selected && queryRepresentsSelection(query, selected)) {
       return;
     }
+    const value = query.trim();
+    const requestId = searchRequest.current + 1;
+    searchRequest.current = requestId;
+    if (value.length < 2) {
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const response = await fetch(`/api/companies/search?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { companies: CompanySearchResult[] };
+        if (requestId === searchRequest.current) {
+          setResults(payload.companies);
+          setHighlightedIndex(payload.companies.length ? 0 : -1);
+        }
+      } catch (searchError) {
+        if (!(searchError instanceof Error && searchError.name === "AbortError") && requestId === searchRequest.current) {
+          setResults([]);
+        }
+      } finally {
+        if (requestId === searchRequest.current) setIsSearching(false);
+      }
+    }, 200);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [query, selected]);
 
-    const response = await fetch(`/api/companies/search?q=${encodeURIComponent(value)}`);
-    if (!response.ok) return;
-    const payload = (await response.json()) as { companies: CompanySearchResult[] };
-    if (requestId === searchRequest.current) setResults(payload.companies);
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setResults([]);
+      setHighlightedIndex(-1);
+      return;
+    }
+    if (!results.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedIndex((current) => current < results.length - 1 ? current + 1 : 0);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedIndex((current) => current > 0 ? current - 1 : results.length - 1);
+    } else if (event.key === "Enter" && highlightedIndex >= 0) {
+      event.preventDefault();
+      selectCompany(results[highlightedIndex]);
+    }
   }
 
   function runAnalysis() {
@@ -96,7 +169,12 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                 <input
                   id="company-search"
                   value={query}
-                  onChange={(event) => void searchCompanies(event.target.value)}
+                  onChange={(event) => updateQuery(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  role="combobox"
+                  aria-expanded={results.length > 0}
+                  aria-controls="company-search-results"
+                  aria-activedescendant={highlightedIndex >= 0 ? `company-result-${highlightedIndex}` : undefined}
                   placeholder="AAPL, NVIDIA, Investor..."
                   className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-3 text-sm text-[#f4efe5] placeholder:text-[#6f7b8c]"
                 />
@@ -107,23 +185,33 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
               </Button>
             </div>
             <p className="mt-2 text-sm text-[#9aa7b8]">{helperText}</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((company) => (
+            <div id="company-search-results" role="listbox" className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {results.map((company, index) => (
                 <button
                   key={`${company.ticker}-${company.cik ?? company.name}`}
+                  id={`company-result-${index}`}
                   type="button"
-                  onClick={() => setSelected(company)}
+                  role="option"
+                  aria-selected={selected?.entityId === company.entityId}
+                  onClick={() => selectCompany(company)}
                   className={`rounded-md border p-3 text-left text-sm transition ${
-                    selected?.ticker === company.ticker
+                    selected?.entityId === company.entityId
                       ? "border-[#b99b5f]/60 bg-[#b99b5f]/15"
+                      : highlightedIndex === index
+                        ? "border-white/30 bg-white/10"
                       : "border-white/10 bg-white/5 hover:bg-white/8"
                   }`}
                 >
-                  <span className="block font-semibold text-[#f4efe5]">{company.ticker}</span>
+                  <span className="block font-semibold text-[#f4efe5]">{company.canonicalTicker ?? company.ticker}</span>
                   <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#9aa7b8]">{company.name}</span>
+                  <span className="mt-1 block text-xs text-[#6f7b8c]">{[company.exchange, company.securityType].filter(Boolean).join(" - ")}</span>
                 </button>
               ))}
             </div>
+            {isSearching ? <p className="mt-3 text-sm text-[#9aa7b8]">Searching...</p> : null}
+            {!isSearching && query.trim().length >= 2 && !selected && results.length === 0 ? (
+              <p className="mt-3 text-sm text-[#9aa7b8]">No matching company found.</p>
+            ) : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">

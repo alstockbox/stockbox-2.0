@@ -3,6 +3,7 @@ import { resolveArchetype } from "./archetypes";
 import { MODEL_VERSION, REPORT_SCHEMA_VERSION } from "./config";
 import { computeDcfRange } from "./dcf";
 import { detectFinancialRedFlags } from "./flags";
+import { assessDataFreshness } from "./freshness";
 import { isFiniteNumber } from "./math";
 import { computeFinancialMetrics } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
@@ -102,7 +103,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
   };
 }
 
-function diagnosticDates(input: FinancialAnalysisInput) {
+function diagnosticDates(input: FinancialAnalysisInput, freshness = assessDataFreshness(input)) {
   const annualEnds = input.annualPeriods.map((period) => period.periodEndDate).filter((value): value is string => Boolean(value)).sort();
   const latestAnnualPeriodEnd = annualEnds.at(-1) ?? null;
   const latestFinancialPeriodEnd = input.trailingTwelveMonths?.periodEndDate ?? latestAnnualPeriodEnd;
@@ -114,27 +115,49 @@ function diagnosticDates(input: FinancialAnalysisInput) {
     dataAgeDays: Number.isFinite(periodTime) ? Math.max(0, Math.floor((analysisTime - periodTime) / 86_400_000)) : null,
     ttmStatus: input.trailingTwelveMonths ? "available" as const : input.annualPeriods.length ? "annual_fallback" as const : "unavailable" as const,
     providerDiagnostics: input.providerDiagnostics ?? [],
-    financialFlowPeriodEnd: latestFinancialPeriodEnd,
     financialFlowPeriodBasis: input.trailingTwelveMonths?.periodBasis ?? (latestAnnualPeriodEnd ? "FY" : null),
-    balanceSheetPeriodEnd: input.trailingTwelveMonths?.balanceSheetDate ?? latestAnnualPeriodEnd,
-    marketPriceDate: input.market?.priceDate ?? null,
+    ...freshness,
   };
 }
 
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
   const ttmConsistency = ttmPeriodBasisCheck(input.trailingTwelveMonths);
-  const calculationInput = ttmConsistency.status === "warning"
+  const periodConsistentInput = ttmConsistency.status === "warning"
     ? { ...input, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : input;
+  const freshness = assessDataFreshness(periodConsistentInput);
+  const calculationInput = freshness.dataStatus === "stale"
+    ? { ...periodConsistentInput, annualPeriods: [], trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
+    : periodConsistentInput;
   const metrics = computeFinancialMetrics(calculationInput);
-  const reconciliation = reconcileFinancialData(input, metrics);
-  const scores = computeScores(calculationInput, metrics, { reconciliation: reconciliationConfidence(reconciliation) });
+  const reconciliation = reconcileFinancialData(freshness.dataStatus === "stale" ? calculationInput : input, metrics);
+  reconciliation.push({
+    code: "fundamental_data_freshness",
+    status: freshness.dataStatus === "stale" ? "warning" : freshness.dataStatus === "current" ? "pass" : "unavailable",
+    message: freshness.dataStatus === "stale"
+      ? "Latest reliable financial statements are too old for a current analysis."
+      : freshness.dataStatus === "current"
+        ? "Financial statements are within the current-analysis freshness threshold."
+        : "Financial statement freshness could not be established.",
+  });
+  const computedScores = computeScores(calculationInput, metrics, { reconciliation: reconciliationConfidence(reconciliation) });
+  const scores = freshness.dataStatus === "stale"
+    ? { ...computedScores, stockBoxScore: null, personalizedScore: null, shortTermScore: null, longTermScore: null }
+    : computedScores;
   const archetype = resolveArchetype(calculationInput.company);
   const redFlags = detectFinancialRedFlags(metrics, archetype);
   const dcf = computeDcfRange(calculationInput, metrics);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
-  const scenarios = buildAnalysisScenarios(metrics, scores, dcf);
+  const scenarios = freshness.dataStatus === "stale" ? [] : buildAnalysisScenarios(metrics, scores, dcf);
   const missing = [...metrics.missingData, ...scores.missingData, ...dcf.missingData];
+  if (freshness.dataStatus === "stale") {
+    missing.push({
+      field: "staleFinancialData",
+      reason: "Latest reliable financial statements are too old for a current analysis.",
+      impact: "score",
+      severity: "high",
+    });
+  }
   for (const check of reconciliation.filter((item) => item.status === "warning")) {
     missing.push({ field: check.code, reason: check.message, impact: "score", severity: "high" });
   }
@@ -144,6 +167,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     modelVersion: MODEL_VERSION,
     reportSchemaVersion: REPORT_SCHEMA_VERSION,
     analysisArchetype: archetype,
+    dataStatus: freshness.dataStatus,
     metrics,
     scores,
     redFlags,
@@ -153,7 +177,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     missingData: [...uniqueMissing.values()],
     dataCoverage: scores.dataCoverage,
     confidenceBreakdown: scores.confidenceBreakdown,
-    diagnostics: diagnosticDates(calculationInput),
+    diagnostics: diagnosticDates(periodConsistentInput, freshness),
     reconciliation,
     provenance: metrics.provenance,
   };
@@ -214,17 +238,25 @@ export function presentAnalysisReport(
     analysisType: legacyInput.analysisType,
     investmentProfile: legacyInput.investmentProfile,
     generatedAt: canonicalInput.analysisDate ?? new Date().toISOString(),
-    oneSentence: score === null
+    oneSentence: result.dataStatus === "stale"
+      ? "Latest reliable financial statements are too old for a current analysis."
+      : score === null
       ? `${companyName} receives No Rating because weighted data coverage is insufficient.`
       : `${companyName} receives a ${rating} model rating with a StockBox Score of ${Math.round(score)}/100 and ${result.scores.confidence}% confidence.`,
-    summary: rating === "No Rating"
+    summary: result.dataStatus === "stale"
+      ? "StockBox has blocked scoring and opportunity conclusions because the latest reliable fundamentals exceed the hard freshness threshold."
+      : rating === "No Rating"
       ? "StockBox does not have enough suitable, reconciled data for a directional model rating. Available facts and missing-data reasons remain visible."
       : `${companyName} is rated ${rating} by the versioned StockBox model. The rating separates business quality from valuation coverage and data confidence.`,
     recommendation: rating,
-    shortTermAssessment: result.scores.shortTermScore === null
+    shortTermAssessment: result.dataStatus === "stale"
+      ? "No current short-term assessment is produced from stale financial statements."
+      : result.scores.shortTermScore === null
       ? "Short-term assessment is unavailable because market and risk coverage is insufficient."
       : `Short-term model score is ${result.scores.shortTermScore}/100; this does not alter the canonical financial facts.`,
-    longTermAssessment: result.scores.longTermScore === null
+    longTermAssessment: result.dataStatus === "stale"
+      ? "No current long-term assessment is produced from stale financial statements."
+      : result.scores.longTermScore === null
       ? "Long-term assessment is unavailable because fundamental coverage is insufficient."
       : `Long-term model score is ${result.scores.longTermScore}/100, based on the same canonical facts as every report depth.`,
     metrics,
@@ -259,6 +291,7 @@ export function presentAnalysisReport(
     analysisArchetype: result.analysisArchetype,
     dataCoverage: result.dataCoverage,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,
+    dataStatus: result.dataStatus,
     confidenceBreakdown: result.confidenceBreakdown,
     providerDiagnostics: result.diagnostics.providerDiagnostics,
     engine: result,

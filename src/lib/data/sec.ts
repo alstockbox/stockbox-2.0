@@ -8,6 +8,7 @@ import type {
 } from "@/lib/analysis/types";
 import { getSecUserAgent } from "@/lib/env/server";
 import { commonCompanies } from "./common-companies";
+import { entityIdentityFor } from "./entity-identities";
 import { providerDiagnostic, type AdapterResult, type FundamentalsProvider, type ProviderCapabilities } from "./providers";
 import {
   resolveAnnualFacts,
@@ -94,13 +95,29 @@ export async function fetchSecTickerUniverse(): Promise<CompanySearchResult[]> {
   }));
 }
 
-export async function searchCompanies(query: string): Promise<CompanySearchResult[]> {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return [];
-  const universe = await fetchSecTickerUniverse();
-  return universe
-    .filter((company) => company.ticker.toLowerCase().includes(normalized) || company.name.toLowerCase().includes(normalized))
-    .slice(0, 12);
+export function mergeSecCompanyFacts(factSets: SecCompanyFacts[]): SecCompanyFacts {
+  const merged: NonNullable<SecCompanyFacts["facts"]> = {};
+  for (const factSet of factSets) {
+    const sourceCik = padCik(factSet.cik);
+    for (const [taxonomy, concepts] of Object.entries(factSet.facts ?? {})) {
+      const targetTaxonomy = (merged[taxonomy as keyof typeof merged] ??= {});
+      for (const [concept, definition] of Object.entries(concepts ?? {})) {
+        const targetConcept = (targetTaxonomy[concept] ??= { units: {} });
+        const targetUnits = (targetConcept.units ??= {});
+        for (const [unit, rows] of Object.entries(definition.units ?? {})) {
+          targetUnits[unit] = [
+            ...(targetUnits[unit] ?? []),
+            ...(rows ?? []).map((row) => ({ ...row, sourceCik: row.sourceCik ?? sourceCik })),
+          ];
+        }
+      }
+    }
+  }
+  return {
+    cik: factSets.at(-1)?.cik ?? 0,
+    entityName: factSets.at(-1)?.entityName ?? "Unknown SEC registrant",
+    facts: merged,
+  };
 }
 
 type FactMaps = Record<keyof typeof SEC_CONCEPTS, Map<string, ResolvedSecFact>>;
@@ -417,24 +434,32 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
   if (!company.cik) {
     return { ok: false, reason: "unsupported_symbol", message: "A SEC CIK is required for this fundamentals adapter.", diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unsupported", "missing_cik") };
   }
-  const cik = padCik(company.cik);
-  const [facts, submissions] = await Promise.all([
-    fetchSecJson<SecCompanyFacts>(`${secBase}/api/xbrl/companyfacts/CIK${cik}.json`, 60 * 60 * 12),
+  const identity = entityIdentityFor(company);
+  const cik = identity?.currentCik ?? padCik(company.cik);
+  const requestedCiks = identity ? [...identity.predecessorCiks, identity.currentCik] : [cik];
+  const [factSets, submissions] = await Promise.all([
+    Promise.all(requestedCiks.map((sourceCik) =>
+      fetchSecJson<SecCompanyFacts>(`${secBase}/api/xbrl/companyfacts/CIK${sourceCik}.json`, 60 * 60 * 12)
+    )),
     fetchSecJson<SecSubmissions>(`${secBase}/submissions/CIK${cik}.json`, 60 * 60 * 24),
   ]);
-  if (!facts) {
+  const availableFactSets = factSets.filter((facts): facts is SecCompanyFacts => Boolean(facts));
+  if (!availableFactSets.length) {
     return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
   }
+  const facts = mergeSecCompanyFacts(availableFactSets);
   const { annualPeriods, trailingTwelveMonths, priorTrailingTwelveMonths } = resolveSecFinancialPeriods(facts);
   const latestAnnualPeriodEnd = annualPeriods.at(-1)?.periodEndDate ?? null;
-  const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: facts.entityName || company.name });
+  const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: identity ? company.name : facts.entityName || company.name });
   const diagnostic = { provider: "SEC Companyfacts", capability: "fundamentals" as const, status: annualPeriods.length ? "available" as const : "partial" as const, reason: trailingTwelveMonths ? undefined : "ttm_unavailable_annual_fallback", observedAt };
   return {
     ok: true,
     data: {
       ticker: company.ticker,
-      name: facts.entityName || company.name,
+      name: identity ? company.name : facts.entityName || company.name,
       cik,
+      sourceCiks: availableFactSets.map((factSet) => padCik(factSet.cik)),
+      entityId: identity?.canonicalId ?? company.entityId,
       sector: classification.sector,
       industry: classification.industry,
       sic: submissions?.sic,
@@ -452,6 +477,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
         financialFlowPeriodEnd: trailingTwelveMonths?.periodEndDate ?? latestAnnualPeriodEnd,
         financialFlowPeriodBasis: trailingTwelveMonths?.periodBasis ?? (latestAnnualPeriodEnd ? "FY" : null),
         balanceSheetPeriodEnd: trailingTwelveMonths?.balanceSheetDate ?? latestAnnualPeriodEnd,
+        dataStatus: annualPeriods.length ? "current" : "unavailable",
       },
     },
     diagnostic,

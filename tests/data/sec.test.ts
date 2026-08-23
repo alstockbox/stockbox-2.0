@@ -57,15 +57,17 @@ describe("SEC provider requests", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      companies: [
-        {
-          ticker: "AAPL",
-          name: "Apple Inc.",
-          cik: "0000320193",
-          exchange: "US",
-          country: "US"
-        }
-      ]
+      companies: [expect.objectContaining({
+        ticker: "AAPL",
+        canonicalTicker: "AAPL",
+        name: "Apple Inc.",
+        cik: "0000320193",
+        exchange: "NASDAQ",
+        country: "US",
+        entityId: "sec:0000320193",
+        securityType: "Common Stock",
+        providerCapabilities: expect.objectContaining({ fundamentals: true })
+      })]
     });
   });
 });

@@ -8,7 +8,8 @@ import type {
   MarketSnapshot
 } from "@/lib/analysis/types";
 import { getMarketDataProvider, isFinancialProviderConfigured } from "@/lib/env/server";
-import { fetchCompanyFundamentalsResult, searchCompanies as searchSecCompanies } from "./sec";
+import { searchCompanyCatalog } from "./company-search";
+import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchStooqMarketData, mapStooqSymbol } from "./stooq";
 import { providerDiagnostic, type AdapterResult } from "./providers";
 
@@ -17,7 +18,7 @@ export type ProviderResult<T> =
   | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[] };
 
 export async function searchCompanies(query: string) {
-  return searchSecCompanies(query);
+  return searchCompanyCatalog(query);
 }
 
 export async function fetchConfiguredMarketData(
@@ -54,6 +55,14 @@ export async function analyzeCompany({
       warnings: ["Financial provider disabled because no SEC contact is configured."]
     };
   }
+  if (!company.cik) {
+    return {
+      ok: false,
+      error: "Company found, but the configured fundamentals provider does not currently support this listing.",
+      sources,
+      warnings: ["The selected listing has no verified fundamentals adapter capability."],
+    };
+  }
 
   const [fundamentalsResult, marketResult] = await Promise.all([
     fetchCompanyFundamentalsResult(company),
@@ -64,12 +73,14 @@ export async function analyzeCompany({
   const providerDiagnostics = [fundamentalsResult.diagnostic, marketResult.diagnostic];
 
   if (fundamentals) {
-    sources.push({
-      name: "SEC Companyfacts",
-      url: `https://data.sec.gov/api/xbrl/companyfacts/CIK${fundamentals.cik}.json`,
-      accessedAt,
-      freshness: "SEC XBRL facts, cached up to 12 hours."
-    });
+    for (const sourceCik of fundamentals.sourceCiks ?? [fundamentals.cik].filter(Boolean) as string[]) {
+      sources.push({
+        name: `SEC Companyfacts CIK ${sourceCik}`,
+        url: `https://data.sec.gov/api/xbrl/companyfacts/CIK${sourceCik}.json`,
+        accessedAt,
+        freshness: "SEC XBRL facts, cached up to 12 hours."
+      });
+    }
   } else {
     warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);
   }

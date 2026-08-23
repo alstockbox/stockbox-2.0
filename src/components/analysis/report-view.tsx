@@ -88,6 +88,15 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
   const scoreAvailable = report.score.score !== null;
   return (
     <div className="space-y-5">
+      {report.dataStatus === "stale" ? (
+        <Card className="border-red-300/30 bg-red-950/20 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
+            <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+            Stale financial data - No Rating
+          </p>
+          <p className="mt-2 text-sm leading-6 text-[#c9d2df]">Latest reliable financial statements are too old for a current analysis.</p>
+        </Card>
+      ) : null}
       <Card className="p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -227,7 +236,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
         </div>
       </Card> : null}
 
-      <Card>
+      {report.scenarios.length ? <Card>
         <h2 className="text-lg font-semibold text-[#f4efe5]">Bull / Base / Bear</h2>
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
           {report.scenarios.map((scenario) => (
@@ -245,7 +254,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
             </details>
           ))}
         </div>
-      </Card>
+      </Card> : null}
 
       {showValuation ? <Card>
         <div className="flex flex-wrap items-center justify-between gap-2">
