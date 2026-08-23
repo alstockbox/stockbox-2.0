@@ -75,6 +75,10 @@ function FlagList({ flags, tone }: { flags: Flag[]; tone: "red" | "green" }) {
   );
 }
 
+function researchScoreValue(score: number | null) {
+  return score === null ? "Insufficient data" : Math.round(score).toString();
+}
+
 export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; mode?: UiMode }) {
   const extended = report.analysisType === "deep" || report.analysisType === "research";
   const showExplainability = mode === "pro" || extended;
@@ -295,6 +299,82 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
             </ul>
           </details>
         ) : null}
+      </Card> : null}
+
+      {report.research ? <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold text-[#e1cb95]">DEEP RESEARCH</p>
+            <h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">RESEARCH LENS</h2>
+          </div>
+          <div className="text-right text-xs text-[#9aa7b8]">
+            <p>Research confidence {report.research.confidence}%</p>
+            <p>Research coverage {formatPercent(report.research.coverage, 0)}</p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {([
+            ["Quality", report.research.quality],
+            ["Opportunity", report.research.opportunity],
+            ["Inflection", report.research.inflection],
+          ] as const).map(([label, researchScore]) => (
+            <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold text-[#e1cb95]">{label}</p>
+              <p className={`${researchScore.score === null ? "text-base" : "number text-3xl"} mt-2 font-semibold text-[#f4efe5]`}>{researchScoreValue(researchScore.score)}</p>
+              <div className="mt-3 flex justify-between gap-3 text-xs text-[#9aa7b8]">
+                <span>Confidence {researchScore.confidence}%</span>
+                <span>Coverage {formatPercent(researchScore.coverage, 0)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 grid gap-5 lg:grid-cols-3">
+          {([
+            ["WHAT IS WORKING", report.research.positives],
+            ["WHAT IS DETERIORATING", report.research.negatives],
+            ["WHAT MAY BE CHANGING", report.research.changes],
+          ] as const).map(([title, signals]) => (
+            <section key={title}>
+              <h3 className="text-xs font-semibold text-[#e1cb95]">{title}</h3>
+              <div className="mt-3 space-y-2 text-sm leading-6 text-[#c9d2df]">
+                {signals.length ? signals.slice(0, 6).map((item) => <p key={item.id}>{item.statement}</p>) : <p className="text-[#9aa7b8]">Insufficient verified signals.</p>}
+              </div>
+            </section>
+          ))}
+        </div>
+        <div className="mt-6 grid gap-6 border-t border-white/10 pt-5 lg:grid-cols-2">
+          <section>
+            <h3 className="text-sm font-semibold text-[#f4efe5]">RECENT COMPANY EVENTS</h3>
+            <div className="mt-3 space-y-2">
+              {report.research.events.length ? report.research.events.slice(0, 8).map((event) => (
+                <a key={event.accession} href={event.url} target="_blank" rel="noreferrer" className="block rounded-md border border-white/10 p-3 text-sm hover:bg-white/5">
+                  <span className="font-semibold text-[#f4efe5]">{event.form} - {event.filingDate}</span>
+                  <span className="mt-1 block text-xs text-[#9aa7b8]">{event.category.replaceAll("_", " ")}{event.items.length ? ` - Items ${event.items.join(", ")}` : ""}</span>
+                </a>
+              )) : <p className="text-sm text-[#9aa7b8]">No verified recent filing events are available.</p>}
+            </div>
+          </section>
+          <section>
+            <h3 className="text-sm font-semibold text-[#f4efe5]">RESEARCH COVERAGE</h3>
+            <dl className="mt-3 divide-y divide-white/10 text-sm">
+              {report.research.layers.map((layer) => (
+                <div key={layer.layer} className="flex items-center justify-between gap-4 py-2">
+                  <dt className="text-[#c9d2df]">{layer.label}</dt>
+                  <dd className={layer.status === "available" ? "text-emerald-200" : layer.status === "partial" ? "text-[#e1cb95]" : "text-[#9aa7b8]"}>{layer.status}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        </div>
+        <details className="mt-6 border-t border-white/10 pt-5">
+          <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">KEY EVIDENCE</summary>
+          <div className="mt-3 space-y-3 text-xs leading-5 text-[#9aa7b8]">
+            {report.research.signals.slice(0, 12).map((item) => (
+              <p key={item.id}><span className="font-semibold text-[#c9d2df]">{item.metric}</span>: {item.statement}{item.periodCurrent ? ` (${item.periodPrevious ?? "prior"} to ${item.periodCurrent})` : ""}</p>
+            ))}
+            {report.research.evidence.map((item) => <p key={item.id}><a href={item.source.url} target="_blank" rel="noreferrer" className="font-semibold text-[#e1cb95] hover:text-[#f4efe5]">{item.title}</a> - {item.kind.replaceAll("_", " ")}</p>)}
+          </div>
+        </details>
       </Card> : null}
 
       {report.deepReport ? <Card>

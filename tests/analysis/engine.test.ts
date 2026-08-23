@@ -7,7 +7,7 @@ describe("analyzeFinancials", () => {
     const result = analyzeFinancials(durableCompounderInput);
 
     expect(result.modelVersion).toBe("stockbox-analysis-engine-v1.0.0");
-    expect(result.reportSchemaVersion).toBe("stockbox-analysis-report-v2");
+    expect(result.reportSchemaVersion).toBe("stockbox-analysis-report-v3");
     expect(result.scores.stockBoxScore).toBeGreaterThan(70);
     expect(result.scores.methodology.personalizedWeights).not.toEqual(result.scores.methodology.sectorWeights);
     expect(["Buy", "Strong Buy"]).toContain(result.recommendation.rating);

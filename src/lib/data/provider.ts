@@ -1,4 +1,4 @@
-import { buildAnalysis } from "@/lib/analysis/engine";
+import { buildAnalysis, toFinancialAnalysisInput } from "@/lib/analysis/engine";
 import { attachInstitutionalResearch } from "@/lib/analysis/research";
 import type {
   AnalysisReport,
@@ -12,6 +12,7 @@ import type {
 import { getMarketDataProvider, isFinancialProviderConfigured } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
+import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
 import { providerDiagnostic, type AdapterResult, type MarketDataProvider } from "./providers";
 import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
@@ -137,14 +138,16 @@ export async function analyzeCompany({
     };
   }
 
-  const [fundamentalsResult, marketResolution] = await Promise.all([
+  const deepResearchRequested = analysisType === "deep" || analysisType === "research";
+  const [fundamentalsResult, marketResolution, filingsResult] = await Promise.all([
     fetchCompanyFundamentalsResult(company),
-    resolveConfiguredMarketData(company)
+    resolveConfiguredMarketData(company),
+    deepResearchRequested && company.cik ? fetchSecSubmissionEvents(company) : Promise.resolve(null),
   ]);
   const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const market = marketResult.ok ? marketResult.data : null;
-  const providerDiagnostics = [fundamentalsResult.diagnostic, ...marketResolution.diagnostics];
+  const providerDiagnostics = [fundamentalsResult.diagnostic, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
 
   if (fundamentals) {
     for (const sourceCik of fundamentals.sourceCiks ?? [fundamentals.cik].filter(Boolean) as string[]) {
@@ -188,7 +191,26 @@ export async function analyzeCompany({
     providerDiagnostics
   });
   report.sources = sources;
-  if (report.engine) attachInstitutionalResearch(report, report.engine);
+  if (report.engine) {
+    const canonicalInput = toFinancialAnalysisInput({ company, market, fundamentals, analysisType, investmentProfile, providerDiagnostics });
+    const filings = filingsResult?.ok ? {
+      status: "available" as const,
+      events: filingsResult.data.data,
+      evidence: filingsResult.data.evidence,
+      dataAsOf: filingsResult.data.dataAsOf,
+      coverage: filingsResult.data.coverage,
+      confidence: filingsResult.data.confidence,
+    } : filingsResult ? {
+      status: filingsResult.diagnostic.status === "unsupported" ? "unsupported" as const : "unavailable" as const,
+      events: [],
+      evidence: [],
+      dataAsOf: null,
+      coverage: 0,
+      confidence: 0,
+      reason: filingsResult.message,
+    } : undefined;
+    attachInstitutionalResearch(report, report.engine, canonicalInput, { market, filings });
+  }
   report.score.missingData = [...new Set([...report.score.missingData, ...warnings])];
 
   return {

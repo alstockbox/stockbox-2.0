@@ -72,7 +72,7 @@ export type MetricProvenance = {
 
 export type ProviderDiagnostic = {
   provider: string;
-  capability: "search" | "fundamentals" | "market_data" | "estimates" | "specialized" | "news" | "insider";
+  capability: "search" | "fundamentals" | "market_data" | "estimates" | "specialized" | "news" | "insider" | "filings_events" | "ownership" | "industry" | "macro" | "geopolitical" | "positioning";
   status: "available" | "partial" | "unavailable" | "unsupported";
   reason?: string;
   observedAt: string;
@@ -94,6 +94,12 @@ export type CompanySearchResult = {
     providerIds: string[];
   };
   searchAliases?: string[];
+  primarySecurity?: boolean;
+  matchType?: "exact_canonical_ticker" | "exact_provider_ticker" | "exact_alias" | "exact_company_name" | "company_name_prefix" | "token_coverage" | "ticker_typo" | "name_typo";
+  matchScore?: number;
+  matchConfidence?: "high" | "medium" | "low";
+  matchReasons?: string[];
+  primaryCandidate?: boolean;
 };
 
 export type AnalysisSource = {
@@ -779,6 +785,73 @@ export type ResearchFinding = {
 
 export type ResearchModuleStatus = "available" | "partial" | "unavailable" | "unsupported";
 
+export type ResearchLayerId =
+  | "fundamental" | "valuation" | "market" | "filings_events" | "earnings_expectations"
+  | "news_events" | "insider_ownership" | "industry" | "macro" | "geopolitical" | "positioning";
+
+export type ResearchLayerStatus = {
+  layer: ResearchLayerId;
+  label: string;
+  status: ResearchModuleStatus;
+  coverage: number;
+  confidence: number;
+  dataAsOf: string | null;
+  reason?: string;
+  evidenceIds: string[];
+};
+
+export type ResearchSignal = {
+  id: string;
+  category: "quality" | "opportunity" | "inflection";
+  statement: string;
+  metric: string;
+  current: number | null;
+  previous: number | null;
+  change: number | null;
+  periodCurrent: string | null;
+  periodPrevious: string | null;
+  direction: "positive" | "negative" | "change";
+  confidence: number;
+  source?: MetricProvenance;
+  evidenceIds: string[];
+};
+
+export type ResearchScoreContributor = {
+  key: string;
+  label: string;
+  value: number | null;
+  score: number | null;
+  weight: number;
+  coverage: number;
+  status: "available" | "missing" | "unsuitable";
+  reason?: string;
+};
+
+export type ResearchScore = {
+  score: number | null;
+  confidence: number;
+  coverage: number;
+  contributors: ResearchScoreContributor[];
+  positiveSignals: ResearchSignal[];
+  negativeSignals: ResearchSignal[];
+};
+
+export type ResearchEventCategory =
+  | "earnings_results" | "acquisition_disposition" | "financing_capital" | "management_governance"
+  | "impairment_restructuring" | "material_agreement" | "guidance_outlook" | "other_material_event";
+
+export type ResearchEvent = {
+  category: ResearchEventCategory;
+  form: "10-K" | "10-Q" | "8-K" | "6-K" | "20-F";
+  filingDate: string;
+  accession: string;
+  primaryDocument: string | null;
+  url: string;
+  items: string[];
+  source: string;
+  provider: string;
+};
+
 export type ResearchModuleId =
   | "fundamental_core"
   | "business_model_moat"
@@ -896,8 +969,27 @@ export type ResearchPlan = {
 export type ResearchResult = {
   modules: ResearchModuleResult[];
   evidence: ResearchEvidence[];
-  inflection: InflectionScoreResult;
+  quality: ResearchScore;
+  opportunity: ResearchScore;
+  inflection: ResearchScore;
+  inflectionDetail: InflectionScoreResult;
+  confidence: number;
+  coverage: number;
+  layers: ResearchLayerStatus[];
+  signals: ResearchSignal[];
+  events: ResearchEvent[];
+  positives: ResearchSignal[];
+  negatives: ResearchSignal[];
+  changes: ResearchSignal[];
   generatedAt: string;
+};
+
+export type ResearchLayerPayload<T = unknown> = {
+  data: T;
+  dataAsOf: string | null;
+  coverage: number;
+  confidence: number;
+  evidence: ResearchEvidence[];
 };
 
 export type AdminQaDiagnostics = {

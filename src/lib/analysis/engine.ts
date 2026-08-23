@@ -370,7 +370,7 @@ export function presentAnalysisReport(
     scenarioStatus: result.scenarioStatus,
     engine: result,
   };
-  attachInstitutionalResearch(report, result);
+  attachInstitutionalResearch(report, result, canonicalInput, { market: legacyInput.market });
   return report;
 }
 

@@ -5,12 +5,14 @@ const mocks = vi.hoisted(() => ({ fetchSecTickerUniverse: vi.fn() }));
 vi.mock("@/lib/data/sec", () => ({ fetchSecTickerUniverse: mocks.fetchSecTickerUniverse }));
 
 import { searchCompanyCatalog } from "../../src/lib/data/company-search";
+import { providerDiagnostic, type CompanySearchProvider } from "../../src/lib/data/providers";
 
 describe("company search catalog", () => {
   beforeEach(() => {
     mocks.fetchSecTickerUniverse.mockResolvedValue([
       { ticker: "NVDA", name: "NVIDIA CORP", cik: "0001045810", exchange: "NASDAQ", country: "US" },
       { ticker: "JPM", name: "JPMORGAN CHASE & CO", cik: "0000019617", exchange: "NYSE", country: "US" },
+      { ticker: "JPM-PC", name: "JPMorgan Chase Preferred Depositary Shares Series C", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "JPM-PD", name: "JPMorgan Chase Preferred Depositary Shares", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", exchange: "NASDAQ", country: "US" },
       { ticker: "NNN", name: "NNN REIT, INC.", cik: "0000751364", exchange: "NYSE", country: "US" },
@@ -26,6 +28,16 @@ describe("company search catalog", () => {
     ["JPM", "JPM"],
     ["AAPL", "AAPL"],
     ["Apple", "AAPL"],
+    ["Apple Inc", "AAPL"],
+    ["appl", "AAPL"],
+    ["NVIDIA", "NVDA"],
+    ["BRK.B", "BRK.B"],
+    ["BRK B", "BRK.B"],
+    ["Berkshire", "BRK.B"],
+    ["GOOGL", "GOOGL"],
+    ["Google", "GOOGL"],
+    ["META", "META"],
+    ["Amazon", "AMZN"],
     ["Investor B", "INVE.B"],
     ["INVE.B", "INVE.B"],
     ["INVE B", "INVE.B"],
@@ -51,12 +63,58 @@ describe("company search catalog", () => {
     const results = await searchCompanyCatalog("MICRO");
     expect(results.map((company) => company.ticker)).toEqual(expect.arrayContaining(["MU", "MCHP"]));
     expect(results.length).toBeGreaterThanOrEqual(2);
+    expect(results[0]).toEqual(expect.objectContaining({ primaryCandidate: false, matchConfidence: "medium" }));
   });
 
   it("strongly prefers JPM common stock over preferred securities", async () => {
     const results = await searchCompanyCatalog("JPM");
     expect(results[0]).toEqual(expect.objectContaining({ ticker: "JPM", securityType: "Common Stock" }));
     expect(results.findIndex((company) => company.securityType === "Preferred")).toBeGreaterThan(0);
+  });
+
+  it("respects explicit preferred-security intent and exact preferred tickers", async () => {
+    const preferredResults = await searchCompanyCatalog("JPM preferred");
+    expect(preferredResults[0]).toEqual(expect.objectContaining({ securityType: "Preferred" }));
+
+    const exactResults = await searchCompanyCatalog("JPM-PC");
+    expect(exactResults[0]).toEqual(expect.objectContaining({
+      ticker: "JPM-PC",
+      matchType: expect.stringMatching(/^exact_/),
+      matchConfidence: "high",
+      primaryCandidate: true,
+    }));
+  });
+
+  it("returns transparent ranking metadata without leaking private aliases", async () => {
+    const [apple] = await searchCompanyCatalog("Apple");
+    expect(apple).toEqual(expect.objectContaining({
+      canonicalTicker: "AAPL",
+      matchType: "exact_alias",
+      matchScore: expect.any(Number),
+      matchConfidence: "high",
+      matchReasons: expect.arrayContaining(["Exact known alias"]),
+      primaryCandidate: true,
+    }));
+    expect(apple).not.toHaveProperty("searchAliases");
+  });
+
+  it("applies provider coverage only after stronger identity matches", async () => {
+    const provider: CompanySearchProvider = {
+      id: "rich-but-irrelevant",
+      capabilities: {
+        supportedCountries: ["global"], supportedExchanges: ["global"],
+        supportsFundamentals: true, supportsMarketData: true, supportsEstimates: true,
+      },
+      search: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [{ ticker: "ZZZ", name: "Unrelated Holdings", country: "US", cik: "0009999999", searchAliases: ["AAPL"] }],
+        diagnostic: providerDiagnostic("rich-but-irrelevant", "search", "available"),
+      }),
+    };
+    const results = await searchCompanyCatalog("AAPL", [provider]);
+    expect(results[0]?.canonicalTicker).toBe("AAPL");
+    expect(results.findIndex((company) => company.ticker === "ZZZ")).toBeGreaterThan(0);
+    expect(results[0]!.matchScore).toBeGreaterThan(results.find((company) => company.ticker === "ZZZ")!.matchScore!);
   });
 
   it("finds curated REIT companies by market category", async () => {

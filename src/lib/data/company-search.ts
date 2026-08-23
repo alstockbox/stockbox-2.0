@@ -47,6 +47,7 @@ function enrich(
     cik,
     entityId: identity?.canonicalId ?? company.entityId ?? (cik ? `sec:${cik}` : `listing:${company.country ?? "unknown"}:${company.ticker.toUpperCase()}`),
     securityType: type,
+    primarySecurity: company.primarySecurity ?? type === "Common Stock",
     providerCapabilities: {
       fundamentals: fundamentalsSupported,
       marketData: company.providerCapabilities?.marketData ?? company.country === "US",
@@ -71,7 +72,37 @@ function editDistance(left: string, right: string): number {
   return previous[right.length];
 }
 
-function searchRank(company: CompanySearchResult, query: string): number {
+type SearchMatch = {
+  score: number;
+  type: NonNullable<CompanySearchResult["matchType"]>;
+  reasons: string[];
+};
+
+const SECURITY_QUERY_WORDS = new Set(["preferred", "preference", "pfd", "adr", "etf", "fund", "common", "stock", "shares", "share", "class"]);
+const MATCH_SCORE_CEILINGS: Record<NonNullable<CompanySearchResult["matchType"]>, number> = {
+  exact_canonical_ticker: 100,
+  exact_provider_ticker: 99,
+  exact_alias: 97,
+  exact_company_name: 95,
+  company_name_prefix: 92,
+  token_coverage: 90,
+  ticker_typo: 86,
+  name_typo: 82,
+};
+
+function queryTokens(query: string): string[] {
+  return normalizedText(query).split(" ").filter((token) => token && !SECURITY_QUERY_WORDS.has(token));
+}
+
+function requestedPreferred(query: string): boolean {
+  return /\b(preferred|preference|pfd)\b/i.test(query);
+}
+
+function requestedAdr(query: string): boolean {
+  return /\badr\b|american depositary/i.test(query);
+}
+
+export function scoreSearchMatch(company: CompanySearchResult, query: string): SearchMatch | null {
   const rawQuery = query.trim().toUpperCase();
   const ticker = (company.canonicalTicker ?? company.ticker).toUpperCase();
   const normalizedQueryTicker = normalizedTicker(query);
@@ -79,18 +110,59 @@ function searchRank(company: CompanySearchResult, query: string): number {
   const queryText = normalizedText(query);
   const name = normalizedText(company.name);
   const aliases = (company.searchAliases ?? []).map(normalizedText);
-  const securityPenalty = company.securityType === "Common Stock" ? 0 : company.securityType === "ADR" ? 2 : 5;
-  if (rawQuery === ticker || rawQuery === company.ticker.toUpperCase()) return securityPenalty;
-  if (normalizedQueryTicker && normalizedQueryTicker === normalizedCompanyTicker) return 10 + securityPenalty;
-  if (aliases.some((alias) => alias === queryText)) return 15 + securityPenalty;
-  if (name.startsWith(queryText)) return 20 + securityPenalty;
-  if (name.includes(queryText) || aliases.some((alias) => alias.includes(queryText))) return 30 + securityPenalty;
+  const preferredIntent = requestedPreferred(query);
+  const adrIntent = requestedAdr(query);
+  const exactCanonical = rawQuery === ticker;
+  const exactProvider = rawQuery === company.ticker.toUpperCase();
+  let match: SearchMatch | null = null;
+  if (exactCanonical) match = { score: 100, type: "exact_canonical_ticker", reasons: ["Exact canonical ticker"] };
+  else if (exactProvider) match = { score: 99, type: "exact_provider_ticker", reasons: ["Exact provider ticker"] };
+  else if (normalizedQueryTicker && normalizedQueryTicker === normalizedCompanyTicker) match = { score: 98, type: "exact_canonical_ticker", reasons: ["Normalized canonical ticker match"] };
+  else if (aliases.some((alias) => alias === queryText)) match = { score: 96, type: "exact_alias", reasons: ["Exact known alias"] };
+  else if (name === queryText) match = { score: 94, type: "exact_company_name", reasons: ["Exact normalized company name"] };
+  else if (name.startsWith(queryText)) match = { score: 86, type: "company_name_prefix", reasons: ["Company-name prefix"] };
+  const tokens = queryTokens(query);
+  const searchableTokens = new Set([name, ...aliases].join(" ").split(" "));
+  const tokenCoverage = tokens.length ? tokens.filter((token) => searchableTokens.has(token)).length / tokens.length : 0;
+  if (!match && tokenCoverage > 0) match = { score: 60 + tokenCoverage * 20, type: "token_coverage", reasons: [`${Math.round(tokenCoverage * 100)}% query-token coverage`] };
+  const securityRoot = normalizedTicker(tokens[0] ?? "");
+  if (!match && preferredIntent && securityRoot && normalizedCompanyTicker.startsWith(securityRoot)) {
+    match = { score: 82, type: "token_coverage", reasons: ["Issuer ticker and preferred-security intent matched"] };
+  }
   const compactName = name.replace(/\s/g, "");
   const compactQuery = queryText.replace(/\s/g, "");
-  if (compactQuery.length >= 3 && (editDistance(compactQuery, normalizedCompanyTicker.toLowerCase()) <= 2 || editDistance(compactQuery, compactName.slice(0, compactQuery.length)) <= 2)) {
-    return 50 + securityPenalty;
+  const tickerDistance = editDistance(normalizedQueryTicker.toLowerCase(), normalizedCompanyTicker.toLowerCase());
+  const nameDistance = editDistance(compactQuery, compactName.slice(0, compactQuery.length));
+  if (!match && compactQuery.length >= 3 && tickerDistance <= 2) match = { score: 74 - tickerDistance * 4, type: "ticker_typo", reasons: [`Ticker typo distance ${tickerDistance}`] };
+  if (!match && compactQuery.length >= 4 && nameDistance <= 2) match = { score: 70 - nameDistance * 4, type: "name_typo", reasons: [`Name typo distance ${nameDistance}`] };
+  if (!match) return null;
+
+  const explicitSecurityTicker = match.type === "exact_canonical_ticker" || match.type === "exact_provider_ticker";
+  if (company.securityType === "Preferred") {
+    if (preferredIntent) { match.score += 14; match.reasons.push("Preferred security requested"); }
+    else if (!explicitSecurityTicker) { match.score -= 24; match.reasons.push("Preferred security de-prioritized"); }
+  } else if (preferredIntent) {
+    match.score -= 18;
   }
-  return Number.POSITIVE_INFINITY;
+  if (company.securityType === "ADR") {
+    if (adrIntent) { match.score += 10; match.reasons.push("ADR requested"); }
+    else if (!explicitSecurityTicker) { match.score -= 10; match.reasons.push("ADR de-prioritized without ADR intent"); }
+  }
+  if (company.securityType === "ETF/Fund" && !explicitSecurityTicker && !/\b(etf|fund)\b/i.test(query)) {
+    match.score -= 28;
+    match.reasons.push("Fund de-prioritized for company search");
+  }
+  if (company.securityType === "Common Stock" && !preferredIntent) { match.score += 6; match.reasons.push("Common stock preference"); }
+  if (company.primarySecurity && !preferredIntent && !adrIntent) { match.score += 4; match.reasons.push("Primary security preference"); }
+
+  const explicitLocation = [company.exchange, company.country].filter(Boolean).some((value) => normalizedText(query).includes(normalizedText(value as string)));
+  if (explicitLocation) { match.score += 4; match.reasons.push("Exchange or country intent matched"); }
+  if (match.score >= 65) {
+    if (company.providerCapabilities?.fundamentals) { match.score += 2; match.reasons.push("Live fundamentals available"); }
+    if (company.providerCapabilities?.marketData) { match.score += 1; match.reasons.push("Live market data available"); }
+  }
+  match.score = Math.max(0, Math.min(MATCH_SCORE_CEILINGS[match.type], Math.round(match.score * 10) / 10));
+  return match;
 }
 
 function mergeCompany(current: CompanySearchResult | undefined, candidate: CompanySearchResult): CompanySearchResult {
@@ -153,12 +225,27 @@ export async function searchCompanyCatalog(
     }
   }
   return [...merged.values()]
-    .map((company) => ({ company, rank: searchRank(company, normalizedQuery) }))
-    .filter(({ rank }) => Number.isFinite(rank))
-    .sort((left, right) => left.rank - right.rank || left.company.name.localeCompare(right.company.name))
+    .flatMap((company) => {
+      const match = scoreSearchMatch(company, normalizedQuery);
+      return match ? [{ company, match }] : [];
+    })
+    .sort((left, right) => right.match.score - left.match.score || left.company.name.localeCompare(right.company.name))
     .slice(0, 20)
-    .map(({ company }) => {
-      const publicCompany = { ...company };
+    .map(({ company, match }, index, ranked) => {
+      const second = ranked[index === 0 ? 1 : 0];
+      const scoreGap = second ? Math.abs(match.score - second.match.score) : 100;
+      const competingIssuer = second ? second.company.entityId !== company.entityId : false;
+      const ambiguousTop = index === 0 && competingIssuer && scoreGap < 6;
+      const confidence = match.score >= 92 && !ambiguousTop ? "high" : match.score >= 70 ? "medium" : "low";
+      const primaryCandidate = index === 0 && !ambiguousTop && (match.type.startsWith("exact_") || (match.score >= 82 && scoreGap >= 5));
+      const publicCompany: CompanySearchResult = {
+        ...company,
+        matchType: match.type,
+        matchScore: match.score,
+        matchConfidence: confidence,
+        matchReasons: match.reasons,
+        primaryCandidate,
+      };
       delete publicCompany.searchAliases;
       return publicCompany;
     });

@@ -4,6 +4,8 @@ import type {
   MarketSnapshot,
   ProviderDiagnostic,
   SpecializedCompanyData,
+  ResearchEvent,
+  ResearchLayerPayload,
 } from "@/lib/analysis/types";
 
 export type ProviderCapabilities = {
@@ -60,6 +62,51 @@ export interface SpecializedDataProvider {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;
   fetchSpecializedData(company: CompanySearchResult): Promise<AdapterResult<SpecializedCompanyData>>;
+}
+
+export interface FilingsEventsProvider {
+  readonly id: string;
+  fetchFilingsEvents(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload<ResearchEvent[]>>>;
+}
+
+export interface NewsEventsProvider {
+  readonly id: string;
+  fetchNewsEvents(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface EarningsEstimatesProvider {
+  readonly id: string;
+  fetchEarningsExpectations(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface InsiderOwnershipProvider {
+  readonly id: string;
+  fetchInsiderOwnership(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface OwnershipProvider {
+  readonly id: string;
+  fetchOwnership(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface IndustryResearchProvider {
+  readonly id: string;
+  fetchIndustryContext(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface MacroResearchProvider {
+  readonly id: string;
+  fetchMacroContext(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface GeopoliticalResearchProvider {
+  readonly id: string;
+  fetchGeopoliticalContext(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
+}
+
+export interface MarketPositioningProvider {
+  readonly id: string;
+  fetchMarketPositioning(company: CompanySearchResult): Promise<AdapterResult<ResearchLayerPayload>>;
 }
 
 export function providerDiagnostic(
