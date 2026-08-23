@@ -1,4 +1,4 @@
-import type { AnalysisReport, InvestmentProfile, UiMode } from "@/lib/analysis/types";
+import type { AnalysisReport, BatchQaResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPlan } from "@/lib/billing/plans";
 import { MODEL_VERSION } from "@/lib/analysis/config";
@@ -64,6 +64,26 @@ export async function persistAnalysis(input: {
   return { ok: true as const, id: data.id as string };
 }
 
+export async function persistBatchQaResult(result: BatchQaResult) {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false as const, error: "Supabase admin client is not configured." };
+  const { error } = await supabase.from("analysis_batch_qa_results").upsert({
+    batch_id: result.batchId,
+    rerun_key: result.rerunKey,
+    model_version: result.modelVersion,
+    provider_versions: result.providerVersions,
+    analysis_timestamp: result.analysisTimestamp,
+    canonical_entity: result.canonicalEntity,
+    analysis_archetype: result.archetype,
+    data_coverage: result.coverage,
+    confidence: result.confidence,
+    qa_flags: result.flags,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "batch_id,rerun_key,canonical_entity" });
+  if (error) return { ok: false as const, error: error.message };
+  return { ok: true as const };
+}
+
 export async function getAnalysis(id: string, userId: string) {
   const supabase = createAdminClient();
   if (!supabase) return null;
@@ -118,7 +138,7 @@ export async function logApplicationError(input: {
   });
 }
 
-export async function checkAnalysisEntitlement(input: { userId: string; analysisType: "summary" | "numbers" | "deep" }) {
+export async function checkAnalysisEntitlement(input: { userId: string; analysisType: AnalysisReport["analysisType"] }) {
   const supabase = createAdminClient();
   if (!supabase) return { allowed: true as const, configured: false as const };
 
@@ -128,13 +148,14 @@ export async function checkAnalysisEntitlement(input: { userId: string; analysis
   const [{ data: subscription }, { count: total }, { count: deep }] = await Promise.all([
     supabase.from("subscriptions").select("plan_key,status").eq("user_id", input.userId).single(),
     supabase.from("analyses").select("id", { count: "exact", head: true }).eq("user_id", input.userId).gte("created_at", monthStart.toISOString()),
-    supabase.from("analyses").select("id", { count: "exact", head: true }).eq("user_id", input.userId).eq("analysis_type", "deep").gte("created_at", monthStart.toISOString()),
+    supabase.from("analyses").select("id", { count: "exact", head: true }).eq("user_id", input.userId).in("analysis_type", ["deep", "research"]).gte("created_at", monthStart.toISOString()),
   ]);
   const active = subscription && ["active", "trialing"].includes(subscription.status);
   const plan = getPlan(active ? subscription.plan_key : "free");
   const used = total ?? 0;
   const deepUsed = deep ?? 0;
-  const allowed = used < plan.entitlements.monthlyAnalyses && (input.analysisType !== "deep" || deepUsed < plan.entitlements.deepAnalyses);
+  const usesDeepQuota = input.analysisType === "deep" || input.analysisType === "research";
+  const allowed = used < plan.entitlements.monthlyAnalyses && (!usesDeepQuota || deepUsed < plan.entitlements.deepAnalyses);
 
   return {
     allowed,

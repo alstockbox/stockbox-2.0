@@ -8,7 +8,14 @@ const marketDataProviderSchema = z.preprocess(
     const normalized = value.trim().toLowerCase();
     return normalized || undefined;
   },
-  z.enum(["stooq", "disabled"]).default("stooq")
+  z.enum(["twelve_data", "stooq", "disabled"]).default("stooq")
+);
+
+const providerListSchema = z.preprocess(
+  (value) => typeof value === "string"
+    ? value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+    : value,
+  z.array(z.enum(["twelve_data", "stooq"])).default([]),
 );
 
 const envSchema = z.object({
@@ -26,6 +33,9 @@ const envSchema = z.object({
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional().or(z.literal("")),
   SEC_USER_AGENT: z.string().optional().or(z.literal("")),
   MARKET_DATA_PROVIDER: marketDataProviderSchema,
+  MARKET_DATA_FALLBACK_PROVIDERS: providerListSchema,
+  GLOBAL_SYMBOL_SEARCH_PROVIDER: z.enum(["twelve_data", "disabled"]).default("disabled"),
+  TWELVE_DATA_API_KEY: z.string().optional().or(z.literal("")),
   NEWS_PROVIDER: z.string().default("disabled"),
   NEWS_API_KEY: z.string().optional().or(z.literal("")),
   AI_PROVIDER: z.string().default("disabled"),
@@ -99,6 +109,15 @@ export function isFinancialProviderConfigured(env = getServerEnv()) {
 
 export function getMarketDataProvider(env = getServerEnv()) {
   return env.MARKET_DATA_PROVIDER;
+}
+
+export function getMarketDataProviderChain(env = getServerEnv()) {
+  const ordered = [env.MARKET_DATA_PROVIDER, ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? [])];
+  return [...new Set(ordered.filter((provider): provider is "twelve_data" | "stooq" => provider !== "disabled"))];
+}
+
+export function getGlobalSymbolSearchProvider(env = getServerEnv()) {
+  return env.GLOBAL_SYMBOL_SEARCH_PROVIDER;
 }
 
 export function adminEmails() {

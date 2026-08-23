@@ -6,7 +6,14 @@ import type {
   ScoreResult,
   Scenario,
   ScenarioName,
+  ScenarioStatus,
 } from "./types";
+
+export function scenarioStatusFor(metrics: FinancialMetrics, scores: ScoreResult, dcf: DcfRangeResult): ScenarioStatus {
+  const usefulValuation = dcf.status === "available" || Object.values(metrics.valuation).some((value) => typeof value === "number" && Number.isFinite(value));
+  if (scores.stockBoxScore === null && scores.dataCoverage < 0.5 && !usefulValuation) return "insufficient_data";
+  return dcf.status === "available" ? "valuation" : "qualitative_research";
+}
 
 export function buildScenarios(metrics: Metrics, confidence: number): Scenario[] {
   const growthPositive = (metrics.revenueCagr3y ?? metrics.revenueGrowth1y ?? 0) > 0.08;
@@ -58,6 +65,7 @@ export function buildAnalysisScenarios(
   scores: ScoreResult,
   dcf: DcfRangeResult,
 ): AnalysisScenario[] {
+  if (scenarioStatusFor(metrics, scores, dcf) === "insufficient_data") return [];
   const valuation = new Map(dcf.scenarios.map((item) => [item.name, item]));
   const make = (
     name: ScenarioName,

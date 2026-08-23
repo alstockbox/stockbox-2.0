@@ -1,4 +1,4 @@
-import type { AnalysisArchetype, FinancialMetrics, Flag, Metrics, RedFlag } from "./types";
+import type { AnalysisArchetype, FinancialMetrics, Flag, Metrics, RedFlag, SpecializedCompanyData } from "./types";
 
 export function detectRedFlags(metrics: Metrics): Flag[] {
   const flags: Flag[] = [];
@@ -93,6 +93,41 @@ export function detectGreenFlags(metrics: Metrics): Flag[] {
   return flags;
 }
 
+export function detectArchetypeGreenFlags(
+  metrics: Metrics,
+  financial: FinancialMetrics,
+  archetype: AnalysisArchetype,
+  specialized?: SpecializedCompanyData,
+): Flag[] {
+  if (archetype === "reit") {
+    if (specialized?.kind !== "reit") return [];
+    const flags: Flag[] = [];
+    if ((specialized.fundsFromOperationsGrowth.value ?? 0) > 0.05) flags.push({ severity: "low", title: "FFO growth", detail: "Provider-reported FFO growth is positive.", metric: "epsGrowth1y" });
+    if ((specialized.occupancy.value ?? 0) >= 0.95) flags.push({ severity: "low", title: "High occupancy", detail: "Reported portfolio occupancy is at least 95%." });
+    if ((specialized.dividendCoverage.value ?? 0) >= 1.1) flags.push({ severity: "low", title: "Dividend covered by AFFO", detail: "Reported AFFO coverage exceeds 1.1 times." });
+    return flags;
+  }
+  if (archetype === "bank") {
+    if (specialized?.kind !== "bank") return [];
+    const flags: Flag[] = [];
+    if ((specialized.cet1CapitalRatio.value ?? 0) >= 0.12) flags.push({ severity: "low", title: "Strong CET1 capital", detail: "Reported CET1 capital ratio is at least 12%." });
+    if ((specialized.netInterestMargin.value ?? 0) > 0 && (specialized.returnOnAssets.value ?? 0) > 0) flags.push({ severity: "low", title: "Positive bank profitability", detail: "Reported NIM and return on assets are positive." });
+    return flags;
+  }
+  const flags = detectGreenFlags(metrics);
+  if (archetype === "cyclical") {
+    return flags.filter((flag) => flag.metric !== "revenueGrowth1y").concat(
+      financial.trends.operatingMarginChangeYoY !== null && financial.trends.operatingMarginChangeYoY > 0
+        ? [{ severity: "low" as const, title: "Margin recovery", detail: "Operating margin is improving from the prior comparable period.", metric: "operatingMargin" as const }]
+        : [],
+    );
+  }
+  if (archetype === "software_growth") {
+    return flags.filter((flag) => flag.metric !== "debtToEquity");
+  }
+  return flags;
+}
+
 export function detectFinancialRedFlags(
   metrics: FinancialMetrics,
   archetype: AnalysisArchetype = "standard",
@@ -110,7 +145,8 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (metrics.margins.freeCashFlowMargin !== null && metrics.margins.freeCashFlowMargin < -0.08) {
+  const corporateCashFlowApplies = !["bank", "insurer", "reit"].includes(archetype);
+  if (corporateCashFlowApplies && metrics.margins.freeCashFlowMargin !== null && metrics.margins.freeCashFlowMargin < -0.08) {
     flags.push({
       code: "negative_fcf_margin",
       label: "Weak free cash flow",
@@ -144,7 +180,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (metrics.ratios.cashConversion !== null && metrics.ratios.cashConversion < 0.45) {
+  if (corporateCashFlowApplies && metrics.ratios.cashConversion !== null && metrics.ratios.cashConversion < 0.45) {
     flags.push({
       code: "weak_cash_conversion",
       label: "Weak earnings support",
@@ -166,7 +202,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (metrics.cashFlow.accrualRatio !== null && metrics.cashFlow.accrualRatio > 0.12) {
+  if (corporateCashFlowApplies && metrics.cashFlow.accrualRatio !== null && metrics.cashFlow.accrualRatio > 0.12) {
     flags.push({
       code: "large_accrual_gap",
       label: "Large accrual gap",
@@ -177,7 +213,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (metrics.cashFlow.stockBasedCompensationToRevenue !== null && metrics.cashFlow.stockBasedCompensationToRevenue > 0.2) {
+  if (archetype === "software_growth" && metrics.cashFlow.stockBasedCompensationToRevenue !== null && metrics.cashFlow.stockBasedCompensationToRevenue > 0.2) {
     flags.push({
       code: "sbc_burden",
       label: "High stock-based compensation burden",
@@ -188,7 +224,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (metrics.trends.operatingMarginChangeYoY !== null && metrics.trends.operatingMarginChangeYoY < -0.05) {
+  if (!["bank", "insurer", "reit"].includes(archetype) && metrics.trends.operatingMarginChangeYoY !== null && metrics.trends.operatingMarginChangeYoY < -0.05) {
     flags.push({
       code: "margin_compression",
       label: "Operating margin compression",

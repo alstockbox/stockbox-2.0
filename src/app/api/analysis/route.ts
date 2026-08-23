@@ -12,9 +12,18 @@ const requestSchema = z.object({
     name: z.string().trim().min(1).max(200),
     cik: z.string().optional(),
     exchange: z.string().optional(),
-    country: z.string().optional()
+    country: z.string().optional(),
+    currency: z.string().optional(),
+    canonicalTicker: z.string().optional(),
+    entityId: z.string().optional(),
+    securityType: z.enum(["Common Stock", "Preferred", "ETF/Fund", "ADR", "Other"]).optional(),
+    providerCapabilities: z.object({
+      fundamentals: z.boolean(),
+      marketData: z.boolean(),
+      providerIds: z.array(z.string()),
+    }).optional(),
   }),
-  analysisType: z.enum(["summary", "numbers", "deep"]).default("summary"),
+  analysisType: z.enum(["summary", "numbers", "deep", "research"]).default("summary"),
   investmentProfile: z
     .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"])
     .default("balanced")

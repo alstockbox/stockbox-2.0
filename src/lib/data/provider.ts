@@ -1,4 +1,5 @@
 import { buildAnalysis } from "@/lib/analysis/engine";
+import { attachInstitutionalResearch } from "@/lib/analysis/research";
 import type {
   AnalysisReport,
   AnalysisSource,
@@ -13,13 +14,17 @@ import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { stooqMarketDataProvider } from "./stooq";
 import { providerDiagnostic, type AdapterResult, type MarketDataProvider } from "./providers";
+import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
   | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[] };
 
 export async function searchCompanies(query: string) {
-  return searchCompanyCatalog(query);
+  const globalProviders = process.env.GLOBAL_SYMBOL_SEARCH_PROVIDER?.trim().toLowerCase() === "twelve_data" && process.env.TWELVE_DATA_API_KEY
+    ? [createTwelveDataSearchProvider(process.env.TWELVE_DATA_API_KEY)]
+    : [];
+  return searchCompanyCatalog(query, globalProviders);
 }
 
 type MarketDataResolution = {
@@ -85,8 +90,14 @@ export async function fetchMarketDataFromProviders(
 }
 
 async function resolveConfiguredMarketData(company: CompanySearchResult): Promise<MarketDataResolution> {
-  const selectedProvider = getMarketDataProvider();
-  const providers = selectedProvider === "stooq" ? [stooqMarketDataProvider] : [];
+  const primary = getMarketDataProvider();
+  const fallback = (process.env.MARKET_DATA_FALLBACK_PROVIDERS ?? "").split(",").map((item) => item.trim().toLowerCase());
+  const chain = [...new Set([primary, ...fallback])];
+  const providers = chain.flatMap((provider) => {
+    if (provider === "stooq") return [stooqMarketDataProvider];
+    if (provider === "twelve_data" && process.env.TWELVE_DATA_API_KEY) return [createTwelveDataMarketProvider(process.env.TWELVE_DATA_API_KEY)];
+    return [];
+  });
   return resolveMarketDataFromProviders(company, providers);
 }
 
@@ -177,6 +188,7 @@ export async function analyzeCompany({
     providerDiagnostics
   });
   report.sources = sources;
+  if (report.engine) attachInstitutionalResearch(report, report.engine);
   report.score.missingData = [...new Set([...report.score.missingData, ...warnings])];
 
   return {

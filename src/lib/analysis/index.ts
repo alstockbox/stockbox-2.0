@@ -10,3 +10,5 @@ export * from "./engine";
 export * from "./archetypes";
 export * from "./reconciliation";
 export * from "./evaluation";
+export * from "./research";
+export * from "./qa";

@@ -228,6 +228,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                 <option value="summary">Ytlig / Summary</option>
                 <option value="numbers">Siffror / Numbers</option>
                 <option value="deep">Djup / Deep</option>
+                <option value="research">Research / Extra Deep</option>
               </select>
             </label>
             <label className="space-y-2 text-sm">

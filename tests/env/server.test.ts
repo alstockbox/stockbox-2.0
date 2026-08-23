@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POSTHOG_HOST,
   getMarketDataProvider,
+  getMarketDataProviderChain,
   getSecUserAgent,
   isBasicLaunchCheckoutConfigured,
   isFinancialProviderConfigured,
@@ -33,6 +34,11 @@ describe("server environment parsing", () => {
 
   it("preserves an explicitly disabled market provider", () => {
     expect(getMarketDataProvider(parseServerEnv({ MARKET_DATA_PROVIDER: " disabled " }))).toBe("disabled");
+  });
+
+  it("builds a de-duplicated explicitly configured provider chain", () => {
+    const env = parseServerEnv({ MARKET_DATA_PROVIDER: "twelve_data", MARKET_DATA_FALLBACK_PROVIDERS: "stooq,twelve_data" });
+    expect(getMarketDataProviderChain(env)).toEqual(["twelve_data", "stooq"]);
   });
 
   it("enables Basic checkout without requiring a webhook secret", () => {

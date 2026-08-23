@@ -3,6 +3,7 @@ import type {
   CompanySearchResult,
   MarketSnapshot,
   ProviderDiagnostic,
+  SpecializedCompanyData,
 } from "@/lib/analysis/types";
 
 export type ProviderCapabilities = {
@@ -53,6 +54,12 @@ export interface MarketDataProvider {
     freshness: string;
   };
   fetchMarketData(company: CompanySearchResult): Promise<AdapterResult<MarketSnapshot>>;
+}
+
+export interface SpecializedDataProvider {
+  readonly id: string;
+  readonly capabilities: ProviderCapabilities;
+  fetchSpecializedData(company: CompanySearchResult): Promise<AdapterResult<SpecializedCompanyData>>;
 }
 
 export function providerDiagnostic(

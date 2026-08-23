@@ -1,4 +1,4 @@
-export type AnalysisType = "summary" | "numbers" | "deep";
+export type AnalysisType = "summary" | "numbers" | "deep" | "research";
 export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 export type UiMode = "simple" | "pro";
 export type DataStatus = "current" | "stale" | "unavailable";
@@ -72,7 +72,7 @@ export type MetricProvenance = {
 
 export type ProviderDiagnostic = {
   provider: string;
-  capability: "search" | "fundamentals" | "market_data" | "estimates";
+  capability: "search" | "fundamentals" | "market_data" | "estimates" | "specialized" | "news" | "insider";
   status: "available" | "partial" | "unavailable" | "unsupported";
   reason?: string;
   observedAt: string;
@@ -85,6 +85,7 @@ export type CompanySearchResult = {
   cik?: string;
   exchange?: string;
   country?: string;
+  currency?: string;
   entityId?: string;
   securityType?: "Common Stock" | "Preferred" | "ETF/Fund" | "ADR" | "Other";
   providerCapabilities?: {
@@ -110,6 +111,10 @@ export type MarketSnapshot = {
   volume: number | null;
   yearHigh: number | null;
   yearLow: number | null;
+  marketCap?: number | null;
+  sharesOutstanding?: number | null;
+  beta?: number | null;
+  provider?: string;
   performance: Partial<Record<"1D" | "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y", number>>;
 };
 
@@ -157,6 +162,7 @@ export type CompanyFundamentals = {
   annualPeriods?: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
+  specialized?: SpecializedCompanyData;
   diagnostics?: AnalysisDiagnostics;
 };
 
@@ -311,11 +317,20 @@ export type AnalysisReport = {
   dataStatus?: DataStatus;
   confidenceBreakdown?: ConfidenceBreakdown;
   providerDiagnostics?: ProviderDiagnostic[];
+  scenarioStatus?: ScenarioStatus;
+  deepReport?: DeepReport;
+  research?: ResearchResult;
+  researchPlan?: ResearchPlan;
+  multiScores?: MultiScoreResult;
+  adminQa?: AdminQaDiagnostics;
   engine?: FinancialAnalysisResult;
 };
 
 export type CompanyProfile = {
   ticker?: string;
+  canonicalTicker?: string;
+  entityId?: string;
+  cik?: string;
   name?: string;
   sector?: Sector;
   industry?: string;
@@ -384,6 +399,7 @@ export type FinancialMarketSnapshot = {
   enterpriseValue?: number | null;
   sharesOutstanding?: number | null;
   beta?: number | null;
+  provider?: string;
   currency?: string | null;
   priceDate?: string | null;
   volume?: number | null;
@@ -428,6 +444,7 @@ export type FinancialAnalysisInput = {
   dcfAssumptions?: DcfInputAssumptions;
   analysisDate?: string;
   providerDiagnostics?: ProviderDiagnostic[];
+  specialized?: SpecializedCompanyData;
 };
 
 export type MarginMetrics = {
@@ -493,6 +510,7 @@ export type ValuationMetrics = {
   priceEarnings: number | null;
   priceSales: number | null;
   priceBook: number | null;
+  priceTangibleBook: number | null;
   evSales: number | null;
   evEbitda: number | null;
   freeCashFlowYield: number | null;
@@ -666,10 +684,245 @@ export type FinancialAnalysisResult = {
   recommendation: RecommendationDecision;
   dcf: DcfRangeResult;
   scenarios: AnalysisScenario[];
+  scenarioStatus: ScenarioStatus;
   missingData: MissingDataItem[];
   dataCoverage: number;
   confidenceBreakdown: ConfidenceBreakdown;
   diagnostics: AnalysisDiagnostics;
   reconciliation: ReconciliationCheck[];
   provenance: Record<string, MetricProvenance>;
+};
+
+export type ScenarioStatus = "valuation" | "qualitative_research" | "insufficient_data";
+
+export type SpecializedMetric = {
+  value: number | null;
+  unit?: string;
+  dataAsOf?: string | null;
+  provenance?: MetricProvenance;
+  definition?: string;
+};
+
+export type BankSpecializedMetrics = {
+  kind: "bank";
+  netInterestIncome: SpecializedMetric;
+  netInterestMargin: SpecializedMetric;
+  grossLoans: SpecializedMetric;
+  deposits: SpecializedMetric;
+  depositGrowth: SpecializedMetric;
+  fundingCost: SpecializedMetric;
+  cet1CapitalRatio: SpecializedMetric;
+  tangibleCommonEquity: SpecializedMetric;
+  tangibleBookValuePerShare: SpecializedMetric;
+  nonPerformingLoans: SpecializedMetric;
+  netChargeOffs: SpecializedMetric;
+  loanLossProvisions: SpecializedMetric;
+  efficiencyRatio: SpecializedMetric;
+  returnOnAssets: SpecializedMetric;
+  returnOnEquity: SpecializedMetric;
+  returnOnTangibleCommonEquity: SpecializedMetric;
+};
+
+export type ReitSpecializedMetrics = {
+  kind: "reit";
+  fundsFromOperations: SpecializedMetric;
+  fundsFromOperationsPerShare: SpecializedMetric;
+  adjustedFundsFromOperations: SpecializedMetric & { companyDefined: boolean };
+  adjustedFundsFromOperationsPerShare: SpecializedMetric & { companyDefined: boolean };
+  fundsFromOperationsGrowth: SpecializedMetric;
+  adjustedFundsFromOperationsGrowth: SpecializedMetric;
+  adjustedFundsFromOperationsPayout: SpecializedMetric;
+  dividendCoverage: SpecializedMetric;
+  occupancy: SpecializedMetric;
+  sameStoreNoiGrowth: SpecializedMetric;
+  netDebtToEbitdare: SpecializedMetric;
+  debtMaturities: SpecializedMetric;
+  fixedChargeCoverage: SpecializedMetric;
+  netAssetValue: SpecializedMetric;
+};
+
+export type SpecializedCompanyData = BankSpecializedMetrics | ReitSpecializedMetrics;
+
+export type EvidenceKind =
+  | "reported_fact"
+  | "derived_metric"
+  | "estimate"
+  | "management_guidance"
+  | "external_estimate"
+  | "model_assumption"
+  | "qualitative_inference";
+
+export type SourceTier =
+  | "regulatory_filing"
+  | "company_ir"
+  | "official_regulator"
+  | "exchange"
+  | "financial_provider"
+  | "reputable_news"
+  | "secondary_source";
+
+export type ResearchEvidence = {
+  id: string;
+  kind: EvidenceKind;
+  sourceTier: SourceTier;
+  title: string;
+  source: AnalysisSource;
+  excerpt?: string;
+  dataAsOf?: string | null;
+};
+
+export type ResearchFinding = {
+  statement: string;
+  evidenceIds: string[];
+  confidence: number;
+};
+
+export type ResearchModuleStatus = "available" | "partial" | "unavailable" | "unsupported";
+
+export type ResearchModuleId =
+  | "fundamental_core"
+  | "business_model_moat"
+  | "segments_geography"
+  | "management_capital_allocation"
+  | "earnings_guidance"
+  | "analyst_expectations"
+  | "news_material_events"
+  | "insider_transactions"
+  | "ownership_positioning"
+  | "competitor_industry"
+  | "supply_chain_customers"
+  | "macro_exposure"
+  | "geopolitical_exposure"
+  | "inflection_turnaround"
+  | "advanced_valuation_scenarios";
+
+export type ResearchModuleResult = {
+  id: ResearchModuleId;
+  title: string;
+  status: ResearchModuleStatus;
+  coverage: number;
+  confidence: number;
+  dataAsOf: string | null;
+  findings: ResearchFinding[];
+  positiveSignals: string[];
+  negativeSignals: string[];
+  unknowns: string[];
+  sources: ResearchEvidence[];
+};
+
+export type DeepSectionId =
+  | "executive_thesis" | "company_overview" | "business_model" | "revenue_profit_drivers"
+  | "segment_analysis" | "geographic_exposure" | "historical_financial_trend" | "growth_quality"
+  | "margin_development" | "capital_efficiency" | "balance_sheet" | "cash_flow" | "capital_allocation"
+  | "share_dilution_sbc" | "archetype_kpis" | "valuation" | "peer_comparison" | "historical_valuation"
+  | "risk_analysis" | "catalysts" | "scenarios" | "improve_case" | "break_thesis" | "watch_next"
+  | "data_confidence" | "sources_provenance" | "missing_data";
+
+export type DeepReportSection = {
+  id: DeepSectionId;
+  title: string;
+  status: ResearchModuleStatus;
+  findings: ResearchFinding[];
+  unknowns: string[];
+};
+
+export type DeepReport = { sections: DeepReportSection[] };
+
+export type MaterialNewsEventType =
+  | "earnings" | "guidance_raise" | "guidance_cut" | "major_order" | "contract_loss"
+  | "acquisition" | "divestment" | "capital_raise" | "buyback" | "dividend_change"
+  | "management_change" | "regulatory_event" | "fda_ema_event" | "lawsuit_investigation"
+  | "credit_rating" | "cybersecurity_event" | "factory_supply_disruption" | "product_launch"
+  | "customer_win_loss" | "short_seller_report" | "geopolitical_exposure_event" | "unclassified";
+
+export type MaterialNewsEvent = {
+  eventType: MaterialNewsEventType;
+  materiality: "low" | "medium" | "high";
+  direction: "positive" | "negative" | "mixed" | "neutral";
+  confidence: number;
+  timeHorizon: "near_term" | "medium_term" | "long_term" | "unknown";
+  affectedFinancialDriver: string | null;
+  evidence: ResearchEvidence;
+};
+
+export type InsiderTransactionType = "open_market_buy" | "open_market_sell" | "option_exercise" | "tax_related" | "automatic_plan" | "other";
+export type InsiderTransaction = {
+  transactionType: InsiderTransactionType;
+  insiderRole: string | null;
+  shares: number | null;
+  value: number | null;
+  ownershipChange: number | null;
+  date: string;
+  automaticPlan: boolean;
+  evidence?: ResearchEvidence;
+};
+
+export type InsiderContextResult = {
+  direction: "positive" | "negative" | "mixed" | "neutral" | "unknown";
+  confidence: number;
+  clusterBuying: boolean;
+  clusterSelling: boolean;
+  findings: string[];
+};
+
+export type InflectionStage = "deteriorating" | "bottoming" | "early_turnaround" | "confirmed_turnaround" | "accelerating" | "mature" | "unknown";
+export type InflectionScoreResult = {
+  inflectionScore: number | null;
+  direction: "positive" | "negative" | "mixed" | "unknown";
+  confidence: number;
+  supportingSignals: string[];
+  contradictingSignals: string[];
+  estimatedStage: InflectionStage;
+};
+
+export type MultiScoreResult = {
+  businessQualityScore: number | null;
+  opportunityScore: number | null;
+  inflectionScore: InflectionScoreResult;
+  riskScore: number | null;
+};
+
+export type ResearchPlan = {
+  investmentHorizon: "short" | "medium" | "long" | "unspecified";
+  nextSuggestedReview: string | null;
+  whatToWatch: string[];
+  improveCase: string[];
+  weakenCase: string[];
+  invalidationTriggers: string[];
+  upcomingEvents: string[];
+  valuationReviewZone: string | null;
+};
+
+export type ResearchResult = {
+  modules: ResearchModuleResult[];
+  evidence: ResearchEvidence[];
+  inflection: InflectionScoreResult;
+  generatedAt: string;
+};
+
+export type AdminQaDiagnostics = {
+  providerFailures: ProviderDiagnostic[];
+  fallbacks: string[];
+  missingDataReasons: MissingDataItem[];
+  classificationDiagnostics: string[];
+  timingsMs: Record<string, number>;
+  sourceConflicts: string[];
+};
+
+export type QaFlag =
+  | "STALE_DATA" | "LOW_COVERAGE" | "ENTITY_MISMATCH" | "UNSUPPORTED_MARKET" | "WRONG_ARCHETYPE"
+  | "TTM_FALLBACK" | "PERIOD_MISMATCH" | "RECONCILIATION_FAIL" | "MARKET_PROVIDER_ERROR"
+  | "SPECIALIZED_DATA_MISSING" | "VALUATION_UNAVAILABLE" | "SCENARIO_UNSUPPORTED" | "SOURCE_CONFLICT";
+
+export type BatchQaResult = {
+  batchId: string;
+  rerunKey: string;
+  modelVersion: string;
+  providerVersions: Record<string, string>;
+  analysisTimestamp: string;
+  canonicalEntity: string;
+  archetype: AnalysisArchetype;
+  coverage: number;
+  confidence: number;
+  flags: QaFlag[];
 };

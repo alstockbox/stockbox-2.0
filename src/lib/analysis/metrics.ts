@@ -128,6 +128,9 @@ function deriveValuationMetrics(
   const revenue = latest?.revenue ?? null;
   const netIncome = latest?.netIncome ?? null;
   const equity = latest?.totalEquity ?? null;
+  const tangibleBook = input.specialized?.kind === "bank"
+    ? input.specialized.tangibleCommonEquity.value
+    : latest?.tangibleBookValue ?? null;
   const ebitda = firstFinite(
     latest?.ebitda,
     isFiniteNumber(latest?.operatingIncome) && isFiniteNumber(latest?.depreciationAndAmortization)
@@ -142,6 +145,7 @@ function deriveValuationMetrics(
     priceEarnings: pe,
     priceSales: isFiniteNumber(revenue) && revenue > 0 ? safeDivide(marketCap, revenue) : null,
     priceBook: isFiniteNumber(equity) && equity > 0 ? safeDivide(marketCap, equity) : null,
+    priceTangibleBook: isFiniteNumber(tangibleBook) && tangibleBook > 0 ? safeDivide(marketCap, tangibleBook) : null,
     evSales: isFiniteNumber(revenue) && revenue > 0 ? safeDivide(enterpriseValue, revenue) : null,
     evEbitda: isFiniteNumber(ebitda) && ebitda > 0 ? safeDivide(enterpriseValue, ebitda) : null,
     freeCashFlowYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(simpleFcf, marketCap) : null,
@@ -299,7 +303,10 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       ...(latest?.provenance ?? {}),
       simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], "CFO - abs(capex)"),
       fcff: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"]),
-      marketCap: derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]),
+      marketCap: isFiniteNumber(input.market?.marketCap)
+        ? { source: "Market data", provider: input.market?.provider, periodEnd: input.market?.priceDate ?? undefined, valueKind: "reported" }
+        : { ...derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]), provider: input.market?.provider },
+      priceTangibleBook: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["marketCap", "tangibleCommonEquity"]),
       revenueGrowthYoY: {
         ...derivedProvenance(
           "StockBox deterministic formula",

@@ -21,8 +21,8 @@ export async function GET() {
   const observedAt = result.diagnostic.observedAt;
 
   return Response.json({
-    provider: selectedProvider === "stooq" ? "stooq-eod" : "disabled",
-    configured: selectedProvider === "stooq",
+    provider: selectedProvider === "stooq" ? "stooq-eod" : selectedProvider === "twelve_data" ? "twelve-data" : "disabled",
+    configured: selectedProvider === "stooq" || (selectedProvider === "twelve_data" && Boolean(process.env.TWELVE_DATA_API_KEY)),
     status: result.ok ? "available" : "unavailable",
     reason: result.ok ? null : result.reason,
     testedSymbol: probeCompany.ticker,

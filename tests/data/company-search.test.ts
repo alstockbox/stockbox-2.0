@@ -29,9 +29,28 @@ describe("company search catalog", () => {
     ["Investor B", "INVE.B"],
     ["INVE.B", "INVE.B"],
     ["INVE B", "INVE.B"],
+    ["Volvo", "VOLV-B.ST"],
+    ["Novo Nordisk", "NOVO-B.CO"],
+    ["7203.T", "7203.T"],
+    ["ROG.SW", "ROG.SW"],
+    ["NESN.SW", "NESN.SW"],
+    ["NOKIA.HE", "NOKIA.HE"],
   ])("ranks %s with canonical ticker %s first", async (query, ticker) => {
     const results = await searchCompanyCatalog(query);
     expect(results[0]?.canonicalTicker).toBe(ticker);
+  });
+
+  it.each(["ABB", "Novo Nordisk", "Toyota", "ASML", "Nokia"])("keeps ADR and local listings distinct for %s", async (query) => {
+    const results = await searchCompanyCatalog(query);
+    const identities = new Map<string, string[]>();
+    for (const company of results) identities.set(company.entityId ?? "", [...(identities.get(company.entityId ?? "") ?? []), company.ticker]);
+    expect([...identities.values()].some((tickers) => tickers.length >= 2)).toBe(true);
+  });
+
+  it("returns ambiguous MICRO candidates without selecting one", async () => {
+    const results = await searchCompanyCatalog("MICRO");
+    expect(results.map((company) => company.ticker)).toEqual(expect.arrayContaining(["MU", "MCHP"]));
+    expect(results.length).toBeGreaterThanOrEqual(2);
   });
 
   it("strongly prefers JPM common stock over preferred securities", async () => {

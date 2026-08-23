@@ -76,9 +76,10 @@ function FlagList({ flags, tone }: { flags: Flag[]; tone: "red" | "green" }) {
 }
 
 export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; mode?: UiMode }) {
-  const showExplainability = mode === "pro" || report.analysisType === "deep";
+  const extended = report.analysisType === "deep" || report.analysisType === "research";
+  const showExplainability = mode === "pro" || extended;
   const showNumbers = mode === "pro" || report.analysisType !== "summary";
-  const showValuation = mode === "pro" || report.analysisType === "deep";
+  const showValuation = mode === "pro" || extended;
   const engine = report.engine;
   const growthBasis = engine?.metrics.growth.revenueGrowthBasis;
   const displayedMetricLabels = {
@@ -184,7 +185,7 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
                   <p className="mt-1 text-xs text-[#9aa7b8]">Coverage {formatPercent(dimension.coverage, 0)}</p>
                 ) : null}
                 <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{dimension.rationale}</p>
-                {report.analysisType === "deep" && dimension.contributors?.length ? (
+                {extended && dimension.contributors?.length ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-xs font-semibold text-[#e1cb95]">Contributors</summary>
                     <div className="mt-2 space-y-1 text-xs text-[#9aa7b8]">
@@ -294,6 +295,45 @@ export function ReportView({ report, mode = "pro" }: { report: AnalysisReport; m
             </ul>
           </details>
         ) : null}
+      </Card> : null}
+
+      {report.deepReport ? <Card>
+        <h2 className="text-lg font-semibold text-[#f4efe5]">Deep Report</h2>
+        <div className="mt-4 divide-y divide-white/10">
+          {report.deepReport.sections.map((section) => (
+            <details key={section.id} className="py-3" open={section.id === "executive_thesis"}>
+              <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">
+                {section.title} <span className="ml-2 text-xs font-normal text-[#9aa7b8]">{section.status}</span>
+              </summary>
+              <div className="mt-2 space-y-2 text-sm leading-6 text-[#c9d2df]">
+                {section.findings.map((finding) => <p key={finding.statement}>{finding.statement}</p>)}
+                {section.unknowns.map((unknown) => <p key={unknown} className="text-[#9aa7b8]">Unknown: {unknown}</p>)}
+              </div>
+            </details>
+          ))}
+        </div>
+      </Card> : null}
+
+      {report.research ? <Card>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-[#f4efe5]">Institutional Research Modules</h2>
+          <Badge>{report.research.modules.filter((module) => module.status !== "unavailable").length}/{report.research.modules.length} available</Badge>
+        </div>
+        <div className="mt-4 divide-y divide-white/10">
+          {report.research.modules.map((module) => (
+            <details key={module.id} className="py-3" open={module.id === "fundamental_core"}>
+              <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">
+                {module.title} <span className="ml-2 text-xs font-normal text-[#9aa7b8]">{module.status}</span>
+              </summary>
+              <div className="mt-2 space-y-2 text-sm leading-6 text-[#c9d2df]">
+                {module.findings.map((finding) => <p key={finding.statement}>{finding.statement}</p>)}
+                {module.positiveSignals.map((signal) => <p key={signal} className="text-emerald-200">Positive: {signal}</p>)}
+                {module.negativeSignals.map((signal) => <p key={signal} className="text-red-200">Negative: {signal}</p>)}
+                {module.unknowns.map((unknown) => <p key={unknown} className="text-[#9aa7b8]">Unknown: {unknown}</p>)}
+              </div>
+            </details>
+          ))}
+        </div>
       </Card> : null}
 
       {showExplainability && engine ? <Card>

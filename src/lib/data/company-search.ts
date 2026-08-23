@@ -156,7 +156,7 @@ export async function searchCompanyCatalog(
     .map((company) => ({ company, rank: searchRank(company, normalizedQuery) }))
     .filter(({ rank }) => Number.isFinite(rank))
     .sort((left, right) => left.rank - right.rank || left.company.name.localeCompare(right.company.name))
-    .slice(0, 12)
+    .slice(0, 20)
     .map(({ company }) => {
       const publicCompany = { ...company };
       delete publicCompany.searchAliases;

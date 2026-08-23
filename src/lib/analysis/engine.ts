@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { resolveArchetype } from "./archetypes";
 import { MODEL_VERSION, REPORT_SCHEMA_VERSION } from "./config";
 import { computeDcfRange } from "./dcf";
-import { detectFinancialRedFlags } from "./flags";
+import { detectArchetypeGreenFlags, detectFinancialRedFlags } from "./flags";
 import { assessDataFreshness } from "./freshness";
 import { isFiniteNumber } from "./math";
 import { computeFinancialMetrics } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
 import { reconcileFinancialData, reconciliationConfidence, ttmPeriodBasisCheck } from "./reconciliation";
-import { buildAnalysisScenarios } from "./scenarios";
+import { attachInstitutionalResearch } from "./research";
+import { buildAnalysisScenarios, scenarioStatusFor } from "./scenarios";
 import { computeScores } from "./scoring";
 import type {
   AnalysisInput,
@@ -21,6 +22,7 @@ import type {
   Metrics,
   MissingDataItem,
   Sector,
+  SpecializedCompanyData,
 } from "./types";
 
 const DISCLAIMER =
@@ -72,6 +74,9 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
   return {
     company: {
       ticker: input.company.ticker,
+      canonicalTicker: input.company.canonicalTicker,
+      entityId: input.company.entityId,
+      cik: input.company.cik,
       name: fundamentals?.name ?? input.company.name,
       sector: toSector(fundamentals?.sector),
       industry: fundamentals?.industry ?? undefined,
@@ -90,6 +95,10 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
       volume: input.market.volume,
       yearHigh: input.market.yearHigh,
       yearLow: input.market.yearLow,
+      marketCap: input.market.marketCap,
+      sharesOutstanding: input.market.sharesOutstanding,
+      beta: input.market.beta,
+      provider: input.market.provider,
       pricePerformance: {
         oneMonth: input.market.performance["1M"] ?? null,
         threeMonth: input.market.performance["3M"] ?? null,
@@ -100,6 +109,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
     } : undefined,
     analysisDate: new Date().toISOString(),
     providerDiagnostics: input.providerDiagnostics ?? fundamentals?.diagnostics?.providerDiagnostics,
+    specialized: fundamentals?.specialized,
   };
 }
 
@@ -123,8 +133,18 @@ function diagnosticDates(input: FinancialAnalysisInput, freshness = assessDataFr
 function specializedMissingData(
   archetype: ReturnType<typeof resolveArchetype>,
   latest: FinancialPeriod | null,
+  specialized?: SpecializedCompanyData,
 ): MissingDataItem[] {
   if (archetype === "bank") {
+    const bankValues = specialized?.kind === "bank" ? {
+      netInterestMargin: specialized.netInterestMargin.value,
+      cet1CapitalRatio: specialized.cet1CapitalRatio.value,
+      grossLoans: specialized.grossLoans.value,
+      deposits: specialized.deposits.value,
+      nonperformingLoans: specialized.nonPerformingLoans.value,
+      netChargeOffs: specialized.netChargeOffs.value,
+      tangibleCommonEquity: specialized.tangibleCommonEquity.value,
+    } : {};
     return [
       ["netInterestMargin", "Net interest margin (NIM)"],
       ["cet1CapitalRatio", "CET1 capital ratio"],
@@ -134,6 +154,7 @@ function specializedMissingData(
       ["netChargeOffs", "Net charge-offs"],
       ["tangibleCommonEquity", "Tangible common equity / tangible book value"],
     ].flatMap(([field, label]) => {
+      if (isFiniteNumber(bankValues[field as keyof typeof bankValues])) return [];
       if (field === "tangibleCommonEquity" && isFiniteNumber(latest?.tangibleBookValue)) return [];
       return [{
         field,
@@ -145,7 +166,9 @@ function specializedMissingData(
   }
   if (archetype === "reit") {
     const missing: MissingDataItem[] = [];
-    if (!isFiniteNumber(latest?.fundsFromOperations)) {
+    const reportedFfo = specialized?.kind === "reit" ? specialized.fundsFromOperations.value : latest?.fundsFromOperations;
+    const reportedAffo = specialized?.kind === "reit" ? specialized.adjustedFundsFromOperations.value : latest?.adjustedFundsFromOperations;
+    if (!isFiniteNumber(reportedFfo)) {
       missing.push({
         field: "fundsFromOperations",
         reason: "Provider-reported FFO is unavailable; GAAP EPS is not substituted for FFO.",
@@ -153,7 +176,7 @@ function specializedMissingData(
         severity: "high",
       });
     }
-    if (!isFiniteNumber(latest?.adjustedFundsFromOperations)) {
+    if (!isFiniteNumber(reportedAffo)) {
       missing.push({
         field: "adjustedFundsFromOperations",
         reason: "Provider-reported AFFO is unavailable; GAAP EPS is not substituted for AFFO.",
@@ -194,6 +217,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
   const redFlags = detectFinancialRedFlags(metrics, archetype);
   const dcf = computeDcfRange(calculationInput, metrics);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
+  const scenarioStatus = freshness.dataStatus === "stale" ? "insufficient_data" : scenarioStatusFor(metrics, scores, dcf);
   const scenarios = freshness.dataStatus === "stale" ? [] : buildAnalysisScenarios(metrics, scores, dcf);
   const unsuitableCorporateFields = new Set(
     ["bank", "insurer", "reit"].includes(archetype)
@@ -201,7 +225,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
       : [],
   );
   const missing = [
-    ...specializedMissingData(archetype, metrics.latestPeriod),
+    ...specializedMissingData(archetype, metrics.latestPeriod, calculationInput.specialized),
     ...metrics.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...scores.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...dcf.missingData,
@@ -230,6 +254,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     recommendation,
     dcf,
     scenarios,
+    scenarioStatus,
     missingData: [...uniqueMissing.values()],
     dataCoverage: scores.dataCoverage,
     confidenceBreakdown: scores.confidenceBreakdown,
@@ -262,14 +287,6 @@ function legacyMetrics(result: FinancialAnalysisResult, input: FinancialAnalysis
     priceMomentum1y: input.market?.pricePerformance?.oneYear ?? null,
     priceMomentum3m: input.market?.pricePerformance?.threeMonth ?? null,
   };
-}
-
-function greenFlags(metrics: Metrics): Flag[] {
-  const flags: Flag[] = [];
-  if (metrics.revenueCagr3y !== null && metrics.revenueCagr3y > 0.1) flags.push({ severity: "low", title: "Durable revenue growth", detail: "Three-year revenue growth is strong.", metric: "revenueCagr3y" });
-  if (metrics.operatingMargin !== null && metrics.operatingMargin > 0.2) flags.push({ severity: "low", title: "Strong operating margin", detail: "Operating profitability is strong relative to revenue.", metric: "operatingMargin" });
-  if (metrics.fcfMargin !== null && metrics.fcfMargin > 0.12) flags.push({ severity: "low", title: "Strong simple FCF margin", detail: "CFO after economic capex is strong relative to revenue.", metric: "fcfMargin" });
-  return flags;
 }
 
 export function presentAnalysisReport(
@@ -331,7 +348,7 @@ export function presentAnalysisReport(
       bull: result.dcf.high,
     },
     redFlags,
-    greenFlags: greenFlags(metrics),
+    greenFlags: detectArchetypeGreenFlags(metrics, result.metrics, result.analysisArchetype, canonicalInput.specialized),
     scenarios: result.scenarios.map((scenario) => ({
       caseName: scenario.name,
       assumptions: scenario.assumptions,
@@ -350,8 +367,10 @@ export function presentAnalysisReport(
     dataStatus: result.dataStatus,
     confidenceBreakdown: result.confidenceBreakdown,
     providerDiagnostics: result.diagnostics.providerDiagnostics,
+    scenarioStatus: result.scenarioStatus,
     engine: result,
   };
+  attachInstitutionalResearch(report, result);
   return report;
 }
 
