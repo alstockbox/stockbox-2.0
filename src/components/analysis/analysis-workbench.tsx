@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { SetupNotice } from "@/components/ui/setup-notice";
 import { ReportView } from "./report-view";
 import {
+  compactAnalysisCapability,
   formattedCompanySelection,
   queryRepresentsSelection,
   securitySelectionKey,
@@ -208,6 +209,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                   <span className="block font-semibold text-[#f4efe5]">{company.canonicalTicker ?? company.ticker}</span>
                   <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#9aa7b8]">{company.name}</span>
                   <span className="mt-1 block text-xs text-[#6f7b8c]">{[company.exchange, company.securityType].filter(Boolean).join(" - ")}</span>
+                  <span className="mt-1 block text-xs text-[#7f8da0]">{compactAnalysisCapability(company)}</span>
                 </button>
               ))}
             </div>

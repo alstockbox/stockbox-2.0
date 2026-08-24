@@ -3,6 +3,8 @@ import { commonCompanies } from "./common-companies";
 import { entityIdentityFor } from "./entity-identities";
 import { fetchSecTickerUniverse } from "./sec";
 import { providerDiagnostic, type AdapterResult, type CompanySearchProvider, type ProviderCapabilities } from "./providers";
+import { securityMasterCompanySearchProvider } from "./security-master";
+import { normalizeText as normalizeSecurityText, normalizeTicker as normalizeSecurityTicker } from "./security-master/normalization";
 
 const SEARCH_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["global"],
@@ -13,11 +15,11 @@ const SEARCH_CAPABILITIES: ProviderCapabilities = {
 };
 
 function normalizedText(value: string): string {
-  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return normalizeSecurityText(value);
 }
 
 export function normalizedTicker(value: string): string {
-  return value.trim().toUpperCase().replace(/\.ST$/, "").replace(/[.\-\s]/g, "");
+  return normalizeSecurityTicker(value);
 }
 
 function securityType(company: CompanySearchResult): NonNullable<CompanySearchResult["securityType"]> {
@@ -45,12 +47,12 @@ function enrich(
     ticker: company.ticker.toUpperCase(),
     canonicalTicker: company.canonicalTicker ?? company.ticker.toUpperCase(),
     cik,
-    entityId: identity?.canonicalId ?? company.entityId ?? (cik ? `sec:${cik}` : `listing:${company.country ?? "unknown"}:${company.ticker.toUpperCase()}`),
+    entityId: identity?.canonicalId ?? company.entityId ?? company.issuerId ?? (cik ? `sec:${cik}` : `listing:${company.country ?? "unknown"}:${company.ticker.toUpperCase()}`),
     securityType: type,
     primarySecurity: company.primarySecurity ?? type === "Common Stock",
     providerCapabilities: {
       fundamentals: fundamentalsSupported,
-      marketData: company.providerCapabilities?.marketData ?? company.country === "US",
+      marketData: company.providerCapabilities?.marketData ?? (provider.capabilities.supportsMarketData || company.country === "US"),
       providerIds: [...providerIds].sort(),
     },
   };
@@ -81,7 +83,7 @@ type SearchMatch = {
 const SECURITY_QUERY_WORDS = new Set(["preferred", "preference", "pfd", "adr", "etf", "fund", "common", "stock", "shares", "share", "class"]);
 const MATCH_SCORE_CEILINGS: Record<NonNullable<CompanySearchResult["matchType"]>, number> = {
   exact_canonical_ticker: 100,
-  exact_provider_ticker: 99,
+  exact_provider_ticker: 100,
   exact_alias: 97,
   exact_company_name: 95,
   company_name_prefix: 92,
@@ -105,19 +107,31 @@ function requestedAdr(query: string): boolean {
 export function scoreSearchMatch(company: CompanySearchResult, query: string): SearchMatch | null {
   const rawQuery = query.trim().toUpperCase();
   const ticker = (company.canonicalTicker ?? company.ticker).toUpperCase();
+  const tickerCandidates = [
+    company.canonicalTicker ?? company.ticker,
+    company.ticker,
+    company.localTicker,
+    ...(company.providerTickers ?? []),
+  ].filter((value): value is string => Boolean(value));
+  const rawTickerCandidates = new Set(tickerCandidates.map((value) => value.toUpperCase()));
+  const normalizedTickerCandidates = new Set(tickerCandidates.map(normalizedTicker).filter(Boolean));
   const normalizedQueryTicker = normalizedTicker(query);
   const normalizedCompanyTicker = normalizedTicker(ticker);
   const queryText = normalizedText(query);
   const name = normalizedText(company.name);
-  const aliases = (company.searchAliases ?? []).map(normalizedText);
+  const aliases = [
+    ...(company.searchAliases ?? []),
+    company.localTicker,
+    ...(company.providerTickers ?? []),
+  ].filter((value): value is string => Boolean(value)).map(normalizedText);
   const preferredIntent = requestedPreferred(query);
   const adrIntent = requestedAdr(query);
   const exactCanonical = rawQuery === ticker;
-  const exactProvider = rawQuery === company.ticker.toUpperCase();
+  const exactProvider = rawTickerCandidates.has(rawQuery);
   let match: SearchMatch | null = null;
   if (exactCanonical) match = { score: 100, type: "exact_canonical_ticker", reasons: ["Exact canonical ticker"] };
   else if (exactProvider) match = { score: 99, type: "exact_provider_ticker", reasons: ["Exact provider ticker"] };
-  else if (normalizedQueryTicker && normalizedQueryTicker === normalizedCompanyTicker) match = { score: 98, type: "exact_canonical_ticker", reasons: ["Normalized canonical ticker match"] };
+  else if (normalizedQueryTicker && (normalizedQueryTicker === normalizedCompanyTicker || normalizedTickerCandidates.has(normalizedQueryTicker))) match = { score: 98, type: "exact_canonical_ticker", reasons: ["Normalized security ticker match"] };
   else if (aliases.some((alias) => alias === queryText)) match = { score: 96, type: "exact_alias", reasons: ["Exact known alias"] };
   else if (name === queryText) match = { score: 94, type: "exact_company_name", reasons: ["Exact normalized company name"] };
   else if (name.startsWith(queryText)) match = { score: 86, type: "company_name_prefix", reasons: ["Company-name prefix"] };
@@ -213,14 +227,15 @@ export async function searchCompanyCatalog(
 ): Promise<CompanySearchResult[]> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) return [];
-  const providers = [...configuredCatalogProviders, curatedCompanySearchProvider, secCompanySearchProvider];
+  const providers = [...configuredCatalogProviders, securityMasterCompanySearchProvider, curatedCompanySearchProvider, secCompanySearchProvider];
   const providerResults = await Promise.all(providers.map((provider) => provider.search(normalizedQuery)));
   const merged = new Map<string, CompanySearchResult>();
   for (const [providerIndex, result] of providerResults.entries()) {
     if (!result.ok) continue;
     for (const company of result.data) {
       const enriched = enrich(company, providers[providerIndex]);
-      const key = `${enriched.entityId ?? `${enriched.country ?? "unknown"}:unknown-issuer`}:${normalizedTicker(enriched.canonicalTicker ?? enriched.ticker)}:${enriched.securityType}`;
+      const key = enriched.securityId
+        ?? `${enriched.entityId ?? `${enriched.country ?? "unknown"}:unknown-issuer`}:${normalizedTicker(enriched.canonicalTicker ?? enriched.ticker)}:${enriched.securityType}`;
       merged.set(key, mergeCompany(merged.get(key), enriched));
     }
   }
@@ -229,7 +244,12 @@ export async function searchCompanyCatalog(
       const match = scoreSearchMatch(company, normalizedQuery);
       return match ? [{ company, match }] : [];
     })
-    .sort((left, right) => right.match.score - left.match.score || left.company.name.localeCompare(right.company.name))
+    .sort((left, right) =>
+      right.match.score - left.match.score
+      || Number(Boolean(right.company.securityId)) - Number(Boolean(left.company.securityId))
+      || Number(Boolean(right.company.primarySecurity)) - Number(Boolean(left.company.primarySecurity))
+      || left.company.name.localeCompare(right.company.name)
+    )
     .slice(0, 20)
     .map(({ company, match }, index, ranked) => {
       const second = ranked[index === 0 ? 1 : 0];

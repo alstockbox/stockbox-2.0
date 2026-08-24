@@ -41,7 +41,11 @@ describe("company search catalog", () => {
     ["Investor B", "INVE.B"],
     ["INVE.B", "INVE.B"],
     ["INVE B", "INVE.B"],
+    ["INVE.B.ST", "INVE.B"],
     ["Volvo", "VOLV-B.ST"],
+    ["VOLV-B.ST", "VOLV-B.ST"],
+    ["VOLV B", "VOLV-B.ST"],
+    ["ERIC-B.ST", "ERIC-B.ST"],
     ["Novo Nordisk", "NOVO-B.CO"],
     ["7203.T", "7203.T"],
     ["ROG.SW", "ROG.SW"],
@@ -125,9 +129,56 @@ describe("company search catalog", () => {
   it("does not claim SEC fundamentals support for Investor AB", async () => {
     const [investor] = await searchCompanyCatalog("INVE.B");
     expect(investor).toEqual(expect.objectContaining({
-      entityId: "listing:SE:INVE.B",
+      securityId: "xsto:inve-b",
+      entityId: "issuer:se:investor-ab",
       providerCapabilities: expect.objectContaining({ fundamentals: false }),
     }));
+  });
+
+  it.each([
+    ["Viscaria", "VISC.ST"],
+    ["VISC", "VISC.ST"],
+    ["visc.st", "VISC.ST"],
+    ["Sivers", "SIVE.ST"],
+    ["Sivers Semiconductors", "SIVE.ST"],
+    ["SIVE", "SIVE.ST"],
+    ["sive.st", "SIVE.ST"],
+  ])("finds Swedish listed securities by %s", async (query, canonicalTicker) => {
+    const [company] = await searchCompanyCatalog(query);
+    expect(company).toEqual(expect.objectContaining({
+      canonicalTicker,
+      country: "SE",
+      providerCapabilities: expect.objectContaining({ fundamentals: false, marketData: true }),
+      analysisCapability: expect.objectContaining({ fundamentals: "unavailable", marketData: "available" }),
+    }));
+  });
+
+  it("lets an exact Swedish listed ticker outrank fuzzy US-style candidates", async () => {
+    const provider: CompanySearchProvider = {
+      id: "fuzzy-global-provider",
+      capabilities: {
+        supportedCountries: ["global"], supportedExchanges: ["global"],
+        supportsFundamentals: true, supportsMarketData: true, supportsEstimates: false,
+      },
+      search: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [
+          { ticker: "FIVE", name: "Five Below, Inc.", country: "US", cik: "0001177609" },
+          { ticker: "HIVE", name: "HIVE Digital Technologies Ltd.", country: "CA" },
+          { ticker: "LIVE", name: "Live Ventures Incorporated", country: "US" },
+        ],
+        diagnostic: providerDiagnostic("fuzzy-global-provider", "search", "available"),
+      }),
+    };
+
+    const results = await searchCompanyCatalog("sive.st", [provider]);
+    expect(results[0]).toEqual(expect.objectContaining({
+      ticker: "SIVE",
+      canonicalTicker: "SIVE.ST",
+      matchType: expect.stringMatching(/^exact_/),
+      primaryCandidate: true,
+    }));
+    expect(results.findIndex((company) => company.ticker === "FIVE")).toBeGreaterThan(0);
   });
 
   it.each([

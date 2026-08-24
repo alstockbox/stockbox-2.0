@@ -79,20 +79,36 @@ export type ProviderDiagnostic = {
 };
 
 export type CompanySearchResult = {
+  securityId?: string;
+  issuerId?: string;
   ticker: string;
   canonicalTicker?: string;
+  localTicker?: string;
+  providerTickers?: string[];
   name: string;
   cik?: string;
   exchange?: string;
+  mic?: string;
+  marketSegment?: string;
   country?: string;
   currency?: string;
   entityId?: string;
+  isin?: string;
+  figi?: string;
+  lei?: string;
   securityType?: "Common Stock" | "Preferred" | "ETF/Fund" | "ADR" | "Other";
   providerCapabilities?: {
     fundamentals: boolean;
     marketData: boolean;
     providerIds: string[];
   };
+  analysisCapability?: {
+    fundamentals: "full" | "partial" | "unavailable";
+    marketData: "available" | "unavailable";
+    reason?: string;
+  };
+  source?: string;
+  sourceUpdatedAt?: string;
   searchAliases?: string[];
   primarySecurity?: boolean;
   matchType?: "exact_canonical_ticker" | "exact_provider_ticker" | "exact_alias" | "exact_company_name" | "company_name_prefix" | "token_coverage" | "ticker_typo" | "name_typo";

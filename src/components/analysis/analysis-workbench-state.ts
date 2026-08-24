@@ -39,3 +39,9 @@ export function selectionAfterQueryChange(
 export function supportsLiveFundamentals(company: CompanySearchResult | null): boolean {
   return Boolean(company?.providerCapabilities?.fundamentals ?? company?.cik);
 }
+
+export function compactAnalysisCapability(company: CompanySearchResult): string {
+  const fundamentals = supportsLiveFundamentals(company) ? "Fundamentals" : "Discovery only";
+  const marketData = company.providerCapabilities?.marketData ? "Market data" : "No market data";
+  return `${fundamentals} - ${marketData}`;
+}
