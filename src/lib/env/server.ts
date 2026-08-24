@@ -8,14 +8,14 @@ const marketDataProviderSchema = z.preprocess(
     const normalized = value.trim().toLowerCase();
     return normalized || undefined;
   },
-  z.enum(["twelve_data", "stooq", "disabled"]).default("stooq")
+  z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("stooq")
 );
 
 const providerListSchema = z.preprocess(
   (value) => typeof value === "string"
     ? value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
     : value,
-  z.array(z.enum(["twelve_data", "stooq"])).default([]),
+  z.array(z.enum(["twelve_data", "stooq", "yahoo"])).default([]),
 );
 
 const envSchema = z.object({
@@ -112,8 +112,13 @@ export function getMarketDataProvider(env = getServerEnv()) {
 }
 
 export function getMarketDataProviderChain(env = getServerEnv()) {
-  const ordered = [env.MARKET_DATA_PROVIDER, ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? [])];
-  return [...new Set(ordered.filter((provider): provider is "twelve_data" | "stooq" => provider !== "disabled"))];
+  if (env.MARKET_DATA_PROVIDER === "disabled") return [];
+  const ordered: Array<"twelve_data" | "stooq" | "yahoo"> = [
+    env.MARKET_DATA_PROVIDER,
+    ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? []),
+    "yahoo",
+  ];
+  return [...new Set(ordered)];
 }
 
 export function getGlobalSymbolSearchProvider(env = getServerEnv()) {

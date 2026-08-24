@@ -58,6 +58,25 @@ describe("computeFinancialMetrics", () => {
     expect(metrics.valuation.enterpriseValue).toBeNull();
   });
 
+  it("does not use diluted weighted-average shares as a current market-cap denominator", () => {
+    const latest = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      currentSharesOutstanding: null,
+      sharesDiluted: 15_000,
+    };
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [latest],
+      market: {
+        ...durableCompounderInput.market,
+        price: 200,
+        marketCap: null,
+        sharesOutstanding: null,
+      },
+    });
+    expect(metrics.valuation.marketCap).toBeNull();
+  });
+
   it("reports missing or unsafe denominators instead of producing misleading growth", () => {
     const metrics = computeFinancialMetrics(missingDataInput);
 

@@ -16,6 +16,7 @@ import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
 import { providerDiagnostic, type AdapterResult, type MarketDataProvider, type ProviderFailureReason } from "./providers";
 import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
+import { yahooMarketDataProvider } from "./yahoo-market";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
@@ -34,7 +35,7 @@ type MarketDataResolution = {
   source?: Omit<AnalysisSource, "accessedAt">;
 };
 
-type ConfiguredMarketProviderKey = "twelve_data" | "stooq";
+type ConfiguredMarketProviderKey = "twelve_data" | "stooq" | "yahoo";
 
 type MarketDataProviderCandidate = {
   key: ConfiguredMarketProviderKey;
@@ -100,6 +101,16 @@ function configuredMarketDataProviderCandidates(env: ServerEnv = getServerEnv())
         label: "Stooq",
         configured: true,
         provider: stooqMarketDataProvider,
+      };
+    }
+
+    if (key === "yahoo") {
+      return {
+        key,
+        providerId: yahooMarketDataProvider.id,
+        label: "Yahoo Finance chart",
+        configured: true,
+        provider: yahooMarketDataProvider,
       };
     }
 

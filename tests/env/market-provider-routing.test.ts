@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fetchStooqMarketData: vi.fn(),
   fetchTwelveDataMarketData: vi.fn(),
+  fetchYahooMarketData: vi.fn(),
   getMarketDataProviderChain: vi.fn(),
   getServerEnv: vi.fn(),
 }));
@@ -25,6 +26,21 @@ vi.mock("@/lib/data/stooq", () => ({
     },
     source: vi.fn(() => ({ name: "Stooq", url: "https://stooq.test", freshness: "EOD" })),
     fetchMarketData: mocks.fetchStooqMarketData,
+  },
+}));
+
+vi.mock("@/lib/data/yahoo-market", () => ({
+  yahooMarketDataProvider: {
+    id: "yahoo-chart",
+    capabilities: {
+      supportedCountries: ["global"],
+      supportedExchanges: ["Yahoo Finance chart catalog"],
+      supportsFundamentals: false,
+      supportsMarketData: true,
+      supportsEstimates: false,
+    },
+    source: vi.fn(() => ({ name: "Yahoo Finance chart", url: "https://finance.yahoo.test", freshness: "15m" })),
+    fetchMarketData: mocks.fetchYahooMarketData,
   },
 }));
 
@@ -133,6 +149,26 @@ describe("configured market provider routing", () => {
     await expect(fetchConfiguredMarketData(company)).resolves.toEqual(fallbackResult);
     expect(mocks.fetchStooqMarketData).toHaveBeenCalledOnce();
     expect(mocks.fetchTwelveDataMarketData).toHaveBeenCalledOnce();
+  });
+
+  it("continues to Yahoo after Stooq returns HTML", async () => {
+    const yahooResult = {
+      ok: true as const,
+      data: marketSnapshot("yahoo-chart"),
+      diagnostic: { provider: "Yahoo Finance chart", capability: "market_data" as const, status: "available" as const, observedAt: "2026-08-24T00:00:00.000Z" },
+    };
+    mocks.getMarketDataProviderChain.mockReturnValue(["stooq", "yahoo"]);
+    mocks.fetchStooqMarketData.mockResolvedValue({
+      ok: false,
+      reason: "html_response",
+      message: "Stooq returned HTML instead of market data.",
+      diagnostic: { provider: "Stooq", capability: "market_data" as const, status: "unavailable" as const, reason: "html_response", observedAt: "2026-08-24T00:00:00.000Z" },
+    });
+    mocks.fetchYahooMarketData.mockResolvedValue(yahooResult);
+
+    await expect(fetchConfiguredMarketData(company)).resolves.toEqual(yahooResult);
+    expect(mocks.fetchStooqMarketData).toHaveBeenCalledOnce();
+    expect(mocks.fetchYahooMarketData).toHaveBeenCalledOnce();
   });
 
   it("reports an unconfigured Twelve Data provider before resolving Stooq in smoke diagnostics", async () => {

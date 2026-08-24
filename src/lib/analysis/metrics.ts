@@ -107,7 +107,7 @@ function stability(values: Array<number | null>): number | null {
 
 function deriveMarketCap(input: FinancialAnalysisInput, latest: FinancialPeriod | null): number | null {
   if (isFiniteNumber(input.market?.marketCap)) return input.market.marketCap;
-  const shares = firstFinite(input.market?.sharesOutstanding, latest?.currentSharesOutstanding, latest?.sharesDiluted);
+  const shares = firstFinite(input.market?.sharesOutstanding, latest?.currentSharesOutstanding);
   return isFiniteNumber(input.market?.price) && isFiniteNumber(shares) ? input.market.price * shares : null;
 }
 
