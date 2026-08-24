@@ -4,8 +4,26 @@ const mocks = vi.hoisted(() => ({ fetchSecTickerUniverse: vi.fn() }));
 
 vi.mock("@/lib/data/sec", () => ({ fetchSecTickerUniverse: mocks.fetchSecTickerUniverse }));
 
-import { searchCompanyCatalog } from "../../src/lib/data/company-search";
+import { normalizedTicker, searchCompanyCatalog } from "../../src/lib/data/company-search";
 import { providerDiagnostic, type CompanySearchProvider } from "../../src/lib/data/providers";
+import { swedishSecurityMasterProvider } from "../../src/lib/data/security-master";
+
+const stockholmTickerCollisions = [
+  ["EVO.ST", "Evolution"],
+  ["EQT.ST", "EQT"],
+  ["CAST.ST", "Castellum"],
+  ["MIR.ST", "Miris Holding"],
+  ["META.ST", "Metacon"],
+  ["NIO.ST", "Nordic Iron Ore"],
+  ["ACAD.ST", "AcadeMedia"],
+  ["BILL.ST", "Billerud"],
+  ["HUM.ST", "Humana"],
+  ["PDX.ST", "Paradox Interactive"],
+] as const;
+
+function tickerRoot(ticker: string): string {
+  return normalizedTicker(ticker.replace(/\.(ST|SS)$/i, ""));
+}
 
 describe("company search catalog", () => {
   beforeEach(() => {
@@ -15,10 +33,21 @@ describe("company search catalog", () => {
       { ticker: "JPM-PC", name: "JPMorgan Chase Preferred Depositary Shares Series C", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "JPM-PD", name: "JPMorgan Chase Preferred Depositary Shares", cik: "0000019617", exchange: "NYSE", country: "US" },
       { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", exchange: "NASDAQ", country: "US" },
+      { ticker: "GOOG", name: "Alphabet Inc. Class C", cik: "0001652044", exchange: "NASDAQ", country: "US" },
+      { ticker: "GOOGL", name: "Alphabet Inc. Class A", cik: "0001652044", exchange: "NASDAQ", country: "US" },
       { ticker: "NNN", name: "NNN REIT, INC.", cik: "0000751364", exchange: "NYSE", country: "US" },
       { ticker: "O", name: "REALTY INCOME CORP", cik: "0000726728", exchange: "NYSE", country: "US" },
       { ticker: "PLD", name: "Prologis, Inc.", cik: "0001045609", exchange: "NYSE", country: "US" },
       { ticker: "AHR", name: "American Healthcare REIT, Inc.", cik: "0001632970", exchange: "NYSE", country: "US" },
+      { ticker: "EVO", name: "Evotec SE", cik: "0001806949", exchange: "NASDAQ", country: "US" },
+      { ticker: "EQT", name: "EQT Corporation", cik: "0000033213", exchange: "NYSE", country: "US" },
+      { ticker: "CAST", name: "FreeCast, Inc.", cik: "0001905660", exchange: "OTC", country: "US" },
+      { ticker: "MIR", name: "Mirion Technologies, Inc.", cik: "0001809987", exchange: "NYSE", country: "US" },
+      { ticker: "NIO", name: "NIO Inc.", cik: "0001736541", exchange: "NYSE", country: "US" },
+      { ticker: "ACAD", name: "ACADIA Pharmaceuticals Inc.", cik: "0001070494", exchange: "NASDAQ", country: "US" },
+      { ticker: "BILL", name: "BILL Holdings, Inc.", cik: "0001786352", exchange: "NYSE", country: "US" },
+      { ticker: "HUM", name: "Humana Inc.", cik: "0000049071", exchange: "NYSE", country: "US" },
+      { ticker: "PDX", name: "PIMCO Dynamic Income Strategy Fund", cik: "0001848753", exchange: "NYSE", country: "US" },
       { ticker: "ZZZZ", name: "Unverified SEC Registrant", cik: "0009999999", exchange: "NYSE", country: "US" },
     ]);
   });
@@ -26,6 +55,8 @@ describe("company search catalog", () => {
   it.each([
     ["NVDA", "NVDA"],
     ["JPM", "JPM"],
+    ["JPM-PC", "JPM-PC"],
+    ["JPM-PD", "JPM-PD"],
     ["AAPL", "AAPL"],
     ["Apple", "AAPL"],
     ["Apple Inc", "AAPL"],
@@ -34,6 +65,7 @@ describe("company search catalog", () => {
     ["BRK.B", "BRK.B"],
     ["BRK B", "BRK.B"],
     ["Berkshire", "BRK.B"],
+    ["GOOG", "GOOG"],
     ["GOOGL", "GOOGL"],
     ["Google", "GOOGL"],
     ["META", "META"],
@@ -202,7 +234,36 @@ describe("company search catalog", () => {
       matchType: expect.stringMatching(/^exact_/),
       primaryCandidate: true,
     }));
-    expect(results.findIndex((company) => company.ticker === "FIVE")).toBeGreaterThan(0);
+    expect(results[0]?.ticker).not.toBe("FIVE");
+  });
+
+  it.each(stockholmTickerCollisions)(
+    "keeps exact Stockholm ticker %s above same-root foreign securities",
+    async (canonicalTicker, expectedName) => {
+      const results = await searchCompanyCatalog(canonicalTicker);
+      const root = tickerRoot(canonicalTicker);
+
+      expect(results[0]).toEqual(expect.objectContaining({
+        canonicalTicker,
+        country: "SE",
+        name: expect.stringContaining(expectedName),
+        matchType: expect.stringMatching(/^exact_/),
+        matchConfidence: "high",
+        primaryCandidate: true,
+      }));
+      expect(results.findIndex((company) =>
+        company.country !== "SE" && normalizedTicker(company.ticker) === root
+      )).toBeGreaterThan(0);
+    },
+  );
+
+  it("keeps generated Swedish collision tickers covered by exact-routing regression", async () => {
+    const securities = await swedishSecurityMasterProvider.listSecurities();
+    const canonicalByRoot = new Map(securities.map((security) => [tickerRoot(security.canonicalTicker), security.canonicalTicker]));
+
+    expect(stockholmTickerCollisions.map(([canonicalTicker]) => canonicalByRoot.get(tickerRoot(canonicalTicker)))).toEqual(
+      stockholmTickerCollisions.map(([canonicalTicker]) => canonicalTicker),
+    );
   });
 
   it.each([
