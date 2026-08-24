@@ -131,6 +131,7 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
           sharesOutstanding,
           beta: nestedNumber(statistics, "stock_price_summary", "beta"),
           provider: PROVIDER_ID,
+          historyLength: history.length,
           performance: {
             "1D": change(history, 1) ?? undefined,
             "1W": change(history, 5) ?? undefined,

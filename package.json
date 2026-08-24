@@ -7,10 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "eslint . --cache",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "security-master:build-sweden": "node scripts/security-master/build-swedish-snapshot.mjs",
+    "market-data:smoke": "node scripts/market-data-smoke.mjs"
   },
   "allowScripts": {
     "unrs-resolver@1.12.2": true

@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  fetchConfiguredMarketData: vi.fn(),
+  configuredMarketDataProviderStatuses: vi.fn(),
   getCurrentUser: vi.fn(),
-  getMarketDataProvider: vi.fn(),
+  smokeConfiguredMarketData: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({ getCurrentUser: mocks.getCurrentUser }));
-vi.mock("@/lib/data/provider", () => ({ fetchConfiguredMarketData: mocks.fetchConfiguredMarketData }));
-vi.mock("@/lib/env/server", () => ({ getMarketDataProvider: mocks.getMarketDataProvider }));
+vi.mock("@/lib/data/provider", () => ({
+  configuredMarketDataProviderStatuses: mocks.configuredMarketDataProviderStatuses,
+  smokeConfiguredMarketData: mocks.smokeConfiguredMarketData,
+}));
 
 import { dynamic, GET } from "../../src/app/api/health/providers/market/route";
 
@@ -19,27 +21,52 @@ describe("admin market provider probe", () => {
 
   it("returns only sanitized live provider diagnostics to an admin", async () => {
     mocks.getCurrentUser.mockResolvedValue({ id: "admin-1", email: "owner@stockbox.test", role: "admin" });
-    mocks.getMarketDataProvider.mockReturnValue("stooq");
-    mocks.fetchConfiguredMarketData.mockResolvedValue({
-      ok: false,
-      reason: "rate_limited",
-      message: "upstream response containing a confidential header",
-      diagnostic: { provider: "Stooq", capability: "market_data", status: "unavailable", reason: "rate_limited", observedAt: "2026-08-22T12:00:00.000Z" },
-    });
+    mocks.configuredMarketDataProviderStatuses.mockReturnValue([
+      { key: "twelve_data", providerId: "twelve-data", label: "Twelve Data", configured: false, reason: "not_configured" },
+      { key: "stooq", providerId: "stooq-eod", label: "Stooq", configured: true },
+    ]);
+    mocks.smokeConfiguredMarketData.mockResolvedValue([
+      {
+        symbol: "AAPL",
+        status: "available",
+        attemptedProviders: [
+          { provider: "Twelve Data", status: "unavailable", reason: "not_configured" },
+          { provider: "Stooq", status: "available" },
+        ],
+        resolvedProvider: "stooq-eod",
+        reason: null,
+        priceDate: "2026-08-21",
+        historyLength: 400,
+        momentum3MAvailable: true,
+        momentum1YAvailable: true,
+        betaAvailable: false,
+        marketCapAvailable: false,
+        observedAt: "2026-08-22T12:00:00.000Z",
+      },
+    ]);
 
     const response = await GET();
     const payload = await response.json();
 
     expect(dynamic).toBe("force-dynamic");
     expect(response.status).toBe(200);
-    expect(payload).toEqual({
-      provider: "stooq-eod",
+    expect(payload).toEqual(expect.objectContaining({
+      providerChain: [
+        { key: "twelve_data", providerId: "twelve-data", label: "Twelve Data", configured: false, reason: "not_configured" },
+        { key: "stooq", providerId: "stooq-eod", label: "Stooq", configured: true },
+      ],
       configured: true,
-      status: "unavailable",
-      reason: "rate_limited",
-      testedSymbol: "AAPL",
-      observedAt: "2026-08-22T12:00:00.000Z",
-    });
+      status: "available",
+      probes: expect.arrayContaining([
+        expect.objectContaining({
+          symbol: "AAPL",
+          resolvedProvider: "stooq-eod",
+          priceDate: "2026-08-21",
+          historyLength: 400,
+        }),
+      ]),
+      observedAt: expect.any(String),
+    }));
     expect(JSON.stringify(payload)).not.toContain("confidential");
     expect(JSON.stringify(payload)).not.toContain("owner@stockbox.test");
   });
@@ -50,6 +77,6 @@ describe("admin market provider probe", () => {
     const response = await GET();
 
     expect(response.status).toBe(403);
-    expect(mocks.fetchConfiguredMarketData).not.toHaveBeenCalled();
+    expect(mocks.smokeConfiguredMarketData).not.toHaveBeenCalled();
   });
 });

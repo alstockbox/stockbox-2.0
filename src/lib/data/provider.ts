@@ -9,12 +9,12 @@ import type {
   MarketSnapshot,
   ProviderDiagnostic,
 } from "@/lib/analysis/types";
-import { getMarketDataProvider, isFinancialProviderConfigured } from "@/lib/env/server";
+import { getMarketDataProviderChain, getServerEnv, isFinancialProviderConfigured, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
-import { providerDiagnostic, type AdapterResult, type MarketDataProvider } from "./providers";
+import { providerDiagnostic, type AdapterResult, type MarketDataProvider, type ProviderFailureReason } from "./providers";
 import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
 
 export type ProviderResult<T> =
@@ -34,6 +34,45 @@ type MarketDataResolution = {
   source?: Omit<AnalysisSource, "accessedAt">;
 };
 
+type ConfiguredMarketProviderKey = "twelve_data" | "stooq";
+
+type MarketDataProviderCandidate = {
+  key: ConfiguredMarketProviderKey;
+  providerId: string;
+  label: string;
+  configured: boolean;
+  reason?: ProviderFailureReason;
+  message?: string;
+  provider?: MarketDataProvider;
+};
+
+export type MarketDataProviderStatus = {
+  key: ConfiguredMarketProviderKey;
+  providerId: string;
+  label: string;
+  configured: boolean;
+  reason?: ProviderFailureReason;
+};
+
+export type MarketDataSmokeResult = {
+  symbol: string;
+  status: "available" | "unavailable";
+  attemptedProviders: Array<{
+    provider: string;
+    status: ProviderDiagnostic["status"];
+    reason?: string;
+  }>;
+  resolvedProvider: string | null;
+  reason: string | null;
+  priceDate: string | null;
+  historyLength: number | null;
+  momentum3MAvailable: boolean;
+  momentum1YAvailable: boolean;
+  betaAvailable: boolean;
+  marketCapAvailable: boolean;
+  observedAt: string;
+};
+
 function unavailableMarketData(): AdapterResult<MarketSnapshot> {
   return {
     ok: false,
@@ -41,6 +80,58 @@ function unavailableMarketData(): AdapterResult<MarketSnapshot> {
     message: "Market data is disabled for this deployment.",
     diagnostic: providerDiagnostic("disabled", "market_data", "unavailable", "not_configured"),
   };
+}
+
+function unconfiguredMarketData(candidate: MarketDataProviderCandidate): AdapterResult<MarketSnapshot> {
+  return {
+    ok: false,
+    reason: candidate.reason ?? "not_configured",
+    message: candidate.message ?? `${candidate.label} is not configured for this deployment.`,
+    diagnostic: providerDiagnostic(candidate.label, "market_data", "unavailable", candidate.reason ?? "not_configured"),
+  };
+}
+
+function configuredMarketDataProviderCandidates(env: ServerEnv = getServerEnv()): MarketDataProviderCandidate[] {
+  return getMarketDataProviderChain(env).map((key) => {
+    if (key === "stooq") {
+      return {
+        key,
+        providerId: stooqMarketDataProvider.id,
+        label: "Stooq",
+        configured: true,
+        provider: stooqMarketDataProvider,
+      };
+    }
+
+    if (env.TWELVE_DATA_API_KEY?.trim()) {
+      return {
+        key,
+        providerId: "twelve-data",
+        label: "Twelve Data",
+        configured: true,
+        provider: createTwelveDataMarketProvider(env.TWELVE_DATA_API_KEY),
+      };
+    }
+
+    return {
+      key,
+      providerId: "twelve-data",
+      label: "Twelve Data",
+      configured: false,
+      reason: "not_configured",
+      message: "Twelve Data is listed in the market-data provider chain but TWELVE_DATA_API_KEY is not configured.",
+    };
+  });
+}
+
+export function configuredMarketDataProviderStatuses(env: ServerEnv = getServerEnv()): MarketDataProviderStatus[] {
+  return configuredMarketDataProviderCandidates(env).map((candidate) => ({
+    key: candidate.key,
+    providerId: candidate.providerId,
+    label: candidate.label,
+    configured: candidate.configured,
+    reason: candidate.reason,
+  }));
 }
 
 async function resolveMarketDataFromProviders(
@@ -83,6 +174,58 @@ async function resolveMarketDataFromProviders(
   return { result: lastResult, diagnostics };
 }
 
+async function resolveMarketDataFromCandidates(
+  company: CompanySearchResult,
+  candidates: MarketDataProviderCandidate[],
+): Promise<MarketDataResolution> {
+  if (!candidates.length) {
+    const result = unavailableMarketData();
+    return { result, diagnostics: [result.diagnostic] };
+  }
+
+  const diagnostics: ProviderDiagnostic[] = [];
+  let lastResult: AdapterResult<MarketSnapshot> = unavailableMarketData();
+  let lastConfiguredResult: AdapterResult<MarketSnapshot> | null = null;
+
+  for (const candidate of candidates) {
+    if (!candidate.configured || !candidate.provider) {
+      const result = unconfiguredMarketData(candidate);
+      diagnostics.push(result.diagnostic);
+      lastResult = result;
+      continue;
+    }
+
+    let result: AdapterResult<MarketSnapshot>;
+    try {
+      result = await candidate.provider.fetchMarketData(company);
+    } catch {
+      result = {
+        ok: false,
+        reason: "upstream_error",
+        message: "The configured market-data provider failed unexpectedly.",
+        diagnostic: providerDiagnostic(candidate.label, "market_data", "unavailable", "upstream_error"),
+      };
+      console.error("Market data provider failed unexpectedly", {
+        resolvedProvider: candidate.provider.id,
+        symbol: company.canonicalTicker ?? company.ticker,
+        reason: "upstream_error",
+      });
+    }
+    diagnostics.push(result.diagnostic);
+    lastResult = result;
+    lastConfiguredResult = result;
+    if (result.ok) {
+      return {
+        result,
+        diagnostics,
+        source: candidate.provider.source?.(company),
+      };
+    }
+  }
+
+  return { result: lastConfiguredResult ?? lastResult, diagnostics };
+}
+
 export async function fetchMarketDataFromProviders(
   company: CompanySearchResult,
   providers: MarketDataProvider[],
@@ -91,21 +234,59 @@ export async function fetchMarketDataFromProviders(
 }
 
 async function resolveConfiguredMarketData(company: CompanySearchResult): Promise<MarketDataResolution> {
-  const primary = getMarketDataProvider();
-  const fallback = (process.env.MARKET_DATA_FALLBACK_PROVIDERS ?? "").split(",").map((item) => item.trim().toLowerCase());
-  const chain = [...new Set([primary, ...fallback])];
-  const providers = chain.flatMap((provider) => {
-    if (provider === "stooq") return [stooqMarketDataProvider];
-    if (provider === "twelve_data" && process.env.TWELVE_DATA_API_KEY) return [createTwelveDataMarketProvider(process.env.TWELVE_DATA_API_KEY)];
-    return [];
-  });
-  return resolveMarketDataFromProviders(company, providers);
+  return resolveMarketDataFromCandidates(company, configuredMarketDataProviderCandidates());
 }
 
 export async function fetchConfiguredMarketData(
   company: CompanySearchResult,
 ): Promise<AdapterResult<MarketSnapshot>> {
   return (await resolveConfiguredMarketData(company)).result;
+}
+
+const MARKET_DATA_SMOKE_SYMBOLS = ["AAPL", "MSFT", "NVDA", "SPY"];
+
+function smokeCompany(symbol: string): CompanySearchResult {
+  return {
+    ticker: symbol,
+    canonicalTicker: symbol,
+    name: symbol,
+    exchange: symbol === "SPY" ? "NYSE Arca" : "NASDAQ",
+    country: "US",
+    currency: "USD",
+    providerCapabilities: {
+      fundamentals: false,
+      marketData: true,
+      providerIds: [],
+    },
+  };
+}
+
+export async function smokeConfiguredMarketData(
+  symbols: string[] = MARKET_DATA_SMOKE_SYMBOLS,
+): Promise<MarketDataSmokeResult[]> {
+  return Promise.all(symbols.map(async (symbol) => {
+    const resolution = await resolveConfiguredMarketData(smokeCompany(symbol));
+    const market = resolution.result.ok ? resolution.result.data : null;
+    const latestDiagnostic = resolution.diagnostics.at(-1) ?? resolution.result.diagnostic;
+    return {
+      symbol,
+      status: resolution.result.ok ? "available" : "unavailable",
+      attemptedProviders: resolution.diagnostics.map((diagnostic) => ({
+        provider: diagnostic.provider,
+        status: diagnostic.status,
+        reason: diagnostic.reason,
+      })),
+      resolvedProvider: market?.provider ?? (resolution.result.ok ? resolution.result.diagnostic.provider : null),
+      reason: resolution.result.ok ? null : resolution.result.reason,
+      priceDate: market?.date ?? null,
+      historyLength: market?.historyLength ?? null,
+      momentum3MAvailable: market?.performance["3M"] !== undefined,
+      momentum1YAvailable: market?.performance["1Y"] !== undefined,
+      betaAvailable: market?.beta !== undefined && market.beta !== null,
+      marketCapAvailable: market?.marketCap !== undefined && market.marketCap !== null,
+      observedAt: latestDiagnostic.observedAt,
+    };
+  }));
 }
 
 export async function analyzeCompany({

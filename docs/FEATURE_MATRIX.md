@@ -11,7 +11,7 @@ Current date: August 20, 2026. Release deadline: August 31, 2026.
 | Authorization | Built, migration test required | Server admin gate, owner checks, service-role separation, RLS migration. |
 | Onboarding and profiles | Built locally | Experience selects Simple/Pro default; profile persists and drives weights. |
 | English/Swedish | Partial | Locale detection/switch/persistence exist; several operational strings remain English. |
-| Search and live analysis | Built, provider verification required | SEC Companyfacts plus Stooq; no fake fallback. Initial coverage is mainly US equities. |
+| Search and live analysis | Built, provider verification required | SEC Companyfacts plus Twelve Data market data with explicit Stooq fallback; no fake fallback. Initial fundamentals coverage is mainly US equities. |
 | Scores, recommendations, flags | Built and unit-tested | Deterministic, missing-data aware, sector/profile weighting in full engine. |
 | DCF and scenarios | Built and unit-tested | Full per-share DCF core; compact live adapter currently exposes an FCF value proxy. |
 | Saved reports and sharing | Built, RLS test required | User-owned persistence and private-to-public token route with expiry/revoke support. |

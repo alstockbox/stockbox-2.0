@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  configuredMarketDataProviderStatuses: vi.fn(),
   getMarketDataProvider: vi.fn(),
+  getMarketDataProviderChain: vi.fn(),
   getSecUserAgent: vi.fn(),
   getServerEnv: vi.fn()
 }));
 
+vi.mock("@/lib/data/provider", () => ({
+  configuredMarketDataProviderStatuses: mocks.configuredMarketDataProviderStatuses,
+}));
 vi.mock("@/lib/env/server", () => ({
   getMarketDataProvider: mocks.getMarketDataProvider,
+  getMarketDataProviderChain: mocks.getMarketDataProviderChain,
   getSecUserAgent: mocks.getSecUserAgent,
   getServerEnv: mocks.getServerEnv
 }));
@@ -18,6 +24,10 @@ describe("provider health diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getMarketDataProvider.mockReturnValue("stooq");
+    mocks.getMarketDataProviderChain.mockReturnValue(["stooq"]);
+    mocks.configuredMarketDataProviderStatuses.mockReturnValue([
+      { key: "stooq", providerId: "stooq-eod", label: "Stooq", configured: true },
+    ]);
   });
 
   it("returns only non-sensitive explicit SEC status", async () => {
@@ -39,7 +49,8 @@ describe("provider health diagnostics", () => {
     expect(payload).toEqual(expect.objectContaining({
       secConfigured: true,
       secUserAgentExplicit: true,
-      marketProvider: "stooq"
+      marketProvider: "stooq",
+      marketProviderChain: ["stooq"],
     }));
     expect(payload.providers.fundamentals.capabilities.supportsFundamentals).toBe(true);
     expect(payload.providers.marketData.capabilities.supportsMarketData).toBe(true);
@@ -62,7 +73,8 @@ describe("provider health diagnostics", () => {
     expect(payload).toEqual(expect.objectContaining({
       secConfigured: true,
       secUserAgentExplicit: false,
-      marketProvider: "stooq"
+      marketProvider: "stooq",
+      marketProviderChain: ["stooq"],
     }));
     expect(JSON.stringify(payload)).not.toContain("alerts@stockbox.test");
   });
@@ -71,6 +83,8 @@ describe("provider health diagnostics", () => {
     mocks.getServerEnv.mockReturnValue({ SEC_USER_AGENT: "", MARKET_DATA_PROVIDER: "disabled" });
     mocks.getSecUserAgent.mockReturnValue(null);
     mocks.getMarketDataProvider.mockReturnValue("disabled");
+    mocks.getMarketDataProviderChain.mockReturnValue([]);
+    mocks.configuredMarketDataProviderStatuses.mockReturnValue([]);
 
     const payload = await GET().json();
 

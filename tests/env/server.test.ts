@@ -23,7 +23,7 @@ describe("server environment parsing", () => {
     expect(env.NEXT_PUBLIC_POSTHOG_HOST).toBe("https://eu.posthog.com");
   });
 
-  it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the documented Stooq default", (provider) => {
+  it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the no-env Stooq fallback", (provider) => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: provider });
     expect(getMarketDataProvider(env)).toBe("stooq");
   });

@@ -137,6 +137,7 @@ export type MarketSnapshot = {
   sharesOutstanding?: number | null;
   beta?: number | null;
   provider?: string;
+  historyLength?: number;
   performance: Partial<Record<"1D" | "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y", number>>;
 };
 

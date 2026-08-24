@@ -20,6 +20,7 @@ pnpm-debug.log*
 
 # testing
 coverage/
+.eslintcache
 
 # vercel
 .vercel/

@@ -1,7 +1,7 @@
 import type { CompanySearchResult } from "@/lib/analysis/types";
 import { providerDiagnostic, type AdapterResult, type CompanySearchProvider, type ProviderCapabilities } from "../providers";
 import { securitySearchAliases } from "./normalization";
-import { swedishListedSecuritySeed } from "./swedish-securities";
+import { swedishListedSecuritySeed, swedishSecuritySourceMetadata } from "./swedish-securities";
 import type {
   ListedSecurity,
   SecurityMasterProvider,
@@ -19,31 +19,7 @@ const SECURITY_MASTER_CAPABILITIES: ProviderCapabilities = {
   supportsEstimates: false,
 };
 
-const SWEDISH_SOURCE_METADATA: SecurityMasterSourceMetadata = {
-  providerId: "swedish-listed-security-master",
-  sourceName: "Swedish listed security master",
-  sourceUrls: [
-    "https://www.nasdaq.com/products/data/nordic-baltic/nordic-reference-data-files",
-    "https://www.nasdaq.com/products/european-markets/stockholm",
-    "https://spotlightstockmarket.se/en/",
-    "https://www.ngm.se/en/the-exchange/market-data",
-    "https://mdapi.ngm.se/static/index.html",
-  ],
-  refreshMode: "seeded_release_snapshot",
-  refreshedAt: "2026-08-24",
-  notes: [
-    "Nasdaq Nordic equity reference data is the intended configured feed for complete Stockholm Main Market and First North refreshes.",
-    "Spotlight and NGM support configured reference-data/API refreshes; the release snapshot keeps discovery working when those feeds are not configured.",
-    "Discovery capability is intentionally separate from fundamentals capability.",
-  ],
-  expectedVenueCounts: {
-    NASDAQ_STOCKHOLM_MAIN: 363,
-    NASDAQ_FIRST_NORTH_STOCKHOLM: 346,
-    SPOTLIGHT: 140,
-    NGM_MAIN_REGULATED: 1,
-    NGM_GROWTH_NORDIC_SME: 1,
-  },
-};
+const SWEDISH_SOURCE_METADATA = swedishSecuritySourceMetadata;
 
 let cachedSecurities: { expiresAt: number; securities: ListedSecurity[] } | null = null;
 
@@ -135,6 +111,25 @@ function emptyVenueCounts(): Record<SecurityMasterVenue, number> {
   };
 }
 
+function sourceAgeDays(refreshedAt: string | null): number | null {
+  if (!refreshedAt) return null;
+  const refreshed = Date.parse(`${refreshedAt.slice(0, 10)}T00:00:00.000Z`);
+  if (!Number.isFinite(refreshed)) return null;
+  const today = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+  return Math.max(0, Math.floor((today - refreshed) / (1000 * 60 * 60 * 24)));
+}
+
+function minimumVenueCountsFromMetadata(
+  metadata: SecurityMasterSourceMetadata,
+): Partial<Record<SecurityMasterVenue, number>> {
+  return Object.fromEntries(
+    Object.entries(metadata.expectedVenueCounts ?? {}).map(([venue, count]) => [
+      venue,
+      Math.max(1, Math.floor((count ?? 0) * 0.95)),
+    ]),
+  ) as Partial<Record<SecurityMasterVenue, number>>;
+}
+
 export function qaSecurityUniverse(
   providerId: string,
   securities: ListedSecurity[],
@@ -158,6 +153,8 @@ export function qaSecurityUniverse(
   return {
     providerId,
     generatedAt: new Date().toISOString(),
+    sourceRefreshedAt: SWEDISH_SOURCE_METADATA.refreshedAt,
+    sourceAgeDays: sourceAgeDays(SWEDISH_SOURCE_METADATA.refreshedAt),
     activeSecuritiesByVenue,
     activeSecuritiesBySecurityType,
     duplicateSecurityIds: duplicateKeys(securities.map((security) => security.securityId)),
@@ -182,13 +179,11 @@ export function qaSecurityUniverse(
 
 export async function qaSwedishSecurityUniverse(): Promise<SecurityMasterQaReport> {
   const securities = await swedishSecurityMasterProvider.listSecurities();
-  return qaSecurityUniverse(swedishSecurityMasterProvider.id, securities, {
-    NASDAQ_STOCKHOLM_MAIN: 25,
-    NASDAQ_FIRST_NORTH_STOCKHOLM: 8,
-    SPOTLIGHT: 6,
-    NGM_MAIN_REGULATED: 2,
-    NGM_GROWTH_NORDIC_SME: 7,
-  });
+  return qaSecurityUniverse(
+    swedishSecurityMasterProvider.id,
+    securities,
+    minimumVenueCountsFromMetadata(SWEDISH_SOURCE_METADATA),
+  );
 }
 
 export type {

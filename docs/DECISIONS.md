@@ -12,9 +12,9 @@ Supabase provides PostgreSQL, cookie-compatible auth, migrations, and RLS on a l
 
 Financial arithmetic, normalization, DCF, scoring, confidence, recommendation gates, and flags run in typed code. AI is disabled by default and may later explain already-derived evidence through a provider-neutral interface.
 
-## ADR-004: Free official fundamentals first
+## ADR-004: Verified provider chain first
 
-SEC Companyfacts is the initial fundamental source and Stooq is the initial end-of-day source. This keeps early cost near zero, but launch coverage is honestly limited mainly to US issuers and non-real-time prices.
+SEC Companyfacts is the initial fundamental source. Twelve Data is the configured production market-data provider when a key is present, with Stooq retained only as an explicit end-of-day fallback. Missing provider data stays unavailable rather than falling back to fabricated values.
 
 ## ADR-005: Stripe-hosted subscription surfaces
 

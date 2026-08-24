@@ -4,7 +4,7 @@ Model version: `stockbox-analysis-engine-v0.1.0`
 
 ## Data and calculations
 
-The live adapter reads SEC XBRL annual facts and Stooq end-of-day closes. It derives growth, CAGR, margins, free cash flow, cash conversion, leverage, coverage, earnings/FCF yield, and momentum only when required numerators and denominators exist. Missing or unsafe denominators produce `null`, never zero or an invented estimate.
+The live adapter reads SEC XBRL annual facts and the configured market-data provider chain, with Twelve Data intended for production market data and Stooq retained as an explicit end-of-day fallback. It derives growth, CAGR, margins, free cash flow, cash conversion, leverage, coverage, earnings/FCF yield, and momentum only when required numerators and denominators exist. Missing or unsafe denominators produce `null`, never zero or an invented estimate.
 
 Free cash flow is operating cash flow less capital expenditure. SEC capex is commonly represented as a negative cash outflow, so the adapter normalizes sign before use. CAGR is `(end/start)^(1/years) - 1` and requires positive endpoints.
 
@@ -32,4 +32,4 @@ The current live report displays an enterprise-value proxy range when positive F
 
 ## Limitations
 
-SEC tags vary by issuer and history can be incomplete. Stooq is end-of-day, not real-time. The initial provider does not supply licensed estimates, transcripts, peer sets, analyst ratings, or company-specific qualitative evidence; StockBox does not invent those sections. Scores are research aids based on historical relationships, not forecasts, guarantees, or individualized advice.
+SEC tags vary by issuer and history can be incomplete. Stooq fallback data is end-of-day, not real-time. The initial provider stack does not supply licensed estimates, transcripts, peer sets, analyst ratings, or company-specific qualitative evidence; StockBox does not invent those sections. Scores are research aids based on historical relationships, not forecasts, guarantees, or individualized advice.

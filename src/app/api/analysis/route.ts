@@ -2,7 +2,14 @@ import { z } from "zod";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { analyzeCompany } from "@/lib/data/provider";
-import { checkAnalysisEntitlement, logApplicationError, persistAnalysis, recordUsageEvent } from "@/lib/db/repositories";
+import {
+  completeAnalysisReservation,
+  logApplicationError,
+  persistAnalysis,
+  recordUsageEvent,
+  releaseAnalysisReservation,
+  reserveAnalysisEntitlement,
+} from "@/lib/db/repositories";
 import { sendStrongBuyAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
 
@@ -36,15 +43,25 @@ export async function POST(request: Request) {
   }
 
   const user = await getCurrentUser();
-  if (user && user.role !== "admin") {
-    const entitlement = await checkAnalysisEntitlement({ userId: user.id, analysisType: body.data.analysisType });
+  if (!user) {
+    return Response.json({ error: "Sign in to run an analysis." }, { status: 401 });
+  }
+
+  let quotaReservationId: string | null = null;
+  if (user.role !== "admin") {
+    const entitlement = await reserveAnalysisEntitlement({ userId: user.id, analysisType: body.data.analysisType });
+    if (!entitlement.configured) {
+      return Response.json({ error: "Analysis quotas are temporarily unavailable." }, { status: 503 });
+    }
     if (!entitlement.allowed) {
       captureServerEvent("paywall_viewed", { userId: user.id, analysisType: body.data.analysisType, plan: entitlement.plan });
       return Response.json({ error: "Monthly analysis limit reached.", entitlement }, { status: 429 });
     }
+    quotaReservationId = entitlement.reservationId ?? null;
   }
+
   captureServerEvent("analysis_started", {
-    userId: user?.id,
+    userId: user.id,
     ticker: body.data.company.ticker,
     analysisType: body.data.analysisType
   });
@@ -52,34 +69,43 @@ export async function POST(request: Request) {
   const result = await analyzeCompany(body.data);
 
   if (!result.ok) {
+    if (quotaReservationId) {
+      await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
+    }
     await recordUsageEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       event: "analysis_failed",
       metadata: { ticker: body.data.company.ticker, error: result.error }
     });
-    captureServerEvent("analysis_failed", { userId: user?.id, ticker: body.data.company.ticker });
+    captureServerEvent("analysis_failed", { userId: user.id, ticker: body.data.company.ticker });
     return Response.json(result, { status: 503 });
   }
 
   const persisted = await persistAnalysis({
-    userId: user?.id ?? null,
+    userId: user.id,
     report: result.data,
     rawProviderWarnings: result.warnings
   });
 
   if (persisted.ok) {
     result.data.id = persisted.id;
+    if (quotaReservationId) {
+      await completeAnalysisReservation({ reservationId: quotaReservationId, analysisId: persisted.id });
+    }
   } else {
+    if (quotaReservationId) {
+      await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
+    }
     await logApplicationError({
       service: "analysis-api",
       message: persisted.error,
-      userId: user?.id ?? null,
+      userId: user.id,
       context: { ticker: result.data.ticker }
     });
   }
 
   await recordUsageEvent({
-    userId: user?.id ?? null,
+    userId: user.id,
     event: "analysis_completed",
     metadata: {
       ticker: result.data.ticker,
@@ -89,7 +115,7 @@ export async function POST(request: Request) {
   });
 
   captureServerEvent("analysis_completed", {
-    userId: user?.id,
+    userId: user.id,
     ticker: result.data.ticker,
     score: result.data.score.score,
     recommendation: result.data.recommendation

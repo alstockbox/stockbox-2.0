@@ -278,6 +278,7 @@ export async function fetchStooqMarketData(
               yearHigh: Math.max(...year.map((row) => row.close)),
               yearLow: Math.min(...year.map((row) => row.close)),
               provider: STOOQ_PROVIDER_ID,
+              historyLength: rows.length,
               performance: {
                 "1D": performance(rows, 1) ?? undefined,
                 "1W": performance(rows, 5) ?? undefined,

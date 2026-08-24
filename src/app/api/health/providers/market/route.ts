@@ -1,31 +1,21 @@
 import { getCurrentUser } from "@/lib/auth/session";
-import { fetchConfiguredMarketData } from "@/lib/data/provider";
-import { getMarketDataProvider } from "@/lib/env/server";
+import { configuredMarketDataProviderStatuses, smokeConfiguredMarketData } from "@/lib/data/provider";
 
 export const dynamic = "force-dynamic";
-
-const probeCompany = {
-  ticker: "AAPL",
-  name: "Apple Inc.",
-  exchange: "NASDAQ",
-  country: "US",
-};
 
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Unauthorized." }, { status: 401 });
   if (user.role !== "admin") return Response.json({ error: "Forbidden." }, { status: 403 });
 
-  const selectedProvider = getMarketDataProvider();
-  const result = await fetchConfiguredMarketData(probeCompany);
-  const observedAt = result.diagnostic.observedAt;
+  const providerChain = configuredMarketDataProviderStatuses();
+  const probes = await smokeConfiguredMarketData();
 
   return Response.json({
-    provider: selectedProvider === "stooq" ? "stooq-eod" : selectedProvider === "twelve_data" ? "twelve-data" : "disabled",
-    configured: selectedProvider === "stooq" || (selectedProvider === "twelve_data" && Boolean(process.env.TWELVE_DATA_API_KEY)),
-    status: result.ok ? "available" : "unavailable",
-    reason: result.ok ? null : result.reason,
-    testedSymbol: probeCompany.ticker,
-    observedAt,
+    providerChain,
+    configured: providerChain.some((provider) => provider.configured),
+    status: probes.some((probe) => probe.status === "available") ? "available" : "unavailable",
+    probes,
+    observedAt: new Date().toISOString(),
   });
 }

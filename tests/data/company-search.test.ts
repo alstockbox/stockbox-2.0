@@ -38,10 +38,11 @@ describe("company search catalog", () => {
     ["Google", "GOOGL"],
     ["META", "META"],
     ["Amazon", "AMZN"],
-    ["Investor B", "INVE.B"],
-    ["INVE.B", "INVE.B"],
-    ["INVE B", "INVE.B"],
-    ["INVE.B.ST", "INVE.B"],
+    ["Investor B", "INVE-B.ST"],
+    ["INVE.B", "INVE-B.ST"],
+    ["INVE B", "INVE-B.ST"],
+    ["INVE.B.ST", "INVE-B.ST"],
+    ["Investor AB", "INVE.B"],
     ["Volvo", "VOLV-B.ST"],
     ["VOLV-B.ST", "VOLV-B.ST"],
     ["VOLV B", "VOLV-B.ST"],
@@ -129,8 +130,8 @@ describe("company search catalog", () => {
   it("does not claim SEC fundamentals support for Investor AB", async () => {
     const [investor] = await searchCompanyCatalog("INVE.B");
     expect(investor).toEqual(expect.objectContaining({
-      securityId: "xsto:inve-b",
-      entityId: "issuer:se:investor-ab",
+      securityId: "xsto:tx76",
+      entityId: "issuer:se:investor",
       providerCapabilities: expect.objectContaining({ fundamentals: false }),
     }));
   });
@@ -143,6 +144,29 @@ describe("company search catalog", () => {
     ["Sivers Semiconductors", "SIVE.ST"],
     ["SIVE", "SIVE.ST"],
     ["sive.st", "SIVE.ST"],
+    ["SINCH.ST", "SINCH.ST"],
+    ["TEL2-B.ST", "TEL2-B.ST"],
+    ["KINV-B.ST", "KINV-B.ST"],
+    ["LATO-B.ST", "LATO-B.ST"],
+    ["SSAB-A.ST", "SSAB-A.ST"],
+    ["BEIJ-B.ST", "BEIJ-B.ST"],
+    ["CAST.ST", "CAST.ST"],
+    ["FABG.ST", "FABG.ST"],
+    ["SEB-A.ST", "SEB-A.ST"],
+    ["SHB-A.ST", "SHB-A.ST"],
+    ["SWED-A.ST", "SWED-A.ST"],
+    ["SKF-B.ST", "SKF-B.ST"],
+    ["Atlas Copco B", "ATCO-B.ST"],
+    ["ASSA ABLOY B", "ASSA-B.ST"],
+    ["Sandvik", "SAND.ST"],
+    ["Telia", "TELIA.ST"],
+    ["Tele2 B", "TEL2-B.ST"],
+    ["Kinnevik B", "KINV-B.ST"],
+    ["Latour B", "LATO-B.ST"],
+    ["SSAB A", "SSAB-A.ST"],
+    ["Beijer Ref B", "BEIJ-B.ST"],
+    ["Castellum", "CAST.ST"],
+    ["Fabege", "FABG.ST"],
   ])("finds Swedish listed securities by %s", async (query, canonicalTicker) => {
     const [company] = await searchCompanyCatalog(query);
     expect(company).toEqual(expect.objectContaining({

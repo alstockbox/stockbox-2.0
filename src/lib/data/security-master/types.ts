@@ -69,6 +69,8 @@ export interface SecurityMasterProvider {
 export type SecurityMasterQaReport = {
   providerId: string;
   generatedAt: string;
+  sourceRefreshedAt: string | null;
+  sourceAgeDays: number | null;
   activeSecuritiesByVenue: Record<SecurityMasterVenue, number>;
   activeSecuritiesBySecurityType: Record<string, number>;
   duplicateSecurityIds: string[];

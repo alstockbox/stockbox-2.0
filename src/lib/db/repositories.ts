@@ -1,7 +1,61 @@
 import type { AnalysisReport, BatchQaResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getPlan } from "@/lib/billing/plans";
+import { getPlan, type PlanKey } from "@/lib/billing/plans";
 import { MODEL_VERSION } from "@/lib/analysis/config";
+
+type AnalysisEntitlementResult = {
+  allowed: boolean;
+  configured: boolean;
+  plan: PlanKey;
+  reservationId?: string | null;
+  usage: { analyses: number; deepAnalyses: number };
+  limits: { analyses: number; deepAnalyses: number };
+};
+
+function fallbackEntitlement(configured: boolean, allowed = false): AnalysisEntitlementResult {
+  const plan = getPlan("free");
+  return {
+    allowed,
+    configured,
+    plan: plan.key,
+    reservationId: null,
+    usage: { analyses: 0, deepAnalyses: 0 },
+    limits: { analyses: plan.entitlements.monthlyAnalyses, deepAnalyses: plan.entitlements.deepAnalyses },
+  };
+}
+
+function numberFromJson(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function entitlementFromJson(value: unknown): AnalysisEntitlementResult {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return fallbackEntitlement(false);
+  const payload = value as Record<string, unknown>;
+  const planKey = typeof payload.plan === "string" && getPlan(payload.plan as PlanKey).key === payload.plan
+    ? payload.plan as PlanKey
+    : "free";
+  const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
+    ? payload.usage as Record<string, unknown>
+    : {};
+  const limits = payload.limits && typeof payload.limits === "object" && !Array.isArray(payload.limits)
+    ? payload.limits as Record<string, unknown>
+    : {};
+  const plan = getPlan(planKey);
+  return {
+    allowed: payload.allowed === true,
+    configured: payload.configured === true,
+    plan: plan.key,
+    reservationId: typeof payload.reservationId === "string" ? payload.reservationId : null,
+    usage: {
+      analyses: numberFromJson(usage.analyses),
+      deepAnalyses: numberFromJson(usage.deepAnalyses),
+    },
+    limits: {
+      analyses: numberFromJson(limits.analyses) || plan.entitlements.monthlyAnalyses,
+      deepAnalyses: numberFromJson(limits.deepAnalyses) || plan.entitlements.deepAnalyses,
+    },
+  };
+}
 
 export async function upsertProfile(input: {
   userId: string;
@@ -164,6 +218,57 @@ export async function checkAnalysisEntitlement(input: { userId: string; analysis
     usage: { analyses: used, deepAnalyses: deepUsed },
     limits: { analyses: plan.entitlements.monthlyAnalyses, deepAnalyses: plan.entitlements.deepAnalyses },
   };
+}
+
+export async function reserveAnalysisEntitlement(input: {
+  userId: string;
+  analysisType: AnalysisReport["analysisType"];
+}): Promise<AnalysisEntitlementResult> {
+  const supabase = createAdminClient();
+  if (!supabase) return fallbackEntitlement(false);
+
+  const { data, error } = await supabase.rpc("reserve_analysis_entitlement", {
+    p_user_id: input.userId,
+    p_analysis_type: input.analysisType,
+  });
+
+  if (error) return fallbackEntitlement(false);
+  return entitlementFromJson(data);
+}
+
+export async function completeAnalysisReservation(input: {
+  reservationId: string;
+  analysisId: string;
+}) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+
+  await supabase
+    .from("analysis_quota_reservations")
+    .update({
+      status: "completed",
+      analysis_id: input.analysisId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.reservationId)
+    .eq("status", "reserved");
+}
+
+export async function releaseAnalysisReservation(input: {
+  reservationId: string;
+  status: "released" | "failed";
+}) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+
+  await supabase
+    .from("analysis_quota_reservations")
+    .update({
+      status: input.status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.reservationId)
+    .eq("status", "reserved");
 }
 
 export async function reserveAdminAlert(report: AnalysisReport) {

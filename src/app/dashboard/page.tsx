@@ -31,7 +31,7 @@ export default async function DashboardPage() {
           <ButtonLink href="/analyze"><Search className="h-4 w-4" aria-hidden="true" />New analysis</ButtonLink>
         </div>
         {!user ? (
-          <Card className="mt-8"><h2 className="text-lg font-semibold text-[#f4efe5]">Sign in to persist your research</h2><p className="mt-2 text-sm leading-6 text-[#9aa7b8]">Live analysis can run without an account, but saved reports, watchlists and usage entitlements require authentication.</p><ButtonLink href="/auth/login" className="mt-5">Log in <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink></Card>
+          <Card className="mt-8"><h2 className="text-lg font-semibold text-[#f4efe5]">Sign in to run research</h2><p className="mt-2 text-sm leading-6 text-[#9aa7b8]">Live analysis, saved reports, watchlists and usage entitlements require authentication.</p><ButtonLink href="/auth/login" className="mt-5">Log in <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink></Card>
         ) : (
           <>
             <div className="mt-8 grid gap-4 sm:grid-cols-3">

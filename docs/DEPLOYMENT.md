@@ -3,7 +3,7 @@
 Current date: August 20, 2026
 Release deadline: August 31, 2026
 
-Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts and Stooq are the initial no-key financial sources; news and AI are disabled, and Resend is the optional email adapter.
+Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts supplies filings, Twelve Data is the production market-data provider, Stooq is the explicit end-of-day fallback, news and AI are disabled, and Resend is the optional email adapter.
 
 ## P0 Deployment Principles
 
@@ -96,7 +96,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 - Supabase: URL, anon key, service-role key, database URL.
 - Auth: redirect URLs, session settings.
 - Stripe: secret key, publishable key, webhook secret, product/price IDs.
-- Financial data: provider keys, base URLs, exchange coverage.
+- Financial data: `SEC_USER_AGENT`, `MARKET_DATA_PROVIDER=twelve_data`, `MARKET_DATA_FALLBACK_PROVIDERS=stooq`, `TWELVE_DATA_API_KEY`, base URLs, exchange coverage.
 - News: provider keys, base URLs, attribution settings.
 - AI: provider keys, model names, budget/rate limits.
 - Email: API key, sender, admin alert recipients.

@@ -128,6 +128,9 @@ export function scoreSearchMatch(company: CompanySearchResult, query: string): S
   const adrIntent = requestedAdr(query);
   const exactCanonical = rawQuery === ticker;
   const exactProvider = rawTickerCandidates.has(rawQuery);
+  const issuerRootTickerMatch = normalizedQueryTicker.length >= 2
+    && normalizedCompanyTicker.startsWith(normalizedQueryTicker)
+    && normalizedQueryTicker !== normalizedCompanyTicker;
   let match: SearchMatch | null = null;
   if (exactCanonical) match = { score: 100, type: "exact_canonical_ticker", reasons: ["Exact canonical ticker"] };
   else if (exactProvider) match = { score: 99, type: "exact_provider_ticker", reasons: ["Exact provider ticker"] };
@@ -143,6 +146,9 @@ export function scoreSearchMatch(company: CompanySearchResult, query: string): S
   if (!match && preferredIntent && securityRoot && normalizedCompanyTicker.startsWith(securityRoot)) {
     match = { score: 82, type: "token_coverage", reasons: ["Issuer ticker and preferred-security intent matched"] };
   }
+  if (!match && issuerRootTickerMatch && company.securityType === "Preferred") {
+    match = { score: 91, type: "token_coverage", reasons: ["Issuer ticker matched security family"] };
+  }
   const compactName = name.replace(/\s/g, "");
   const compactQuery = queryText.replace(/\s/g, "");
   const tickerDistance = editDistance(normalizedQueryTicker.toLowerCase(), normalizedCompanyTicker.toLowerCase());
@@ -154,6 +160,7 @@ export function scoreSearchMatch(company: CompanySearchResult, query: string): S
   const explicitSecurityTicker = match.type === "exact_canonical_ticker" || match.type === "exact_provider_ticker";
   if (company.securityType === "Preferred") {
     if (preferredIntent) { match.score += 14; match.reasons.push("Preferred security requested"); }
+    else if (issuerRootTickerMatch) { match.score -= 8; match.reasons.push("Preferred security shown below common stock"); }
     else if (!explicitSecurityTicker) { match.score -= 24; match.reasons.push("Preferred security de-prioritized"); }
   } else if (preferredIntent) {
     match.score -= 18;
@@ -246,6 +253,7 @@ export async function searchCompanyCatalog(
     })
     .sort((left, right) =>
       right.match.score - left.match.score
+      || Number(Boolean(right.company.providerCapabilities?.fundamentals)) - Number(Boolean(left.company.providerCapabilities?.fundamentals))
       || Number(Boolean(right.company.securityId)) - Number(Boolean(left.company.securityId))
       || Number(Boolean(right.company.primarySecurity)) - Number(Boolean(left.company.primarySecurity))
       || left.company.name.localeCompare(right.company.name)

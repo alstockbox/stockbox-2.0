@@ -8,11 +8,11 @@
 - Supabase PostgreSQL stores normalized accounts, billing state, reports, sources, scores, watchlists, portfolios, jobs, usage, errors, and audit records.
 - Stripe Checkout creates subscriptions; signed webhooks are the source of truth for entitlement state.
 - PostHog receives a small allowlisted product-event vocabulary without report bodies or secrets.
-- SEC Companyfacts supplies US filing facts and Stooq supplies end-of-day price history. Provider modules are isolated under `src/lib/data`.
+- SEC Companyfacts supplies US filing facts, Twelve Data supplies production market data when configured, and Stooq remains an explicit end-of-day fallback. Provider modules are isolated under `src/lib/data`.
 
 ## Analysis flow
 
-`Company search → validated API request → SEC and Stooq in parallel → raw provider types → deterministic metrics → weighted scores → flags and constrained recommendation → scenarios/DCF → persisted report → source-visible UI`
+`Company search → validated authenticated API request → entitlement reservation → SEC and configured market-provider chain in parallel → raw provider types → deterministic metrics → weighted scores → flags and constrained recommendation → scenarios/DCF → persisted report → source-visible UI`
 
 Provider failure never falls back to fabricated values. Partial results carry warnings; fully missing results fail visibly.
 

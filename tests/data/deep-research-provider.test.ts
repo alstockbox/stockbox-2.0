@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/env/server", () => ({
   getMarketDataProvider: vi.fn(() => "disabled"),
+  getMarketDataProviderChain: vi.fn(() => []),
+  getServerEnv: vi.fn(() => ({ MARKET_DATA_PROVIDER: "disabled", MARKET_DATA_FALLBACK_PROVIDERS: [], TWELVE_DATA_API_KEY: "" })),
   isFinancialProviderConfigured: vi.fn(() => true),
 }));
 vi.mock("@/lib/data/sec", () => ({ fetchCompanyFundamentalsResult: mocks.fetchCompanyFundamentalsResult }));
