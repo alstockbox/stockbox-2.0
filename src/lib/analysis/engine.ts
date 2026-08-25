@@ -191,15 +191,32 @@ function specializedMissingData(
 
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
   const ttmConsistency = ttmPeriodBasisCheck(input.trailingTwelveMonths);
-  const periodConsistentInput = ttmConsistency.status === "warning"
+  const consistencySafeInput = ttmConsistency.status === "warning"
     ? { ...input, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : input;
-  const freshness = assessDataFreshness(periodConsistentInput);
+  const initialFreshness = assessDataFreshness(consistencySafeInput);
+  const annualFallbackInput = consistencySafeInput.trailingTwelveMonths
+    ? { ...consistencySafeInput, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
+    : consistencySafeInput;
+  const annualFallbackFreshness = assessDataFreshness(annualFallbackInput);
+  const periodConsistentInput = consistencySafeInput.trailingTwelveMonths
+    && initialFreshness.financialFlowStatus === "stale"
+    && annualFallbackFreshness.dataStatus === "current"
+    ? annualFallbackInput
+    : consistencySafeInput;
+  const freshness = periodConsistentInput === annualFallbackInput
+    ? annualFallbackFreshness
+    : initialFreshness;
   const calculationInput = freshness.dataStatus === "stale"
     ? { ...periodConsistentInput, annualPeriods: [], trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : periodConsistentInput;
   const metrics = computeFinancialMetrics(calculationInput);
-  const reconciliation = reconcileFinancialData(freshness.dataStatus === "stale" ? calculationInput : input, metrics);
+  const reconciliation = reconcileFinancialData(freshness.dataStatus === "stale" ? calculationInput : periodConsistentInput, metrics);
+  if (ttmConsistency.status === "warning") {
+    const ttmCheckIndex = reconciliation.findIndex((check) => check.code === ttmConsistency.code);
+    if (ttmCheckIndex >= 0) reconciliation[ttmCheckIndex] = ttmConsistency;
+    else reconciliation.unshift(ttmConsistency);
+  }
   reconciliation.push({
     code: "fundamental_data_freshness",
     status: freshness.dataStatus === "stale" ? "warning" : freshness.dataStatus === "current" ? "pass" : "unavailable",

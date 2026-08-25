@@ -4,12 +4,13 @@ import type {
   AnalysisReport,
   AnalysisSource,
   AnalysisType,
+  CompanyFundamentals,
   CompanySearchResult,
   InvestmentProfile,
   MarketSnapshot,
   ProviderDiagnostic,
 } from "@/lib/analysis/types";
-import { getMarketDataProviderChain, getServerEnv, isFinancialProviderConfigured, type ServerEnv } from "@/lib/env/server";
+import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
@@ -17,15 +18,67 @@ import { stooqMarketDataProvider } from "./stooq";
 import { providerDiagnostic, type AdapterResult, type MarketDataProvider, type ProviderFailureReason } from "./providers";
 import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
 import { yahooMarketDataProvider } from "./yahoo-market";
+import { fetchYahooFundamentalsResult, yahooCompanySearchProvider, yahooSymbolForCompany } from "./yahoo-fundamentals";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
   | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[] };
 
+type FundamentalsResolution = {
+  result: AdapterResult<CompanyFundamentals>;
+  diagnostics: ProviderDiagnostic[];
+  source?: Omit<AnalysisSource, "accessedAt">;
+};
+
+function yahooFundamentalsSource(company: CompanySearchResult): Omit<AnalysisSource, "accessedAt"> {
+  const symbol = yahooSymbolForCompany(company);
+  return {
+    name: "Yahoo Finance reported fundamentals",
+    url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/financials/`,
+    freshness: "Reported annual, quarterly and trailing fundamentals, cached up to 30 minutes.",
+  };
+}
+
+function hasUsableFinancialPeriods(fundamentals: CompanyFundamentals): boolean {
+  return Boolean(
+    fundamentals.trailingTwelveMonths
+    || fundamentals.annualPeriods?.length
+    || fundamentals.annual.length,
+  );
+}
+
+async function resolveConfiguredFundamentals(company: CompanySearchResult): Promise<FundamentalsResolution> {
+  const diagnostics: ProviderDiagnostic[] = [];
+  if (company.cik) {
+    let secResult: AdapterResult<CompanyFundamentals>;
+    try {
+      secResult = await fetchCompanyFundamentalsResult(company);
+    } catch {
+      secResult = { ok: false, reason: "upstream_error", message: "SEC fundamentals failed unexpectedly.", diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "upstream_error") };
+    }
+    if (secResult.ok && hasUsableFinancialPeriods(secResult.data)) {
+      diagnostics.push(secResult.diagnostic);
+      return { result: secResult, diagnostics };
+    }
+    diagnostics.push(secResult.ok
+      ? providerDiagnostic("SEC Companyfacts", "fundamentals", "partial", "empty_response")
+      : secResult.diagnostic);
+  }
+  let yahooResult: AdapterResult<CompanyFundamentals>;
+  try {
+    yahooResult = await fetchYahooFundamentalsResult(company);
+  } catch {
+    yahooResult = { ok: false, reason: "upstream_error", message: "Yahoo fundamentals failed unexpectedly.", diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "unavailable", "upstream_error") };
+  }
+  diagnostics.push(yahooResult.diagnostic);
+  return { result: yahooResult, diagnostics, source: yahooResult.ok ? yahooFundamentalsSource(company) : undefined };
+}
+
 export async function searchCompanies(query: string) {
-  const globalProviders = process.env.GLOBAL_SYMBOL_SEARCH_PROVIDER?.trim().toLowerCase() === "twelve_data" && process.env.TWELVE_DATA_API_KEY
-    ? [createTwelveDataSearchProvider(process.env.TWELVE_DATA_API_KEY)]
-    : [];
+  const globalProviders = [yahooCompanySearchProvider];
+  if (process.env.GLOBAL_SYMBOL_SEARCH_PROVIDER?.trim().toLowerCase() === "twelve_data" && process.env.TWELVE_DATA_API_KEY) {
+    globalProviders.unshift(createTwelveDataSearchProvider(process.env.TWELVE_DATA_API_KEY));
+  }
   return searchCompanyCatalog(query, globalProviders);
 }
 
@@ -300,6 +353,21 @@ export async function smokeConfiguredMarketData(
   }));
 }
 
+function enrichMarketWithFundamentals(
+  company: CompanySearchResult, market: MarketSnapshot | null, fundamentals: CompanyFundamentals | null,
+): MarketSnapshot | null {
+  if (!market || !fundamentals) return market;
+  const marketCurrency = market.currency?.toUpperCase() ?? null;
+  const capCurrency = fundamentals.reportedMarketCapCurrency?.toUpperCase() ?? null;
+  const capDate = fundamentals.reportedMarketCapDate;
+  const capDateUsable = !capDate || Date.parse(`${capDate}T00:00:00Z`) <= Date.now() + 86_400_000;
+  const marketCap = market.marketCap ?? (marketCurrency && capCurrency && marketCurrency === capCurrency && capDateUsable
+    ? fundamentals.reportedMarketCap ?? null : null);
+  const commonEquity = !company.securityType || company.securityType === "Common Stock";
+  const sharesOutstanding = market.sharesOutstanding ?? (commonEquity ? fundamentals.reportedSharesOutstanding ?? null : null);
+  return { ...market, marketCap, sharesOutstanding };
+}
+
 export async function analyzeCompany({
   company,
   analysisType,
@@ -313,42 +381,26 @@ export async function analyzeCompany({
   const sources: AnalysisSource[] = [];
   const warnings: string[] = [];
 
-  if (!isFinancialProviderConfigured()) {
-    return {
-      ok: false,
-      error: "Live financial data is not configured for this deployment.",
-      sources,
-      warnings: ["Financial provider disabled because no SEC contact is configured."]
-    };
-  }
-  if (!company.cik) {
-    return {
-      ok: false,
-      error: "Company found, but the configured fundamentals provider does not currently support this listing.",
-      sources,
-      warnings: ["The selected listing has no verified fundamentals adapter capability."],
-    };
-  }
-
   const deepResearchRequested = analysisType === "deep" || analysisType === "research";
-  const [fundamentalsResult, marketResolution, filingsResult] = await Promise.all([
-    fetchCompanyFundamentalsResult(company),
+  const [fundamentalsResolution, marketResolution, filingsResult] = await Promise.all([
+    resolveConfiguredFundamentals(company),
     resolveConfiguredMarketData(company),
     deepResearchRequested && company.cik ? fetchSecSubmissionEvents(company) : Promise.resolve(null),
   ]);
+  const fundamentalsResult = fundamentalsResolution.result;
   const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
-  const market = marketResult.ok ? marketResult.data : null;
-  const providerDiagnostics = [fundamentalsResult.diagnostic, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
+  const rawMarket = marketResult.ok ? marketResult.data : null;
+  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals);
+  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
 
   if (fundamentals) {
-    for (const sourceCik of fundamentals.sourceCiks ?? [fundamentals.cik].filter(Boolean) as string[]) {
-      sources.push({
-        name: `SEC Companyfacts CIK ${sourceCik}`,
-        url: `https://data.sec.gov/api/xbrl/companyfacts/CIK${sourceCik}.json`,
-        accessedAt,
-        freshness: "SEC XBRL facts, cached up to 12 hours."
-      });
+    const secCiks = fundamentals.sourceCiks ?? (fundamentals.cik ? [fundamentals.cik] : []);
+    for (const sourceCik of secCiks) {
+      sources.push({ name: `SEC Companyfacts CIK ${sourceCik}`, url: `https://data.sec.gov/api/xbrl/companyfacts/CIK${sourceCik}.json`, accessedAt, freshness: "SEC XBRL facts, cached up to 12 hours." });
+    }
+    if (!secCiks.length && fundamentalsResolution.source) {
+      sources.push({ ...fundamentalsResolution.source, accessedAt });
     }
   } else {
     warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);

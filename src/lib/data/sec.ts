@@ -6,6 +6,8 @@ import type {
   CompanySearchResult,
   FinancialPeriod,
   MetricProvenance,
+  SpecializedCompanyData,
+  SpecializedMetric,
 } from "@/lib/analysis/types";
 import { getSecUserAgent } from "@/lib/env/server";
 import { commonCompanies } from "./common-companies";
@@ -14,6 +16,7 @@ import { providerDiagnostic, type AdapterResult, type FundamentalsProvider, type
 import {
   resolveAnnualFacts,
   resolveInstantFacts,
+  resolveTtmFact,
   resolveTtmFacts,
   secFactProvenance,
   SEC_CONCEPTS,
@@ -242,7 +245,17 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
   };
 }
 
-function balanceSnapshotAt(maps: FactMaps, targetEnd: string): Partial<FinancialPeriod> {
+function sharesForPeriod(maps: FactMaps, targetEnd: string, filingAccession?: string): ResolvedSecFact | undefined {
+  const exact = factAt(maps.currentShares, targetEnd);
+  if (exact) return exact;
+  if (!filingAccession) return undefined;
+  return [...maps.currentShares.values()]
+    .filter((fact) => fact.accn === filingAccession)
+    .sort((left, right) => left.end.localeCompare(right.end))
+    .at(-1);
+}
+
+function balanceSnapshotAt(maps: FactMaps, targetEnd: string, filingAccession?: string): Partial<FinancialPeriod> {
   const anchor = latestAtOrBefore(maps.assets, targetEnd)?.end
     ?? latestAtOrBefore(maps.equity, targetEnd)?.end
     ?? latestAtOrBefore(maps.cash, targetEnd)?.end;
@@ -256,6 +269,8 @@ function balanceSnapshotAt(maps: FactMaps, targetEnd: string): Partial<Financial
   };
   const debt = debtAt(maps, anchor);
   if (debt.provenance) provenance.totalDebt = debt.provenance;
+  const currentShares = sharesForPeriod(maps, anchor, filingAccession);
+  if (currentShares) provenance.currentSharesOutstanding = secFactProvenance(currentShares);
   return {
     balanceSheetDate: anchor,
     totalAssets: value("assets", "totalAssets"),
@@ -272,7 +287,7 @@ function balanceSnapshotAt(maps: FactMaps, targetEnd: string): Partial<Financial
     currentLiabilities: value("currentLiabilities"),
     accountsReceivable: value("accountsReceivable"),
     inventory: value("inventory"),
-    currentSharesOutstanding: value("currentShares"),
+    currentSharesOutstanding: currentShares?.val ?? null,
     provenance,
   };
 }
@@ -351,7 +366,7 @@ function buildTtmPeriods(
         inputs: ["revenue", "costOfRevenue"],
       };
     }
-    const balance = balanceSnapshotAt(instantMaps, anchorFact.end);
+    const balance = balanceSnapshotAt(instantMaps, anchorFact.end, anchorFact.accn);
     return [{
       ...balance,
       fiscalYear: undefined,
@@ -428,6 +443,55 @@ function toLegacy(period: FinancialPeriod): AnnualFinancials {
   };
 }
 
+function unavailableSpecializedMetric(definition: string): SpecializedMetric {
+  return { value: null, dataAsOf: null, definition };
+}
+
+function specializedMetric(
+  fact: ResolvedSecFact | null | undefined,
+  definition: string,
+): SpecializedMetric {
+  return fact ? {
+    value: fact.val,
+    unit: fact.unit,
+    dataAsOf: fact.end,
+    provenance: secFactProvenance(fact),
+    definition,
+  } : unavailableSpecializedMetric(definition);
+}
+
+export function resolveSecSpecializedData(
+  facts: SecCompanyFacts,
+  archetype: AnalysisArchetype,
+): SpecializedCompanyData | undefined {
+  if (archetype !== "bank") return undefined;
+
+  const netInterestIncome = resolveTtmFact(facts, SEC_CONCEPTS.netInterestIncome)
+    ?? [...resolveAnnualFacts(facts, SEC_CONCEPTS.netInterestIncome).values()].at(-1);
+  const grossLoans = [...resolveInstantFacts(facts, SEC_CONCEPTS.grossLoans).values()].at(-1);
+  const deposits = [...resolveInstantFacts(facts, SEC_CONCEPTS.deposits).values()].at(-1);
+  const missing = unavailableSpecializedMetric;
+  return {
+    kind: "bank",
+    netInterestIncome: specializedMetric(netInterestIncome, "Reported net interest income after interest expense."),
+    netInterestMargin: missing("Reported net interest margin; not inferred from period-end assets."),
+    grossLoans: specializedMetric(grossLoans, "Reported loans and leases receivable."),
+    deposits: specializedMetric(deposits, "Reported customer deposits."),
+    depositGrowth: missing("Deposit growth requires comparable reported deposit balances."),
+    fundingCost: missing("Reported funding cost."),
+    cet1CapitalRatio: missing("Reported common equity tier 1 capital ratio."),
+    tangibleCommonEquity: missing("Reported tangible common equity."),
+    tangibleBookValuePerShare: missing("Reported tangible book value per share."),
+    nonPerformingLoans: missing("Reported nonperforming loans."),
+    netChargeOffs: missing("Reported net charge-offs."),
+    loanLossProvisions: missing("Reported provision for credit losses."),
+    efficiencyRatio: missing("Reported efficiency ratio."),
+    returnOnAssets: missing("Reported return on average assets."),
+    returnOnEquity: missing("Reported return on average equity."),
+    returnOnTangibleCommonEquity: missing("Reported return on tangible common equity."),
+  };
+}
+
 export function resolveSecFinancialPeriods(
   facts: SecCompanyFacts,
   archetype: AnalysisArchetype = "standard",
@@ -479,6 +543,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
     facts,
     classification.analysisArchetype,
   );
+  const specialized = resolveSecSpecializedData(facts, classification.analysisArchetype);
   const latestAnnualPeriodEnd = annualPeriods.at(-1)?.periodEndDate ?? null;
   const diagnostic = { provider: "SEC Companyfacts", capability: "fundamentals" as const, status: annualPeriods.length ? "available" as const : "partial" as const, reason: trailingTwelveMonths ? undefined : "ttm_unavailable_annual_fallback", observedAt };
   return {
@@ -497,6 +562,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
       annualPeriods,
       trailingTwelveMonths,
       priorTrailingTwelveMonths,
+      specialized,
       diagnostics: {
         latestFinancialPeriodEnd: trailingTwelveMonths?.periodEndDate ?? latestAnnualPeriodEnd,
         latestAnnualPeriodEnd,

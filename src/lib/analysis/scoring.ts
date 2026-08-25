@@ -4,9 +4,9 @@ import {
   STATIC_BENCHMARK_VERSION,
   benchmarksForSector,
   longTermWeights,
-  profileWeights,
   shortTermWeights,
   weightsForSector,
+  weightsForSectorAndProfile,
 } from "./config";
 import { resolveArchetype } from "./archetypes";
 import {
@@ -299,7 +299,7 @@ export function computeScores(
   const investmentProfile = input.company.investmentProfile ?? "balanced";
   const analysisArchetype = resolveArchetype(input.company);
   const sectorWeights = weightsForSector(sector);
-  const personalizedWeights = profileWeights[investmentProfile];
+  const personalizedWeights = weightsForSectorAndProfile(sector, investmentProfile);
   const dimensions = archetypeDimensions(input, metrics, analysisArchetype);
   const general = aggregate(dimensions, sectorWeights);
   const personalized = aggregate(dimensions, personalizedWeights);

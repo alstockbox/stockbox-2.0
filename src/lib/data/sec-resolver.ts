@@ -188,7 +188,7 @@ const ifrs = (concept: string): ConceptAlias => ({ taxonomy: "ifrs-full", concep
 const dei = (concept: string): ConceptAlias => ({ taxonomy: "dei", concept });
 
 export const SEC_CONCEPTS = {
-  revenue: { kind: "duration", units: ["USD"], aliases: [us("RevenueFromContractWithCustomerExcludingAssessedTax"), us("Revenues"), us("RevenuesNetOfInterestExpense"), us("SalesRevenueNet"), us("SalesRevenueGoodsNet"), ifrs("Revenue")] },
+  revenue: { kind: "duration", units: ["USD"], aliases: [us("RevenueFromContractWithCustomerExcludingAssessedTax"), us("RevenueFromContractWithCustomerIncludingAssessedTax"), us("RegulatedAndUnregulatedOperatingRevenue"), us("Revenues"), us("RevenuesNetOfInterestExpense"), us("SalesRevenueNet"), us("SalesRevenueGoodsNet"), ifrs("Revenue")] },
   costOfRevenue: { kind: "duration", units: ["USD"], aliases: [us("CostOfRevenue"), us("CostOfGoodsAndServicesSold"), ifrs("CostOfSales")] },
   grossProfit: { kind: "duration", units: ["USD"], aliases: [us("GrossProfit"), ifrs("GrossProfit")] },
   operatingIncome: { kind: "duration", units: ["USD"], aliases: [us("OperatingIncomeLoss"), ifrs("ProfitLossFromOperatingActivities")] },
@@ -206,7 +206,7 @@ export const SEC_CONCEPTS = {
   researchAndDevelopment: { kind: "duration", units: ["USD"], aliases: [us("ResearchAndDevelopmentExpense"), ifrs("ResearchAndDevelopmentExpense")] },
   assets: { kind: "instant", units: ["USD"], aliases: [us("Assets"), ifrs("Assets")] },
   liabilities: { kind: "instant", units: ["USD"], aliases: [us("Liabilities"), ifrs("Liabilities")] },
-  equity: { kind: "instant", units: ["USD"], aliases: [us("StockholdersEquity"), us("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), ifrs("Equity")] },
+  equity: { kind: "instant", units: ["USD"], aliases: [us("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), us("StockholdersEquity"), ifrs("Equity")] },
   cash: { kind: "instant", units: ["USD"], aliases: [us("CashAndCashEquivalentsAtCarryingValue"), ifrs("CashAndCashEquivalents")] },
   restrictedCash: { kind: "instant", units: ["USD"], aliases: [us("RestrictedCashAndCashEquivalentsCurrent"), us("RestrictedCashAndCashEquivalentsNoncurrent")] },
   currentAssets: { kind: "instant", units: ["USD"], aliases: [us("AssetsCurrent"), ifrs("CurrentAssets")] },
@@ -219,4 +219,7 @@ export const SEC_CONCEPTS = {
   accountsReceivable: { kind: "instant", units: ["USD"], aliases: [us("AccountsReceivableNetCurrent"), ifrs("TradeAndOtherCurrentReceivables")] },
   inventory: { kind: "instant", units: ["USD"], aliases: [us("InventoryNet"), ifrs("Inventories")] },
   currentShares: { kind: "instant", units: ["shares"], aliases: [dei("EntityCommonStockSharesOutstanding")] },
+  netInterestIncome: { kind: "duration", units: ["USD"], aliases: [us("InterestIncomeExpenseNet")] },
+  grossLoans: { kind: "instant", units: ["USD"], aliases: [us("LoansAndLeasesReceivableNetOfDeferredIncome"), us("LoansAndLeasesReceivableNetReportedAmount")] },
+  deposits: { kind: "instant", units: ["USD"], aliases: [us("Deposits")] },
 } as const satisfies Record<string, ConceptSpec>;

@@ -22,8 +22,10 @@ export function ttmPeriodBasisCheck(period: FinancialPeriod | undefined): Reconc
     .filter((value): value is number => isFiniteNumber(value));
   const basisConsistent = Boolean(period.periodBasis) && bases.length === presentFields.length
     && bases.every((basis) => basis === period.periodBasis);
-  const durationConsistent = durations.length === presentFields.length
-    && Math.max(...durations) - Math.min(...durations) <= 15;
+  const durationConsistent = period.periodBasis === "TTM_REPORTED"
+    ? durations.length === 0
+    : durations.length === presentFields.length
+      && Math.max(...durations) - Math.min(...durations) <= 15;
   return {
     code: "ttm_period_basis_consistency",
     status: basisConsistent && durationConsistent ? "pass" : "warning",

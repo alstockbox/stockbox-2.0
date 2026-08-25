@@ -25,6 +25,41 @@ describe("SEC XBRL fact resolver", () => {
     expect(resolved.get("2023-12-31")?.val).toBe(125);
   });
 
+  it("resolves utility revenue reported inclusive of assessed tax", () => {
+    const fixture = facts({
+      "us-gaap": {
+        RevenueFromContractWithCustomerIncludingAssessedTax: { units: { USD: [
+          { start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-13", fy: 2025, val: 24_100 },
+        ] } },
+      },
+    });
+
+    const resolved = resolveAnnualFacts(fixture, SEC_CONCEPTS.revenue);
+    expect(resolved.get("2025-12-31")).toEqual(expect.objectContaining({
+      concept: "RevenueFromContractWithCustomerIncludingAssessedTax",
+      val: 24_100,
+    }));
+  });
+
+  it("prefers consolidated equity including noncontrolling interests for balance-sheet reconciliation", () => {
+    const fixture = facts({
+      "us-gaap": {
+        StockholdersEquity: { units: { USD: [
+          { end: "2025-12-31", form: "10-K", filed: "2026-02-13", val: 54_608 },
+        ] } },
+        StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest: { units: { USD: [
+          { end: "2025-12-31", form: "10-K", filed: "2026-02-13", val: 66_479 },
+        ] } },
+      },
+    });
+
+    const resolved = resolveAnnualFacts(fixture, SEC_CONCEPTS.equity);
+    expect(resolved.get("2025-12-31")).toEqual(expect.objectContaining({
+      concept: "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      val: 66_479,
+    }));
+  });
+
   it("uses start and end identity so comparative periods sharing fy do not collapse", () => {
     const fixture = facts({
       "us-gaap": {

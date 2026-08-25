@@ -50,5 +50,16 @@ export const appleQ3CompanyFacts: SecCompanyFacts = {
       LongTermDebtCurrent: balances([10.912, 10.992, 12.350, 11.007]),
       LongTermDebtNoncurrent: balances([85.750, 82.209, 78.328, 71.340]),
     },
+    "dei": {
+      EntityCommonStockSharesOutstanding: {
+        units: {
+          shares: [
+            { end: "2025-07-18", form: "10-Q", filed: "2025-08-01", accn: "q3-2025-ytd", val: 14_840_390_000 },
+            { end: "2026-07-17", form: "10-Q", filed: "2026-07-31", accn: "q3-2026-ytd", val: 14_594_180_000 },
+            { end: "2026-08-01", form: "10-Q", filed: "2026-08-02", accn: "unrelated-filing", val: 999 },
+          ],
+        },
+      },
+    },
   },
 };

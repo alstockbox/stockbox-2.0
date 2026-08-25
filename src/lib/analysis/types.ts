@@ -47,7 +47,7 @@ export type AnalysisArchetype =
 
 export type MetricValueKind = "reported" | "derived" | "estimated" | "fallback";
 
-export type FinancialPeriodBasis = "FY" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
+export type FinancialPeriodBasis = "FY" | "TTM_REPORTED" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
 
 export type MetricProvenance = {
   source: string;
@@ -187,6 +187,11 @@ export type CompanyFundamentals = {
   priorTrailingTwelveMonths?: FinancialPeriod;
   specialized?: SpecializedCompanyData;
   diagnostics?: AnalysisDiagnostics;
+  reportedMarketCap?: number | null;
+  reportedMarketCapDate?: string | null;
+  reportedMarketCapCurrency?: string | null;
+  reportedSharesOutstanding?: number | null;
+  reportedSharesDate?: string | null;
 };
 
 export type AnalysisInput = {
