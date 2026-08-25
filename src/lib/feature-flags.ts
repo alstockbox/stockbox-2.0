@@ -10,7 +10,7 @@ export type FeatureFlag =
 
 const defaults: Record<FeatureFlag, boolean> = {
   news: false,
-  batchAnalysis: false,
+  batchAnalysis: true,
   portfolio: true,
   admin: true,
   aiAssistant: false,
