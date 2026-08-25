@@ -36,6 +36,10 @@ describe("Apple Q3 2026 Companyfacts regression", () => {
       netIncome: 128_930_000_000,
       operatingCashFlow: 146_724_000_000,
       capitalExpenditures: 10_041_000_000,
+      currentSharesOutstanding: 14_594_180_000,
+    }));
+    expect(current?.provenance?.currentSharesOutstanding).toEqual(expect.objectContaining({
+      concept: "EntityCommonStockSharesOutstanding", periodEnd: "2026-07-17", accession: "q3-2026-ytd",
     }));
     expect(prior).toEqual(expect.objectContaining({
       periodEndDate: "2025-06-28",

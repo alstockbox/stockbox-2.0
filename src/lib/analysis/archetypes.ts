@@ -7,6 +7,7 @@ const UTILITY_SICS = ["491", "492", "493", "494"];
 const ENERGY_SICS = ["100", "104", "122", "131", "138", "291"];
 const BIOTECH_SICS = ["2834", "2835", "2836"];
 const SOFTWARE_SICS = ["7370", "7371", "7372", "7373", "7374"];
+const AUTOMOTIVE_SICS = ["371"];
 
 function startsWithAny(sic: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => sic.startsWith(prefix));
@@ -35,6 +36,9 @@ export function classifyCompany(input: {
   }
   if (startsWithAny(sic, ENERGY_SICS) || /petroleum|oil and gas|coal mining/.test(text)) {
     return { sector: "energy", industry: description || null, analysisArchetype: "cyclical" };
+  }
+  if (startsWithAny(sic, AUTOMOTIVE_SICS) || /motor vehicles?|automobiles?|passenger car/.test(text)) {
+    return { sector: "industrials", industry: description || null, analysisArchetype: "cyclical" };
   }
   if (startsWithAny(sic, BIOTECH_SICS) || /biological products|biotechnology/.test(text)) {
     return {

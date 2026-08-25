@@ -41,6 +41,30 @@ describe("hard data freshness gate", () => {
     ]));
   });
 
+  it("falls back to current annual statements when an old TTM period would falsely mark the company stale", () => {
+    const result = analyzeFinancials({
+      ...staleNvdaInput,
+      annualPeriods: [{
+        ...staleNvdaInput.annualPeriods[0],
+        fiscalYear: 2025,
+        periodEndDate: "2025-12-31",
+        balanceSheetDate: "2025-12-31",
+      }],
+      trailingTwelveMonths: {
+        ...staleNvdaInput.annualPeriods[0],
+        periodEndDate: "2013-09-30",
+        balanceSheetDate: "2013-09-30",
+        periodBasis: "TTM_Q3_9M",
+      },
+    });
+
+    expect(result.dataStatus).toBe("current");
+    expect(result.metrics.latestPeriod?.periodEndDate).toBe("2025-12-31");
+    expect(result.diagnostics.latestFinancialPeriodEnd).toBe("2025-12-31");
+    expect(result.diagnostics.ttmStatus).toBe("annual_fallback");
+    expect(result.dataCoverage).toBeGreaterThan(0);
+  });
+
   it("tracks explicit freshness thresholds independently by data domain", () => {
     const current = assessDataFreshness({
       ...staleNvdaInput,

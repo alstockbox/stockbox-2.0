@@ -15,6 +15,11 @@ describe("archetype-specific analysis", () => {
     expect(asArchetype("standard").dcf.status).toBe("available");
   });
 
+  it("keeps balanced profile weights anchored to the bank sector model", () => {
+    const result = asArchetype("bank", { company: { sector: "financials", investmentProfile: "balanced" } });
+    expect(result.scores.methodology.personalizedWeights).toEqual(result.scores.methodology.sectorWeights);
+  });
+
   it("does not run corporate FCFF for a bank", () => {
     const result = asArchetype("bank", { company: { sector: "financials" } });
     expect(result.dcf.status).toBe("inappropriate");

@@ -12,6 +12,13 @@ type AnalysisEntitlementResult = {
   limits: { analyses: number; deepAnalyses: number };
 };
 
+export type BatchEntitlementResult = {
+  allowed: boolean;
+  configured: boolean;
+  plan: PlanKey;
+  rowLimit: number;
+};
+
 function fallbackEntitlement(configured: boolean, allowed = false): AnalysisEntitlementResult {
   const plan = getPlan("free");
   return {
@@ -217,6 +224,36 @@ export async function checkAnalysisEntitlement(input: { userId: string; analysis
     plan: plan.key,
     usage: { analyses: used, deepAnalyses: deepUsed },
     limits: { analyses: plan.entitlements.monthlyAnalyses, deepAnalyses: plan.entitlements.deepAnalyses },
+  };
+}
+
+export async function getBatchEntitlement(input: {
+  userId: string;
+  isAdmin?: boolean;
+}): Promise<BatchEntitlementResult> {
+  if (input.isAdmin) {
+    return { allowed: true, configured: true, plan: "elite", rowLimit: 50 };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) {
+    return { allowed: false, configured: false, plan: "free", rowLimit: 0 };
+  }
+
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("plan_key,status")
+    .eq("user_id", input.userId)
+    .single();
+  const active = subscription && ["active", "trialing"].includes(subscription.status);
+  const plan = getPlan(active ? subscription.plan_key : "free");
+  const rowLimit = Math.min(plan.entitlements.batchRows, 50);
+
+  return {
+    allowed: rowLimit > 0,
+    configured: true,
+    plan: plan.key,
+    rowLimit,
   };
 }
 

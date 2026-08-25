@@ -267,6 +267,21 @@ export const profileWeights: Record<InvestmentProfile, Record<ScoreDimensionKey,
   }),
 };
 
+export function weightsForSectorAndProfile(
+  sector: Sector | undefined,
+  profile: InvestmentProfile,
+): Record<ScoreDimensionKey, number> {
+  const sectorWeights = weightsForSector(sector);
+  if (profile === "balanced") return sectorWeights;
+  const adjusted = Object.fromEntries(
+    (Object.keys(baseSectorWeights) as ScoreDimensionKey[]).map((key) => [
+      key,
+      sectorWeights[key] * (profileWeights[profile][key] / baseSectorWeights[key]),
+    ]),
+  ) as Record<ScoreDimensionKey, number>;
+  return normalizeWeights(adjusted);
+}
+
 export const shortTermWeights: Record<ScoreDimensionKey, number> = normalizeWeights({
   growth: 0.15,
   profitability: 0.06,

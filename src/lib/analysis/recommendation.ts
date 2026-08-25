@@ -32,6 +32,15 @@ export function recommend(score: StockBoxScore, redFlags: Flag[]): Recommendatio
   return "Hold";
 }
 
+function archetypeValuationScore(score: ScoreResult, valuation?: DcfRangeResult): number | null {
+  if (valuation?.status !== "inappropriate") return null;
+  if (!["bank", "insurer", "reit"].includes(score.analysisArchetype)) return null;
+  const dimension = score.dimensions.valuation;
+  return (dimension.coverage ?? 0) >= 0.5 && typeof dimension.score === "number" && Number.isFinite(dimension.score)
+    ? dimension.score
+    : null;
+}
+
 export function deriveRecommendation(
   score: ScoreResult,
   redFlags: RedFlag[],
@@ -50,27 +59,48 @@ export function deriveRecommendation(
     else if (scoreUsed <= 40) rating = "Sell";
   }
 
-  if (rating !== "No Rating" && valuation?.status !== "available" && rating !== "Hold") {
+  const specializedValuationScore = archetypeValuationScore(score, valuation);
+  const dcfValuationAvailable = valuation?.status === "available";
+  const adequateValuationCoverage = dcfValuationAvailable || specializedValuationScore !== null;
+
+  if (rating !== "No Rating" && valuation?.status === "inappropriate" && specializedValuationScore === null) {
+    rating = "No Rating";
+    constraintsApplied.push("The company archetype requires specialized valuation coverage before a rating is issued.");
+  }
+
+  if (rating !== "No Rating" && !adequateValuationCoverage && rating !== "Hold") {
     rating = "Hold";
     constraintsApplied.push("Directional ratings require adequate valuation coverage.");
   }
 
-  if (rating === "Strong Buy" && (!valuation || valuation.impliedUpside === null || valuation.impliedUpside === undefined || valuation.impliedUpside < 0.15)) {
+  const strongBuySupported = dcfValuationAvailable
+    ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside >= 0.15
+    : specializedValuationScore !== null && specializedValuationScore >= 75;
+  if (rating === "Strong Buy" && !strongBuySupported) {
     rating = "Buy";
     constraintsApplied.push("Strong Buy requires meaningful valuation support.");
   }
 
-  if (rating === "Strong Sell" && (!valuation || valuation.impliedUpside === null || valuation.impliedUpside === undefined || valuation.impliedUpside > -0.15)) {
+  const strongSellSupported = dcfValuationAvailable
+    ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside <= -0.15
+    : specializedValuationScore !== null && specializedValuationScore <= 25;
+  if (rating === "Strong Sell" && !strongSellSupported) {
     rating = "Sell";
     constraintsApplied.push("Strong Sell requires meaningful downside support.");
   }
 
-  if (rating === "Buy" && (!valuation || valuation.impliedUpside === null || valuation.impliedUpside === undefined || valuation.impliedUpside < 0.05)) {
+  const buySupported = dcfValuationAvailable
+    ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside >= 0.05
+    : specializedValuationScore !== null && specializedValuationScore >= 60;
+  if (rating === "Buy" && !buySupported) {
     rating = "Hold";
     constraintsApplied.push("Buy requires positive valuation support.");
   }
 
-  if (rating === "Sell" && (!valuation || valuation.impliedUpside === null || valuation.impliedUpside === undefined || valuation.impliedUpside > -0.05)) {
+  const sellSupported = dcfValuationAvailable
+    ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside <= -0.05
+    : specializedValuationScore !== null && specializedValuationScore <= 40;
+  if (rating === "Sell" && !sellSupported) {
     rating = "Hold";
     constraintsApplied.push("Sell requires negative valuation support.");
   }

@@ -31,6 +31,11 @@ function mockScoreResult(overrides: Partial<ScoreResult> = {}): ScoreResult {
         key,
         label: key,
         score: 88,
+        rawScore: 88,
+        adjustedScore: 88,
+        coverage: 1,
+        plannedWeight: 1,
+        availableWeight: 1,
         weight: 0.125,
         contributors: [],
         missingData: [],
@@ -104,4 +109,43 @@ describe("deriveRecommendation", () => {
     expect(recommendation.rating).toBe("Hold");
     expect(recommendation.constraintsApplied).toContain("Buy requires positive valuation support.");
   });
+
+  it("accepts strong archetype valuation when corporate DCF is inappropriate", () => {
+    const score = mockScoreResult({ analysisArchetype: "bank", sector: "financials" });
+    const recommendation = deriveRecommendation(score, [], {
+      ...supportedValuation,
+      status: "inappropriate",
+      method: "Residual income / P-TBV",
+      impliedUpside: null,
+    });
+    expect(recommendation.rating).toBe("Strong Buy");
+  });
+
+  it("does not accept a neutral archetype multiple as positive valuation support", () => {
+    const score = mockScoreResult({ analysisArchetype: "bank", sector: "financials" });
+    score.dimensions.valuation.score = 55;
+    const recommendation = deriveRecommendation(score, [], {
+      ...supportedValuation,
+      status: "inappropriate",
+      method: "Residual income / P-TBV",
+      impliedUpside: null,
+    });
+    expect(recommendation.rating).toBe("Hold");
+    expect(recommendation.constraintsApplied).toContain("Buy requires positive valuation support.");
+  });
+
+  it.each(["unknown", "holding_company", "pre_revenue_biotech"] as const)(
+    "returns No Rating for %s without a valid specialized valuation",
+    (analysisArchetype) => {
+      const score = mockScoreResult({ analysisArchetype });
+      const recommendation = deriveRecommendation(score, [], {
+        ...supportedValuation,
+        status: "inappropriate",
+        method: "Specialized valuation required",
+        impliedUpside: null,
+      });
+      expect(recommendation.rating).toBe("No Rating");
+      expect(recommendation.constraintsApplied).toContain("The company archetype requires specialized valuation coverage before a rating is issued.");
+    },
+  );
 });

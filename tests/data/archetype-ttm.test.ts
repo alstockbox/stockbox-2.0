@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeFinancials } from "../../src/lib/analysis";
-import { resolveSecFinancialPeriods } from "../../src/lib/data/sec";
+import { resolveSecFinancialPeriods, resolveSecSpecializedData } from "../../src/lib/data/sec";
 import type { SecCompanyFacts, SecFactUnit } from "../../src/lib/data/sec-resolver";
 
 function duration(annual: number, priorYtd: number, currentYtd: number) {
@@ -32,9 +32,12 @@ const jpmBankFacts: SecCompanyFacts = {
   facts: {
     "us-gaap": {
       RevenuesNetOfInterestExpense: duration(182_447, 90_222, 107_183),
+      InterestIncomeExpenseNet: duration(92_400, 45_000, 49_800),
       NetIncomeLoss: duration(57_048, 29_630, 37_649),
       Assets: instant(4_002_814, 4_198_000),
       StockholdersEquity: instant(345_000, 361_000),
+      LoansAndLeasesReceivableNetOfDeferredIncome: instant(1_320_000, 1_380_000),
+      Deposits: instant(2_400_000, 2_520_000),
     },
   },
 };
@@ -72,5 +75,20 @@ describe("archetype-aware SEC TTM construction", () => {
       method: "Residual income / equity multiples",
     }));
     expect(result.missingData.some((item) => item.field === "simpleFreeCashFlow")).toBe(false);
+  });
+
+  it("extracts reported bank metrics with SEC provenance instead of estimating them", () => {
+    const specialized = resolveSecSpecializedData(jpmBankFacts, "bank");
+
+    expect(specialized).toEqual(expect.objectContaining({
+      kind: "bank",
+      netInterestIncome: expect.objectContaining({ value: 97_200, dataAsOf: "2026-06-30" }),
+      grossLoans: expect.objectContaining({ value: 1_380_000, dataAsOf: "2026-06-30" }),
+      deposits: expect.objectContaining({ value: 2_520_000, dataAsOf: "2026-06-30" }),
+    }));
+    if (specialized?.kind === "bank") {
+      expect(specialized.netInterestIncome.provenance?.concept).toContain("InterestIncomeExpenseNet");
+      expect(specialized.cet1CapitalRatio.value).toBeNull();
+    }
   });
 });
