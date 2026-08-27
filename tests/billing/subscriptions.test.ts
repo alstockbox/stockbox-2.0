@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   effectivePlanKey,
+  hasActiveBasicAccess,
   isCurrentBasicSubscription,
   reusableStripeCustomerId,
+  subscriptionBillingState,
   type UserSubscription
 } from "../../src/lib/billing/subscriptions";
 
@@ -18,13 +20,23 @@ function basicSubscription(status: string): UserSubscription {
 }
 
 describe("subscription state", () => {
-  it.each(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"])(
-    "blocks a second Basic checkout while status is %s",
+  it.each(["active", "trialing"])("grants Basic access while status is %s", (status) => {
+    const subscription = basicSubscription(status);
+    expect(isCurrentBasicSubscription(subscription)).toBe(true);
+    expect(hasActiveBasicAccess(subscription)).toBe(true);
+    expect(effectivePlanKey(subscription)).toBe("basic");
+    expect(subscriptionBillingState(subscription)).toBe("basic");
+  });
+
+  it.each(["past_due", "unpaid", "incomplete", "paused"])(
+    "keeps %s manageable in billing without granting paid entitlements",
     (status) => {
       const subscription = basicSubscription(status);
       expect(isCurrentBasicSubscription(subscription)).toBe(true);
-      expect(effectivePlanKey(subscription)).toBe("basic");
+      expect(hasActiveBasicAccess(subscription)).toBe(false);
+      expect(effectivePlanKey(subscription)).toBe("free");
       expect(reusableStripeCustomerId(subscription)).toBe("cus_test");
+      expect(subscriptionBillingState(subscription)).toBe("basic_manage");
     }
   );
 
@@ -33,12 +45,16 @@ describe("subscription state", () => {
     (status) => {
       const subscription = basicSubscription(status);
       expect(isCurrentBasicSubscription(subscription)).toBe(false);
+      expect(hasActiveBasicAccess(subscription)).toBe(false);
       expect(effectivePlanKey(subscription)).toBe("free");
       expect(reusableStripeCustomerId(subscription)).toBeNull();
+      expect(subscriptionBillingState(subscription)).toBe("free");
     }
   );
 
-  it("does not invent a reusable customer for a missing subscription", () => {
+  it("does not invent access for a missing subscription", () => {
+    expect(hasActiveBasicAccess(null)).toBe(false);
     expect(reusableStripeCustomerId(null)).toBeNull();
+    expect(subscriptionBillingState(null)).toBe("free");
   });
 });

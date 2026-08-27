@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { getPricingAction } from "../../src/lib/billing/pricing-state";
 
 describe("pricing actions", () => {
@@ -34,6 +34,14 @@ describe("pricing actions", () => {
       kind: "portal",
       label: "Manage subscription",
       current: true
+    });
+  });
+  it("routes a non-terminal Basic billing problem to the portal without claiming paid access", () => {
+    expect(getPricingAction("free", "basic_manage").kind).toBe("none");
+    expect(getPricingAction("basic", "basic_manage")).toMatchObject({
+      kind: "portal",
+      label: "Resolve billing",
+      current: false
     });
   });
 });

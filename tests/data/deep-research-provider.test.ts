@@ -6,6 +6,7 @@ import { providerDiagnostic } from "../../src/lib/data/providers";
 const mocks = vi.hoisted(() => ({
   fetchCompanyFundamentalsResult: vi.fn(),
   fetchSecSubmissionEvents: vi.fn(),
+  attachInstitutionalResearch: vi.fn(),
 }));
 
 vi.mock("@/lib/env/server", () => ({
@@ -16,6 +17,16 @@ vi.mock("@/lib/env/server", () => ({
 }));
 vi.mock("@/lib/data/sec", () => ({ fetchCompanyFundamentalsResult: mocks.fetchCompanyFundamentalsResult }));
 vi.mock("@/lib/data/sec-submissions", () => ({ fetchSecSubmissionEvents: mocks.fetchSecSubmissionEvents }));
+vi.mock("@/lib/analysis/research", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/analysis/research")>();
+  return {
+    ...actual,
+    attachInstitutionalResearch: (...args: Parameters<typeof actual.attachInstitutionalResearch>) => {
+      mocks.attachInstitutionalResearch(...args);
+      return actual.attachInstitutionalResearch(...args);
+    },
+  };
+});
 
 import { analyzeCompany } from "../../src/lib/data/provider";
 
@@ -97,6 +108,7 @@ describe("deep research provider orchestration", () => {
     const result = await analyzeCompany({ ...request, analysisType: "deep" });
     expect(result.ok).toBe(true);
     expect(mocks.fetchSecSubmissionEvents).toHaveBeenCalledOnce();
+    expect(mocks.attachInstitutionalResearch).toHaveBeenCalledOnce();
     if (result.ok) {
       expect(result.data.research?.events).toEqual([
         expect.objectContaining({ form: "10-Q", category: "earnings_results" }),
@@ -112,6 +124,29 @@ describe("deep research provider orchestration", () => {
       expect(result.data.research?.layers.find((layer) => layer.layer === "news_events")?.status).toBe("unavailable");
       expect(result.data.research?.coverage).toBeLessThan(1);
       expect(result.data.research?.confidence).toBeLessThan(95);
+      const sourceIndex = result.data.sources.findIndex((source) => source.capability === "fundamentals");
+      const fundamentalsSource = result.data.sources[sourceIndex];
+      expect(fundamentalsSource).toEqual(expect.objectContaining({
+        provider: expect.any(String),
+        capability: "fundamentals",
+        version: expect.any(String),
+        accessedAt: expect.any(String),
+      }));
+      expect(fundamentalsSource).toHaveProperty("dataAsOf");
+      expect(result.data.research?.evidence.find((item) => item.id === `source-${sourceIndex + 1}`)?.dataAsOf)
+        .toBe(fundamentalsSource.dataAsOf);
+      expect(result.data.adminQa).toEqual(expect.objectContaining({
+        providerAttempts: expect.any(Array),
+        selectedProviders: expect.any(Array),
+        providerFailures: expect.any(Array),
+        fallbacks: expect.any(Array),
+        missingDataReasons: expect.any(Array),
+        classificationDiagnostics: expect.anything(),
+        timingsMs: expect.objectContaining({ total: expect.any(Number) }),
+        currencyState: expect.any(String),
+        specializedCoverage: null,
+        valuationSupport: expect.any(String),
+      }));
     }
   });
 });

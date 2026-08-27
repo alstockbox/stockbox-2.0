@@ -10,6 +10,8 @@ import type {
   UiMode
 } from "@/lib/analysis/types";
 import { commonCompanies } from "@/lib/data/common-companies";
+import { getP0Copy } from "@/lib/i18n/p0-copy";
+import type { Locale } from "@/lib/i18n/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SetupNotice } from "@/components/ui/setup-notice";
@@ -27,15 +29,16 @@ type ApiResult =
   | { ok: true; data: AnalysisReport; warnings: string[]; persisted: boolean }
   | { ok: false; error: string; warnings: string[] };
 
-export function AnalysisWorkbench({ financialConfigured }: { financialConfigured: boolean }) {
+export function AnalysisWorkbench({ financialConfigured, initialMode = "simple", initialInvestmentProfile = "balanced", locale = "en" }: { financialConfigured: boolean; initialMode?: UiMode; initialInvestmentProfile?: InvestmentProfile; locale?: Locale }) {
+  const copy = getP0Copy(locale).analyze;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanySearchResult[]>(commonCompanies.slice(0, 6));
   const [selected, setSelected] = useState<CompanySearchResult | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
-  const [investmentProfile, setInvestmentProfile] = useState<InvestmentProfile>("balanced");
-  const [mode, setMode] = useState<UiMode>("simple");
+  const [investmentProfile, setInvestmentProfile] = useState<InvestmentProfile>(initialInvestmentProfile);
+  const [mode, setMode] = useState<UiMode>(initialMode);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -45,12 +48,12 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
   const selectedSecurityKey = selected ? securitySelectionKey(selected) : null;
 
   const helperText = !financialConfigured
-    ? "Live financial data is not configured for this deployment. An administrator must configure the SEC provider."
+    ? copy.notConfigured
     : !selected
-      ? "Search and select a company."
+      ? copy.selectCompany
       : !supportsLiveFundamentals(selected)
-        ? "Company found — live fundamentals not yet supported for this market."
-        : `${selected.canonicalTicker ?? selected.ticker} - ${selected.name}${selected.exchange ? ` - ${selected.exchange}` : ""} selected.`;
+        ? copy.unsupported
+        : `${selected.canonicalTicker ?? selected.ticker} - ${selected.name}${selected.exchange ? ` - ${selected.exchange}` : ""} ${copy.selected}.`;
 
   function updateQuery(value: string) {
     const nextSelected = selectionAfterQueryChange(selected, value);
@@ -146,7 +149,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
       });
       const payload = (await response.json()) as ApiResult;
       if (!response.ok) {
-        setError("error" in payload ? payload.error : "Analysis failed.");
+        setError("error" in payload ? payload.error : copy.failedTitle);
         setReport(null);
         return;
       }
@@ -165,7 +168,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
         <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <label className="text-sm font-semibold text-[#f4efe5]" htmlFor="company-search">
-              Search company
+              {copy.searchCompany}
             </label>
             <div className="mt-2 flex gap-2">
               <div className="relative flex-1">
@@ -179,13 +182,13 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                   aria-expanded={results.length > 0}
                   aria-controls="company-search-results"
                   aria-activedescendant={highlightedIndex >= 0 ? `company-result-${highlightedIndex}` : undefined}
-                  placeholder="AAPL, NVIDIA, Investor..."
+                  placeholder={copy.placeholder}
                   className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-3 text-sm text-[#f4efe5] placeholder:text-[#6f7b8c]"
                 />
               </div>
               <Button type="button" onClick={runAnalysis} disabled={!canAnalyze}>
                 <Sparkles className="h-4 w-4" aria-hidden="true" />
-                {isPending ? "Analyzing" : "Analyze"}
+                {isPending ? copy.analyzing : copy.analyze}
               </Button>
             </div>
             <p className="mt-2 text-sm text-[#9aa7b8]">{helperText}</p>
@@ -213,44 +216,44 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                 </button>
               ))}
             </div>
-            {isSearching ? <p className="mt-3 text-sm text-[#9aa7b8]">Searching...</p> : null}
+            {isSearching ? <p className="mt-3 text-sm text-[#9aa7b8]">{copy.searching}</p> : null}
             {!isSearching && query.trim().length >= 2 && !selected && results.length === 0 ? (
-              <p className="mt-3 text-sm text-[#9aa7b8]">No matching company found.</p>
+              <p className="mt-3 text-sm text-[#9aa7b8]">{copy.noMatch}</p>
             ) : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <label className="space-y-2 text-sm">
-              <span className="font-semibold text-[#f4efe5]">Report type</span>
+              <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
               <select
                 value={analysisType}
                 onChange={(event) => setAnalysisType(event.target.value as AnalysisType)}
                 className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
               >
-                <option value="summary">Ytlig / Summary</option>
-                <option value="numbers">Siffror / Numbers</option>
-                <option value="deep">Djup / Deep</option>
-                <option value="research">Research / Extra Deep</option>
+                <option value="summary">{copy.summary}</option>
+                <option value="numbers">{copy.numbers}</option>
+                <option value="deep">{copy.deep}</option>
+                <option value="research">{copy.research}</option>
               </select>
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-semibold text-[#f4efe5]">Investment profile</span>
+              <span className="font-semibold text-[#f4efe5]">{copy.investmentProfile}</span>
               <select
                 value={investmentProfile}
                 onChange={(event) => setInvestmentProfile(event.target.value as InvestmentProfile)}
                 className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
               >
-                <option value="balanced">Balanced</option>
-                <option value="long_term">Long-term</option>
-                <option value="short_term">Short-term</option>
-                <option value="growth">Growth</option>
-                <option value="value">Value / valuation</option>
-                <option value="quality">Quality</option>
-                <option value="dividend">Dividend</option>
+                <option value="balanced">{copy.balanced}</option>
+                <option value="long_term">{copy.longTerm}</option>
+                <option value="short_term">{copy.shortTerm}</option>
+                <option value="growth">{copy.growth}</option>
+                <option value="value">{copy.value}</option>
+                <option value="quality">{copy.quality}</option>
+                <option value="dividend">{copy.dividend}</option>
               </select>
             </label>
             <fieldset className="space-y-2 text-sm">
-              <legend className="font-semibold text-[#f4efe5]">Mode</legend>
+              <legend className="font-semibold text-[#f4efe5]">{copy.mode}</legend>
               <div className="grid grid-cols-2 rounded-md border border-white/12 bg-[#07111f] p-1">
                 {(["simple", "pro"] as UiMode[]).map((item) => (
                   <button
@@ -261,7 +264,7 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
                       mode === item ? "bg-[#b99b5f] text-[#07111f]" : "text-[#c9d2df]"
                     }`}
                   >
-                    {item}
+                    {item === "simple" ? copy.simple : copy.pro}
                   </button>
                 ))}
               </div>
@@ -272,14 +275,14 @@ export function AnalysisWorkbench({ financialConfigured }: { financialConfigured
 
       {!financialConfigured ? (
         <SetupNotice
-          title="Live analysis provider setup required"
-          detail="Live financial data is unavailable until an administrator configures the SEC provider for this deployment."
+          title={copy.setupTitle}
+          detail={copy.setupDetail}
         />
       ) : null}
 
-      {error ? <SetupNotice title="Analysis failed" detail={error} /> : null}
+      {error ? <SetupNotice title={copy.failedTitle} detail={error} /> : null}
 
-      {report ? <ReportView report={report} mode={mode} /> : null}
+      {report ? <ReportView report={report} mode={mode} locale={locale} /> : null}
     </div>
   );
 }

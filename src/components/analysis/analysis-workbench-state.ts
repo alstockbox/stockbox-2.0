@@ -1,4 +1,13 @@
-import type { CompanySearchResult } from "@/lib/analysis/types";
+import type { CompanySearchResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
+import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
+
+const INVESTMENT_PROFILES = new Set<InvestmentProfile>(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"]);
+
+export function analysisWorkbenchDefaults(profile: { uiMode?: unknown; investmentProfile?: unknown; experience?: unknown } | null | undefined): { mode: UiMode; investmentProfile: InvestmentProfile } {
+  const mode: UiMode = profile?.uiMode === "pro" || profile?.uiMode === "simple" ? profile.uiMode : profile?.experience === "advanced" ? "pro" : "simple";
+  const investmentProfile = typeof profile?.investmentProfile === "string" && INVESTMENT_PROFILES.has(profile.investmentProfile as InvestmentProfile) ? profile.investmentProfile as InvestmentProfile : "balanced";
+  return { mode, investmentProfile };
+}
 
 function normalized(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -37,7 +46,7 @@ export function selectionAfterQueryChange(
 }
 
 export function supportsLiveFundamentals(company: CompanySearchResult | null): boolean {
-  return Boolean(company?.providerCapabilities?.fundamentals ?? company?.cik);
+  return supportsLiveFundamentalsSecurity(company);
 }
 
 export function compactAnalysisCapability(company: CompanySearchResult): string {

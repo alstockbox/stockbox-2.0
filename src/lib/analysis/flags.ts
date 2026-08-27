@@ -1,57 +1,8 @@
-import type { AnalysisArchetype, FinancialMetrics, Flag, Metrics, RedFlag, SpecializedCompanyData } from "./types";
+import type { AnalysisArchetype, CompanyProfile, FinancialMetrics, Flag, Metrics, RedFlag, SpecializedCompanyData } from "./types";
+import { isFiniteNumber } from "./math";
+import { resolveInsurerSubtype } from "./insurer-subtypes";
 
-export function detectRedFlags(metrics: Metrics): Flag[] {
-  const flags: Flag[] = [];
-
-  if (metrics.revenueGrowth1y !== null && metrics.revenueGrowth1y < -0.15) {
-    flags.push({
-      severity: "high",
-      title: "Revenue contraction",
-      detail: "Latest annual revenue declined by more than 15%.",
-      metric: "revenueGrowth1y"
-    });
-  }
-
-  if (metrics.fcf !== null && metrics.fcf < 0) {
-    flags.push({
-      severity: "high",
-      title: "Negative free cash flow",
-      detail: "Operating cash flow after capital expenditure is negative.",
-      metric: "fcf"
-    });
-  }
-
-  if (metrics.debtToEquity !== null && metrics.debtToEquity > 2.5) {
-    flags.push({
-      severity: "medium",
-      title: "Elevated leverage",
-      detail: "Debt is high relative to reported equity.",
-      metric: "debtToEquity"
-    });
-  }
-
-  if (metrics.interestCoverage !== null && metrics.interestCoverage < 2) {
-    flags.push({
-      severity: "high",
-      title: "Weak interest coverage",
-      detail: "Operating income gives limited coverage of interest expense.",
-      metric: "interestCoverage"
-    });
-  }
-
-  if (metrics.cashConversion !== null && metrics.cashConversion < 0.5) {
-    flags.push({
-      severity: "medium",
-      title: "Weak cash conversion",
-      detail: "Accounting earnings are not strongly supported by free cash flow.",
-      metric: "cashConversion"
-    });
-  }
-
-  return flags;
-}
-
-export function detectGreenFlags(metrics: Metrics): Flag[] {
+function detectGreenFlags(metrics: Metrics): Flag[] {
   const flags: Flag[] = [];
 
   if (metrics.revenueCagr3y !== null && metrics.revenueCagr3y > 0.12) {
@@ -98,22 +49,35 @@ export function detectArchetypeGreenFlags(
   financial: FinancialMetrics,
   archetype: AnalysisArchetype,
   specialized?: SpecializedCompanyData,
+  company?: CompanyProfile,
 ): Flag[] {
   if (archetype === "reit") {
     if (specialized?.kind !== "reit") return [];
     const flags: Flag[] = [];
-    if ((specialized.fundsFromOperationsGrowth.value ?? 0) > 0.05) flags.push({ severity: "low", title: "FFO growth", detail: "Provider-reported FFO growth is positive.", metric: "epsGrowth1y" });
-    if ((specialized.occupancy.value ?? 0) >= 0.95) flags.push({ severity: "low", title: "High occupancy", detail: "Reported portfolio occupancy is at least 95%." });
-    if ((specialized.dividendCoverage.value ?? 0) >= 1.1) flags.push({ severity: "low", title: "Dividend covered by AFFO", detail: "Reported AFFO coverage exceeds 1.1 times." });
+    if (isFiniteNumber(specialized.fundsFromOperationsGrowth.value) && specialized.fundsFromOperationsGrowth.value > 0.05) flags.push({ severity: "low", title: "FFO growth", detail: "Provider-reported FFO growth is positive.", metric: "epsGrowth1y" });
+    if (isFiniteNumber(specialized.occupancy.value) && specialized.occupancy.value >= 0.95) flags.push({ severity: "low", title: "High occupancy", detail: "Reported portfolio occupancy is at least 95%." });
+    if (isFiniteNumber(specialized.dividendCoverage.value) && specialized.dividendCoverage.value >= 1.1) flags.push({ severity: "low", title: "Dividend covered by AFFO", detail: "Reported AFFO coverage exceeds 1.1 times." });
     return flags;
   }
   if (archetype === "bank") {
     if (specialized?.kind !== "bank") return [];
     const flags: Flag[] = [];
-    if ((specialized.cet1CapitalRatio.value ?? 0) >= 0.12) flags.push({ severity: "low", title: "Strong CET1 capital", detail: "Reported CET1 capital ratio is at least 12%." });
-    if ((specialized.netInterestMargin.value ?? 0) > 0 && (specialized.returnOnAssets.value ?? 0) > 0) flags.push({ severity: "low", title: "Positive bank profitability", detail: "Reported NIM and return on assets are positive." });
+    if (isFiniteNumber(specialized.cet1CapitalRatio.value) && specialized.cet1CapitalRatio.value >= 0.12) flags.push({ severity: "low", title: "Strong CET1 capital", detail: "Reported CET1 capital ratio is at least 12%." });
+    if (isFiniteNumber(specialized.netInterestMargin.value) && specialized.netInterestMargin.value > 0 && isFiniteNumber(specialized.returnOnAssets.value) && specialized.returnOnAssets.value > 0) flags.push({ severity: "low", title: "Positive bank profitability", detail: "Reported NIM and return on assets are positive." });
     return flags;
   }
+  if (archetype === "insurer") {
+    if (specialized?.kind !== "insurer") return [];
+    const subtype = resolveInsurerSubtype(company ?? {});
+    if (subtype === "unknown" || subtype === "mixed") return [];
+    const flags: Flag[] = [];
+    if (isFiniteNumber(specialized.regulatoryCapitalRatio.value) && specialized.regulatoryCapitalRatio.value >= 1.5) flags.push({ severity: "low", title: "Strong insurer capital", detail: "Reported regulatory capital ratio is at least 1.5 times." });
+    if (isFiniteNumber(specialized.returnOnEquity.value) && specialized.returnOnEquity.value >= 0.1) flags.push({ severity: "low", title: "Positive insurer returns", detail: "Reported insurer return on equity is at least 10%." });
+    if (isFiniteNumber(specialized.premiumGrowth.value) && specialized.premiumGrowth.value >= 0.03) flags.push({ severity: "low", title: "Positive premium growth", detail: "Reported premium growth is at least 3%." });
+    if (subtype === "property_casualty" && isFiniteNumber(specialized.combinedRatio.value) && specialized.combinedRatio.value <= 0.95) flags.push({ severity: "low", title: "Profitable underwriting", detail: "Reported combined ratio is at or below 95%." });
+    return flags;
+  }
+  if (["pre_revenue_biotech", "holding_company", "unknown"].includes(archetype)) return [];
   const flags = detectGreenFlags(metrics);
   if (archetype === "cyclical") {
     return flags.filter((flag) => flag.metric !== "revenueGrowth1y").concat(
@@ -131,10 +95,13 @@ export function detectArchetypeGreenFlags(
 export function detectFinancialRedFlags(
   metrics: FinancialMetrics,
   archetype: AnalysisArchetype = "standard",
+  specialized?: SpecializedCompanyData,
+  company?: CompanyProfile,
 ): RedFlag[] {
   const flags: RedFlag[] = [];
+  const operatingCompanyApplies = ["standard", "software_growth", "cyclical", "utility"].includes(archetype);
 
-  if (metrics.growth.revenueGrowthYoY !== null && metrics.growth.revenueGrowthYoY < -0.12) {
+  if (operatingCompanyApplies && metrics.growth.revenueGrowthYoY !== null && metrics.growth.revenueGrowthYoY < -0.12) {
     flags.push({
       code: "revenue_contraction",
       label: "Material revenue contraction",
@@ -145,7 +112,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  const corporateCashFlowApplies = !["bank", "insurer", "reit"].includes(archetype);
+  const corporateCashFlowApplies = operatingCompanyApplies;
   if (corporateCashFlowApplies && metrics.margins.freeCashFlowMargin !== null && metrics.margins.freeCashFlowMargin < -0.08) {
     flags.push({
       code: "negative_fcf_margin",
@@ -157,7 +124,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  const corporateLeverageApplies = !["bank", "insurer", "reit", "holding_company"].includes(archetype);
+  const corporateLeverageApplies = operatingCompanyApplies;
   if (corporateLeverageApplies && metrics.ratios.netDebtToEbitda !== null && metrics.ratios.netDebtToEbitda > 5) {
     flags.push({
       code: "high_leverage",
@@ -224,7 +191,7 @@ export function detectFinancialRedFlags(
     });
   }
 
-  if (!["bank", "insurer", "reit"].includes(archetype) && metrics.trends.operatingMarginChangeYoY !== null && metrics.trends.operatingMarginChangeYoY < -0.05) {
+  if (operatingCompanyApplies && metrics.trends.operatingMarginChangeYoY !== null && metrics.trends.operatingMarginChangeYoY < -0.05) {
     flags.push({
       code: "margin_compression",
       label: "Operating margin compression",
@@ -233,6 +200,49 @@ export function detectFinancialRedFlags(
       value: metrics.trends.operatingMarginChangeYoY,
       rationale: "Operating margin contracted by more than five percentage points.",
     });
+  }
+
+  if (archetype === "bank" && specialized?.kind === "bank") {
+    const cet1 = specialized.cet1CapitalRatio.value;
+    const grossLoans = specialized.grossLoans.value;
+    const nonPerformingLoans = specialized.nonPerformingLoans.value;
+    const nonPerformingLoanRatio = isFiniteNumber(grossLoans) && grossLoans > 0 && isFiniteNumber(nonPerformingLoans)
+      ? nonPerformingLoans / grossLoans
+      : null;
+    if (isFiniteNumber(cet1) && cet1 < 0.08) {
+      flags.push({ code: "weak_cet1_capital", label: "Weak CET1 capital", severity: "critical", metric: "cet1CapitalRatio", value: cet1, rationale: "Reported CET1 capital is below the model's minimum resilience threshold." });
+    }
+    if (isFiniteNumber(nonPerformingLoanRatio) && nonPerformingLoanRatio > 0.05) {
+      flags.push({ code: "high_nonperforming_loans", label: "High nonperforming loans", severity: "high", metric: "nonPerformingLoans", value: nonPerformingLoanRatio, rationale: "Reported nonperforming loans exceed 5% of gross loans." });
+    }
+    if (isFiniteNumber(specialized.efficiencyRatio.value) && specialized.efficiencyRatio.value > 0.75) {
+      flags.push({ code: "weak_bank_efficiency", label: "Weak bank efficiency", severity: "medium", metric: "efficiencyRatio", value: specialized.efficiencyRatio.value, rationale: "Reported efficiency ratio exceeds 75%." });
+    }
+  }
+
+  if (archetype === "insurer" && specialized?.kind === "insurer") {
+    const subtype = resolveInsurerSubtype(company ?? {});
+    if (subtype === "property_casualty" && isFiniteNumber(specialized.combinedRatio.value) && specialized.combinedRatio.value > 1.05) {
+      flags.push({ code: "underwriting_loss", label: "Underwriting loss", severity: "high", metric: "combinedRatio", value: specialized.combinedRatio.value, rationale: "Reported combined ratio exceeds 105%." });
+    }
+    if (isFiniteNumber(specialized.regulatoryCapitalRatio.value) && specialized.regulatoryCapitalRatio.value < 1) {
+      flags.push({ code: "weak_insurer_capital", label: "Weak insurer capital", severity: "critical", metric: "regulatoryCapitalRatio", value: specialized.regulatoryCapitalRatio.value, rationale: "Reported regulatory capital ratio is below the model's minimum resilience threshold." });
+    }
+    if (subtype === "property_casualty" && isFiniteNumber(specialized.reserveDevelopment.value) && specialized.reserveDevelopment.value > 0.08) {
+      flags.push({ code: "adverse_reserve_development", label: "Adverse reserve development", severity: "high", metric: "reserveDevelopment", value: specialized.reserveDevelopment.value, rationale: "Reported adverse reserve development exceeds 8%." });
+    }
+  }
+
+  if (archetype === "reit" && specialized?.kind === "reit") {
+    if (isFiniteNumber(specialized.netDebtToEbitdare.value) && specialized.netDebtToEbitdare.value > 8) {
+      flags.push({ code: "high_reit_leverage", label: "High REIT leverage", severity: "critical", metric: "netDebtToEbitdare", value: specialized.netDebtToEbitdare.value, rationale: "Reported net debt exceeds eight times EBITDAre." });
+    }
+    if (isFiniteNumber(specialized.fixedChargeCoverage.value) && specialized.fixedChargeCoverage.value < 1.2) {
+      flags.push({ code: "weak_fixed_charge_coverage", label: "Weak fixed-charge coverage", severity: "critical", metric: "fixedChargeCoverage", value: specialized.fixedChargeCoverage.value, rationale: "Reported fixed-charge coverage is below 1.2 times." });
+    }
+    if (isFiniteNumber(specialized.occupancy.value) && specialized.occupancy.value < 0.8) {
+      flags.push({ code: "low_occupancy", label: "Low occupancy", severity: "high", metric: "occupancy", value: specialized.occupancy.value, rationale: "Reported portfolio occupancy is below 80%." });
+    }
   }
 
   return flags;

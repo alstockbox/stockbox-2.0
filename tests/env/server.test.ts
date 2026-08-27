@@ -23,9 +23,9 @@ describe("server environment parsing", () => {
     expect(env.NEXT_PUBLIC_POSTHOG_HOST).toBe("https://eu.posthog.com");
   });
 
-  it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the no-env Stooq fallback", (provider) => {
+  it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the reliable no-env Yahoo fallback", (provider) => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: provider });
-    expect(getMarketDataProvider(env)).toBe("stooq");
+    expect(getMarketDataProvider(env)).toBe("yahoo");
   });
 
   it.each(["stooq", " STOOQ "])("normalizes an enabled Stooq provider value of %s", (provider) => {
@@ -36,9 +36,9 @@ describe("server environment parsing", () => {
     expect(getMarketDataProvider(parseServerEnv({ MARKET_DATA_PROVIDER: " disabled " }))).toBe("disabled");
   });
 
-  it("builds a de-duplicated provider chain with Yahoo as the built-in final fallback", () => {
+  it("builds a de-duplicated provider chain only from explicitly configured providers", () => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: "twelve_data", MARKET_DATA_FALLBACK_PROVIDERS: "stooq,twelve_data" });
-    expect(getMarketDataProviderChain(env)).toEqual(["twelve_data", "stooq", "yahoo"]);
+    expect(getMarketDataProviderChain(env)).toEqual(["twelve_data", "stooq"]);
   });
 
   it("enables Basic checkout without requiring a webhook secret", () => {

@@ -1,16 +1,23 @@
-import { randomUUID } from "node:crypto";
-import { resolveArchetype } from "./archetypes";
-import { MODEL_VERSION, REPORT_SCHEMA_VERSION } from "./config";
+import { createHash, randomUUID } from "node:crypto";
+import { resolveFinancialArchetype } from "./archetypes";
+import {
+  MODEL_VERSION,
+  REPORT_SCHEMA_VERSION,
+  SCORE_POLICY_VERSION,
+  STATIC_BENCHMARK_VERSION,
+} from "./config";
 import { computeDcfRange } from "./dcf";
 import { detectArchetypeGreenFlags, detectFinancialRedFlags } from "./flags";
 import { assessDataFreshness } from "./freshness";
 import { isFiniteNumber } from "./math";
-import { computeFinancialMetrics } from "./metrics";
+import { computeFinancialMetrics, valuationCurrencyAlignment } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
 import { reconcileFinancialData, reconciliationConfidence, ttmPeriodBasisCheck } from "./reconciliation";
 import { attachInstitutionalResearch } from "./research";
 import { buildAnalysisScenarios, scenarioStatusFor } from "./scenarios";
 import { computeScores } from "./scoring";
+import { summarizeSourceConflicts } from "./source-conflicts";
+import { insurerRequiredFields } from "./insurer-subtypes";
 import type {
   AnalysisInput,
   AnalysisReport,
@@ -27,6 +34,31 @@ import type {
 
 const DISCLAIMER =
   "StockBox is an analytical tool. Scores and model ratings depend on available data, explicit assumptions, and historical relationships. They are not individualized financial advice or guaranteed outcomes.";
+const FUTURE_FINANCIAL_DATE_TOLERANCE_DAYS = 1;
+
+function canonicalizeForFingerprint(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeForFingerprint);
+  if (typeof value === "number" && !Number.isFinite(value)) return `__${String(value)}__`;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, child]) => child !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalizeForFingerprint(child)]),
+    );
+  }
+  return value;
+}
+
+export function canonicalInputFingerprint(input: FinancialAnalysisInput): string {
+  const payload = canonicalizeForFingerprint({
+    input,
+    modelVersion: MODEL_VERSION,
+    scorePolicyVersion: SCORE_POLICY_VERSION,
+    benchmarkVersion: STATIC_BENCHMARK_VERSION,
+  });
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
 
 const sectors = new Set<Sector>([
   "technology", "financials", "healthcare", "consumer", "industrials", "energy", "utilities",
@@ -35,6 +67,21 @@ const sectors = new Set<Sector>([
 
 function toSector(value: string | null | undefined): Sector | undefined {
   return value && sectors.has(value as Sector) ? value as Sector : undefined;
+}
+
+function entityIdentityConfidence(company: AnalysisInput["company"]): number {
+  if (company.cik || company.isin || company.figi || company.lei || company.entityId?.startsWith("sec:")) return 100;
+  if (company.issuerId || company.entityId?.startsWith("issuer:")) return 95;
+  if (company.securityId && !company.entityId?.startsWith("listing:unknown:")) return 90;
+  if (company.entityId?.startsWith("listing:unknown:")) {
+    if (company.matchConfidence === "high") return 65;
+    if (company.matchConfidence === "medium") return 50;
+    return 35;
+  }
+  if (company.matchType === "exact_canonical_ticker" || company.matchType === "exact_provider_ticker") {
+    return company.matchConfidence === "high" ? 80 : company.matchConfidence === "medium" ? 65 : 50;
+  }
+  return company.entityId ? 75 : 55;
 }
 
 function mapLegacyPeriod(period: AnnualFinancials): FinancialPeriod {
@@ -47,6 +94,8 @@ function mapLegacyPeriod(period: AnnualFinancials): FinancialPeriod {
     operatingIncome: period.operatingIncome,
     ebitda: period.ebitda,
     netIncome: period.netIncome,
+    netIncomeCommonStockholders: period.netIncomeCommonStockholders,
+    dilutedNetIncomeAvailableToCommon: period.dilutedNetIncomeAvailableToCommon,
     epsDiluted: period.epsDiluted,
     operatingCashFlow: period.operatingCashFlow,
     capitalExpenditures: period.capex,
@@ -55,6 +104,7 @@ function mapLegacyPeriod(period: AnnualFinancials): FinancialPeriod {
     cashAndEquivalents: period.cash,
     totalDebt: period.debt,
     totalEquity: period.equity,
+    minorityInterest: period.minorityInterest,
     currentAssets: period.currentAssets,
     currentLiabilities: period.currentLiabilities,
     interestExpense: period.interestExpense,
@@ -71,21 +121,34 @@ function mapLegacyPeriod(period: AnnualFinancials): FinancialPeriod {
 
 export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysisInput {
   const fundamentals = input.fundamentals;
+  const annualPeriods = fundamentals?.annualPeriods ?? fundamentals?.annual.map(mapLegacyPeriod) ?? [];
+  const latestAnnualCurrency = [...annualPeriods]
+    .sort((left, right) => (left.periodEndDate ?? String(left.fiscalYear ?? "")).localeCompare(right.periodEndDate ?? String(right.fiscalYear ?? "")))
+    .reverse()
+    .find((period) => period.currency && !period.currencyConflict?.length)?.currency;
+  const reportingCurrency = fundamentals?.reportingCurrency
+    ?? fundamentals?.trailingTwelveMonths?.currency
+    ?? latestAnnualCurrency;
+  const tradingCurrency = input.market?.currency ?? undefined;
   return {
     company: {
       ticker: input.company.ticker,
       canonicalTicker: input.company.canonicalTicker,
       entityId: input.company.entityId,
+      entityIdentityConfidence: entityIdentityConfidence(input.company),
       cik: input.company.cik,
       name: fundamentals?.name ?? input.company.name,
       sector: toSector(fundamentals?.sector),
       industry: fundamentals?.industry ?? undefined,
       investmentProfile: input.investmentProfile,
       analysisArchetype: fundamentals?.analysisArchetype,
+      classificationDiagnostics: fundamentals?.classificationDiagnostics,
       sic: fundamentals?.sic,
-      currency: input.market?.currency ?? undefined,
+      currency: reportingCurrency ?? undefined,
+      reportingCurrency: reportingCurrency ?? undefined,
+      tradingCurrency,
     },
-    annualPeriods: fundamentals?.annualPeriods ?? fundamentals?.annual.map(mapLegacyPeriod) ?? [],
+    annualPeriods,
     trailingTwelveMonths: fundamentals?.trailingTwelveMonths,
     priorTrailingTwelveMonths: fundamentals?.priorTrailingTwelveMonths,
     market: input.market ? {
@@ -96,7 +159,10 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
       yearHigh: input.market.yearHigh,
       yearLow: input.market.yearLow,
       marketCap: input.market.marketCap,
+      marketCapAsOf: input.market.marketCapAsOf ?? input.market.date,
+      marketCapCurrency: input.market.marketCapCurrency ?? input.market.currency,
       sharesOutstanding: input.market.sharesOutstanding,
+      sharesOutstandingAsOf: input.market.sharesOutstandingAsOf ?? input.market.date,
       beta: input.market.beta,
       provider: input.market.provider,
       pricePerformance: {
@@ -107,9 +173,10 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
         oneYear: input.market.performance["1Y"] ?? null,
       },
     } : undefined,
-    analysisDate: new Date().toISOString(),
+    analysisDate: input.analysisDate ?? new Date().toISOString(),
     providerDiagnostics: input.providerDiagnostics ?? fundamentals?.diagnostics?.providerDiagnostics,
     specialized: fundamentals?.specialized,
+    sourceConflicts: fundamentals?.sourceConflicts ?? [],
   };
 }
 
@@ -131,7 +198,8 @@ function diagnosticDates(input: FinancialAnalysisInput, freshness = assessDataFr
 }
 
 function specializedMissingData(
-  archetype: ReturnType<typeof resolveArchetype>,
+  archetype: ReturnType<typeof resolveFinancialArchetype>,
+  company: FinancialAnalysisInput["company"],
   latest: FinancialPeriod | null,
   specialized?: SpecializedCompanyData,
 ): MissingDataItem[] {
@@ -186,67 +254,204 @@ function specializedMissingData(
     }
     return missing;
   }
+  if (archetype === "insurer") {
+    const insurer = specialized?.kind === "insurer" ? specialized : null;
+    const labels = new Map([
+      ["premiumGrowth", "Premium growth"],
+      ["combinedRatio", "Combined ratio"],
+      ["lossRatio", "Loss ratio"],
+      ["expenseRatio", "Expense ratio"],
+      ["bookValue", "Book value"],
+      ["tangibleBookValue", "Tangible book value"],
+      ["returnOnEquity", "Insurer return on equity"],
+      ["regulatoryCapitalRatio", "Regulatory capital ratio"],
+      ["reserveDevelopment", "Reserve development"],
+    ]);
+    return insurerRequiredFields(company).flatMap((field) => isFiniteNumber(
+      insurer?.[field as keyof typeof insurer] && typeof insurer[field as keyof typeof insurer] === "object"
+        ? (insurer[field as keyof typeof insurer] as { value: number | null }).value
+        : null,
+    ) ? [] : [{
+      field,
+      reason: `${labels.get(field) ?? field} is unavailable from the current specialized insurer-data provider phase.`,
+      impact: "metric" as const,
+      severity: "medium" as const,
+    }]);
+  }
   return [];
 }
 
+function dateIsTooFarInFuture(value: string | null | undefined, analysisDate: string): boolean {
+  if (!value) return false;
+  const age = (Date.parse(analysisDate) - Date.parse(value)) / 86_400_000;
+  return Number.isFinite(age) && age < -FUTURE_FINANCIAL_DATE_TOLERANCE_DAYS;
+}
+
+function hasFutureFinancialData(input: FinancialAnalysisInput): boolean {
+  const analysisDate = input.analysisDate ?? new Date().toISOString();
+  return [
+    input.trailingTwelveMonths,
+    input.priorTrailingTwelveMonths,
+    ...input.annualPeriods,
+  ].filter((period): period is FinancialPeriod => Boolean(period)).some((period) =>
+    dateIsTooFarInFuture(period.periodEndDate, analysisDate)
+    || dateIsTooFarInFuture(period.balanceSheetDate, analysisDate)
+  );
+}
+
+function normalizedCurrency(value: string | null | undefined): string | null {
+  const currency = value?.trim().toUpperCase();
+  return currency ? currency : null;
+}
+
+function financialCurrencyCodes(input: FinancialAnalysisInput): string[] {
+  const currencies = new Set<string>();
+  for (const period of [input.trailingTwelveMonths, input.priorTrailingTwelveMonths, ...input.annualPeriods]) {
+    if (!period) continue;
+    const currency = normalizedCurrency(period.currency ?? input.company.reportingCurrency ?? input.company.currency);
+    if (currency) currencies.add(currency);
+  }
+  return [...currencies].sort();
+}
+
+function hasFinancialCurrencyConflict(input: FinancialAnalysisInput): boolean {
+  return [
+    input.trailingTwelveMonths,
+    input.priorTrailingTwelveMonths,
+    ...input.annualPeriods,
+  ].filter((period): period is FinancialPeriod => Boolean(period)).some((period) =>
+    (period.currencyConflict?.length ?? 0) > 1
+  );
+}
+
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
-  const ttmConsistency = ttmPeriodBasisCheck(input.trailingTwelveMonths);
+  const effectiveInput: FinancialAnalysisInput = input.analysisDate
+    ? input
+    : { ...input, analysisDate: new Date().toISOString() };
+  const ttmConsistency = ttmPeriodBasisCheck(effectiveInput.trailingTwelveMonths);
   const consistencySafeInput = ttmConsistency.status === "warning"
-    ? { ...input, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
-    : input;
+    ? { ...effectiveInput, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
+    : effectiveInput;
   const initialFreshness = assessDataFreshness(consistencySafeInput);
   const annualFallbackInput = consistencySafeInput.trailingTwelveMonths
     ? { ...consistencySafeInput, trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : consistencySafeInput;
   const annualFallbackFreshness = assessDataFreshness(annualFallbackInput);
   const periodConsistentInput = consistencySafeInput.trailingTwelveMonths
-    && initialFreshness.financialFlowStatus === "stale"
+    && initialFreshness.dataStatus === "stale"
     && annualFallbackFreshness.dataStatus === "current"
     ? annualFallbackInput
     : consistencySafeInput;
   const freshness = periodConsistentInput === annualFallbackInput
     ? annualFallbackFreshness
     : initialFreshness;
-  const calculationInput = freshness.dataStatus === "stale"
+  const futureFinancialData = hasFutureFinancialData(periodConsistentInput);
+  const financialCurrencies = financialCurrencyCodes(periodConsistentInput);
+  const financialCurrencyMismatch = financialCurrencies.length > 1;
+  const financialCurrencyConflict = hasFinancialCurrencyConflict(periodConsistentInput);
+  const unsafeFinancialCurrencies = financialCurrencyMismatch || financialCurrencyConflict;
+  const sourceConflictPolicy = summarizeSourceConflicts(periodConsistentInput);
+  const blockingSourceConflict = sourceConflictPolicy.blocking;
+  const analysisDataStatus = futureFinancialData || unsafeFinancialCurrencies || blockingSourceConflict ? "unavailable" as const : freshness.dataStatus;
+  const unusableFinancialData = freshness.dataStatus === "stale" || futureFinancialData || unsafeFinancialCurrencies || blockingSourceConflict;
+  const calculationInput = unusableFinancialData
     ? { ...periodConsistentInput, annualPeriods: [], trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : periodConsistentInput;
   const metrics = computeFinancialMetrics(calculationInput);
-  const reconciliation = reconcileFinancialData(freshness.dataStatus === "stale" ? calculationInput : periodConsistentInput, metrics);
+  const currencyAlignment = valuationCurrencyAlignment(periodConsistentInput, metrics.latestPeriod);
+  const reconciliation = reconcileFinancialData(unusableFinancialData ? calculationInput : periodConsistentInput, metrics);
   if (ttmConsistency.status === "warning") {
     const ttmCheckIndex = reconciliation.findIndex((check) => check.code === ttmConsistency.code);
     if (ttmCheckIndex >= 0) reconciliation[ttmCheckIndex] = ttmConsistency;
     else reconciliation.unshift(ttmConsistency);
   }
+  if (unsafeFinancialCurrencies) {
+    reconciliation.push({
+      code: "financial_currency_consistency",
+      status: "warning",
+      message: financialCurrencyConflict
+        ? "At least one financial period contains conflicting monetary currencies; growth and scoring require one verified reporting currency per period."
+        : `Financial periods use mixed reporting currencies (${financialCurrencies.join(", ")}); growth and scoring require restated comparable currency data.`,
+    });
+  }
+  if (blockingSourceConflict) {
+    if (!reconciliation.some((check) => check.code === "provider_source_conflict")) {
+      reconciliation.push({
+        code: "provider_source_conflict",
+        status: "warning",
+        message: "Primary and secondary fundamentals providers disagree materially on one or more same-period facts.",
+      });
+    }
+  }
   reconciliation.push({
     code: "fundamental_data_freshness",
-    status: freshness.dataStatus === "stale" ? "warning" : freshness.dataStatus === "current" ? "pass" : "unavailable",
-    message: freshness.dataStatus === "stale"
+    status: unusableFinancialData ? "warning" : freshness.dataStatus === "current" ? "pass" : "unavailable",
+    message: futureFinancialData
+      ? "Latest reliable financial statements are future-dated relative to the analysis date."
+      : freshness.dataStatus === "stale"
       ? "Latest reliable financial statements are too old for a current analysis."
       : freshness.dataStatus === "current"
         ? "Financial statements are within the current-analysis freshness threshold."
         : "Financial statement freshness could not be established.",
   });
-  const computedScores = computeScores(calculationInput, metrics, { reconciliation: reconciliationConfidence(reconciliation) });
-  const scores = freshness.dataStatus === "stale"
+  const dcf = computeDcfRange(calculationInput, metrics);
+  const computedScores = computeScores(calculationInput, metrics, {
+    reconciliation: reconciliationConfidence(reconciliation),
+    valuationAssumptionQuality: dcf.assumptionQuality,
+    valuationStatus: dcf.status,
+  });
+  const scores = unusableFinancialData
     ? { ...computedScores, stockBoxScore: null, personalizedScore: null, shortTermScore: null, longTermScore: null }
     : computedScores;
-  const archetype = resolveArchetype(calculationInput.company);
-  const redFlags = detectFinancialRedFlags(metrics, archetype);
-  const dcf = computeDcfRange(calculationInput, metrics);
+  const archetype = resolveFinancialArchetype(calculationInput);
+  const redFlags = detectFinancialRedFlags(metrics, archetype, calculationInput.specialized, calculationInput.company);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
-  const scenarioStatus = freshness.dataStatus === "stale" ? "insufficient_data" : scenarioStatusFor(metrics, scores, dcf);
-  const scenarios = freshness.dataStatus === "stale" ? [] : buildAnalysisScenarios(metrics, scores, dcf);
+  const scenarioStatus = unusableFinancialData ? "insufficient_data" : scenarioStatusFor(metrics, scores, dcf);
+  const scenarios = unusableFinancialData ? [] : buildAnalysisScenarios(metrics, scores, dcf);
   const unsuitableCorporateFields = new Set(
     ["bank", "insurer", "reit"].includes(archetype)
       ? ["simpleFreeCashFlow", "enterpriseValue", "normalizedTaxRate"]
       : [],
   );
   const missing = [
-    ...specializedMissingData(archetype, metrics.latestPeriod, calculationInput.specialized),
+    ...specializedMissingData(archetype, calculationInput.company, metrics.latestPeriod, calculationInput.specialized),
     ...metrics.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...scores.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...dcf.missingData,
   ];
+  if (futureFinancialData) {
+    missing.push({
+      field: "futureFinancialData",
+      reason: "Latest reliable financial statements are future-dated relative to the analysis date.",
+      impact: "score",
+      severity: "high",
+    });
+  }
+  if (unsafeFinancialCurrencies) {
+    missing.push({
+      field: "financialCurrencyConsistency",
+      reason: financialCurrencyConflict
+        ? "At least one financial period contains conflicting monetary currencies."
+        : `Financial periods use mixed reporting currencies (${financialCurrencies.join(", ")}); growth and scoring require restated comparable currency data.`,
+      impact: "score",
+      severity: "high",
+    });
+  }
+  if (blockingSourceConflict) {
+    missing.push({
+      field: "sourceConflict",
+      reason: "A material same-period provider conflict must be resolved before scoring or rating.",
+      impact: "score",
+      severity: "high",
+    });
+  } else if (sourceConflictPolicy.hasConflicts) {
+    missing.push({
+      field: "sourceConflict",
+      reason: "A historical provider disagreement remains visible and reduces confidence without discarding current primary facts.",
+      impact: "score",
+      severity: "medium",
+    });
+  }
   if (freshness.dataStatus === "stale") {
     missing.push({
       field: "staleFinancialData",
@@ -256,15 +461,19 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     });
   }
   for (const check of reconciliation.filter((item) => item.status === "warning")) {
-    missing.push({ field: check.code, reason: check.message, impact: "score", severity: "high" });
+    const severity = check.code === "provider_source_conflict" && !blockingSourceConflict ? "medium" as const : "high" as const;
+    missing.push({ field: check.code, reason: check.message, impact: "score", severity });
   }
   const uniqueMissing = new Map<string, MissingDataItem>();
   for (const item of missing) uniqueMissing.set(`${item.field}:${item.impact}`, item);
   return {
     modelVersion: MODEL_VERSION,
+    canonicalInputFingerprint: canonicalInputFingerprint(effectiveInput),
     reportSchemaVersion: REPORT_SCHEMA_VERSION,
     analysisArchetype: archetype,
-    dataStatus: freshness.dataStatus,
+    classificationDiagnostics: calculationInput.company.classificationDiagnostics,
+    currencyAlignment,
+    dataStatus: analysisDataStatus,
     metrics,
     scores,
     redFlags,
@@ -275,9 +484,13 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     missingData: [...uniqueMissing.values()],
     dataCoverage: scores.dataCoverage,
     confidenceBreakdown: scores.confidenceBreakdown,
-    diagnostics: diagnosticDates(periodConsistentInput, freshness),
+    diagnostics: {
+      ...diagnosticDates(periodConsistentInput, { ...freshness, dataStatus: analysisDataStatus }),
+      currencyAlignment,
+    },
     reconciliation,
     provenance: metrics.provenance,
+    sourceConflicts: periodConsistentInput.sourceConflicts ?? [],
   };
 }
 
@@ -365,7 +578,7 @@ export function presentAnalysisReport(
       bull: result.dcf.high,
     },
     redFlags,
-    greenFlags: detectArchetypeGreenFlags(metrics, result.metrics, result.analysisArchetype, canonicalInput.specialized),
+    greenFlags: detectArchetypeGreenFlags(metrics, result.metrics, result.analysisArchetype, canonicalInput.specialized, canonicalInput.company),
     scenarios: result.scenarios.map((scenario) => ({
       caseName: scenario.name,
       assumptions: scenario.assumptions,
@@ -387,12 +600,14 @@ export function presentAnalysisReport(
     scenarioStatus: result.scenarioStatus,
     engine: result,
   };
-  attachInstitutionalResearch(report, result, canonicalInput, { market: legacyInput.market });
   return report;
 }
 
 /** Compatibility entry point. All calculations route through analyzeFinancials. */
 export function buildAnalysis(input: AnalysisInput): AnalysisReport {
   const canonicalInput = toFinancialAnalysisInput(input);
-  return presentAnalysisReport(input, canonicalInput, analyzeFinancials(canonicalInput));
+  const result = analyzeFinancials(canonicalInput);
+  const report = presentAnalysisReport(input, canonicalInput, result);
+  attachInstitutionalResearch(report, result, canonicalInput, { market: input.market });
+  return report;
 }

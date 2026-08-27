@@ -13,6 +13,14 @@ function contextualScore(score: number): ResearchScore {
   return { score, confidence: 90, coverage: 1, contributors: [], positiveSignals: [], negativeSignals: [] };
 }
 
+function currentValuationInput() {
+  return {
+    ...durableCompounderInput,
+    analysisDate: "2026-08-25T00:00:00.000Z",
+    market: { ...durableCompounderInput.market, currency: "USD", priceDate: "2026-08-24", marketCapAsOf: "2026-08-24", sharesOutstandingAsOf: "2026-08-24" },
+  };
+}
+
 describe("research score formulas", () => {
   it("keeps Quality independent from valuation and gates insufficient inputs", () => {
     const result = analyzeFinancials(durableCompounderInput);
@@ -47,7 +55,7 @@ describe("research score formulas", () => {
   });
 
   it("lets quality and deterioration constrain an otherwise cheap opportunity", () => {
-    const result = analyzeFinancials(durableCompounderInput);
+    const result = analyzeFinancials(currentValuationInput());
     const market = { ticker: "BOX", price: 30, currency: "USD", date: "2026-08-23", volume: null, yearHigh: 45, yearLow: 20, performance: { "3M": 0.1 } };
     const healthy = computeOpportunityScore(result, contextualScore(85), contextualScore(75), market);
     const deteriorating = computeOpportunityScore(result, contextualScore(20), contextualScore(20), market);
@@ -63,7 +71,7 @@ describe("research score formulas", () => {
     result.scores.dimensions.valuation.score = null;
     result.scores.dimensions.valuation.coverage = 0;
     const opportunity = computeOpportunityScore(result, contextualScore(80), contextualScore(70), null);
-    const coveredResult = analyzeFinancials(durableCompounderInput);
+    const coveredResult = analyzeFinancials(currentValuationInput());
     const covered = computeOpportunityScore(coveredResult, contextualScore(80), contextualScore(70), {
       ticker: "BOX", price: 30, currency: "USD", date: "2026-08-23", volume: null, yearHigh: 45, yearLow: 20, performance: {},
     });
@@ -71,6 +79,20 @@ describe("research score formulas", () => {
     expect(opportunity.score).toBeNull();
     expect(opportunity.confidence).toBeLessThan(covered.confidence);
     expect(opportunity.contributors.find((item) => item.key === "dcf")).toEqual(expect.objectContaining({ status: "unsuitable", score: null }));
+  });
+
+  it("does not use low-confidence DCF as an opportunity signal", () => {
+    const result = structuredClone(analyzeFinancials(currentValuationInput()));
+    result.dcf = { ...result.dcf, confidence: 35 };
+    const opportunity = computeOpportunityScore(result, contextualScore(80), contextualScore(70), {
+      ticker: "BOX", price: 30, currency: "USD", date: "2026-08-23", volume: null, yearHigh: 45, yearLow: 20, performance: {},
+    });
+
+    expect(opportunity.contributors.find((item) => item.key === "dcf")).toEqual(expect.objectContaining({
+      status: "missing",
+      score: null,
+      reason: "DCF confidence is too low for opportunity scoring.",
+    }));
   });
 
   it("detects multi-signal improvement and negative-to-positive free cash flow", () => {

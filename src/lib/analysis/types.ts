@@ -2,6 +2,7 @@ export type AnalysisType = "summary" | "numbers" | "deep" | "research";
 export type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 export type UiMode = "simple" | "pro";
 export type DataStatus = "current" | "stale" | "unavailable";
+export type CurrencyAlignmentStatus = "aligned" | "mismatch" | "unknown";
 
 export type Sector =
   | "technology"
@@ -45,6 +46,16 @@ export type AnalysisArchetype =
   | "holding_company"
   | "unknown";
 
+export type InsurerSubtype = "property_casualty" | "life" | "reinsurance" | "mixed" | "unknown";
+
+export type ArchetypeClassificationDiagnostics = {
+  reason: string;
+  source: "sic" | "description" | "fallback" | "explicit";
+  confidence: number;
+  ambiguous: boolean;
+  candidates: AnalysisArchetype[];
+};
+
 export type MetricValueKind = "reported" | "derived" | "estimated" | "fallback";
 
 export type FinancialPeriodBasis = "FY" | "TTM_REPORTED" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
@@ -76,6 +87,18 @@ export type ProviderDiagnostic = {
   status: "available" | "partial" | "unavailable" | "unsupported";
   reason?: string;
   observedAt: string;
+};
+
+export type ProviderSourceConflict = {
+  metric: string;
+  periodEnd: string | null;
+  primaryProvider: string;
+  secondaryProvider: string;
+  primaryValue?: number | string | null;
+  secondaryValue?: number | string | null;
+  relativeDifference?: number | null;
+  severity: "medium" | "high";
+  reason: string;
 };
 
 export type CompanySearchResult = {
@@ -123,6 +146,10 @@ export type AnalysisSource = {
   url: string;
   accessedAt: string;
   freshness: string;
+  provider?: string;
+  capability?: ProviderDiagnostic["capability"];
+  dataAsOf?: string | null;
+  version?: string;
 };
 
 export type MarketSnapshot = {
@@ -134,7 +161,10 @@ export type MarketSnapshot = {
   yearHigh: number | null;
   yearLow: number | null;
   marketCap?: number | null;
+  marketCapAsOf?: string | null;
+  marketCapCurrency?: string | null;
   sharesOutstanding?: number | null;
+  sharesOutstandingAsOf?: string | null;
   beta?: number | null;
   provider?: string;
   historyLength?: number;
@@ -147,6 +177,8 @@ export type AnnualFinancials = {
   grossProfit: number | null;
   operatingIncome: number | null;
   netIncome: number | null;
+  netIncomeCommonStockholders?: number | null;
+  dilutedNetIncomeAvailableToCommon?: number | null;
   epsDiluted: number | null;
   operatingCashFlow: number | null;
   capex: number | null;
@@ -155,6 +187,7 @@ export type AnnualFinancials = {
   cash: number | null;
   debt: number | null;
   equity: number | null;
+  minorityInterest?: number | null;
   interestExpense: number | null;
   periodEndDate?: string;
   pretaxIncome?: number | null;
@@ -182,6 +215,7 @@ export type CompanyFundamentals = {
   annual: AnnualFinancials[];
   sic?: string;
   analysisArchetype?: AnalysisArchetype;
+  classificationDiagnostics?: ArchetypeClassificationDiagnostics;
   annualPeriods?: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
@@ -192,6 +226,8 @@ export type CompanyFundamentals = {
   reportedMarketCapCurrency?: string | null;
   reportedSharesOutstanding?: number | null;
   reportedSharesDate?: string | null;
+  reportingCurrency?: string | null;
+  sourceConflicts?: ProviderSourceConflict[];
 };
 
 export type AnalysisInput = {
@@ -201,6 +237,7 @@ export type AnalysisInput = {
   analysisType: AnalysisType;
   investmentProfile: InvestmentProfile;
   providerDiagnostics?: ProviderDiagnostic[];
+  analysisDate?: string;
 };
 
 export type Metrics = {
@@ -358,13 +395,17 @@ export type CompanyProfile = {
   ticker?: string;
   canonicalTicker?: string;
   entityId?: string;
+  entityIdentityConfidence?: number;
   cik?: string;
   name?: string;
   sector?: Sector;
   industry?: string;
   currency?: string;
+  reportingCurrency?: string;
+  tradingCurrency?: string;
   investmentProfile?: InvestmentProfile;
   analysisArchetype?: AnalysisArchetype;
+  classificationDiagnostics?: ArchetypeClassificationDiagnostics;
   sic?: string;
 };
 
@@ -380,12 +421,15 @@ export type FinancialPeriod = {
   ttmConstructionMethod?: string;
   balanceSheetDate?: string;
   currency?: string;
+  currencyConflict?: string[];
   revenue?: number | null;
   grossProfit?: number | null;
   costOfRevenue?: number | null;
   operatingIncome?: number | null;
   ebitda?: number | null;
   netIncome?: number | null;
+  netIncomeCommonStockholders?: number | null;
+  dilutedNetIncomeAvailableToCommon?: number | null;
   epsDiluted?: number | null;
   operatingCashFlow?: number | null;
   capitalExpenditures?: number | null;
@@ -393,6 +437,7 @@ export type FinancialPeriod = {
   cashAndEquivalents?: number | null;
   totalDebt?: number | null;
   totalEquity?: number | null;
+  minorityInterest?: number | null;
   totalAssets?: number | null;
   totalLiabilities?: number | null;
   currentAssets?: number | null;
@@ -424,8 +469,11 @@ export type FinancialPeriod = {
 export type FinancialMarketSnapshot = {
   price?: number | null;
   marketCap?: number | null;
+  marketCapAsOf?: string | null;
+  marketCapCurrency?: string | null;
   enterpriseValue?: number | null;
   sharesOutstanding?: number | null;
+  sharesOutstandingAsOf?: string | null;
   beta?: number | null;
   provider?: string;
   currency?: string | null;
@@ -473,6 +521,7 @@ export type FinancialAnalysisInput = {
   analysisDate?: string;
   providerDiagnostics?: ProviderDiagnostic[];
   specialized?: SpecializedCompanyData;
+  sourceConflicts?: ProviderSourceConflict[];
 };
 
 export type MarginMetrics = {
@@ -573,6 +622,13 @@ export type ConfidenceBreakdown = {
   reconciliation: number;
   estimateAvailability: number;
   valuationInputs: number;
+  entityIdentity: number;
+  currencyAlignment: number;
+  archetypeConfidence: number;
+  specializedCoverage: number | null;
+  marketInputFreshness: number;
+  valuationAssumptions: number;
+  sourceConflict: number;
 };
 
 export type ScoreResult = {
@@ -587,8 +643,11 @@ export type ScoreResult = {
   dimensions: Record<ScoreDimensionKey, ScoreDimension>;
   shortTermScore: number | null;
   longTermScore: number | null;
+  specializedCoverage?: SpecializedCoverage;
   methodology: {
     modelVersion: string;
+    scorePolicyVersion: string;
+    benchmarkVersion: string;
     sectorWeights: Record<ScoreDimensionKey, number>;
     personalizedWeights: Record<ScoreDimensionKey, number>;
   };
@@ -637,6 +696,21 @@ export type DiscountedCashFlowResult = {
   assumptions: DiscountedCashFlowAssumptions;
 };
 
+export type ValuationAssumption = {
+  value: number | number[];
+  source: string;
+  asOf: string | null;
+  valueKind: "reported" | "market_sourced" | "configured" | "derived" | "fallback";
+  version: string;
+};
+
+export type ValuationAssumptionQuality = {
+  level: "high" | "moderate" | "fallback_heavy";
+  fallbackCount: number;
+  centralFallbackCount: number;
+  assumptions: Record<string, ValuationAssumption>;
+};
+
 export type DcfScenarioResult = DiscountedCashFlowResult & {
   name: ScenarioName;
   confidence: number;
@@ -658,6 +732,8 @@ export type DcfRangeResult = {
   sensitivity?: Array<{ discountRate: number; terminalGrowthRate: number; perShareValue: number }>;
   assumptionNotes?: string[];
   confidence?: number;
+  directionalSupport?: boolean;
+  assumptionQuality?: ValuationAssumptionQuality;
 };
 
 export type ReconciliationCheck = {
@@ -681,9 +757,14 @@ export type AnalysisDiagnostics = {
   financialFlowAgeDays?: number | null;
   balanceSheetAgeDays?: number | null;
   marketPriceAgeDays?: number | null;
+  marketCapAgeDays?: number | null;
+  sharesOutstandingAgeDays?: number | null;
   financialFlowStatus?: "current" | "stale" | "unavailable";
   balanceSheetStatus?: "current" | "stale" | "unavailable";
   marketPriceStatus?: "current" | "stale" | "unavailable";
+  marketCapStatus?: "current" | "stale" | "unavailable";
+  sharesOutstandingStatus?: "current" | "stale" | "unavailable";
+  currencyAlignment?: CurrencyAlignmentStatus;
 };
 
 export type AnalysisScenario = {
@@ -703,8 +784,11 @@ export type AnalysisScenario = {
 
 export type FinancialAnalysisResult = {
   modelVersion: string;
+  canonicalInputFingerprint: string;
   reportSchemaVersion: string;
   analysisArchetype: AnalysisArchetype;
+  classificationDiagnostics?: ArchetypeClassificationDiagnostics;
+  currencyAlignment: CurrencyAlignmentStatus;
   dataStatus: DataStatus;
   metrics: FinancialMetrics;
   scores: ScoreResult;
@@ -719,6 +803,7 @@ export type FinancialAnalysisResult = {
   diagnostics: AnalysisDiagnostics;
   reconciliation: ReconciliationCheck[];
   provenance: Record<string, MetricProvenance>;
+  sourceConflicts: ProviderSourceConflict[];
 };
 
 export type ScenarioStatus = "valuation" | "qualitative_research" | "insufficient_data";
@@ -751,6 +836,19 @@ export type BankSpecializedMetrics = {
   returnOnTangibleCommonEquity: SpecializedMetric;
 };
 
+export type InsurerSpecializedMetrics = {
+  kind: "insurer";
+  premiumGrowth: SpecializedMetric;
+  combinedRatio: SpecializedMetric;
+  lossRatio: SpecializedMetric;
+  expenseRatio: SpecializedMetric;
+  bookValue: SpecializedMetric;
+  tangibleBookValue: SpecializedMetric;
+  returnOnEquity: SpecializedMetric;
+  regulatoryCapitalRatio: SpecializedMetric;
+  reserveDevelopment: SpecializedMetric;
+};
+
 export type ReitSpecializedMetrics = {
   kind: "reit";
   fundsFromOperations: SpecializedMetric;
@@ -769,7 +867,15 @@ export type ReitSpecializedMetrics = {
   netAssetValue: SpecializedMetric;
 };
 
-export type SpecializedCompanyData = BankSpecializedMetrics | ReitSpecializedMetrics;
+export type SpecializedCompanyData = BankSpecializedMetrics | InsurerSpecializedMetrics | ReitSpecializedMetrics;
+
+export type SpecializedCoverage = {
+  overall: number;
+  required: string[];
+  available: string[];
+  missing: string[];
+  insurerSubtype?: InsurerSubtype;
+};
 
 export type EvidenceKind =
   | "reported_fact"
@@ -1015,28 +1121,39 @@ export type ResearchLayerPayload<T = unknown> = {
 };
 
 export type AdminQaDiagnostics = {
+  providerAttempts: ProviderDiagnostic[];
+  selectedProviders: string[];
   providerFailures: ProviderDiagnostic[];
   fallbacks: string[];
   missingDataReasons: MissingDataItem[];
-  classificationDiagnostics: string[];
+  classificationDiagnostics: ArchetypeClassificationDiagnostics | null;
   timingsMs: Record<string, number>;
-  sourceConflicts: string[];
+  sourceConflicts: ProviderSourceConflict[];
+  currencyState: CurrencyAlignmentStatus;
+  specializedCoverage: number | null;
+  valuationSupport: "directional" | "illustrative" | "specialized" | "unavailable";
 };
 
 export type QaFlag =
   | "STALE_DATA" | "LOW_COVERAGE" | "ENTITY_MISMATCH" | "UNSUPPORTED_MARKET" | "WRONG_ARCHETYPE"
   | "TTM_FALLBACK" | "PERIOD_MISMATCH" | "RECONCILIATION_FAIL" | "MARKET_PROVIDER_ERROR"
-  | "SPECIALIZED_DATA_MISSING" | "VALUATION_UNAVAILABLE" | "SCENARIO_UNSUPPORTED" | "SOURCE_CONFLICT";
+  | "CURRENCY_MISMATCH" | "SPECIALIZED_DATA_MISSING" | "VALUATION_UNAVAILABLE" | "SCENARIO_UNSUPPORTED" | "SOURCE_CONFLICT"
+  | "FALLBACK_USED" | "DATA_UNAVAILABLE" | "FUTURE_DATA" | "ARCHETYPE_UNCERTAIN";
 
 export type BatchQaResult = {
   batchId: string;
   rerunKey: string;
   modelVersion: string;
+  scorePolicyVersion: string;
+  benchmarkVersion: string;
+  canonicalInputFingerprint: string;
   providerVersions: Record<string, string>;
   analysisTimestamp: string;
   canonicalEntity: string;
   archetype: AnalysisArchetype;
   coverage: number;
   confidence: number;
+  score: number | null;
+  rating: Recommendation;
   flags: QaFlag[];
 };

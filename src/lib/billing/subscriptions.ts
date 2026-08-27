@@ -14,13 +14,35 @@ export type SubscriptionLookup =
   | { ok: true; subscription: UserSubscription | null }
   | { ok: false; subscription: null };
 
+export type SubscriptionBillingState = "free" | "basic" | "basic_manage";
+
 const TERMINAL_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);
+const PAID_ACCESS_STATUSES = new Set(["active", "trialing"]);
+
+export function hasPaidAccessStatus(status: string): boolean {
+  return PAID_ACCESS_STATUSES.has(status);
+}
 
 export function isCurrentBasicSubscription(subscription: UserSubscription | null): boolean {
   return Boolean(
     subscription?.planKey === "basic" &&
       !TERMINAL_SUBSCRIPTION_STATUSES.has(subscription.status)
   );
+}
+
+export function hasActiveBasicAccess(subscription: UserSubscription | null): boolean {
+  return Boolean(
+    subscription?.planKey === "basic" &&
+      hasPaidAccessStatus(subscription.status)
+  );
+}
+
+export function subscriptionBillingState(
+  subscription: UserSubscription | null
+): SubscriptionBillingState {
+  if (hasActiveBasicAccess(subscription)) return "basic";
+  if (isCurrentBasicSubscription(subscription)) return "basic_manage";
+  return "free";
 }
 
 export function reusableStripeCustomerId(
@@ -32,7 +54,7 @@ export function reusableStripeCustomerId(
 }
 
 export function effectivePlanKey(subscription: UserSubscription | null): "free" | "basic" {
-  return isCurrentBasicSubscription(subscription) ? "basic" : "free";
+  return hasActiveBasicAccess(subscription) ? "basic" : "free";
 }
 
 export function subscriptionStatusLabel(status: string): string {
@@ -46,7 +68,7 @@ export function subscriptionStatusLabel(status: string): string {
     canceled: "Canceled",
     incomplete_expired: "Expired"
   };
-  return labels[status] ?? "Active";
+  return labels[status] ?? "Unknown";
 }
 
 export async function getUserSubscription(userId: string): Promise<SubscriptionLookup> {

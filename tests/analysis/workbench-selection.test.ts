@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  analysisWorkbenchDefaults,
   formattedCompanySelection,
   securitySelectionKey,
   selectionAfterQueryChange,
@@ -57,6 +58,48 @@ describe("analysis workbench selection state", () => {
     expect(supportsLiveFundamentals(company("AAPL"))).toBe(true);
   });
 
+  it("does not treat non-common securities as fundamentals-ready just because they have a CIK", () => {
+    expect(supportsLiveFundamentals({
+      ticker: "ADR",
+      name: "Example ADR",
+      cik: "0000000000",
+      securityType: "ADR",
+    })).toBe(false);
+    expect(supportsLiveFundamentals({
+      ticker: "PREF",
+      name: "Example preferred",
+      cik: "0000000001",
+      securityType: "Preferred",
+    })).toBe(false);
+  });
+
+  it("infers unsupported securities from ticker and name when securityType is omitted", () => {
+    expect(supportsLiveFundamentals({
+      ticker: "NVO",
+      name: "Novo Nordisk A/S ADR",
+      cik: "0000353278",
+    })).toBe(false);
+    expect(supportsLiveFundamentals({
+      ticker: "JPM-PD",
+      name: "JPMorgan Chase & Co. Depositary Shares Series DD",
+      cik: "0000019617",
+    })).toBe(false);
+  });
+
+  it("does not trust a common-stock label when the security text says ADR", () => {
+    expect(supportsLiveFundamentals({
+      ticker: "NVO",
+      name: "Novo Nordisk A/S ADR",
+      cik: "0000353278",
+      securityType: "Common Stock",
+      providerCapabilities: {
+        fundamentals: true,
+        marketData: true,
+        providerIds: ["client"],
+      },
+    })).toBe(false);
+  });
+
   it.each([
     ["JPM", 0],
     ["JPM-PC", 1],
@@ -78,4 +121,16 @@ describe("analysis workbench selection state", () => {
 
     expect(highlightedIndex).toBe(2);
   });
+  it("initializes workbench preferences from a saved profile", () => {
+    expect(analysisWorkbenchDefaults({ uiMode: "pro", investmentProfile: "growth", experience: "advanced" })).toEqual({
+      mode: "pro",
+      investmentProfile: "growth",
+    });
+  });
+
+  it("uses safe defaults and legacy advanced fallback when profile fields are missing", () => {
+    expect(analysisWorkbenchDefaults({ experience: "advanced" })).toEqual({ mode: "pro", investmentProfile: "balanced" });
+    expect(analysisWorkbenchDefaults(null)).toEqual({ mode: "simple", investmentProfile: "balanced" });
+  });
+
 });

@@ -8,7 +8,7 @@ const marketDataProviderSchema = z.preprocess(
     const normalized = value.trim().toLowerCase();
     return normalized || undefined;
   },
-  z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("stooq")
+  z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("yahoo")
 );
 
 const providerListSchema = z.preprocess(
@@ -116,7 +116,6 @@ export function getMarketDataProviderChain(env = getServerEnv()) {
   const ordered: Array<"twelve_data" | "stooq" | "yahoo"> = [
     env.MARKET_DATA_PROVIDER,
     ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? []),
-    "yahoo",
   ];
   return [...new Set(ordered)];
 }

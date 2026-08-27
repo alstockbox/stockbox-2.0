@@ -1,10 +1,13 @@
 import { classifyCompany } from "@/lib/analysis/archetypes";
 import type {
+  AnalysisArchetype,
   CompanyFundamentals,
   CompanySearchResult,
   FinancialPeriod,
   MetricProvenance,
+  Sector,
 } from "@/lib/analysis/types";
+import { inferSecurityType } from "./security-classification";
 import {
   providerDiagnostic,
   type AdapterResult,
@@ -43,16 +46,20 @@ type YahooMetadata = {
 
 const FLOW_FIELDS = [
   "TotalRevenue", "CostOfRevenue", "GrossProfit", "OperatingIncome", "EBITDA", "NetIncome",
-  "DilutedEPS", "OperatingCashFlow", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
+  "NetIncomeCommonStockholders", "DilutedNIAvailtoComStockholders", "DilutedEPS",
+  "OperatingCashFlow", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
   "TaxProvision", "CashDividendsPaid", "StockBasedCompensation", "ResearchAndDevelopment",
   "DilutedAverageShares",
 ] as const;
 
 const BALANCE_FIELDS = [
-  "TotalAssets", "TotalLiabilitiesNetMinorityInterest", "StockholdersEquity",
-  "CashAndCashEquivalents", "TotalDebt", "CurrentAssets", "CurrentLiabilities",
+  "TotalAssets", "TotalLiabilitiesNetMinorityInterest", "StockholdersEquity", "MinorityInterest",
+  "TotalEquityGrossMinorityInterest", "CashAndCashEquivalents", "TotalDebt", "CurrentAssets", "CurrentLiabilities",
   "OrdinarySharesNumber",
 ] as const;
+
+const MONETARY_FLOW_FIELDS = FLOW_FIELDS.filter((field) => field !== "DilutedAverageShares");
+const MONETARY_BALANCE_FIELDS = BALANCE_FIELDS.filter((field) => field !== "OrdinarySharesNumber");
 
 const REQUEST_TYPES = [
   ...FLOW_FIELDS.flatMap((field) => [`annual${field}`, `trailing${field}`]),
@@ -129,12 +136,17 @@ function atDate(values: YahooValue[], concept: string, date: string): YahooValue
   return values.find((item) => item.concept === concept && item.asOfDate === date) ?? null;
 }
 
+function semanticUnit(fact: YahooValue): string | undefined {
+  if (/(?:AverageShares|SharesNumber|SharesOutstanding|ShareCount)$/i.test(fact.concept)) return "shares";
+  return fact.currencyCode ?? undefined;
+}
+
 function provenance(fact: YahooValue): MetricProvenance {
   return {
     source: "Yahoo Finance fundamentals timeseries",
     provider: PROVIDER_ID,
     concept: fact.concept,
-    unit: fact.currencyCode ?? undefined,
+    unit: semanticUnit(fact),
     periodEnd: fact.asOfDate,
     periodBasis: fact.periodType === "TTM" ? "TTM_REPORTED" : fact.periodType === "12M" ? "FY" : undefined,
     valueKind: "reported",
@@ -149,6 +161,29 @@ function fiscalYear(date: string): number | undefined {
   const year = Number(date.slice(0, 4));
   return Number.isInteger(year) ? year : undefined;
 }
+
+function periodCurrency(
+  values: YahooValue[],
+  flowPrefix: "annual" | "trailing",
+  flowDate: string,
+  balancePrefix: "annual" | "quarterly",
+  balanceDate: string,
+): { currency?: string; conflict?: string[] } {
+  const flowConcepts = new Set(MONETARY_FLOW_FIELDS.map((field) => `${flowPrefix}${field}`));
+  const balanceConcepts = new Set(MONETARY_BALANCE_FIELDS.map((field) => `${balancePrefix}${field}`));
+  const currencies = [...new Set(values
+    .filter((fact) => (
+      (fact.asOfDate === flowDate && flowConcepts.has(fact.concept))
+      || (fact.asOfDate === balanceDate && balanceConcepts.has(fact.concept))
+    ))
+    .map((fact) => fact.currencyCode?.trim().toUpperCase())
+    .filter((currency): currency is string => Boolean(currency)))]
+    .sort();
+  if (currencies.length === 1) return { currency: currencies[0] };
+  if (currencies.length > 1) return { conflict: currencies };
+  return {};
+}
+
 function buildPeriod(
   values: YahooValue[],
   flowPrefix: "annual" | "trailing",
@@ -157,6 +192,7 @@ function buildPeriod(
   balanceDate: string,
 ): FinancialPeriod {
   const metricProvenance: Record<string, MetricProvenance> = {};
+  const currency = periodCurrency(values, flowPrefix, flowDate, balancePrefix, balanceDate);
   const flow = (field: string, output: string = field) => {
     const fact = atDate(values, `${flowPrefix}${field}`, flowDate);
     if (!fact) return null;
@@ -173,6 +209,25 @@ function buildPeriod(
   if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
   const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
   if (dividendFact) metricProvenance.dividendsPaid = provenance(dividendFact);
+  const parentEquity = balance("StockholdersEquity", "totalEquity");
+  const directMinorityInterest = balance("MinorityInterest", "minorityInterest");
+  const grossEquityFact = atDate(values, `${balancePrefix}TotalEquityGrossMinorityInterest`, balanceDate);
+  let minorityInterest = directMinorityInterest;
+  if (minorityInterest === null && grossEquityFact && parentEquity !== null) {
+    const derivedMinority = grossEquityFact.value - parentEquity;
+    if (Number.isFinite(derivedMinority) && derivedMinority >= 0) {
+      minorityInterest = derivedMinority;
+      metricProvenance.minorityInterest = {
+        source: "Yahoo Finance fundamentals timeseries",
+        provider: PROVIDER_ID,
+        unit: grossEquityFact.currencyCode ?? undefined,
+        periodEnd: balanceDate,
+        inputs: [grossEquityFact.concept, `${balancePrefix}StockholdersEquity`],
+        valueKind: "derived",
+        note: "Minority interest derived as gross equity including minority interest minus parent stockholders' equity.",
+      };
+    }
+  }
 
   return {
     fiscalYear: fiscalYear(flowDate),
@@ -180,15 +235,16 @@ function buildPeriod(
     form: flowPrefix === "trailing" ? "TTM" : "FY",
     periodBasis: flowPrefix === "trailing" ? "TTM_REPORTED" : "FY",
     balanceSheetDate: balanceDate,
-    currency: latest(values, `${flowPrefix}TotalRevenue`)?.currencyCode
-      ?? latest(values, `${balancePrefix}TotalAssets`)?.currencyCode
-      ?? undefined,
+    currency: currency.currency,
+    currencyConflict: currency.conflict,
     revenue: flow("TotalRevenue", "revenue"),
     costOfRevenue: flow("CostOfRevenue", "costOfRevenue"),
     grossProfit: flow("GrossProfit", "grossProfit"),
     operatingIncome: flow("OperatingIncome", "operatingIncome"),
     ebitda: flow("EBITDA", "ebitda"),
     netIncome: flow("NetIncome", "netIncome"),
+    netIncomeCommonStockholders: flow("NetIncomeCommonStockholders", "netIncomeCommonStockholders"),
+    dilutedNetIncomeAvailableToCommon: flow("DilutedNIAvailtoComStockholders", "dilutedNetIncomeAvailableToCommon"),
     epsDiluted: flow("DilutedEPS", "epsDiluted"),
     operatingCashFlow: flow("OperatingCashFlow", "operatingCashFlow"),
     capitalExpenditures: normalizedCapex(capexFact),
@@ -201,7 +257,8 @@ function buildPeriod(
     sharesDiluted: flow("DilutedAverageShares", "sharesDiluted"),
     totalAssets: balance("TotalAssets", "totalAssets"),
     totalLiabilities: balance("TotalLiabilitiesNetMinorityInterest", "totalLiabilities"),
-    totalEquity: balance("StockholdersEquity", "totalEquity"),
+    totalEquity: parentEquity,
+    minorityInterest,
     cashAndEquivalents: balance("CashAndCashEquivalents", "cashAndEquivalents"),
     totalDebt: balance("TotalDebt", "totalDebt"),
     currentAssets: balance("CurrentAssets", "currentAssets"),
@@ -243,19 +300,37 @@ function balanceDateFor(values: YahooValue[], flowDate: string): string | null {
 function classifyYahooMetadata(metadata: YahooMetadata) {
   const description = [metadata.industry, metadata.sector].filter(Boolean).join(" ");
   const classified = classifyCompany({ sicDescription: description, name: metadata.name });
-  if (classified.analysisArchetype !== "unknown") return classified;
+  const confidentUnsupportedSpecialist = classified.analysisArchetype === "unknown"
+    && !classified.classificationDiagnostics.ambiguous
+    && classified.classificationDiagnostics.confidence >= 0.6;
+  if (classified.analysisArchetype !== "unknown" || confidentUnsupportedSpecialist) return classified;
 
   const sector = (metadata.sector ?? "").toLowerCase();
-  if (/technology/.test(sector)) return { sector: "technology" as const, industry: metadata.industry, analysisArchetype: "standard" as const };
-  if (/industrial/.test(sector)) return { sector: "industrials" as const, industry: metadata.industry, analysisArchetype: "standard" as const };
-  if (/consumer/.test(sector)) return { sector: "consumer" as const, industry: metadata.industry, analysisArchetype: "standard" as const };
-  if (/health/.test(sector)) return { sector: "healthcare" as const, industry: metadata.industry, analysisArchetype: "standard" as const };
-  if (/energy/.test(sector)) return { sector: "energy" as const, industry: metadata.industry, analysisArchetype: "cyclical" as const };
-  if (/basic materials|materials/.test(sector)) return { sector: "materials" as const, industry: metadata.industry, analysisArchetype: "cyclical" as const };
-  if (/utilities/.test(sector)) return { sector: "utilities" as const, industry: metadata.industry, analysisArchetype: "utility" as const };
-  if (/communication/.test(sector)) return { sector: "communication" as const, industry: metadata.industry, analysisArchetype: "standard" as const };
-  if (/real estate/.test(sector)) return { sector: "realEstate" as const, industry: metadata.industry, analysisArchetype: "unknown" as const };
-  if (/financial/.test(sector)) return { sector: "financials" as const, industry: metadata.industry, analysisArchetype: "unknown" as const };
+  const fallback = (
+    resolvedSector: Sector,
+    analysisArchetype: AnalysisArchetype,
+  ) => ({
+    sector: resolvedSector,
+    industry: metadata.industry,
+    analysisArchetype,
+    classificationDiagnostics: {
+      reason: `Yahoo sector metadata (${metadata.sector ?? "unavailable"}) supplied the fallback classification.`,
+      source: "fallback" as const,
+      confidence: analysisArchetype === "unknown" ? 0.3 : 0.55,
+      ambiguous: analysisArchetype === "unknown",
+      candidates: [analysisArchetype],
+    },
+  });
+  if (/technology/.test(sector)) return fallback("technology", "standard");
+  if (/industrial/.test(sector)) return fallback("industrials", "standard");
+  if (/consumer/.test(sector)) return fallback("consumer", "standard");
+  if (/health/.test(sector)) return fallback("healthcare", "standard");
+  if (/energy/.test(sector)) return fallback("energy", "cyclical");
+  if (/basic materials|materials/.test(sector)) return fallback("materials", "cyclical");
+  if (/utilities/.test(sector)) return fallback("utilities", "utility");
+  if (/communication/.test(sector)) return fallback("communication", "standard");
+  if (/real estate/.test(sector)) return fallback("realEstate", "unknown");
+  if (/financial/.test(sector)) return fallback("financials", "unknown");
   return classified;
 }
 async function fetchJson(url: URL): Promise<AdapterResult<JsonObject>> {
@@ -294,8 +369,18 @@ async function fetchMetadata(symbol: string): Promise<YahooMetadata> {
   };
 }
 
-function yahooSecurityType(quoteType: string | null): CompanySearchResult["securityType"] {
+function isDepositaryReceiptName(name: string): boolean {
+  return /\badr\b|american depositary|depositary receipt/i.test(name);
+}
+
+function isPreferredSecurityName(name: string): boolean {
+  return /preferred|preference|depositary shares/i.test(name);
+}
+
+function yahooSecurityType(quoteType: string | null, name: string): CompanySearchResult["securityType"] {
   if (quoteType === "ETF" || quoteType === "MUTUALFUND") return "ETF/Fund";
+  if (isDepositaryReceiptName(name)) return "ADR";
+  if (isPreferredSecurityName(name)) return "Preferred";
   return "Common Stock";
 }
 
@@ -318,6 +403,12 @@ export const yahooCompanySearchProvider: CompanySearchProvider = {
       const name = stringValue(quote?.longname) ?? stringValue(quote?.shortname);
       const quoteType = stringValue(quote?.quoteType)?.toUpperCase() ?? null;
       if (!symbol || !name || !["EQUITY", "ETF", "MUTUALFUND"].includes(quoteType ?? "")) return [];
+      const securityType = inferSecurityType({
+        ticker: symbol,
+        canonicalTicker: symbol,
+        name,
+        securityType: yahooSecurityType(quoteType, name),
+      });
       return [{
         ticker: symbol,
         canonicalTicker: symbol,
@@ -325,21 +416,26 @@ export const yahooCompanySearchProvider: CompanySearchProvider = {
         exchange: stringValue(quote?.exchDisp) ?? stringValue(quote?.exchange) ?? undefined,
         country: stringValue(quote?.country) ?? undefined,
         currency: stringValue(quote?.currency) ?? undefined,
-        securityType: yahooSecurityType(quoteType),
+        securityType,
         providerTickers: [symbol],
-        providerCapabilities: { fundamentals: quoteType === "EQUITY", marketData: true, providerIds: ["yahoo-search", PROVIDER_ID] },
+        providerCapabilities: { fundamentals: quoteType === "EQUITY" && securityType === "Common Stock", marketData: true, providerIds: ["yahoo-search", PROVIDER_ID] },
       } satisfies CompanySearchResult];
     });
     return { ok: true, data, diagnostic: providerDiagnostic("Yahoo Finance search", "search", data.length ? "available" : "partial", data.length ? undefined : "empty_response") };
   },
 };
 
+function stableYahooPeriod2(now = Date.now()): string {
+  const date = new Date(now);
+  return String(Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1) / 1000));
+}
+
 async function fetchTimeseries(symbol: string): Promise<AdapterResult<YahooValue[]>> {
   const url = new URL(`${TIMESERIES_BASE}/${encodeURIComponent(symbol)}`);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("type", REQUEST_TYPES.join(","));
   url.searchParams.set("period1", "1262304000");
-  url.searchParams.set("period2", String(Math.floor(Date.now() / 1000) + 86_400));
+  url.searchParams.set("period2", stableYahooPeriod2());
   const response = await fetchJson(url);
   if (!response.ok) return response;
   const values = parseSeries(response.data);
@@ -360,6 +456,8 @@ function toLegacy(period: FinancialPeriod): CompanyFundamentals["annual"][number
     operatingIncome: period.operatingIncome ?? null,
     ebitda: period.ebitda ?? null,
     netIncome: period.netIncome ?? null,
+    netIncomeCommonStockholders: period.netIncomeCommonStockholders ?? null,
+    dilutedNetIncomeAvailableToCommon: period.dilutedNetIncomeAvailableToCommon ?? null,
     pretaxIncome: period.pretaxIncome ?? null,
     incomeTaxExpense: period.incomeTaxExpense ?? null,
     epsDiluted: period.epsDiluted ?? null,
@@ -370,6 +468,7 @@ function toLegacy(period: FinancialPeriod): CompanyFundamentals["annual"][number
     cash: period.cashAndEquivalents ?? null,
     debt: period.totalDebt ?? null,
     equity: period.totalEquity ?? null,
+    minorityInterest: period.minorityInterest ?? null,
     currentAssets: period.currentAssets ?? null,
     currentLiabilities: period.currentLiabilities ?? null,
     interestExpense: period.interestExpense ?? null,
@@ -422,6 +521,7 @@ export async function fetchYahooFundamentalsResult(
       sector: classification.sector,
       industry: classification.industry,
       analysisArchetype: classification.analysisArchetype,
+      classificationDiagnostics: classification.classificationDiagnostics,
       annual: annualPeriods.map(toLegacy),
       annualPeriods,
       trailingTwelveMonths,

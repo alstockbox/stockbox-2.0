@@ -23,10 +23,14 @@ type SubscriptionEventType =
   | "customer.subscription.updated"
   | "customer.subscription.deleted";
 
+type SyncResult = { applied: boolean; reason: string | null };
+
 async function syncSubscription(
   subscription: Stripe.Subscription,
+  eventId: string,
+  eventCreated: number,
   eventType: SubscriptionEventType
-) {
+): Promise<SyncResult> {
   const firstItem = subscription.items.data[0];
   const priceId = firstItem?.price.id;
   const plan = getPlanByStripePrice(priceId);
@@ -48,7 +52,6 @@ async function syncSubscription(
     });
     throw new Error("Stripe subscription price is unknown.");
   }
-
   const supabase = createAdminClient();
   if (!supabase) {
     console.error("[billing] Supabase admin client is unavailable for subscription sync.", {
@@ -58,29 +61,31 @@ async function syncSubscription(
     throw new Error("Supabase admin client is unavailable.");
   }
 
-  const { error } = await supabase
-    .from("subscriptions")
-    .upsert(
-      {
-        user_id: userId,
-        stripe_subscription_id: subscription.id,
-        stripe_customer_id:
-          typeof subscription.customer === "string"
-            ? subscription.customer
-            : subscription.customer.id,
-        stripe_price_id: priceId,
-        plan_key: plan.key,
-        status:
-          eventType === "customer.subscription.deleted"
-            ? "canceled"
-            : subscription.status,
-        current_period_end: firstItem?.current_period_end
-          ? new Date(firstItem.current_period_end * 1000).toISOString()
-          : null,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "user_id" }
-    );
+  const stripeCustomerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer.id;
+  const status =
+    eventType === "customer.subscription.deleted"
+      ? "canceled"
+      : subscription.status;
+  const currentPeriodEnd = firstItem?.current_period_end
+    ? new Date(firstItem.current_period_end * 1000).toISOString()
+    : null;
+
+  const { data, error } = await supabase.rpc("sync_subscription_from_stripe", {
+    p_user_id: userId,
+    p_event_id: eventId,
+    p_event_created: eventCreated,
+    p_event_type: eventType,
+    p_stripe_subscription_id: subscription.id,
+    p_subscription_created: subscription.created,
+    p_stripe_customer_id: stripeCustomerId,
+    p_stripe_price_id: priceId ?? null,
+    p_plan_key: plan.key,
+    p_status: status,
+    p_current_period_end: currentPeriodEnd
+  });
 
   if (error) {
     console.error("[billing] Supabase subscription sync failed.", {
@@ -91,6 +96,14 @@ async function syncSubscription(
     });
     throw new Error("Supabase subscription sync failed.");
   }
+
+  const payload = data && typeof data === "object" && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  return {
+    applied: payload.applied !== false,
+    reason: typeof payload.reason === "string" ? payload.reason : null
+  };
 }
 
 export async function POST(request: Request) {
@@ -102,12 +115,18 @@ export async function POST(request: Request) {
   }
 
   const signature = request.headers.get("stripe-signature");
-  if (!signature) return Response.json({ error: "Missing Stripe signature." }, { status: 400 });
+  if (!signature) {
+    return Response.json({ error: "Missing Stripe signature." }, { status: 400 });
+  }
 
   let event: Stripe.Event;
   try {
     const rawBody = await request.text();
-    event = stripe.webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      env.STRIPE_WEBHOOK_SECRET
+    );
   } catch {
     return Response.json({ error: "Invalid Stripe signature." }, { status: 400 });
   }
@@ -115,22 +134,33 @@ export async function POST(request: Request) {
   switch (event.type) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
-    case "customer.subscription.deleted":
+    case "customer.subscription.deleted": {
+      const subscription = event.data.object as Stripe.Subscription;
+      let syncResult: SyncResult;
       try {
-        await syncSubscription(event.data.object as Stripe.Subscription, event.type);
+        syncResult = await syncSubscription(
+          subscription,
+          event.id,
+          event.created,
+          event.type
+        );
       } catch {
         return Response.json(
           { error: "Webhook processing failed." },
           { status: 500 }
         );
       }
-      captureServerEvent(
-        event.type === "customer.subscription.deleted"
-          ? "subscription_cancelled"
-          : "subscription_started",
-        { subscriptionId: (event.data.object as Stripe.Subscription).id }
-      );
+
+      if (syncResult.applied) {
+        captureServerEvent(
+          event.type === "customer.subscription.deleted"
+            ? "subscription_cancelled"
+            : "subscription_started",
+          { subscriptionId: subscription.id }
+        );
+      }
       break;
+    }
     default:
       break;
   }
