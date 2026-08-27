@@ -3,14 +3,19 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { ScoreDimension } from "@/lib/analysis/types";
 
-export function ScoreChart({ dimensions }: { dimensions: ScoreDimension[] }) {
-  const data = dimensions.map((dimension) => ({
+export function scoreChartData(dimensions: ScoreDimension[]) {
+  return dimensions.map((dimension) => ({
     name: dimension.label,
-    score: dimension.score ?? 0
+    score: typeof dimension.score === "number" && Number.isFinite(dimension.score) ? dimension.score : null,
+    availability: typeof dimension.score === "number" && Number.isFinite(dimension.score) ? "available" as const : "unavailable" as const,
   }));
+}
+
+export function ScoreChart({ dimensions }: { dimensions: ScoreDimension[] }) {
+  const data = scoreChartData(dimensions);
 
   return (
-    <div className="h-64 w-full">
+    <div className="h-64 w-full" aria-hidden="true">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ left: -18, right: 8, top: 8, bottom: 24 }}>
           <CartesianGrid stroke="rgba(244,239,229,0.1)" vertical={false} />

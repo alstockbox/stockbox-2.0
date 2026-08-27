@@ -1,25 +1,12 @@
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type SubscriptionRow = {
-  id: string;
-  user_id: string;
-  plan_key: string;
-  status: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  stripe_price_id: string | null;
-  current_period_end: string | null;
-  updated_at?: string;
-};
-
 const mocks = vi.hoisted(() => ({
   captureServerEvent: vi.fn(),
   constructEvent: vi.fn(),
   createAdminClient: vi.fn(),
-  from: vi.fn(),
   getPlanByStripePrice: vi.fn(),
-  upsert: vi.fn()
+  rpc: vi.fn()
 }));
 
 vi.mock("@/lib/analytics/events", () => ({
@@ -29,10 +16,7 @@ vi.mock("@/lib/billing/plans", async () => {
   const actual = await vi.importActual<typeof import("@/lib/billing/plans")>(
     "@/lib/billing/plans"
   );
-  return {
-    ...actual,
-    getPlanByStripePrice: mocks.getPlanByStripePrice
-  };
+  return { ...actual, getPlanByStripePrice: mocks.getPlanByStripePrice };
 });
 vi.mock("@/lib/billing/stripe", () => ({
   getStripe: vi.fn(() => ({
@@ -40,9 +24,7 @@ vi.mock("@/lib/billing/stripe", () => ({
   }))
 }));
 vi.mock("@/lib/env/server", () => ({
-  getServerEnv: vi.fn(() => ({
-    STRIPE_WEBHOOK_SECRET: "whsec_test"
-  }))
+  getServerEnv: vi.fn(() => ({ STRIPE_WEBHOOK_SECRET: "whsec_test" }))
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mocks.createAdminClient
@@ -50,22 +32,15 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 import { POST } from "../../src/app/api/stripe/webhook/route";
 
-let rows: SubscriptionRow[];
-let upsertError: { code: string; message: string } | null;
-
 function subscription(overrides: Partial<Stripe.Subscription> = {}): Stripe.Subscription {
   return {
     id: "sub_basic",
+    created: 1_700_000_000,
     customer: "cus_basic",
     metadata: { userId: "user_1" },
     status: "active",
     items: {
-      data: [
-        {
-          price: { id: "price_basic" },
-          current_period_end: 1_800_000_000
-        }
-      ]
+      data: [{ price: { id: "price_basic" }, current_period_end: 1_800_000_000 }]
     },
     ...overrides
   } as Stripe.Subscription;
@@ -81,166 +56,111 @@ function webhookRequest() {
 
 function deliver(
   stripeSubscription: Stripe.Subscription,
-  type: Stripe.Event.Type = "customer.subscription.created"
+  type: Stripe.Event.Type = "customer.subscription.created",
+  eventOverrides: Partial<Stripe.Event> = {}
 ) {
   mocks.constructEvent.mockReturnValue({
+    id: "evt_test",
+    created: 1_710_000_000,
     type,
-    data: { object: stripeSubscription }
+    data: { object: stripeSubscription },
+    ...eventOverrides
   } as Stripe.Event);
   return POST(webhookRequest());
 }
 
 describe("Stripe subscription webhook", () => {
   beforeEach(() => {
-    rows = [
-      {
-        id: "existing_row",
-        user_id: "user_1",
-        plan_key: "free",
-        status: "active",
-        stripe_customer_id: null,
-        stripe_subscription_id: null,
-        stripe_price_id: null,
-        current_period_end: null
-      }
-    ];
-    upsertError = null;
-
     vi.clearAllMocks();
     mocks.getPlanByStripePrice.mockImplementation((priceId: string | null | undefined) =>
       priceId === "price_basic" ? { key: "basic" } : null
     );
-    mocks.from.mockImplementation((table: string) => {
-      expect(table).toBe("subscriptions");
-      return { upsert: mocks.upsert };
+    mocks.rpc.mockResolvedValue({
+      data: { applied: true, reason: "applied" },
+      error: null
     });
-    mocks.upsert.mockImplementation(
-      async (
-        values: Omit<SubscriptionRow, "id">,
-        options?: { onConflict?: string }
-      ) => {
-        if (upsertError) return { error: upsertError };
-
-        if (options?.onConflict === "user_id") {
-          const existingIndex = rows.findIndex((row) => row.user_id === values.user_id);
-          if (existingIndex >= 0) {
-            rows[existingIndex] = { ...rows[existingIndex], ...values };
-          } else {
-            rows.push({ id: `row_${rows.length + 1}`, ...values });
-          }
-        } else {
-          rows.push({ id: `row_${rows.length + 1}`, ...values });
-        }
-
-        return { error: null };
-      }
-    );
-    mocks.createAdminClient.mockReturnValue({ from: mocks.from });
+    mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
   });
 
-  it("updates the existing Free row to Basic without creating a duplicate", async () => {
+  it("routes a valid subscription through the atomic RPC", async () => {
     const response = await deliver(subscription());
-
     expect(response.status).toBe(200);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: "existing_row",
-      user_id: "user_1",
-      plan_key: "basic",
-      status: "active",
-      stripe_customer_id: "cus_basic",
-      stripe_subscription_id: "sub_basic",
-      stripe_price_id: "price_basic",
-      current_period_end: new Date(1_800_000_000 * 1000).toISOString()
-    });
-    expect(mocks.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: "user_1", plan_key: "basic" }),
-      { onConflict: "user_id" }
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_subscription_from_stripe",
+      expect.objectContaining({
+        p_user_id: "user_1",
+        p_event_id: "evt_test",
+        p_event_created: 1_710_000_000,
+        p_event_type: "customer.subscription.created",
+        p_stripe_subscription_id: "sub_basic",
+        p_subscription_created: 1_700_000_000,
+        p_stripe_customer_id: "cus_basic",
+        p_stripe_price_id: "price_basic",
+        p_plan_key: "basic",
+        p_status: "active",
+        p_current_period_end: new Date(1_800_000_000 * 1000).toISOString()
+      })
     );
     expect(mocks.constructEvent).toHaveBeenCalledWith(
       "raw-webhook-body",
       "sig_test",
       "whsec_test"
     );
-  });
-
-  it("replaces historical Stripe IDs when a canceled user resubscribes", async () => {
-    rows[0] = {
-      ...rows[0],
-      plan_key: "basic",
-      status: "canceled",
-      stripe_customer_id: "cus_historical",
-      stripe_subscription_id: "sub_historical",
-      stripe_price_id: "price_basic"
-    };
-
-    const response = await deliver(
-      subscription({ id: "sub_new", customer: "cus_new", status: "active" })
+    expect(mocks.captureServerEvent).toHaveBeenCalledWith(
+      "subscription_started",
+      { subscriptionId: "sub_basic" }
     );
-
-    expect(response.status).toBe(200);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: "existing_row",
-      user_id: "user_1",
-      plan_key: "basic",
-      status: "active",
-      stripe_customer_id: "cus_new",
-      stripe_subscription_id: "sub_new",
-      stripe_price_id: "price_basic",
-      current_period_end: new Date(1_800_000_000 * 1000).toISOString()
-    });
   });
 
-  it("stores canceled status for customer.subscription.deleted", async () => {
-    rows[0] = {
-      ...rows[0],
-      plan_key: "basic",
-      status: "active",
-      stripe_customer_id: "cus_historical",
-      stripe_subscription_id: "sub_historical",
-      stripe_price_id: "price_basic"
-    };
-
+  it("maps customer.subscription.deleted to canceled", async () => {
     const response = await deliver(
-      subscription({
-        id: "sub_historical",
-        customer: "cus_historical",
-        status: "active"
-      }),
+      subscription({ status: "active" }),
       "customer.subscription.deleted"
     );
-
     expect(response.status).toBe(200);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      plan_key: "basic",
-      status: "canceled",
-      stripe_customer_id: "cus_historical",
-      stripe_subscription_id: "sub_historical"
-    });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_subscription_from_stripe",
+      expect.objectContaining({ p_status: "canceled" })
+    );
+    expect(mocks.captureServerEvent).toHaveBeenCalledWith(
+      "subscription_cancelled",
+      { subscriptionId: "sub_basic" }
+    );
   });
 
-  it("returns 500 and logs safe diagnostics when Supabase upsert fails", async () => {
+  it.each(["duplicate_event", "stale_event", "stale_subscription"])(
+    "does not emit analytics when RPC reports %s",
+    async (reason) => {
+      mocks.rpc.mockResolvedValueOnce({
+        data: { applied: false, reason },
+        error: null
+      });
+      const response = await deliver(subscription());
+      expect(response.status).toBe(200);
+      expect(mocks.captureServerEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns 500 and logs sanitized diagnostics when the RPC fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    upsertError = {
-      code: "23505",
-      message:
-        "Conflict for user@example.com using whsec_do_not_log and sb_secret_do_not_log"
-    };
-
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23505",
+        message: "Conflict user@example.com whsec_do_not_log sb_secret_do_not_log"
+      }
+    });
     const response = await deliver(subscription());
-
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "Webhook processing failed." });
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Supabase subscription sync failed.",
-      {
+      expect.objectContaining({
         subscriptionId: "sub_basic",
         userId: "user_1",
         supabaseErrorCode: "23505",
-        supabaseErrorMessage: "Conflict for [redacted] using [redacted] and [redacted]"
-      }
+        supabaseErrorMessage: "Conflict [redacted] [redacted] [redacted]"
+      })
     );
     expect(mocks.captureServerEvent).not.toHaveBeenCalled();
     consoleError.mockRestore();
@@ -248,11 +168,9 @@ describe("Stripe subscription webhook", () => {
 
   it("returns 500 when metadata.userId is missing", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
     const response = await deliver(subscription({ metadata: {} }));
-
     expect(response.status).toBe(500);
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Stripe subscription is missing metadata.userId.",
       { subscriptionId: "sub_basic", userId: null }
@@ -262,16 +180,13 @@ describe("Stripe subscription webhook", () => {
 
   it("returns 500 when the Stripe price is unknown", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const unknownPriceSubscription = subscription({
+    const response = await deliver(subscription({
       items: {
         data: [{ price: { id: "price_unknown" }, current_period_end: null }]
       } as unknown as Stripe.ApiList<Stripe.SubscriptionItem>
-    });
-
-    const response = await deliver(unknownPriceSubscription);
-
+    }));
     expect(response.status).toBe(500);
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Stripe subscription price does not map to a StockBox plan.",
       {
@@ -285,12 +200,10 @@ describe("Stripe subscription webhook", () => {
 
   it("returns 500 when the Supabase admin client is unavailable", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mocks.createAdminClient.mockReturnValue(null);
-
+    mocks.createAdminClient.mockReturnValueOnce(null);
     const response = await deliver(subscription());
-
     expect(response.status).toBe(500);
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Supabase admin client is unavailable for subscription sync.",
       { subscriptionId: "sub_basic", userId: "user_1" }

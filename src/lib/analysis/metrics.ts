@@ -1,4 +1,5 @@
 import type {
+  CurrencyAlignmentStatus,
   FinancialAnalysisInput,
   FinancialMetrics,
   FinancialPeriod,
@@ -6,6 +7,8 @@ import type {
   MissingDataItem,
   ValuationMetrics,
 } from "./types";
+import { dataDateStatus, DATA_FRESHNESS_THRESHOLDS_DAYS } from "./freshness";
+import { economicCurrencyCode, quotePriceToEconomic } from "./currency-units";
 import {
   addMissingData,
   calculateCagr,
@@ -17,6 +20,7 @@ import {
 } from "./math";
 
 const FALLBACK_TAX_RATE = 0.21;
+const FUTURE_MARKET_PRICE_TOLERANCE_DAYS = 1;
 
 function periodSortValue(period: FinancialPeriod): number {
   const date = period.periodEndDate ? Date.parse(period.periodEndDate) : Number.NaN;
@@ -42,6 +46,43 @@ function average(a: number | null | undefined, b: number | null | undefined): nu
   return isFiniteNumber(a) && isFiniteNumber(b) ? (a + b) / 2 : null;
 }
 
+function normalizedCurrency(value: string | null | undefined): string | null {
+  return economicCurrencyCode(value);
+}
+
+export function valuationCurrencyAlignment(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+): CurrencyAlignmentStatus {
+  const financialCurrency = normalizedCurrency(
+    latest?.currency ?? input.company.reportingCurrency ?? input.company.currency,
+  );
+  const legacyCurrency = !input.company.reportingCurrency && !input.company.tradingCurrency
+    ? input.company.currency
+    : undefined;
+  const marketCurrency = normalizedCurrency(
+    input.market?.currency ?? input.company.tradingCurrency ?? legacyCurrency,
+  );
+  if (!financialCurrency || !marketCurrency) return "unknown";
+  return financialCurrency === marketCurrency ? "aligned" : "mismatch";
+}
+
+export function hasValuationCurrencyMismatch(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+): boolean {
+  return valuationCurrencyAlignment(input, latest) === "mismatch";
+}
+
+export function hasStaleMarketPriceForValuation(input: FinancialAnalysisInput): boolean {
+  if (!input.market?.priceDate) return false;
+  const analysisDate = input.analysisDate ?? new Date().toISOString();
+  const age = (Date.parse(analysisDate) - Date.parse(input.market.priceDate)) / 86_400_000;
+  if (!Number.isFinite(age)) return true;
+  if (age < -FUTURE_MARKET_PRICE_TOLERANCE_DAYS) return true;
+  return Math.max(0, Math.floor(age)) > DATA_FRESHNESS_THRESHOLDS_DAYS.marketPrice;
+}
+
 function comparableBalancePeriods(current: FinancialPeriod | null, prior: FinancialPeriod | null): boolean {
   const currentEnd = current?.balanceSheetDate ?? current?.periodEndDate;
   const priorEnd = prior?.balanceSheetDate ?? prior?.periodEndDate;
@@ -58,6 +99,60 @@ function comparableTtmPeriods(current: FinancialPeriod | null, prior: FinancialP
     && endGap >= 330
     && endGap <= 400
     && Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
+}
+
+function periodSpanYears(older: FinancialPeriod | null, newer: FinancialPeriod | null): number | null {
+  if (!older || !newer) return null;
+  if (older.periodEndDate && newer.periodEndDate) {
+    const days = (Date.parse(newer.periodEndDate) - Date.parse(older.periodEndDate)) / 86_400_000;
+    return Number.isFinite(days) && days > 0 ? days / 365.2425 : null;
+  }
+  if (isFiniteNumber(older.fiscalYear) && isFiniteNumber(newer.fiscalYear)) {
+    const years = newer.fiscalYear - older.fiscalYear;
+    return years > 0 ? years : null;
+  }
+  return null;
+}
+
+function comparableAnnualPeriod(
+  periods: FinancialPeriod[],
+  newer: FinancialPeriod | null,
+  targetYears: number,
+): { period: FinancialPeriod; years: number } | null {
+  if (!newer) return null;
+  const tolerance = targetYears === 1 ? 0.15 : 0.35;
+  const candidates = periods
+    .filter((period) => period !== newer)
+    .flatMap((period) => {
+      const years = periodSpanYears(period, newer);
+      return years !== null && Math.abs(years - targetYears) <= tolerance
+        ? [{ period, years }]
+        : [];
+    })
+    .sort((left, right) => Math.abs(left.years - targetYears) - Math.abs(right.years - targetYears));
+  return candidates[0] ?? null;
+}
+
+function cagrBetween(
+  older: FinancialPeriod | null,
+  newer: FinancialPeriod | null,
+  olderValue: number | null | undefined,
+  newerValue: number | null | undefined,
+): number | null {
+  const years = periodSpanYears(older, newer);
+  return years === null ? null : calculateCagr(olderValue, newerValue, years);
+}
+
+export function contiguousAnnualHistory(periods: FinancialPeriod[], maximum = 5): FinancialPeriod[] {
+  const ordered = sortFinancialPeriods(periods);
+  const contiguous: FinancialPeriod[] = [];
+  for (let index = ordered.length - 1; index >= 0 && contiguous.length < maximum; index -= 1) {
+    const period = ordered[index];
+    const newer = contiguous[0];
+    if (newer && !comparableAnnualPeriod([period], newer, 1)) break;
+    contiguous.unshift(period);
+  }
+  return contiguous;
 }
 
 function investedCapital(period: FinancialPeriod | null): number | null {
@@ -83,7 +178,7 @@ export function normalizedTaxRate(periods: FinancialPeriod[]): {
   return { rate: FALLBACK_TAX_RATE, source: "fallback_assumption" };
 }
 
-function deriveFcff(period: FinancialPeriod | null, taxRate: number): number | null {
+export function deriveFcff(period: FinancialPeriod | null, taxRate: number): number | null {
   if (!period || !isFiniteNumber(period.operatingCashFlow) || !isFiniteNumber(period.capitalExpenditures) || !isFiniteNumber(period.interestExpense)) {
     return null;
   }
@@ -105,10 +200,88 @@ function stability(values: Array<number | null>): number | null {
   return clamp(1 - Math.sqrt(variance) / scale, 0, 1);
 }
 
+function freshnessAllows(
+  input: FinancialAnalysisInput,
+  date: string | null | undefined,
+  thresholdDays: number,
+): boolean {
+  if (!input.analysisDate) return true;
+  return dataDateStatus(date, input.analysisDate, thresholdDays).status === "current";
+}
+
+function currentSharesForValuation(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+): number | null {
+  if (
+    isFiniteNumber(input.market?.sharesOutstanding)
+    && freshnessAllows(
+      input,
+      input.market?.sharesOutstandingAsOf ?? input.market?.priceDate,
+      DATA_FRESHNESS_THRESHOLDS_DAYS.sharesOutstanding,
+    )
+  ) {
+    return input.market.sharesOutstanding;
+  }
+  if (
+    isFiniteNumber(latest?.currentSharesOutstanding)
+    && freshnessAllows(
+      input,
+      latest?.balanceSheetDate ?? latest?.periodEndDate,
+      DATA_FRESHNESS_THRESHOLDS_DAYS.sharesOutstanding,
+    )
+  ) {
+    return latest.currentSharesOutstanding;
+  }
+  return null;
+}
+
+export function currentSharesForDcf(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+): number | null {
+  return currentSharesForValuation(input, latest);
+}
+
+export function marketCapShareBasisDifference(
+  input: FinancialAnalysisInput,
+  latest: FinancialPeriod | null,
+): number | null {
+  const marketCapStatus = dataDateStatus(
+    input.market?.marketCapAsOf ?? input.market?.priceDate,
+    input.analysisDate ?? new Date().toISOString(),
+    DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap,
+  );
+  if (marketCapStatus.status !== "current") return null;
+  const marketCap = input.market?.marketCap;
+  const shares = currentSharesForValuation(input, latest);
+  const economicPrice = quotePriceToEconomic(input.market?.price, input.market?.currency ?? input.company.tradingCurrency);
+  const capCurrency = economicCurrencyCode(input.market?.marketCapCurrency ?? input.market?.currency);
+  const priceCurrency = economicCurrencyCode(input.market?.currency ?? input.company.tradingCurrency);
+  if (!isFiniteNumber(marketCap) || marketCap <= 0 || !isFiniteNumber(shares) || shares <= 0 || !isFiniteNumber(economicPrice) || economicPrice <= 0) return null;
+  if (!capCurrency || !priceCurrency || capCurrency !== priceCurrency) return null;
+  const priceTimesShares = economicPrice * shares;
+  return Math.abs(marketCap - priceTimesShares) / Math.max(Math.abs(marketCap), Math.abs(priceTimesShares), 1);
+}
+
+function marketCapCurrencyMatches(input: FinancialAnalysisInput, latest: FinancialPeriod | null): boolean {
+  const capCurrency = normalizedCurrency(input.market?.marketCapCurrency ?? input.market?.currency);
+  const financialCurrency = normalizedCurrency(latest?.currency ?? input.company.reportingCurrency ?? input.company.currency);
+  return Boolean(capCurrency && financialCurrency && capCurrency === financialCurrency);
+}
+
 function deriveMarketCap(input: FinancialAnalysisInput, latest: FinancialPeriod | null): number | null {
-  if (isFiniteNumber(input.market?.marketCap)) return input.market.marketCap;
-  const shares = firstFinite(input.market?.sharesOutstanding, latest?.currentSharesOutstanding);
-  return isFiniteNumber(input.market?.price) && isFiniteNumber(shares) ? input.market.price * shares : null;
+  const directMarketCapCurrent = freshnessAllows(
+    input,
+    input.market?.marketCapAsOf ?? input.market?.priceDate,
+    DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap,
+  );
+  if (isFiniteNumber(input.market?.marketCap) && directMarketCapCurrent && marketCapCurrencyMatches(input, latest)) {
+    return input.market.marketCap;
+  }
+  const shares = currentSharesForValuation(input, latest);
+  const economicPrice = quotePriceToEconomic(input.market?.price, input.market?.currency ?? input.company.tradingCurrency);
+  return isFiniteNumber(economicPrice) && isFiniteNumber(shares) ? economicPrice * shares : null;
 }
 
 function deriveEnterpriseValue(input: FinancialAnalysisInput, latest: FinancialPeriod | null, marketCap: number | null): number | null {
@@ -126,7 +299,7 @@ function deriveValuationMetrics(
   const marketCap = deriveMarketCap(input, latest);
   const enterpriseValue = deriveEnterpriseValue(input, latest, marketCap);
   const revenue = latest?.revenue ?? null;
-  const netIncome = latest?.netIncome ?? null;
+  const commonEarnings = firstFinite(latest?.netIncomeCommonStockholders, latest?.netIncome);
   const equity = latest?.totalEquity ?? null;
   const tangibleBook = input.specialized?.kind === "bank"
     ? input.specialized.tangibleCommonEquity.value
@@ -137,7 +310,7 @@ function deriveValuationMetrics(
       ? latest.operatingIncome + latest.depreciationAndAmortization
       : null,
   );
-  const pe = isFiniteNumber(netIncome) && netIncome > 0 ? safeDivide(marketCap, netIncome) : null;
+  const pe = isFiniteNumber(commonEarnings) && commonEarnings > 0 ? safeDivide(marketCap, commonEarnings) : null;
   const growth = firstFinite(input.estimates?.nextYearEpsGrowth, epsGrowth);
   return {
     marketCap,
@@ -149,8 +322,24 @@ function deriveValuationMetrics(
     evSales: isFiniteNumber(revenue) && revenue > 0 ? safeDivide(enterpriseValue, revenue) : null,
     evEbitda: isFiniteNumber(ebitda) && ebitda > 0 ? safeDivide(enterpriseValue, ebitda) : null,
     freeCashFlowYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(simpleFcf, marketCap) : null,
-    earningsYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(netIncome, marketCap) : null,
+    earningsYield: isFiniteNumber(marketCap) && marketCap > 0 ? safeDivide(commonEarnings, marketCap) : null,
     peg: isFiniteNumber(pe) && isFiniteNumber(growth) && growth > 0 ? pe / (growth * 100) : null,
+  };
+}
+
+function unavailableValuationMetrics(): ValuationMetrics {
+  return {
+    marketCap: null,
+    enterpriseValue: null,
+    priceEarnings: null,
+    priceSales: null,
+    priceBook: null,
+    priceTangibleBook: null,
+    evSales: null,
+    evEbitda: null,
+    freeCashFlowYield: null,
+    earningsYield: null,
+    peg: null,
   };
 }
 
@@ -171,7 +360,9 @@ function addMissingIfNull(
 export function computeFinancialMetrics(input: FinancialAnalysisInput): FinancialMetrics {
   const annual = sortFinancialPeriods(input.annualPeriods);
   const latestAnnual = annual.at(-1) ?? null;
-  const previousAnnual = annual.at(-2) ?? null;
+  const previousAnnualMatch = comparableAnnualPeriod(annual, latestAnnual, 1);
+  const previousAnnual = previousAnnualMatch?.period ?? null;
+  const twoYearsPrior = comparableAnnualPeriod(annual, previousAnnual, 1)?.period ?? null;
   const latest = input.trailingTwelveMonths ?? latestAnnual;
   const priorTtmCandidate = input.trailingTwelveMonths ? input.priorTrailingTwelveMonths ?? null : null;
   const priorTtm = comparableTtmPeriods(latest, priorTtmCandidate) ? priorTtmCandidate : null;
@@ -205,17 +396,45 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const operatingMargin = safeDivide(operatingIncome, revenue);
   const priorGrossMargin = safeDivide(trendComparison?.grossProfit, trendComparison?.revenue);
   const priorOperatingMargin = safeDivide(trendComparison?.operatingIncome, trendComparison?.revenue);
-  const annualFcfs = annual.map(deriveSimpleFreeCashFlow);
-  const threeYearPrior = annual.at(-4) ?? null;
-  const fiveYearPrior = annual.at(-6) ?? null;
+  const contiguousAnnual = contiguousAnnualHistory(annual);
+  const annualFcfs = contiguousAnnual.map(deriveSimpleFreeCashFlow);
+  const threeYearMatch = comparableAnnualPeriod(annual, latestAnnual, 3);
+  const fiveYearMatch = comparableAnnualPeriod(annual, latestAnnual, 5);
+  const threeYearPrior = threeYearMatch?.period ?? null;
+  const fiveYearPrior = fiveYearMatch?.period ?? null;
   const latestFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(latestAnnual), latestAnnual?.sharesDiluted);
   const priorFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(threeYearPrior), threeYearPrior?.sharesDiluted);
-  const marketCap = deriveMarketCap(input, latest);
+  const currencyAlignment = valuationCurrencyAlignment(input, latest);
+  const currencyMismatch = currencyAlignment === "mismatch";
+  const currencyUnknown = currencyAlignment === "unknown";
+  const staleMarketPrice = hasStaleMarketPriceForValuation(input);
+  const staleMarketCap = isFiniteNumber(input.market?.marketCap) && !freshnessAllows(
+    input,
+    input.market?.marketCapAsOf ?? input.market?.priceDate,
+    DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap,
+  );
+  const staleShares = isFiniteNumber(input.market?.sharesOutstanding) && !freshnessAllows(
+    input,
+    input.market?.sharesOutstandingAsOf ?? input.market?.priceDate,
+    DATA_FRESHNESS_THRESHOLDS_DAYS.sharesOutstanding,
+  );
+  const marketCapCurrencyMismatch = isFiniteNumber(input.market?.marketCap)
+    && !marketCapCurrencyMatches(input, latest);
+  const shareBasisDifference = marketCapShareBasisDifference(input, latest);
+  const materialShareBasisMismatch = isFiniteNumber(shareBasisDifference) && shareBasisDifference > 0.05;
+  const blockMarketValuation = currencyAlignment !== "aligned" || staleMarketPrice || materialShareBasisMismatch;
+  const marketCap = blockMarketValuation ? null : deriveMarketCap(input, latest);
+  const usesReportedMarketCap = isFiniteNumber(input.market?.marketCap)
+    && !staleMarketCap
+    && !marketCapCurrencyMismatch
+    && !materialShareBasisMismatch
+    && currencyAlignment === "aligned";
   const dividends = isFiniteNumber(latest?.dividendsPaid) ? Math.abs(latest.dividendsPaid) : null;
   const dividendGrowthLatest = priorTtm
     ? dividends
     : isFiniteNumber(latestAnnual?.dividendsPaid) ? Math.abs(latestAnnual.dividendsPaid) : null;
   const priorDividends = isFiniteNumber(growthComparison?.dividendsPaid) ? Math.abs(growthComparison.dividendsPaid) : null;
+  const latestAnnualDividends = isFiniteNumber(latestAnnual?.dividendsPaid) ? Math.abs(latestAnnual.dividendsPaid) : null;
   const threeYearDividends = isFiniteNumber(threeYearPrior?.dividendsPaid) ? Math.abs(threeYearPrior.dividendsPaid) : null;
   const netDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
     ? latest.totalDebt - latest.cashAndEquivalents
@@ -225,18 +444,20 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
 
   const growth = {
     revenueGrowthYoY: calculateGrowth(growthLatest?.revenue, growthComparison?.revenue),
-    revenueCagr3y: calculateCagr(threeYearPrior?.revenue, latestAnnual?.revenue, 3),
-    revenueCagr5y: calculateCagr(fiveYearPrior?.revenue, latestAnnual?.revenue, 5),
+    revenueCagr3y: cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.revenue, latestAnnual?.revenue),
+    revenueCagr5y: cagrBetween(fiveYearPrior, latestAnnual, fiveYearPrior?.revenue, latestAnnual?.revenue),
     epsGrowthYoY: calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted),
-    epsCagr3y: calculateCagr(threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted, 3),
+    epsCagr3y: cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted),
     freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(growthLatest), deriveSimpleFreeCashFlow(growthComparison)),
-    freeCashFlowCagr3y: calculateCagr(deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual), 3),
-    freeCashFlowPerShareCagr3y: calculateCagr(priorFcfPerShare, latestFcfPerShare, 3),
+    freeCashFlowCagr3y: cagrBetween(threeYearPrior, latestAnnual, deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual)),
+    freeCashFlowPerShareCagr3y: cagrBetween(threeYearPrior, latestAnnual, priorFcfPerShare, latestFcfPerShare),
     revenueGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
     freeCashFlowGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
   };
 
-  const valuation = deriveValuationMetrics(input, latest, simpleFcf, growth.epsGrowthYoY);
+  const valuation = blockMarketValuation
+    ? unavailableValuationMetrics()
+    : deriveValuationMetrics(input, latest, simpleFcf, growth.epsGrowthYoY);
   const metrics: FinancialMetrics = {
     latestPeriod: latest,
     previousPeriod: growthComparison,
@@ -275,7 +496,13 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       grossMarginChangeYoY: isFiniteNumber(grossMargin) && isFiniteNumber(priorGrossMargin)
         ? grossMargin - priorGrossMargin
         : null,
-      revenueAcceleration: null,
+      revenueAcceleration: (() => {
+        const currentGrowth = calculateGrowth(latestAnnual?.revenue, previousAnnual?.revenue);
+        const previousGrowth = calculateGrowth(previousAnnual?.revenue, twoYearsPrior?.revenue);
+        return isFiniteNumber(currentGrowth) && isFiniteNumber(previousGrowth)
+          ? currentGrowth - previousGrowth
+          : null;
+      })(),
       sharesDilutionYoY: calculateGrowth(latestAnnual?.sharesDiluted, previousAnnual?.sharesDiluted),
     },
     cashFlow: {
@@ -290,21 +517,21 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
         ? (netIncome - latest.operatingCashFlow) / averageAssets
         : null,
       stockBasedCompensationToRevenue: safeDivide(latest?.stockBasedCompensation, revenue),
-      operatingMarginStability: stability(annual.slice(-5).map((period) => safeDivide(period.operatingIncome, period.revenue))),
-      grossMarginStability: stability(annual.slice(-5).map((period) => safeDivide(period.grossProfit, period.revenue))),
-      freeCashFlowStability: stability(annualFcfs.slice(-5)),
+      operatingMarginStability: stability(contiguousAnnual.map((period) => safeDivide(period.operatingIncome, period.revenue))),
+      grossMarginStability: stability(contiguousAnnual.map((period) => safeDivide(period.grossProfit, period.revenue))),
+      freeCashFlowStability: stability(annualFcfs),
       dividendYield: safeDivide(dividends, marketCap),
       dividendPayoutRatio: safeDivide(dividends, netIncome),
       freeCashFlowPayoutRatio: safeDivide(dividends, simpleFcf),
       dividendGrowthYoY: calculateGrowth(dividendGrowthLatest, priorDividends),
-      dividendCagr3y: calculateCagr(threeYearDividends, dividends, 3),
+      dividendCagr3y: cagrBetween(threeYearPrior, latestAnnual, threeYearDividends, latestAnnualDividends),
     },
     provenance: {
       ...(latest?.provenance ?? {}),
       simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], "CFO - abs(capex)"),
       fcff: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"]),
-      marketCap: isFiniteNumber(input.market?.marketCap)
-        ? { source: "Market data", provider: input.market?.provider, periodEnd: input.market?.priceDate ?? undefined, valueKind: "reported" }
+      marketCap: usesReportedMarketCap
+        ? { source: "Market data", provider: input.market?.provider, periodEnd: input.market?.marketCapAsOf ?? input.market?.priceDate ?? undefined, valueKind: "reported" }
         : { ...derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]), provider: input.market?.provider },
       priceTangibleBook: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["marketCap", "tangibleCommonEquity"]),
       revenueGrowthYoY: {
@@ -329,6 +556,69 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
     missingData,
   };
 
+  if (currencyMismatch) {
+    addMissingData(
+      missingData,
+      "currencyAlignment",
+      "Financial and market currencies differ; valuation metrics require aligned currency data or explicit FX conversion.",
+      "metric",
+      "high",
+    );
+  }
+  if (currencyUnknown) {
+    addMissingData(
+      missingData,
+      "currencyAlignment",
+      "Reporting or trading currency is unknown; valuation requires explicit aligned currencies.",
+      "metric",
+      "high",
+    );
+  }
+  if (staleMarketPrice) {
+    addMissingData(
+      missingData,
+      "marketPriceFreshness",
+      "Market price data is stale or future-dated; valuation metrics require a current market price or market cap.",
+      "metric",
+      "high",
+    );
+  }
+  if (staleMarketCap) {
+    addMissingData(
+      missingData,
+      "marketCapFreshness",
+      "Reported market cap is stale or future-dated and is not used as a current valuation input.",
+      "metric",
+      "high",
+    );
+  }
+  if (staleShares) {
+    addMissingData(
+      missingData,
+      "sharesOutstandingFreshness",
+      "Reported shares outstanding are stale or future-dated and are not used for current market cap or per-share valuation.",
+      "metric",
+      "high",
+    );
+  }
+  if (marketCapCurrencyMismatch) {
+    addMissingData(
+      missingData,
+      "marketCapCurrency",
+      "Reported market cap currency does not align with the verified financial and trading currency.",
+      "metric",
+      "high",
+    );
+  }
+  if (materialShareBasisMismatch) {
+    addMissingData(
+      missingData,
+      "shareBasisAlignment",
+      "Reported market cap materially disagrees with current quote price times current shares; market-based valuation is withheld until the listing share basis is reconciled.",
+      "metric",
+      "high",
+    );
+  }
   addMissingIfNull(missingData, revenue, "revenue", "Revenue is unavailable for the latest reliable period.", "high");
   addMissingIfNull(missingData, simpleFcf, "simpleFreeCashFlow", "CFO and capex are required for simple free cash flow.", "high");
   addMissingIfNull(missingData, valuation.marketCap, "marketCap", "Market cap requires a reported value or both price and shares.");

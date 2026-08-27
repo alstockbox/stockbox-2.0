@@ -18,7 +18,14 @@ export function Meter({
           <span className="number">{Math.round(value)}/100</span>
         </div>
       ) : null}
-      <div className="h-2 rounded-full bg-white/10">
+      <div
+        className="h-2 rounded-full bg-white/10"
+        role="progressbar"
+        aria-label={label}
+        aria-valuenow={Math.round(value)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div
           className="h-full rounded-full bg-[#b99b5f] transition-[width] duration-500"
           style={{ width }}

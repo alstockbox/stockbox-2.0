@@ -119,6 +119,7 @@ describe("company search catalog", () => {
       matchType: expect.stringMatching(/^exact_/),
       matchConfidence: "high",
       primaryCandidate: true,
+      providerCapabilities: expect.objectContaining({ fundamentals: false }),
     }));
   });
 
@@ -164,6 +165,33 @@ describe("company search catalog", () => {
     expect(investor).toEqual(expect.objectContaining({
       securityId: "xsto:tx76",
       entityId: "issuer:se:investor",
+      providerCapabilities: expect.objectContaining({ fundamentals: false }),
+    }));
+  });
+
+  it("classifies American depositary shares as ADR even when a provider omits securityType", async () => {
+    const provider: CompanySearchProvider = {
+      id: "global-adr-provider",
+      capabilities: {
+        supportedCountries: ["global"], supportedExchanges: ["global"],
+        supportsFundamentals: true, supportsMarketData: true, supportsEstimates: false,
+      },
+      search: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [{
+          ticker: "BABA",
+          name: "Alibaba Group Holding Limited American Depositary Shares",
+          country: "US",
+          cik: "0001577552",
+        }],
+        diagnostic: providerDiagnostic("global-adr-provider", "search", "available"),
+      }),
+    };
+
+    const [result] = await searchCompanyCatalog("BABA", [provider]);
+    expect(result).toEqual(expect.objectContaining({
+      ticker: "BABA",
+      securityType: "ADR",
       providerCapabilities: expect.objectContaining({ fundamentals: false }),
     }));
   });

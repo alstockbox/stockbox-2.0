@@ -65,6 +65,37 @@ describe("hard data freshness gate", () => {
     expect(result.dataCoverage).toBeGreaterThan(0);
   });
 
+  it("falls back to current annual statements when fresh TTM flows depend on a stale interim balance sheet", () => {
+    const annual = {
+      ...staleNvdaInput.annualPeriods[0],
+      fiscalYear: 2025,
+      periodEndDate: "2025-12-31",
+      balanceSheetDate: "2025-12-31",
+    };
+    const result = analyzeFinancials({
+      ...staleNvdaInput,
+      analysisDate: "2026-08-27T00:00:00.000Z",
+      annualPeriods: [annual],
+      trailingTwelveMonths: {
+        ...annual,
+        fiscalYear: 2026,
+        form: "TTM",
+        periodBasis: "TTM_REPORTED",
+        periodEndDate: "2026-06-30",
+        balanceSheetDate: "2025-12-31",
+        provenance: Object.fromEntries([
+          "revenue", "grossProfit", "operatingIncome", "netIncome", "operatingCashFlow", "capitalExpenditures",
+        ].map((field) => [field, { source: "test", periodBasis: "TTM_REPORTED", valueKind: "reported" as const }])),
+      },
+    });
+
+    expect(result.dataStatus).toBe("current");
+    expect(result.metrics.latestPeriod?.periodEndDate).toBe("2025-12-31");
+    expect(result.diagnostics.latestFinancialPeriodEnd).toBe("2025-12-31");
+    expect(result.diagnostics.ttmStatus).toBe("annual_fallback");
+    expect(result.dataCoverage).toBeGreaterThan(0);
+  });
+
   it("tracks explicit freshness thresholds independently by data domain", () => {
     const current = assessDataFreshness({
       ...staleNvdaInput,
@@ -72,10 +103,55 @@ describe("hard data freshness gate", () => {
       market: { price: 100, priceDate: "2026-07-01" },
     });
 
-    expect(DATA_FRESHNESS_THRESHOLDS_DAYS).toEqual({ financialFlow: 550, balanceSheet: 550, marketPrice: 10 });
+    expect(DATA_FRESHNESS_THRESHOLDS_DAYS).toEqual({
+      financialFlow: 220,
+      balanceSheet: 220,
+      annualFinancialFlow: 455,
+      annualBalanceSheet: 455,
+      marketPrice: 10,
+      marketCap: 10,
+      sharesOutstanding: 180,
+    });
     expect(current.dataStatus).toBe("current");
     expect(current.financialFlowStatus).toBe("current");
     expect(current.balanceSheetStatus).toBe("current");
     expect(current.marketPriceStatus).toBe("stale");
   });
+
+  it("treats future-dated market prices as unavailable instead of current", () => {
+    const freshness = assessDataFreshness({
+      ...staleNvdaInput,
+      annualPeriods: [{ ...staleNvdaInput.annualPeriods[0], periodEndDate: "2026-01-25", balanceSheetDate: "2026-01-25" }],
+      market: { price: 100, priceDate: "2026-09-15" },
+    });
+
+    expect(freshness.marketPriceAgeDays).toBeNull();
+    expect(freshness.marketPriceStatus).toBe("unavailable");
+  });
+});
+
+it("marks reported TTM/interim financials older than the current-reporting window as stale", () => {
+  const freshness = assessDataFreshness({
+    ...staleNvdaInput,
+    analysisDate: "2026-08-27T00:00:00.000Z",
+    annualPeriods: [{ ...staleNvdaInput.annualPeriods[0], fiscalYear: 2025, periodEndDate: "2025-12-31", balanceSheetDate: "2025-12-31" }],
+    trailingTwelveMonths: {
+      ...staleNvdaInput.annualPeriods[0], fiscalYear: 2025, form: "TTM",
+      periodBasis: "TTM_REPORTED", periodEndDate: "2025-12-31", balanceSheetDate: "2025-12-31",
+    },
+  });
+  expect(freshness.financialFlowAgeDays).toBe(239);
+  expect(freshness.financialFlowStatus).toBe("stale");
+  expect(freshness.dataStatus).toBe("stale");
+});
+
+it("keeps a 149-day reported interim period current", () => {
+  const freshness = assessDataFreshness({
+    ...staleNvdaInput,
+    analysisDate: "2026-08-27T00:00:00.000Z",
+    annualPeriods: [],
+    trailingTwelveMonths: { ...staleNvdaInput.annualPeriods[0], form: "TTM", periodBasis: "TTM_REPORTED", periodEndDate: "2026-03-31", balanceSheetDate: "2026-03-31" },
+  });
+  expect(freshness.financialFlowAgeDays).toBe(149);
+  expect(freshness.dataStatus).toBe("current");
 });

@@ -1,6 +1,6 @@
 import type { PlanKey } from "@/lib/billing/plans";
 
-export type BillingViewerState = "signed_out" | "free" | "basic" | "unknown";
+export type BillingViewerState = "signed_out" | "free" | "basic" | "basic_manage" | "unknown";
 export type PricingAction = {
   kind: "signup" | "checkout" | "portal" | "current" | "disabled" | "none";
   label: string;
@@ -24,12 +24,14 @@ export function getPricingAction(
   if (plan !== "basic") {
     return { kind: "none", label: "", current: false };
   }
-
   if (viewer === "signed_out") {
     return { kind: "signup", label: "Get Basic", current: false };
   }
   if (viewer === "free") {
     return { kind: "checkout", label: "Upgrade to Basic", current: false };
+  }
+  if (viewer === "basic_manage") {
+    return { kind: "portal", label: "Resolve billing", current: false };
   }
   if (viewer === "basic") {
     return { kind: "portal", label: "Manage subscription", current: true };

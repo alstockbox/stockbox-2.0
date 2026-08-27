@@ -1,42 +1,33 @@
 import type {
-  Flag,
+  AnalysisArchetype,
   Recommendation,
   RecommendationDecision,
   RedFlag,
   DcfRangeResult,
   ScoreResult,
-  StockBoxScore,
 } from "./types";
+import { MIN_DIRECTIONAL_VALUATION_CONFIDENCE, SCORE_COVERAGE_POLICY } from "./config";
 
-export function recommend(score: StockBoxScore, redFlags: Flag[]): Recommendation {
-  if (score.score === null) return "No Rating";
-  const hasCritical = redFlags.some((flag) => flag.severity === "critical");
-  const highFlagCount = redFlags.filter((flag) => flag.severity === "high").length;
+const CRITICAL_SPECIALIZED_FIELDS: Partial<Record<AnalysisArchetype, string[]>> = {
+  bank: ["cet1CapitalRatio", "grossLoans", "deposits", "tangibleBookValuePerShare"],
+  insurer: ["regulatoryCapitalRatio", "bookValue", "returnOnEquity"],
+  reit: ["fundsFromOperations", "adjustedFundsFromOperations", "adjustedFundsFromOperationsPayout", "fixedChargeCoverage"],
+};
 
-  if (score.score >= 82 && score.confidence >= 72 && !hasCritical && highFlagCount === 0) {
-    return "Strong Buy";
-  }
-
-  if (score.score >= 68 && score.confidence >= 58 && !hasCritical) {
-    return "Buy";
-  }
-
-  if (score.score <= 25 && score.confidence >= 70 && (hasCritical || highFlagCount >= 2)) {
-    return "Strong Sell";
-  }
-
-  if (score.score <= 40 && score.confidence >= 55) {
-    return "Sell";
-  }
-
-  return "Hold";
+function hasCriticalSpecializedCoverage(score: ScoreResult): boolean {
+  const required = CRITICAL_SPECIALIZED_FIELDS[score.analysisArchetype];
+  if (!required) return true;
+  const missing = new Set(score.specializedCoverage?.missing ?? []);
+  return required.every((field) => !missing.has(field));
 }
 
 function archetypeValuationScore(score: ScoreResult, valuation?: DcfRangeResult): number | null {
   if (valuation?.status !== "inappropriate") return null;
   if (!["bank", "insurer", "reit"].includes(score.analysisArchetype)) return null;
+  if ((score.specializedCoverage?.overall ?? 0) < 0.7) return null;
+  if (!hasCriticalSpecializedCoverage(score)) return null;
   const dimension = score.dimensions.valuation;
-  return (dimension.coverage ?? 0) >= 0.5 && typeof dimension.score === "number" && Number.isFinite(dimension.score)
+  return (dimension.coverage ?? 0) >= SCORE_COVERAGE_POLICY.dimensionFull && typeof dimension.score === "number" && Number.isFinite(dimension.score)
     ? dimension.score
     : null;
 }
@@ -61,7 +52,36 @@ export function deriveRecommendation(
 
   const specializedValuationScore = archetypeValuationScore(score, valuation);
   const dcfValuationAvailable = valuation?.status === "available";
-  const adequateValuationCoverage = dcfValuationAvailable || specializedValuationScore !== null;
+  const dcfValuationConfidenceAdequate = dcfValuationAvailable
+    && valuation.directionalSupport !== false
+    && (
+      valuation.confidence === undefined
+      || valuation.confidence >= MIN_DIRECTIONAL_VALUATION_CONFIDENCE
+    );
+  const adequateValuationCoverage = dcfValuationConfidenceAdequate || specializedValuationScore !== null;
+
+  if (
+    rating !== "No Rating"
+    && ["bank", "insurer", "reit"].includes(score.analysisArchetype)
+    && (score.specializedCoverage?.overall ?? 0) < 0.7
+  ) {
+    rating = "No Rating";
+    constraintsApplied.push("Specialized operating and regulatory coverage is insufficient for this company archetype.");
+  }
+
+  if (rating !== "No Rating" && ["bank", "insurer", "reit"].includes(score.analysisArchetype) && !hasCriticalSpecializedCoverage(score)) {
+    rating = "No Rating";
+    constraintsApplied.push("Critical specialized coverage is incomplete for this company archetype.");
+  }
+
+  if (
+    rating !== "No Rating"
+    && score.analysisArchetype === "insurer"
+    && (score.specializedCoverage?.insurerSubtype === "unknown" || score.specializedCoverage?.insurerSubtype === "mixed")
+  ) {
+    rating = "No Rating";
+    constraintsApplied.push("Insurance subtype is unresolved or mixed; specialized insurer methodology is not sufficiently specific for a directional rating.");
+  }
 
   if (rating !== "No Rating" && valuation?.status === "inappropriate" && specializedValuationScore === null) {
     rating = "No Rating";
@@ -105,7 +125,7 @@ export function deriveRecommendation(
     constraintsApplied.push("Sell requires negative valuation support.");
   }
 
-  if (score.confidence < 40 && rating !== "No Rating" && rating !== "Hold") {
+  if (score.confidence < 40 && rating !== "No Rating") {
     rating = "No Rating";
     constraintsApplied.push("Confidence below 40 results in No Rating.");
   } else if (rating === "Strong Buy" && score.confidence < 72) {

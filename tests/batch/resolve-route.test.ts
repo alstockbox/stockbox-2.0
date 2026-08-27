@@ -122,4 +122,56 @@ describe("batch resolve API", () => {
       isAdmin: false,
     });
   });
+
+  it("uses the same ambiguity gate as single-company analysis", async () => {
+    mocks.searchCompanies.mockResolvedValue([
+      {
+        ticker: "ABC",
+        canonicalTicker: "ABC",
+        name: "ABC Holdings US",
+        entityId: "issuer:abc-us",
+        country: "US",
+        securityType: "Common Stock",
+        providerCapabilities: { fundamentals: true, marketData: true, providerIds: ["sec"] },
+      },
+      {
+        ticker: "ABC",
+        canonicalTicker: "ABC",
+        name: "ABC Holdings Canada",
+        entityId: "issuer:abc-ca",
+        country: "CA",
+        securityType: "Common Stock",
+        providerCapabilities: { fundamentals: true, marketData: true, providerIds: ["yahoo"] },
+      },
+    ]);
+
+    const response = await POST(batchRequest(["ABC"]));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.items).toEqual([expect.objectContaining({
+      input: "ABC",
+      status: "ambiguous",
+    })]);
+  });
+
+  it("rate limits repeated batch validation before entitlement and provider work", async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: "batch_rate_user",
+      email: "batch-rate@stockbox.test",
+      role: "customer",
+    });
+
+    const responses: Response[] = [];
+    for (let index = 0; index < 31; index += 1) {
+      responses.push(await POST(batchRequest(["AAPL"])));
+    }
+
+    expect(responses.at(-1)?.status).toBe(429);
+    await expect(responses.at(-1)?.json()).resolves.toEqual({
+      error: "Too many requests. Please try again shortly.",
+    });
+    expect(mocks.getBatchEntitlement).toHaveBeenCalledTimes(30);
+    expect(mocks.searchCompanies).toHaveBeenCalledTimes(30);
+  });
 });

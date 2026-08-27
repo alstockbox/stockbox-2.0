@@ -1,11 +1,11 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 import { adminEmails } from "@/lib/env/server";
 import { createClient } from "@/lib/supabase/server";
 
 export type AppUser = {
   id: string;
   email: string | null;
-  role: "customer" | "admin";
+  role: "customer" | "affiliate_ambassador" | "admin";
 };
 
 export async function getCurrentUser(): Promise<AppUser | null> {
@@ -19,9 +19,17 @@ export async function getCurrentUser(): Promise<AppUser | null> {
 
   if (error || !user) return null;
 
-  const role = adminEmails().includes(user.email?.toLowerCase() ?? "")
-    ? "admin"
-    : "customer";
+  const ownerAdmin = adminEmails().includes(user.email?.toLowerCase() ?? "");
+  let role: AppUser["role"] = ownerAdmin ? "admin" : "customer";
+
+  if (!ownerAdmin) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (profile?.role === "affiliate_ambassador") role = "affiliate_ambassador";
+  }
 
   return {
     id: user.id,

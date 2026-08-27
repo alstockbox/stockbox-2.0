@@ -193,6 +193,8 @@ export const SEC_CONCEPTS = {
   grossProfit: { kind: "duration", units: ["USD"], aliases: [us("GrossProfit"), ifrs("GrossProfit")] },
   operatingIncome: { kind: "duration", units: ["USD"], aliases: [us("OperatingIncomeLoss"), ifrs("ProfitLossFromOperatingActivities")] },
   netIncome: { kind: "duration", units: ["USD"], aliases: [us("NetIncomeLoss"), us("ProfitLoss"), ifrs("ProfitLoss")] },
+  netIncomeCommonStockholders: { kind: "duration", units: ["USD"], aliases: [us("NetIncomeLossAvailableToCommonStockholdersBasic"), ifrs("ProfitLossAttributableToOwnersOfParent")] },
+  dilutedNetIncomeAvailableToCommon: { kind: "duration", units: ["USD"], aliases: [us("NetIncomeLossAvailableToCommonStockholdersDiluted"), us("NetIncomeLossAvailableToCommonStockholdersBasic"), ifrs("ProfitLossAttributableToOwnersOfParent")] },
   pretaxIncome: { kind: "duration", units: ["USD"], aliases: [us("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"), us("IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"), ifrs("ProfitLossBeforeTax")] },
   incomeTaxExpense: { kind: "duration", units: ["USD"], aliases: [us("IncomeTaxExpenseBenefit"), ifrs("IncomeTaxExpenseContinuingOperations")] },
   epsDiluted: { kind: "duration", units: ["USD/shares", "USD-per-shares"], aliases: [us("EarningsPerShareDiluted"), ifrs("DilutedEarningsLossPerShare")] },
