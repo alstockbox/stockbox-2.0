@@ -138,7 +138,8 @@ export default async function BillingPage() {
         ) : null}
 
         <p className="mt-8 text-sm text-[#9aa7b8]">
-          {copy.questions} <Link href="/legal/terms" className="text-[#e1cb95] hover:text-white">{copy.reviewTerms}</Link>.
+          {copy.questions} <Link href="/legal/terms" className="text-[#e1cb95] hover:text-white">{copy.reviewTerms}</Link>.{" "}
+          <Link href="/withdraw" className="text-[#e1cb95] hover:text-white">{copy.withdrawContract}</Link>.
         </p>
       </Container>
     </Section>

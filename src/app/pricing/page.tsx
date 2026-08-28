@@ -147,6 +147,12 @@ export default async function PricingPage() {
             );
           })}
         </div>
+        <div className="mt-5 max-w-3xl rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-[#9aa7b8]">
+          <p>{copy.renewalNotice}</p>
+          <ButtonLink href="/withdraw" variant="ghost" className="mt-2 px-0 text-[#e1cb95] hover:bg-transparent hover:text-white">
+            {copy.withdrawalFunction}
+          </ButtonLink>
+        </div>
         {!checkoutEnabled && (viewer === "free" || viewer === "signed_out") ? (
           <p className="mt-5 text-sm text-[#e1cb95]">
             {copy.subscriptionsUnavailable}

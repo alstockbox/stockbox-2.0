@@ -13,6 +13,7 @@ type ErrorLogRow = { id: number; service: string; sanitized_error: string; creat
 type RuntimeHealth = { provider: string; operation: string; calls: number; successes: number; latencyTotal: number; latencySamples: number; lastIssue: string | null };
 type AmbassadorEntitlementRow = { user_id: string; monthly_analyses: number; deep_analyses: number; batch_rows: number; watchlist_items: number; portfolios: number };
 type AffiliateRow = { user_id: string | null; code: string; status: string; commission_basis_points: number };
+type WithdrawalRow = { id: string; user_id: string; stripe_subscription_id: string; plan_key: string; status: string; submitted_at: string };
 
 export default async function AdminPage() {
   const user = await requireAdmin();
@@ -23,6 +24,7 @@ export default async function AdminPage() {
     supabase.from("error_logs").select("id", { count: "exact", head: true }),
     supabase.from("subscriptions").select("id", { count: "exact", head: true }).in("status", ["active", "trialing"]),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "affiliate_ambassador"),
+    supabase.from("withdrawal_requests").select("id", { count: "exact", head: true }).in("status", ["received", "processing"]),
   ]) : [];
   const profileResult = supabase
     ? await supabase.from("profiles").select("id,email,role,created_at").order("created_at", { ascending: false }).limit(50)
@@ -43,7 +45,7 @@ export default async function AdminPage() {
       .filter((row) => Boolean(row.user_id))
       .map((row) => [row.user_id as string, row] as const),
   );
-  const [providerHealthResult, errorLogResult] = supabase ? await Promise.all([
+  const [providerHealthResult, errorLogResult, withdrawalResult] = supabase ? await Promise.all([
     supabase.from("provider_health")
       .select("provider,operation,ok,latency_ms,status_code,error_class,created_at")
       .order("created_at", { ascending: false })
@@ -52,9 +54,14 @@ export default async function AdminPage() {
       .select("id,service,sanitized_error,created_at")
       .order("created_at", { ascending: false })
       .limit(20),
-  ]) : [{ data: [] }, { data: [] }];
+    supabase.from("withdrawal_requests")
+      .select("id,user_id,stripe_subscription_id,plan_key,status,submitted_at")
+      .order("submitted_at", { ascending: false })
+      .limit(20),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }];
   const providerHealthRows = (providerHealthResult.data ?? []) as ProviderHealthRow[];
   const recentErrors = (errorLogResult.data ?? []) as ErrorLogRow[];
+  const recentWithdrawals = (withdrawalResult.data ?? []) as WithdrawalRow[];
   const runtimeHealth = Array.from(providerHealthRows.reduce((map, row) => {
     const key = `${row.provider}:${row.operation}`;
     const current = map.get(key) ?? {
@@ -89,6 +96,7 @@ export default async function AdminPage() {
     { label: "Analyses", value: counts[1]?.count ?? 0, note: "reports" },
     { label: "Active subscriptions", value: counts[3]?.count ?? 0, note: "billing" },
     { label: "Ambassadors", value: counts[4]?.count ?? 0, note: "custom access" },
+    { label: "Withdrawal notices", value: counts[5]?.count ?? 0, note: "needs review" },
   ];
 
   return (
@@ -176,6 +184,31 @@ export default async function AdminPage() {
             )) : (
               <p className="bg-[#0d1c2e]/70 px-4 py-4 text-sm text-[#9aa7b8]">No application errors are currently recorded.</p>
             )}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Withdrawal notices</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">Consumer withdrawal notices are timestamped here for operational follow-up.</p>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-[#9aa7b8]">
+                <tr><th className="px-4 py-3">Received</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Subscription</th><th className="px-4 py-3">User</th></tr>
+              </thead>
+              <tbody className="divide-y divide-white/10 bg-[#0d1c2e]/70">
+                {recentWithdrawals.length ? recentWithdrawals.map((item) => (
+                  <tr key={item.id}>
+                    <td className="px-4 py-3 text-xs text-[#c9d2df]">{new Date(item.submitted_at).toLocaleString("en-SE")}</td>
+                    <td className="px-4 py-3 font-semibold text-amber-200">{item.status}</td>
+                    <td className="px-4 py-3">{item.plan_key}</td>
+                    <td className="number px-4 py-3 text-xs">{item.stripe_subscription_id}</td>
+                    <td className="number px-4 py-3 text-xs">{item.user_id}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan={5} className="px-4 py-5 text-sm text-[#9aa7b8]">No withdrawal notices recorded.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 

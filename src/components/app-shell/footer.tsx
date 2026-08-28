@@ -9,6 +9,7 @@ export function AppFooter() {
           <Link href="/pricing" className="hover:text-white">Pricing</Link>
           <Link href="/legal/privacy" className="hover:text-white">Privacy</Link>
           <Link href="/legal/terms" className="hover:text-white">Terms</Link>
+          <Link href="/withdraw" className="hover:text-white">Withdraw</Link>
           <Link href="/docs/methodology" className="hover:text-white">Methodology</Link>
         </nav>
       </div>
