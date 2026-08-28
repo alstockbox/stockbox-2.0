@@ -33,4 +33,15 @@ describe("security response headers", () => {
     expect(headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
     expect(headers.get("Permissions-Policy")).toBe("camera=(), microphone=(), geolocation=(), payment=(self)");
   });
+
+  it("permanently canonicalizes the apex domain to www", async () => {
+    expect(typeof nextConfig.redirects).toBe("function");
+    const redirects = await nextConfig.redirects?.();
+    expect(redirects).toContainEqual({
+      source: "/:path*",
+      has: [{ type: "host", value: "getstockbox.app" }],
+      destination: "https://www.getstockbox.app/:path*",
+      permanent: true,
+    });
+  });
 });
