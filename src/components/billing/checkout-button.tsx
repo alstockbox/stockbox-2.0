@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import type { PlanKey } from "@/lib/billing/plans";
+import type { Locale } from "@/lib/i18n/types";
 import { Button } from "@/components/ui/button";
 
 export function CheckoutButton({
@@ -10,13 +11,15 @@ export function CheckoutButton({
   enabled,
   label,
   pendingLabel = "Opening checkout...",
-  fallbackError = "Checkout could not start."
+  fallbackError = "Checkout could not start.",
+  locale = "en"
 }: {
   plan: PlanKey;
   enabled: boolean;
   label: string;
   pendingLabel?: string;
   fallbackError?: string;
+  locale?: Locale;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +31,7 @@ export function CheckoutButton({
       const response = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, locale }),
       });
       const payload = (await response.json()) as {
         url?: string;

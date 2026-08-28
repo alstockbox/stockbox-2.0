@@ -58,6 +58,9 @@ it("supports localized Stripe pending and fallback copy", () => {
   const portal = readFileSync(resolve(process.cwd(), "src/components/billing/portal-button.tsx"), "utf8");
   expect(checkout).toMatch(/pendingLabel/);
   expect(checkout).toMatch(/fallbackError/);
+  expect(checkout).toMatch(/locale/);
+  const pricing = readFileSync(resolve(process.cwd(), "src/app/pricing/page.tsx"), "utf8");
+  expect(pricing).toMatch(/locale=\{locale\}/);
   expect(portal).toMatch(/pendingLabel/);
   expect(portal).toMatch(/fallbackError/);
 });

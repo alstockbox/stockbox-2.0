@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Check, CheckCircle2 } from "lucide-react";
 import { CheckoutButton } from "@/components/billing/checkout-button";
 import { PortalButton } from "@/components/billing/portal-button";
@@ -19,6 +20,7 @@ import {
 import { getUserSubscription, subscriptionBillingState } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/types";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 
 export const metadata: Metadata = { title: "Pricing", description: "StockBox subscription plans and research limits." };
@@ -39,7 +41,8 @@ function PlanAction({
   signupEnabled,
   portalEnabled,
   copy,
-  billingCopy
+  billingCopy,
+  locale
 }: {
   action: PricingAction;
   plan: PlanKey;
@@ -48,6 +51,7 @@ function PlanAction({
   portalEnabled: boolean;
   copy: ReturnType<typeof getP0Copy>["pricing"];
   billingCopy: ReturnType<typeof getP0Copy>["billing"];
+  locale: Locale;
 }) {
   const label = pricingActionLabel(action, plan, copy);
   if (action.kind === "signup") {
@@ -61,7 +65,7 @@ function PlanAction({
     );
   }
   if (action.kind === "checkout") {
-    return <CheckoutButton plan="basic" enabled={checkoutEnabled} label={label} pendingLabel={billingCopy.openingCheckout} fallbackError={billingCopy.checkoutError} />;
+    return <CheckoutButton plan="basic" enabled={checkoutEnabled} label={label} pendingLabel={billingCopy.openingCheckout} fallbackError={billingCopy.checkoutError} locale={locale} />;
   }
   if (action.kind === "portal") {
     return <PortalButton enabled={portalEnabled} label={label} pendingLabel={billingCopy.openingBilling} fallbackError={billingCopy.billingError} />;
@@ -81,7 +85,8 @@ function PlanAction({
 }
 
 export default async function PricingPage() {
-  const allCopy = getP0Copy(await getLocale());
+  const locale = await getLocale();
+  const allCopy = getP0Copy(locale);
   const copy = allCopy.pricing;
   const billingCopy = allCopy.billing;
   const readiness = getBillingReadiness();
@@ -142,6 +147,7 @@ export default async function PricingPage() {
                   portalEnabled={portalEnabled}
                   copy={copy}
                   billingCopy={billingCopy}
+                  locale={locale}
                 />
               </article>
             );
@@ -149,9 +155,13 @@ export default async function PricingPage() {
         </div>
         <div className="mt-5 max-w-3xl rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-[#9aa7b8]">
           <p>{copy.renewalNotice}</p>
-          <ButtonLink href="/withdraw" variant="ghost" className="mt-2 px-0 text-[#e1cb95] hover:bg-transparent hover:text-white">
-            {copy.withdrawalFunction}
-          </ButtonLink>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <ButtonLink href="/withdraw" variant="ghost" className="px-0 text-[#e1cb95] hover:bg-transparent hover:text-white">
+              {copy.withdrawalFunction}
+            </ButtonLink>
+            <Link href="/legal/terms" className="text-[#e1cb95] hover:text-white">{copy.terms}</Link>
+            <Link href="/legal/privacy" className="text-[#e1cb95] hover:text-white">{copy.privacy}</Link>
+          </div>
         </div>
         {!checkoutEnabled && (viewer === "free" || viewer === "signed_out") ? (
           <p className="mt-5 text-sm text-[#e1cb95]">

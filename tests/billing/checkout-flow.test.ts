@@ -50,11 +50,11 @@ vi.mock("@/lib/env/server", async () => {
 
 import { POST } from "../../src/app/api/stripe/checkout/route";
 
-function checkoutRequest() {
+function checkoutRequest(locale: "en" | "sv" = "en") {
   return new Request("http://localhost/api/stripe/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: "basic" })
+    body: JSON.stringify({ plan: "basic", locale })
   });
 }
 
@@ -121,6 +121,13 @@ describe("Basic checkout flow", () => {
     expect(mocks.createSession).toHaveBeenCalledWith({
       mode: "subscription",
       line_items: [{ price: "price_basic", quantity: 1 }],
+      locale: "en",
+      submit_type: "subscribe",
+      custom_text: {
+        submit: {
+          message: "You are starting a monthly subscription. Introductory price SEK 49/month for 3 months, then SEK 79/month until cancelled. By clicking Subscribe you incur a payment obligation."
+        }
+      },
       success_url: "https://stockbox.test/settings/billing?checkout=success",
       cancel_url: "https://stockbox.test/pricing?checkout=cancelled",
       customer_email: "user@example.com",
@@ -145,6 +152,27 @@ describe("Basic checkout flow", () => {
     expect(mocks.createSession.mock.calls[0]?.[0]).not.toHaveProperty("customer");
   });
 
+  it("localizes the payment-obligation disclosure for Swedish Checkout", async () => {
+    mocks.getUserSubscription.mockResolvedValue({
+      ok: true,
+      subscription: {
+        planKey: "free", status: "active", stripeCustomerId: null, stripeSubscriptionId: null,
+        currentPeriodEnd: null, createdAt: null
+      }
+    });
+    const response = await POST(checkoutRequest("sv"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createSession.mock.calls[0]?.[0]).toMatchObject({
+      locale: "sv",
+      submit_type: "subscribe",
+      custom_text: {
+        submit: {
+          message: "Du startar ett m\u00e5nadsabonnemang. Introduktionspris 49 kr/m\u00e5n i 3 m\u00e5nader, d\u00e4refter 79 kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig."
+        }
+      }
+    });
+  });
   it("enables Stripe automatic tax when the seller is VAT registered", async () => {
     mocks.getServerEnv.mockReturnValue({
       NEXT_PUBLIC_APP_URL: "https://stockbox.test",
@@ -222,6 +250,11 @@ describe("Basic checkout flow", () => {
     expect(params.discounts).toBeUndefined();
     expect(params.metadata).toMatchObject({ offer: "none" });
     expect(params.subscription_data?.metadata).toMatchObject({ offer: "none" });
+    expect(params.locale).toBe("en");
+    expect(params.custom_text?.submit?.message).toBe(
+      "You are starting a monthly subscription at SEK 79/month until cancelled. By clicking Subscribe you incur a payment obligation."
+    );
+    expect(params.custom_text?.submit?.message).not.toContain("49");
   });
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {

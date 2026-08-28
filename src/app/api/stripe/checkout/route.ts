@@ -17,7 +17,8 @@ import {
 import { getServerEnv } from "@/lib/env/server";
 
 const schema = z.object({
-  plan: z.enum(["basic", "standard", "premium", "elite"])
+  plan: z.enum(["basic", "standard", "premium", "elite"]),
+  locale: z.enum(["en", "sv"]).default("en")
 });
 
 export async function POST(request: Request) {
@@ -88,10 +89,20 @@ export async function POST(request: Request) {
 
   const stripeCustomerId = reusableStripeCustomerId(subscriptionLookup.subscription);
   const offer = launchOfferAvailable ? "basic_launch_3_months" : "none";
+  const checkoutDisclosure = launchOfferAvailable && plan.launchOffer
+    ? body.data.locale === "sv"
+      ? `Du startar ett m\u00e5nadsabonnemang. Introduktionspris ${plan.launchOffer.monthlyPriceSek} kr/m\u00e5n i ${plan.launchOffer.durationMonths} m\u00e5nader, d\u00e4refter ${plan.launchOffer.thenMonthlyPriceSek} kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig.`
+      : `You are starting a monthly subscription. Introductory price SEK ${plan.launchOffer.monthlyPriceSek}/month for ${plan.launchOffer.durationMonths} months, then SEK ${plan.launchOffer.thenMonthlyPriceSek}/month until cancelled. By clicking Subscribe you incur a payment obligation.`
+    : body.data.locale === "sv"
+      ? `Du startar ett m\u00e5nadsabonnemang f\u00f6r ${plan.monthlyPriceSek} kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig.`
+      : `You are starting a monthly subscription at SEK ${plan.monthlyPriceSek}/month until cancelled. By clicking Subscribe you incur a payment obligation.`;
 
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
+    locale: body.data.locale,
+    submit_type: "subscribe",
+    custom_text: { submit: { message: checkoutDisclosure } },
     ...(env.LEGAL_VAT_MODE === "vat_registered"
       ? { automatic_tax: { enabled: true } }
       : {}),
