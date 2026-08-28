@@ -39,6 +39,15 @@ function tooManyRequestsState(copy: AuthCopy): AuthActionState {
   return { ok: false, message: copy.rateLimited };
 }
 
+function isEmailDeliveryRateLimit(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; status?: unknown; message?: unknown };
+  if (candidate.code === "over_email_send_rate_limit") return true;
+  return candidate.status === 429
+    && typeof candidate.message === "string"
+    && candidate.message.toLowerCase().includes("email rate limit");
+}
+
 function digestIdentifier(value: string): string {
   return createHash("sha256").update(value.trim().toLowerCase()).digest("hex").slice(0, 32);
 }
@@ -123,7 +132,9 @@ export async function signUpAction(
     }
   });
 
-  if (error) return { ok: false, message: copy.signUpError };
+  if (error) {
+    return { ok: false, message: isEmailDeliveryRateLimit(error) ? copy.emailDeliveryBusy : copy.signUpError };
+  }
 
   if (data?.user?.id) {
     const cookieStore = await cookies();
@@ -172,7 +183,9 @@ export async function resetPasswordAction(
     redirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback?next=/auth/reset`
   });
 
-  if (error) return { ok: false, message: copy.resetError };
+  if (error) {
+    return { ok: false, message: isEmailDeliveryRateLimit(error) ? copy.emailDeliveryBusy : copy.resetError };
+  }
 
   return { ok: true, message: copy.resetSuccess };
 }

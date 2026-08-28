@@ -107,6 +107,40 @@ describe("auth actions", () => {
     expect(mocks.updateUser).toHaveBeenCalledTimes(10);
   });
 
+  it("explains when Supabase temporarily cannot send a sign-up confirmation email", async () => {
+    mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.61" }));
+    mocks.signUp.mockResolvedValue({
+      error: { code: "over_email_send_rate_limit", status: 429, message: "email rate limit exceeded" },
+    });
+
+    const result = await signUpAction(
+      { ok: false, message: "" },
+      formData({ email: "email-busy-signup@stockbox.test", password: "StrongPass123!" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Verification email is temporarily unavailable. Please wait a moment and try again.",
+    });
+  });
+
+  it("explains when Supabase temporarily cannot send a password recovery email", async () => {
+    mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.62" }));
+    mocks.resetPasswordForEmail.mockResolvedValue({
+      error: { code: "over_email_send_rate_limit", status: 429, message: "email rate limit exceeded" },
+    });
+
+    const result = await resetPasswordAction(
+      { ok: false, message: "" },
+      formData({ locale: "sv", email: "email-busy-reset@stockbox.test" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Verifieringsmejl är tillfälligt otillgängliga. Vänta en stund och försök igen.",
+    });
+  });
+
   it("rejects weak new passwords at sign-up before Supabase auth work", async () => {
     mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.51" }));
     const result = await signUpAction(
