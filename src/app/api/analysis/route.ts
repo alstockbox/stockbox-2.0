@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -6,6 +7,7 @@ import { analyzeCompany, searchCompanies } from "@/lib/data/provider";
 import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
 import {
   completeAnalysisReservation,
+  getAnalysisReplay,
   logApplicationError,
   persistAnalysis,
   recordUsageEvent,
@@ -42,8 +44,31 @@ const requestSchema = z.object({
   analysisType: z.enum(["summary", "numbers", "deep", "research"]).default("summary"),
   investmentProfile: z
     .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"])
-    .default("balanced")
+    .default("balanced"),
+  idempotencyKey: z.string().uuid().optional()
 });
+
+
+function analysisRequestFingerprint(input: {
+  securityId?: string;
+  canonicalTicker?: string;
+  ticker: string;
+  issuerId?: string;
+  entityId?: string;
+  cik?: string;
+  analysisType: string;
+  investmentProfile: string;
+}) {
+  return createHash("sha256").update(JSON.stringify({
+    securityId: input.securityId ?? null,
+    canonicalTicker: input.canonicalTicker ?? input.ticker,
+    issuerId: input.issuerId ?? null,
+    entityId: input.entityId ?? null,
+    cik: input.cik ?? null,
+    analysisType: input.analysisType,
+    investmentProfile: input.investmentProfile,
+  })).digest("hex");
+}
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -56,12 +81,37 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid analysis request.", issues: body.error.flatten() }, { status: 422 });
   }
 
+  const analysisRateLimit = user.role === "admin" ? RATE_LIMITS.adminAnalysis : RATE_LIMITS.analysis;
   const rateLimit = await checkDistributedRateLimit(
     clientRateLimitKey(request, "analysis", user.id),
-    RATE_LIMITS.analysis
+    analysisRateLimit
   );
   if (!rateLimit.allowed) {
     return rateLimitExceededResponse(rateLimit);
+  }
+
+  const idempotencyKey = body.data.idempotencyKey;
+  const requestFingerprint = idempotencyKey
+    ? analysisRequestFingerprint({
+        ...body.data.company,
+        analysisType: body.data.analysisType,
+        investmentProfile: body.data.investmentProfile,
+      })
+    : undefined;
+
+  if (idempotencyKey && requestFingerprint) {
+    const replay = await getAnalysisReplay({ userId: user.id, idempotencyKey, requestFingerprint });
+    if (replay.status === "unavailable") {
+      return Response.json({ error: "Analysis retry safety is temporarily unavailable." }, { status: 503 });
+    }
+    if (replay.status === "conflict") {
+      return Response.json({ error: "This analysis retry key belongs to a different request." }, { status: 409 });
+    }
+    if (replay.status === "replay") {
+      const replayData = { ...replay.report, id: replay.id };
+      if (user.role !== "admin") delete replayData.adminQa;
+      return Response.json({ ok: true, data: replayData, sources: [], warnings: [], persisted: true, replayed: true });
+    }
   }
 
   let candidates;
@@ -159,7 +209,9 @@ export async function POST(request: Request) {
   const persisted = await persistAnalysis({
     userId: user.id,
     report: result.data,
-    rawProviderWarnings: result.warnings
+    rawProviderWarnings: result.warnings,
+    idempotencyKey,
+    requestFingerprint
   }).catch(async (error) => {
     const message = sanitizeDiagnosticMessage(error, "Analysis persistence failed unexpectedly.");
     if (quotaReservationId) {
@@ -188,11 +240,25 @@ export async function POST(request: Request) {
   }
 
   if (persisted.ok) {
+    if ("replayed" in persisted && persisted.replayed) {
+      if (quotaReservationId) {
+        await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "released" });
+      }
+      const replayData = { ...persisted.report, id: persisted.id };
+      if (user.role !== "admin") delete replayData.adminQa;
+      return Response.json({ ok: true, data: replayData, sources: [], warnings: result.warnings, persisted: true, replayed: true });
+    }
     result.data.id = persisted.id;
     if (quotaReservationId) {
       await completeAnalysisReservation({ reservationId: quotaReservationId, analysisId: persisted.id });
     }
   } else {
+    if (persisted.conflict) {
+      if (quotaReservationId) {
+        await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "released" });
+      }
+      return Response.json({ error: "This analysis retry key belongs to a different request." }, { status: 409 });
+    }
     const persistenceMessage = sanitizeDiagnosticMessage(persisted.error, "Analysis persistence failed.");
     if (quotaReservationId) {
       await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });

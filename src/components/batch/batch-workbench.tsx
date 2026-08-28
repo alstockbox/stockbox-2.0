@@ -42,6 +42,7 @@ type BatchRow = {
   status: BatchStatus;
   error?: string;
   report?: AnalysisReport;
+  idempotencyKey?: string;
 };
 
 type ResolvePayload = {
@@ -53,7 +54,7 @@ type ResolvePayload = {
 type AnalysisPayload =
   | { ok: true; data: AnalysisReport; persisted: boolean; warnings: string[] }
   | { ok: false; error: string; warnings?: string[] }
-  | { error: string };
+  | { error: string; entitlement?: unknown };
 const terminalStatuses = new Set<BatchStatus>([
   "completed",
   "failed",
@@ -193,7 +194,8 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     for (const candidate of candidates) {
       if (cancelled.current) break;
       if (!candidate.company) continue;
-      updateRow(candidate.input, { status: "running", error: undefined });
+      const idempotencyKey = candidate.idempotencyKey ?? crypto.randomUUID();
+      updateRow(candidate.input, { status: "running", error: undefined, idempotencyKey });
       try {
         const response = await fetch("/api/analysis", {
           method: "POST",
@@ -202,6 +204,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
             company: candidate.company,
             analysisType,
             investmentProfile,
+            idempotencyKey: idempotencyKey,
           }),
         });
         const payload = (await response.json()) as AnalysisPayload;
@@ -214,15 +217,20 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           continue;
         }
 
+        if (response.status === 429) {
+          const limitMessage = "entitlement" in payload && payload.entitlement
+            ? copy.monthlyLimit
+            : copy.rateLimited;
+          updateRow(candidate.input, { status: "failed", error: limitMessage });
+          setError(limitMessage);
+          break;
+        }
+
         const message =
           locale === "en" && "error" in payload
             ? payload.error
             : copy.saveFailed;
         updateRow(candidate.input, { status: "failed", error: message });
-        if (response.status === 429) {
-          setError(copy.monthlyLimit);
-          break;
-        }
       } catch {
         updateRow(candidate.input, {
           status: "failed",

@@ -35,6 +35,22 @@ describe("P0 localization", () => {
     expect(readFileSync(resolve(process.cwd(), "src/components/batch/batch-workbench.tsx"), "utf8")).toMatch(/locale/);
   });
 
+
+  it("classifies batch rate limits before the generic save-failure fallback", () => {
+    const svBatch = getP0Copy("sv").batch as unknown as Record<string, string>;
+    expect(svBatch.rateLimited).toContain("analysanrop");
+
+    const source = readFileSync(resolve(process.cwd(), "src/components/batch/batch-workbench.tsx"), "utf8");
+    const rateLimitBranch = source.indexOf("if (response.status === 429)");
+    const genericFailure = source.indexOf("const message =");
+    expect(rateLimitBranch).toBeGreaterThan(-1);
+    expect(genericFailure).toBeGreaterThan(-1);
+    expect(rateLimitBranch).toBeLessThan(genericFailure);
+    expect(source).toContain("copy.rateLimited");
+    expect(source).toContain('"entitlement" in payload');
+    expect(source).toContain("copy.monthlyLimit");
+  });
+
 });
 
 it("supports localized Stripe pending and fallback copy", () => {
