@@ -65,7 +65,6 @@ describe("diagnostic pre-batch live gauntlet", () => {
           continue;
         }
 
-        completed += 1;
         const report = result.data;
         const engine = report.engine!;
         const nonFinite = nonFiniteNumberPaths(report);
@@ -73,15 +72,19 @@ describe("diagnostic pre-batch live gauntlet", () => {
           && (engine.scores.specializedCoverage?.overall ?? 0) >= 0.7
           && (engine.scores.dimensions.valuation.coverage ?? 0) >= 0.75;
         const dcfSupport = engine.dcf.status === "available" && engine.dcf.directionalSupport !== false;
+        const benchmarkSupport = engine.recommendation.constraintsApplied.includes(
+          "Regular directional rating uses high-coverage benchmark valuation because DCF is unavailable.",
+        );
 
         expect(nonFinite, `${query} returned non-finite numbers`).toEqual([]);
         if (directionalRatings.has(engine.recommendation.rating)) {
-          expect(dcfSupport || specializedSupport, `${query} returned an unsupported directional rating`).toBe(true);
+          expect(dcfSupport || specializedSupport || benchmarkSupport, `${query} returned an unsupported directional rating`).toBe(true);
         }
         if (engine.analysisArchetype === "unknown") {
           expect(engine.recommendation.rating).toBe("No Rating");
         }
 
+        completed += 1;
         diagnostics.push({
           query,
           status: "completed",

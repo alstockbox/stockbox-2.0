@@ -12,6 +12,7 @@ export const p0Copy = {
     auth: {
       email: "Email", password: "Password", working: "Working...",
       loginTitle: "Welcome back", loginCopy: "Continue to your research workspace.",
+      emailConfirmed: "Your email is verified. Log in to continue to StockBox.",
       createAccount: "Create an account", or: "or", resetPassword: "reset your password",
       signupTitle: "Start researching", signupCopy: "The Free plan includes real company analysis and no payment card.",
       alreadyAccount: "Already have an account?", forgotTitle: "Reset password",
@@ -129,6 +130,7 @@ export const p0Copy = {
     auth: {
       email: "E-post", password: "Lösenord", working: "Arbetar...",
       loginTitle: "Välkommen tillbaka", loginCopy: "Fortsätt till din analysyta.",
+      emailConfirmed: "Din e-post är verifierad. Logga in för att fortsätta till StockBox.",
       createAccount: "Skapa ett konto", or: "eller", resetPassword: "återställ lösenordet",
       signupTitle: "Börja analysera", signupCopy: "Gratisplanen innehåller riktiga bolagsanalyser och kräver inget betalkort.",
       alreadyAccount: "Har du redan ett konto?", forgotTitle: "Återställ lösenord",
