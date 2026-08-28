@@ -274,7 +274,7 @@ begin
       'plan', v_plan_key,
       'reservationId', null,
       'usage', jsonb_build_object('analyses', v_total_usage, 'deepAnalyses', v_deep_usage),
-      'limits', jsonb_build_object('analyses', v_monthly_limit, 'deepAnalyses', v_deep_limit)
+      'limits', jsonb_build_object('analyses', v_monthly_limit, 'deepAnalyses', v_deep_usage)
     );
   end if;
 
