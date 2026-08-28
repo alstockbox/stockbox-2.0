@@ -1,32 +1,39 @@
 # StockBox 2.0 - Release Status / Owner Actions
 
-Verified against production on 28 August 2026. Verified application code: `9484afe` (`Harden global market data fallback`).
+Verified against production on 28 August 2026 after Analysis Engine v2.7 integration. Current verified application commit: `5c8a4dd` (`calibrate-analysis-engine-v2.7`).
 
 ## Verified complete
 
-1. **Code gates:** 77/77 test files and 753/753 tests pass; typecheck, lint and production build exit 0; production and full npm audits report 0 vulnerabilities.
-2. **Vercel:** production deployment for `9484afe` is READY. `stockbox-2-0.vercel.app` serves the current app. Runtime smoke window has no warning/error/fatal logs.
-3. **Market data:** production primary is Yahoo Finance chart data with Stooq fallback. Provider health resolves `yahoo-chart`, reports global market-data capability and keeps Stooq configured as fallback. Swedish/global search smoke passed.
-4. **SEC/fundamentals:** SEC contact is explicitly configured. Missing/unsupported fundamentals remain visible as missing rather than fabricated.
-5. **Supabase:** all 12 repository migrations are applied through `20260827180007_distributed_rate_limits.sql` in order. Production project is healthy.
-6. **Database security:** RLS is enabled on all public tables. Runtime authenticated isolation verified that a real user cannot read another user's profiles, analyses or subscriptions.
-7. **Privileged RPCs:** entitlement, billing-ordering, workspace and rate-limit SECURITY DEFINER functions are not executable by `anon`/`authenticated`; intended public RPCs are service-role only.
-8. **Rate limiting:** production distributed limiter passed an atomic allow/allow/deny test with rollback.
-9. **Batch QA:** production batch-QA insert/update/read persistence passed under service role with rollback.
-10. **Stripe:** live Basic v2 price is 79 SEK/month. Launch coupon reduces it by 30 SEK for exactly 3 months, producing 49 SEK/month for the first 3 months. Vercel points to the correct v2 price/coupon IDs.
-11. **Stripe webhook:** the Vercel subscription webhook is enabled for subscription created/updated/deleted. Invalid-signature probes return HTTP 400 without DB mutation. Duplicate, stale-event and stale-subscription ordering passed against production with rollback.
-12. **Legacy billing webhook:** the old `getstockbox.app/api/v1/billing/webhook` Stripe endpoint has been disabled (not deleted), removing duplicate-processing risk.
+1. **Analysis engine:** v2.7.0 is integrated on top of the current release-hardening/main code without merging the destructive calibration branch history. The engine remains deterministic, coverage-aware and fail-closed when data is insufficient.
+2. **Code gates:** 91/91 test files and 846/846 tests pass after the v2.7 integration. `npm run typecheck`, `npm run lint`, `npm run build`, `git diff --check`, `npm audit --omit=dev` and full `npm audit` all exit successfully; both audits report 0 vulnerabilities.
+3. **Vercel:** the v2.7 preview deployment completed successfully, then `5c8a4dd` was fast-forwarded to `main` and the production deployment completed successfully. The final production domain responds over HTTPS.
+4. **DNS/domain:** `getstockbox.app` resolves to Vercel and redirects to `https://www.getstockbox.app/`; `www.getstockbox.app` serves the StockBox application with HSTS, CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy and Permissions-Policy headers.
+5. **Production provider health:** `https://www.getstockbox.app/api/health/providers` returns HTTP 200. SEC is configured with an explicit user-agent/contact. Global market data resolves to Yahoo Finance with Stooq configured as fallback.
+6. **Vercel runtime health:** no runtime errors were reported in the post-deploy observation window.
+7. **Supabase:** production project `stockbox-production` is ACTIVE_HEALTHY. Repository migrations are applied through `20260828170026_ambassador_entitlement_limit_response_fix`, including analysis idempotency, affiliate/ambassador workspace, subscription lifecycle, launch offer, affiliate attribution and custom ambassador entitlements.
+8. **Database security:** RLS remains enabled. Supabase Security Advisor reports service-only deny-by-default tables as INFO; the actionable Auth warning is leaked-password protection being disabled.
+9. **Billing model:** Free and Basic are the currently active commercial plans in application code. Basic is 79 SEK/month with the launch offer 49 SEK/month for the first 3 months. Standard, Premium and Elite remain inactive and must not be marketed as purchasable until deliberately activated.
+10. **Billing infrastructure:** Stripe Checkout, Billing Portal, signed webhook processing, duplicate/stale event protection, cancellation-state handling and centralized entitlements are implemented. The legacy duplicate billing webhook remains disabled.
+11. **Admin / ambassador:** admin authorization, unlimited admin analysis behavior, affiliate/ambassador role support and custom ambassador entitlements are implemented; production migrations for the current entitlement model are present.
+12. **Core product surface:** landing, pricing, signup/login/recovery, onboarding, dashboard, Analyze, Batch, History, Watchlist, Portfolio, Billing/Profile settings, Affiliate, Admin, Methodology, Privacy and Terms routes build successfully. Print/Save PDF is available from reports through the browser print flow.
 
-## Remaining before public launch
+## Remaining hard gates before a paid public launch
 
-1. **DNS cutover at STRATO:** Vercel's project-specific inspection requires `A getstockbox.app 76.76.21.21` and `A www.getstockbox.app 76.76.21.21`. Current DNS still points to the legacy Coming Soon host (`216.24.57.1`). Change DNS only when ready to expose the app publicly, then re-run HTTPS/domain smoke.
-2. **Legal/commercial approval:** Privacy and Terms are still explicit drafts. Owner/legal input is required for controller/company identity, contact details, lawful bases, retention, international transfers, VAT/refund/trial treatment, governing law and final disclaimer. Do not publish the current draft notices as final legal terms.
-3. **Supabase Auth:** security advisor reports Leaked Password Protection disabled. If the project plan supports it, enable **Authentication > Email/password settings > Prevent the use of leaked passwords**, then re-run the security advisor. Also review minimum password requirements before launch.
-4. **Final human QA:** manually test mobile/tablet/desktop layout, keyboard/focus/contrast, browser console, signup/login/reset/recovery, canonical security selection, saved analyses/watchlist/portfolio persistence, Basic checkout + billing portal, customer denial from admin routes, and a real cancellation/resubscribe lifecycle.
-5. **DNS-dependent auth:** after DNS cutover, verify Supabase Auth Site URL/redirect allow-list and all email links use the final production domain rather than a temporary Vercel URL.
+1. **Legal/commercial finalization - BLOCKER.** Privacy and Terms still explicitly identify themselves as drafts. Final controller/business identity, contact details, lawful bases, retention policy, international-transfer wording, VAT/refund/trial treatment, governing law and final financial disclaimer must be approved and published before paid traffic is intentionally activated.
+2. **Production Auth end-to-end - BLOCKER.** Verify a real signup -> confirmation email -> callback -> onboarding -> login -> logout -> forgot/reset password cycle on the final `www.getstockbox.app` domain. Confirm Supabase Auth Site URL and redirect allow-list match the final domain.
+3. **Supabase leaked-password protection - SECURITY GATE.** Security Advisor currently reports `Leaked Password Protection Disabled`. Enable it if available on the current Supabase plan and review minimum password requirements, then re-run the advisor.
+4. **Real billing end-to-end - BLOCKER FOR PAID LAUNCH.** With a normal non-admin test customer, verify Basic launch checkout, subscription activation, correct quota, Billing Portal, cancellation, resubscribe and failed-payment behavior. Verify failed/fundamentals-unavailable analyses do not consume quota.
+5. **Post-v2.7 report QA - BLOCKER.** Run real Summary/Numbers/Deep analyses across a representative issuer set including US mega-cap, Swedish/global stock, financial, REIT, cyclical/commodity, loss-making growth, cross-currency, stale/partial fundamentals and unsupported security cases. Review score, rating, confidence, provenance, DCF gating and missing-data behavior. Do not tune to preferred company ratings.
+6. **Browser/device QA - BLOCKER.** Verify mobile/tablet/desktop layouts, keyboard/focus, contrast, browser console, print/PDF, Batch progress/retry, History persistence and admin-denial behavior in real browsers.
+7. **Production abuse/telemetry QA - BLOCKER.** Validate deployed rate limiting/WAF behavior across instances, inspect PostHog payloads for allowlisted non-sensitive data only, and verify Strong Buy email delivery/retry/dedup against the configured email provider.
+8. **Final release smoke - BLOCKER.** After the above gates, run the complete HTTPS route smoke, one fresh customer journey and one fresh analysis/batch journey, then make the explicit GO/NO-GO decision.
 
-## Non-blocking observations
+## Deliberately deferred / not launch blockers
 
-- Supabase performance advisor reports INFO-only unindexed foreign keys and currently-unused indexes. These should be reviewed after release using real workload/query data rather than changed immediately before launch.
-- Service-only tables with RLS enabled and no policies are intentionally deny-by-default; this is not the same as missing RLS protection.
-- Twelve Data remains optional. Production no longer depends on a missing Twelve Data API key because Yahoo is the active global market provider and Stooq is the configured fallback.
+Comparisons, screener, news ingestion, Stock of the Day, automated portfolio monitoring, advanced portfolio analytics, AI research/assistant, transcripts, advanced sentiment, funds/crypto and Stock Battle remain P1/P2 unless they are explicitly promised in launch marketing. Do not expand scope before v1 is stable.
+
+## Current release decision
+
+**TECHNICAL CORE: NEAR RELEASE-READY. PAID PUBLIC LAUNCH: STILL BLOCKED BY THE HARD GATES ABOVE.**
+
+The dominant remaining work is external/end-to-end verification and legal/commercial approval, not another large product rewrite.

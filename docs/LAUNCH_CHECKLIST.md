@@ -1,48 +1,61 @@
 # StockBox 2.0 Launch Checklist
 
-Current date: August 27, 2026. Release deadline: August 31, 2026.
+Current date: August 28, 2026. Release deadline: August 31, 2026.
+Current production code target: `5c8a4dd` — Analysis Engine v2.7 integrated on current release-hardening/main.
 
-## Completed in the repository
+## Repository and production foundation
 
-- [x] Product architecture, feature matrix, security, methodology, deployment and owner-action documentation.
-- [x] Public product surface, pricing, account flows, onboarding, dashboard, analysis, watchlist, portfolio, legal and admin routes.
-- [x] Canonical entity validation, reporting/trading currency separation, period-aware growth, freshness gates and missing-data safety.
-- [x] Deterministic metrics, archetype-aware scores, constrained recommendations, DCF assumption quality, cyclical normalization, scenarios and a 30-case golden invariant set.
-- [x] Provider orchestration with SEC precedence, safe Yahoo supplementation, metric provenance, conflict gates and honest unavailable states.
-- [x] Versioned model/policies/providers, canonical input fingerprints and batch-QA rerun comparison/persistence code.
-- [x] Supabase schema, indexes, RLS policies and service-role boundaries.
-- [x] Stripe Checkout/Portal/webhook code and centralized entitlements.
-- [x] Sanitized errors, product events and deduplicated Strong Buy alert code.
-- [x] P1/P2 launch flags default closed.
-- [x] Saved profile preferences initialize Analyze defaults, and a profile settings surface is available after onboarding.
-- [x] Watchlist and holdings canonicalize company identity server-side before persistence; workspace plan limits are enforced through server/RPC boundaries.
-- [x] User-facing sharing remains hidden for v1 until owner management/revocation UX is explicitly enabled and production-tested.
-- [x] P0 operational UI is localized in English/Swedish, including auth server responses, navigation, Analyze, Batch, Watchlist, Portfolio, Billing and profile/settings copy; canonical financial model narrative remains English by design.
-- [x] P0 accessibility regression coverage includes keyboard skip navigation, visible focus, reduced motion, semantic score/batch progress and non-duplicative chart semantics.
-- [x] Analysis API provider failures are sanitized at the HTTP boundary while detailed provider diagnostics remain server-side for QA/logging.
+- [x] Public product shell, pricing, auth routes, onboarding, dashboard, Analyze, Batch, History, Watchlist, Portfolio, Affiliate, Admin, settings, methodology and legal routes exist and build.
+- [x] Analysis Engine v2.7 integrated without merging the divergent calibration branch wholesale.
+- [x] Canonical entity/currency handling, missing-data safety, provenance/conflict handling, deterministic scoring, DCF gates, confidence/coverage and specialist archetype logic are implemented.
+- [x] Supabase persistence, RLS/service-role boundaries, analysis idempotency, distributed rate limits, batch QA persistence and current affiliate/ambassador entitlement migrations are applied in production.
+- [x] Stripe Checkout/Portal/webhook code, ordering/idempotency protections, subscription lifecycle and launch-offer logic are implemented.
+- [x] Admin unlimited analysis behavior and custom ambassador entitlement support are implemented.
+- [x] English/Swedish P0 operational localization and baseline accessibility/security headers are implemented.
+- [x] Final DNS cutover completed: apex redirects to `www`, and `www.getstockbox.app` serves Vercel production over HTTPS.
+- [x] Production provider health returns HTTP 200 with SEC configured and Yahoo -> Stooq market-provider chain.
 
-## Required release gates
+## Final code gate for v2.7
 
-- [x] Local release gate passes on the current working tree: 77/77 test files and 689/689 tests, TypeScript typecheck, ESLint, Next.js production build (28/28 routes/pages generated) and `git diff --check`. Re-run the same gate on the final release commit after production-only configuration changes.
-- [x] Run the diagnostic pre-batch live gauntlet and review entity, currency, provenance, specialist-data and recommendation safety; 22/22 diagnostic issuers completed with safe fail-closed behavior. This was not the official 25-company calibration batch.
-- [x] Production migrations are applied through `20260827180007`; batch-QA reproducibility columns/indexes are present and the full migration history is synchronized with the repository.
-- [x] Production RLS runtime probe confirms user A cannot read user B profile, analyses, watchlist or portfolio; authenticated users cannot execute admin, Stripe-sync, workspace-entitlement or distributed-rate-limit service RPCs.
-- [ ] Verify signup, email confirmation, login, logout and password recovery against production Auth.
-- [ ] Verify Summary, Numbers and Deep reports against several real issuers, unsupported securities, stale market data, cross-currency data and missing-data cases.
-- [x] Complete English/Swedish localization for P0 operational UI strings. Canonical engine-generated financial narrative/diagnostic terminology remains English to avoid semantic drift.
-- [x] Add atomic Supabase-backed distributed rate limiting with hashed keys for auth-adjacent, search, analysis, batch validation and share endpoints, with process-local fallback as defense in depth.
-- [ ] Validate production edge/WAF rate limiting across deployed instances.
-- [ ] Verify Stripe test checkout, duplicate webhooks, upgrade, failed payment, cancellation and portal.
-- [ ] Verify plan limits and ensure failed or fundamentals-unavailable analyses do not consume entitlement.
-- [ ] Verify Strong Buy delivery and retry/dedup behavior through the selected email provider.
-- [ ] Confirm PostHog payloads contain no secrets, report bodies or unnecessary personal data.
-- [x] Add baseline HSTS and CSP headers.
-- [x] Run dependency audit with no unresolved critical/high finding.
-- [ ] Validate CSP in production browser QA and complete final security review with no unresolved critical/high finding.
-- [ ] Run keyboard, screen-size, contrast, browser-console and Core Web Vitals QA.
-- [ ] Owner/legal approves privacy, terms, financial disclosure, prices and refund/VAT rules.
-- [ ] Production deployment passes the complete HTTPS smoke test.
+- [x] 91/91 test files pass.
+- [x] 846/846 tests pass.
+- [x] TypeScript typecheck passes.
+- [x] ESLint passes.
+- [x] Next.js production build passes and generates the full current route set.
+- [x] `git diff --check` passes.
+- [x] `npm audit --omit=dev` reports 0 vulnerabilities.
+- [x] Full `npm audit` reports 0 vulnerabilities.
+- [x] v2.7 preview deployment completed successfully.
+- [x] v2.7 was fast-forwarded to `main` and production deployment completed successfully.
+- [x] Post-deploy provider-health smoke returns HTTP 200.
+- [x] No Vercel runtime errors observed in the post-deploy window.
+
+## Required release gates still open
+
+- [ ] Replace/approve the explicit draft Privacy notice with final controller/business identity, contact, lawful bases, retention, transfers and data-subject procedure language.
+- [ ] Replace/approve the explicit draft Terms with final commercial identity, pricing/VAT/refund/trial treatment, governing law/support and disclaimer language.
+- [ ] Enable Supabase leaked-password protection if the plan supports it; review password policy and re-run Security Advisor.
+- [ ] Verify Supabase Auth Site URL and redirect allow-list use `https://www.getstockbox.app` and required callback/reset URLs.
+- [ ] Run a real production signup -> email confirmation -> onboarding -> login -> logout flow.
+- [ ] Run a real forgot-password -> email -> callback -> password update -> login flow.
+- [ ] Run a representative post-v2.7 real-report sweep across Summary, Numbers and Deep modes, including global/Swedish, financial, REIT, cyclical, loss-making, cross-currency, stale/partial and unsupported cases.
+- [ ] Confirm no failed/fundamentals-unavailable analysis consumes quota and no retry double-consumes quota.
+- [ ] Validate deployed distributed rate limiting / WAF behavior across production instances.
+- [ ] Run real Basic launch checkout at 49 SEK/month for first 3 months, verify activation/quota and Billing Portal.
+- [ ] Verify cancellation, resubscribe and failed-payment lifecycle with a normal non-admin customer.
+- [ ] Verify PostHog production payloads contain only allowlisted non-sensitive event properties.
+- [ ] Verify Strong Buy email delivery, retry and dedup behavior through the configured email provider.
+- [ ] Run mobile/tablet/desktop browser QA, keyboard/focus/contrast QA and browser-console review.
+- [ ] Verify Print / Save PDF layout on representative Summary/Numbers/Deep reports.
+- [ ] Verify Batch progress, continuation on failure, retry-only-failures, History persistence and admin/customer authorization in production UI.
+- [ ] Run the complete final HTTPS/customer-journey smoke after all items above are green.
+
+## Scope freeze for v1
+
+Comparisons, screener, news, Stock of the Day, automated portfolio monitoring, advanced portfolio analytics, AI research/assistant, transcripts, advanced sentiment, funds/crypto and Stock Battle remain deferred unless launch marketing explicitly promises them.
 
 ## Release decision
 
-`BLOCKED BY SPECIFIC ITEMS`: all unchecked gates above plus the credentials in `OWNER_ACTIONS.md`. Do not activate paid traffic until they pass.
+`NO-GO FOR PAID PUBLIC TRAFFIC` until every open hard gate above is either verified green or explicitly removed from v1 scope with matching product/marketing changes.
+
+`TECHNICAL CORE` is now in final release-hardening rather than feature construction.
