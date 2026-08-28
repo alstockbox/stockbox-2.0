@@ -2,6 +2,7 @@ import { getMarketDataProvider, getMarketDataProviderChain, getSecUserAgent, get
 import { SEC_CAPABILITIES } from "@/lib/data/sec";
 import { STOOQ_CAPABILITIES } from "@/lib/data/stooq";
 import { TWELVE_DATA_CAPABILITIES } from "@/lib/data/twelve-data";
+import { YAHOO_MARKET_CAPABILITIES } from "@/lib/data/yahoo-market";
 import { configuredMarketDataProviderStatuses } from "@/lib/data/provider";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +12,15 @@ export function GET() {
   const marketProvider = getMarketDataProvider(env);
   const marketProviderChain = getMarketDataProviderChain(env);
   const marketProviderStatuses = configuredMarketDataProviderStatuses(env);
-  const marketConfigured = marketProviderStatuses.some((provider) => provider.configured);
-  const marketProviderId = marketProvider === "stooq" ? "stooq-eod" : marketProvider === "twelve_data" ? "twelve-data" : "disabled";
-  const marketCapabilities = marketProvider === "twelve_data" ? TWELVE_DATA_CAPABILITIES : STOOQ_CAPABILITIES;
+  const resolvedMarketProvider = marketProviderStatuses.find((provider) => provider.configured);
+  const marketConfigured = Boolean(resolvedMarketProvider);
+  const resolvedProvider = resolvedMarketProvider?.key ?? "disabled";
+  const marketProviderId = resolvedMarketProvider?.providerId ?? "disabled";
+  const marketCapabilities = resolvedProvider === "twelve_data"
+    ? TWELVE_DATA_CAPABILITIES
+    : resolvedProvider === "yahoo"
+      ? YAHOO_MARKET_CAPABILITIES
+      : STOOQ_CAPABILITIES;
 
   return Response.json({
     secConfigured: Boolean(getSecUserAgent(env)),
@@ -24,6 +31,7 @@ export function GET() {
       fundamentals: { id: "sec-companyfacts", configured: Boolean(getSecUserAgent(env)), capabilities: SEC_CAPABILITIES },
       marketData: {
         id: marketProviderId,
+        resolvedProvider,
         configured: marketConfigured,
         chain: marketProviderStatuses,
         capabilities: marketCapabilities

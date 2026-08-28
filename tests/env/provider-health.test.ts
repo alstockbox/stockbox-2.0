@@ -79,6 +79,47 @@ describe("provider health diagnostics", () => {
     expect(JSON.stringify(payload)).not.toContain("alerts@stockbox.test");
   });
 
+  it("reports Yahoo as the active global market adapter", async () => {
+    mocks.getServerEnv.mockReturnValue({ SEC_USER_AGENT: "", MARKET_DATA_PROVIDER: "yahoo" });
+    mocks.getSecUserAgent.mockReturnValue(null);
+    mocks.getMarketDataProvider.mockReturnValue("yahoo");
+    mocks.getMarketDataProviderChain.mockReturnValue(["yahoo", "stooq"]);
+    mocks.configuredMarketDataProviderStatuses.mockReturnValue([
+      { key: "yahoo", providerId: "yahoo-chart", label: "Yahoo Finance chart", configured: true },
+      { key: "stooq", providerId: "stooq-eod", label: "Stooq", configured: true },
+    ]);
+
+    const payload = await GET().json();
+
+    expect(payload.providers.marketData.id).toBe("yahoo-chart");
+    expect(payload.providers.marketData.capabilities.supportedCountries).toContain("global");
+  });
+
+  it("reports the first actually configured market provider when the declared primary is unavailable", async () => {
+    mocks.getServerEnv.mockReturnValue({
+      SEC_USER_AGENT: "StockBox/2.0 contact@stockbox.test",
+      MARKET_DATA_PROVIDER: "twelve_data",
+      TWELVE_DATA_API_KEY: "",
+    });
+    mocks.getSecUserAgent.mockReturnValue("StockBox/2.0 contact@stockbox.test");
+    mocks.getMarketDataProvider.mockReturnValue("twelve_data");
+    mocks.getMarketDataProviderChain.mockReturnValue(["twelve_data", "stooq", "yahoo"]);
+    mocks.configuredMarketDataProviderStatuses.mockReturnValue([
+      { key: "twelve_data", providerId: "twelve-data", label: "Twelve Data", configured: false, reason: "not_configured" },
+      { key: "stooq", providerId: "stooq-eod", label: "Stooq", configured: true },
+      { key: "yahoo", providerId: "yahoo-chart", label: "Yahoo Finance chart", configured: true },
+    ]);
+
+    const payload = await GET().json();
+
+    expect(payload.marketProvider).toBe("twelve_data");
+    expect(payload.providers.marketData).toEqual(expect.objectContaining({
+      id: "stooq-eod",
+      resolvedProvider: "stooq",
+      configured: true,
+    }));
+  });
+
   it("reports an explicitly disabled market adapter", async () => {
     mocks.getServerEnv.mockReturnValue({ SEC_USER_AGENT: "", MARKET_DATA_PROVIDER: "disabled" });
     mocks.getSecUserAgent.mockReturnValue(null);
