@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   getBillingReadiness: vi.fn(),
+  getServerEnv: vi.fn(),
   getStripe: vi.fn(),
   getUserSubscription: vi.fn(),
   requireUser: vi.fn()
@@ -43,12 +44,7 @@ vi.mock("@/lib/env/server", async () => {
   const actual = await vi.importActual<typeof import("@/lib/env/server")>("@/lib/env/server");
   return {
     ...actual,
-    getServerEnv: vi.fn(() => ({
-      NEXT_PUBLIC_APP_URL: "https://stockbox.test",
-      STRIPE_RESTRICTED_KEY: "rk_test",
-      STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
-      STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch"
-    }))
+    getServerEnv: mocks.getServerEnv
   };
 });
 
@@ -66,11 +62,19 @@ describe("Basic checkout flow", () => {
   beforeEach(() => {
     mocks.createSession.mockReset();
     mocks.getBillingReadiness.mockReset();
+    mocks.getServerEnv.mockReset();
     mocks.getStripe.mockReset();
     mocks.getUserSubscription.mockReset();
     mocks.requireUser.mockReset();
     mocks.requireUser.mockResolvedValue({ id: "user_1", email: "user@example.com", role: "customer" });
     mocks.createSession.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
+    mocks.getServerEnv.mockReturnValue({
+      NEXT_PUBLIC_APP_URL: "https://stockbox.test",
+      STRIPE_RESTRICTED_KEY: "rk_test",
+      STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
+      STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch",
+      LEGAL_VAT_MODE: "small_business_exempt"
+    });
     mocks.getBillingReadiness.mockReturnValue({
       checkoutReady: true,
       supabaseConfigured: true,
@@ -139,6 +143,35 @@ describe("Basic checkout flow", () => {
       "integration_identifier"
     );
     expect(mocks.createSession.mock.calls[0]?.[0]).not.toHaveProperty("customer");
+  });
+
+  it("enables Stripe automatic tax when the seller is VAT registered", async () => {
+    mocks.getServerEnv.mockReturnValue({
+      NEXT_PUBLIC_APP_URL: "https://stockbox.test",
+      STRIPE_RESTRICTED_KEY: "rk_test",
+      STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
+      STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch",
+      LEGAL_VAT_MODE: "vat_registered",
+      LEGAL_VAT_NUMBER: "SE000000000001"
+    });
+    mocks.getUserSubscription.mockResolvedValue({
+      ok: true,
+      subscription: {
+        planKey: "free",
+        status: "active",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        currentPeriodEnd: null,
+        createdAt: null
+      }
+    });
+
+    const response = await POST(checkoutRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.createSession.mock.calls[0]?.[0]).toMatchObject({
+      automatic_tax: { enabled: true }
+    });
   });
 
   it.each(["canceled", "incomplete_expired"])(
