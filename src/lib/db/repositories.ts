@@ -92,10 +92,41 @@ export async function upsertProfile(input: {
   return { ok: true as const };
 }
 
+export type AnalysisReplayResult =
+  | { status: "miss" }
+  | { status: "unavailable" }
+  | { status: "conflict" }
+  | { status: "replay"; id: string; report: AnalysisReport };
+
+export async function getAnalysisReplay(input: {
+  userId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+}): Promise<AnalysisReplayResult> {
+  const supabase = createAdminClient();
+  if (!supabase) return { status: "unavailable" };
+
+  const { data, error } = await supabase
+    .from("analyses")
+    .select("id,report,idempotency_fingerprint")
+    .eq("user_id", input.userId)
+    .eq("idempotency_key", input.idempotencyKey)
+    .maybeSingle();
+
+  if (error) return { status: "unavailable" };
+  if (!data) return { status: "miss" };
+  if (data.idempotency_fingerprint !== input.requestFingerprint) return { status: "conflict" };
+
+  const report = { ...(data.report as AnalysisReport), id: data.id as string };
+  return { status: "replay", id: data.id as string, report };
+}
+
 export async function persistAnalysis(input: {
   userId: string | null;
   report: AnalysisReport;
   rawProviderWarnings: string[];
+  idempotencyKey?: string;
+  requestFingerprint?: string;
 }) {
   const supabase = createAdminClient();
   if (!supabase) return { ok: false as const, error: "Supabase admin client is not configured." };
@@ -121,12 +152,29 @@ export async function persistAnalysis(input: {
       valuation_method: input.report.engine?.dcf.method ?? null,
       valuation_status: input.report.engine?.dcf.status ?? null,
       report: input.report,
-      provider_warnings: input.rawProviderWarnings
+      provider_warnings: input.rawProviderWarnings,
+      idempotency_key: input.idempotencyKey ?? null,
+      idempotency_fingerprint: input.requestFingerprint ?? null
     })
     .select("id")
     .single();
 
-  if (error) return { ok: false as const, error: error.message };
+  if (error) {
+    if (error.code === "23505" && input.userId && input.idempotencyKey && input.requestFingerprint) {
+      const replay = await getAnalysisReplay({
+        userId: input.userId,
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.requestFingerprint,
+      });
+      if (replay.status === "replay") {
+        return { ok: true as const, id: replay.id, report: replay.report, replayed: true as const };
+      }
+      if (replay.status === "conflict") {
+        return { ok: false as const, error: "Idempotency key conflict.", conflict: true as const };
+      }
+    }
+    return { ok: false as const, error: error.message };
+  }
   return { ok: true as const, id: data.id as string };
 }
 

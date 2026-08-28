@@ -41,6 +41,7 @@ type BatchRow = {
   status: BatchStatus;
   error?: string;
   report?: AnalysisReport;
+  idempotencyKey?: string;
 };
 
 type ResolvePayload = {
@@ -186,7 +187,8 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     for (const candidate of candidates) {
       if (cancelled.current) break;
       if (!candidate.company) continue;
-      updateRow(candidate.input, { status: "running", error: undefined });
+      const idempotencyKey = candidate.idempotencyKey ?? crypto.randomUUID();
+      updateRow(candidate.input, { status: "running", error: undefined, idempotencyKey });
       try {
         const response = await fetch("/api/analysis", {
           method: "POST",
@@ -195,6 +197,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
             company: candidate.company,
             analysisType,
             investmentProfile,
+            idempotencyKey: idempotencyKey,
           }),
         });
         const payload = (await response.json()) as AnalysisPayload;

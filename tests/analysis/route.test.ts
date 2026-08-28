@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   analyzeCompany: vi.fn(),
   captureServerEvent: vi.fn(),
   completeAnalysisReservation: vi.fn(),
+  getAnalysisReplay: vi.fn(),
   getCurrentUser: vi.fn(),
   logApplicationError: vi.fn(),
   persistAnalysis: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/data/provider", () => ({
 }));
 vi.mock("@/lib/db/repositories", () => ({
   completeAnalysisReservation: mocks.completeAnalysisReservation,
+  getAnalysisReplay: mocks.getAnalysisReplay,
   logApplicationError: mocks.logApplicationError,
   persistAnalysis: mocks.persistAnalysis,
   recordUsageEvent: mocks.recordUsageEvent,
@@ -43,7 +45,7 @@ vi.mock("@/lib/notifications/admin-alerts", () => ({
 
 import { POST } from "../../src/app/api/analysis/route";
 
-function analysisRequest(analysisType: AnalysisType = "summary") {
+function analysisRequest(analysisType: AnalysisType = "summary", idempotencyKey?: string) {
   return new Request("http://localhost/api/analysis", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,7 +61,8 @@ function analysisRequest(analysisType: AnalysisType = "summary") {
         }
       },
       analysisType,
-      investmentProfile: "balanced"
+      investmentProfile: "balanced",
+      ...(idempotencyKey ? { idempotencyKey } : {})
     })
   });
 }
@@ -187,6 +190,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
       role: "customer"
     });
     mocks.reserveAnalysisEntitlement.mockResolvedValue(allowedEntitlement());
+    mocks.getAnalysisReplay.mockResolvedValue({ status: "miss" });
     mocks.searchCompanies.mockImplementation(async (query: string) => {
       if (query === "BOX") {
         return [{
@@ -533,6 +537,58 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.analyzeCompany).not.toHaveBeenCalled();
   });
 
+  it("returns an existing idempotent analysis before quota or provider work", async () => {
+    const existing = { ...report("summary"), id: "existing-analysis-id" };
+    mocks.getAnalysisReplay.mockResolvedValue({ status: "replay", id: existing.id, report: existing });
+
+    const response = await POST(analysisRequest("summary", "11111111-1111-4111-8111-111111111111"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      persisted: true,
+      replayed: true,
+      data: { id: "existing-analysis-id" }
+    });
+    expect(mocks.searchCompanies).not.toHaveBeenCalled();
+    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
+    expect(mocks.analyzeCompany).not.toHaveBeenCalled();
+    expect(mocks.persistAnalysis).not.toHaveBeenCalled();
+    expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
+    expect(mocks.sendStrongBuyAlert).not.toHaveBeenCalled();
+  });
+
+  it("rejects reuse of an idempotency key for a different canonical request", async () => {
+    mocks.getAnalysisReplay.mockResolvedValue({ status: "conflict" });
+
+    const response = await POST(analysisRequest("summary", "11111111-1111-4111-8111-111111111111"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "This analysis retry key belongs to a different request." });
+    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
+    expect(mocks.analyzeCompany).not.toHaveBeenCalled();
+  });
+
+  it("releases a duplicate race reservation and returns the already persisted winner", async () => {
+    const existing = { ...report("summary"), id: "race-winner-analysis-id" };
+    mocks.persistAnalysis.mockResolvedValue({ ok: true, id: existing.id, report: existing, replayed: true });
+
+    const response = await POST(analysisRequest("summary", "22222222-2222-4222-8222-222222222222"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, persisted: true, replayed: true, data: { id: existing.id } });
+    expect(mocks.analyzeCompany).toHaveBeenCalledOnce();
+    expect(mocks.releaseAnalysisReservation).toHaveBeenCalledWith({
+      reservationId: "quota-reservation-1",
+      status: "released"
+    });
+    expect(mocks.completeAnalysisReservation).not.toHaveBeenCalled();
+    expect(mocks.recordUsageEvent).not.toHaveBeenCalledWith(expect.objectContaining({ event: "analysis_completed" }));
+    expect(mocks.sendStrongBuyAlert).not.toHaveBeenCalled();
+  });
+
   it("allows a signed-in user within quota and completes the reservation", async () => {
     const response = await POST(analysisRequest());
     const payload = await response.json();
@@ -554,6 +610,15 @@ describe("analysis API authentication and entitlement enforcement", () => {
       reservationId: "quota-reservation-1",
       analysisId: "persisted-analysis-id"
     });
+  });
+
+  it("binds an idempotency key to a stable canonical request fingerprint when persisting", async () => {
+    await POST(analysisRequest("summary", "33333333-3333-4333-8333-333333333333"));
+
+    expect(mocks.persistAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+      requestFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
+    }));
   });
 
   it("blocks a Free customer at quota before provider calls", async () => {

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -7,6 +7,12 @@ const hardeningMigration = readFileSync(
   "utf8",
 );
 const normalizedSql = hardeningMigration.replace(/\s+/g, " ").toLowerCase();
+const allMigrationSql = readdirSync(join(process.cwd(), "supabase/migrations"))
+  .filter((name) => name.endsWith(".sql"))
+  .map((name) => readFileSync(join(process.cwd(), "supabase/migrations", name), "utf8"))
+  .join("\n")
+  .replace(/\s+/g, " ")
+  .toLowerCase();
 
 describe("database hardening migrations", () => {
   it("revokes public rls_auto_enable execution without dropping auto-RLS triggers", () => {
@@ -18,6 +24,12 @@ describe("database hardening migrations", () => {
     expect(normalizedSql).not.toContain("drop event trigger");
     expect(normalizedSql).not.toContain("drop trigger");
     expect(normalizedSql).not.toContain("disable trigger");
+  });
+
+  it("enforces per-user analysis idempotency keys at the database layer", () => {
+    expect(allMigrationSql).toContain("idempotency_key");
+    expect(allMigrationSql).toContain("idempotency_fingerprint");
+    expect(allMigrationSql).toMatch(/unique[^;]*user_id[^;]*idempotency_key|unique \(user_id, idempotency_key\)/);
   });
 
   it("adds an index for analysis quota reservations by analysis id", () => {

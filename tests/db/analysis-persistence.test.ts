@@ -1,4 +1,4 @@
-﻿import type { AnalysisReport } from "../../src/lib/analysis/types";
+import type { AnalysisReport } from "../../src/lib/analysis/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -57,6 +57,22 @@ describe("analysis persistence", () => {
       recommendation: "No Rating",
       analysis_archetype: "bank",
       report_schema_version: "stockbox-analysis-report-v5",
+    }));
+  });
+
+  it("persists idempotency metadata with the analysis row", async () => {
+    const result = await persistAnalysis({
+      userId: "user-1",
+      report: report(62, "Hold", "standard"),
+      rawProviderWarnings: [],
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+      requestFingerprint: "a".repeat(64),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({
+      idempotency_key: "33333333-3333-4333-8333-333333333333",
+      idempotency_fingerprint: "a".repeat(64),
     }));
   });
 
