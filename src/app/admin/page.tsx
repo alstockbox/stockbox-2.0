@@ -1,4 +1,4 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import { AlertTriangle, CheckCircle2, Database, ShieldCheck } from "lucide-react";
 import { Card, Container, Section } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth/session";
@@ -7,6 +7,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { setAffiliateAmbassadorAction } from "./actions";
 
 export const metadata: Metadata = { title: "Admin" };
+
+type ProviderHealthRow = { provider: string; operation: string; ok: boolean; latency_ms: number | null; status_code: number | null; error_class: string | null; created_at: string };
+type ErrorLogRow = { id: number; service: string; sanitized_error: string; created_at: string };
+type RuntimeHealth = { provider: string; operation: string; calls: number; successes: number; latencyTotal: number; latencySamples: number; lastIssue: string | null };
 
 export default async function AdminPage() {
   const user = await requireAdmin();
@@ -22,6 +26,37 @@ export default async function AdminPage() {
     ? await supabase.from("profiles").select("id,email,role,created_at").order("created_at", { ascending: false }).limit(50)
     : { data: [] };
   const profiles = profileResult.data ?? [];
+  const [providerHealthResult, errorLogResult] = supabase ? await Promise.all([
+    supabase.from("provider_health")
+      .select("provider,operation,ok,latency_ms,status_code,error_class,created_at")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabase.from("error_logs")
+      .select("id,service,sanitized_error,created_at")
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]) : [{ data: [] }, { data: [] }];
+  const providerHealthRows = (providerHealthResult.data ?? []) as ProviderHealthRow[];
+  const recentErrors = (errorLogResult.data ?? []) as ErrorLogRow[];
+  const runtimeHealth = Array.from(providerHealthRows.reduce((map, row) => {
+    const key = `${row.provider}:${row.operation}`;
+    const current = map.get(key) ?? {
+      provider: row.provider, operation: row.operation, calls: 0, successes: 0,
+      latencyTotal: 0, latencySamples: 0, lastIssue: null,
+    };    current.calls += 1;
+    if (row.ok) current.successes += 1;
+    if (typeof row.latency_ms === "number") {
+      current.latencyTotal += row.latency_ms;
+      current.latencySamples += 1;
+    }
+    if (!row.ok && !current.lastIssue) {
+      current.lastIssue = row.error_class ?? (row.status_code ? `HTTP ${row.status_code}` : "Failure");
+    }
+    map.set(key, current);
+    return map;
+  }, new Map<string, RuntimeHealth>()).values()).sort((a, b) =>
+    a.provider.localeCompare(b.provider) || a.operation.localeCompare(b.operation),
+  );
 
   const env = getServerEnv();
   const protectedAdminEmails = new Set(adminEmails());
@@ -72,6 +107,58 @@ export default async function AdminPage() {
                 </span>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Runtime health</h2>
+              <p className="mt-1 text-sm text-[#9aa7b8]">Latest provider attempts recorded by the application.</p>
+            </div>
+          </div>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-[#9aa7b8]">
+                <tr><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Operation</th><th className="px-4 py-3 text-right">Calls</th><th className="px-4 py-3 text-right">Success rate</th><th className="px-4 py-3 text-right">Avg latency</th><th className="px-4 py-3">Latest issue</th></tr>
+              </thead>
+              <tbody className="divide-y divide-white/10 bg-[#0d1c2e]/70">
+                {runtimeHealth.length ? runtimeHealth.map((item) => {
+                  const successRate = item.calls ? Math.round((item.successes / item.calls) * 100) : 0;
+                  const averageLatency = item.latencySamples ? Math.round(item.latencyTotal / item.latencySamples) : null;
+                  return (
+                    <tr key={`${item.provider}:${item.operation}`}>
+                      <td className="px-4 py-3 font-semibold">{item.provider}</td>
+                      <td className="px-4 py-3 text-[#c9d2df]">{item.operation}</td>
+                      <td className="number px-4 py-3 text-right">{item.calls}</td>
+                      <td className={`number px-4 py-3 text-right ${successRate >= 95 ? "text-emerald-200" : successRate >= 80 ? "text-amber-200" : "text-red-200"}`}>{successRate}%</td>
+                      <td className="number px-4 py-3 text-right">{averageLatency === null ? "—" : `${averageLatency} ms`}</td>
+                      <td className="px-4 py-3 text-xs text-[#c9d2df]">{item.lastIssue ?? "—"}</td>
+                    </tr>
+                  );
+                }) : (
+                  <tr><td colSpan={6} className="px-4 py-5 text-sm text-[#9aa7b8]">No provider attempts have been recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Recent application errors</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">Only sanitized error messages are shown here. Raw request context is never rendered.</p>
+          <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+            {recentErrors.length ? recentErrors.map((item) => (
+              <div key={item.id} className="border-b border-white/10 bg-[#0d1c2e]/70 px-4 py-3 last:border-0">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-[#f4efe5]">{item.service}</p>
+                  <time className="text-xs text-[#7f8b9b]" dateTime={item.created_at}>{new Date(item.created_at).toLocaleString("en-SE")}</time>
+                </div>
+                <p className="mt-2 break-words text-sm leading-6 text-[#c9d2df]">{item.sanitized_error}</p>
+              </div>
+            )) : (
+              <p className="bg-[#0d1c2e]/70 px-4 py-4 text-sm text-[#9aa7b8]">No application errors are currently recorded.</p>
+            )}
           </div>
         </section>
 

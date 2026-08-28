@@ -2,12 +2,13 @@
 
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getServerEnv, isSupabaseConfigured } from "@/lib/env/server";
 import { checkDistributedRateLimit, rateLimitKeyFromHeaders, RATE_LIMITS } from "@/lib/security/rate-limit";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 
 const emailSchema = z.string().email();
@@ -105,7 +106,7 @@ export async function signUpAction(
   if (!supabase) return disabledState(copy);
 
   const env = getServerEnv();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: email.data,
     password: password.data,
     options: {
@@ -114,6 +115,26 @@ export async function signUpAction(
   });
 
   if (error) return { ok: false, message: copy.signUpError };
+
+  if (data?.user?.id) {
+    const cookieStore = await cookies();
+    const referralCode = cookieStore.get("stockbox_ref")?.value;
+    if (referralCode) {
+      try {
+        const admin = createAdminClient();
+        if (admin) {
+          await admin.rpc("attribute_affiliate_signup", {
+            p_code: referralCode,
+            p_referred_user_id: data.user.id,
+          });
+        }
+      } catch {
+        // Attribution must never block account creation.
+      } finally {
+        cookieStore.delete("stockbox_ref");
+      }
+    }
+  }
 
   return {
     ok: true,

@@ -7,6 +7,7 @@ import { Meter } from "@/components/ui/meter";
 import { ScoreChart } from "./score-chart";
 import { adminQaSections } from "./admin-qa";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
+import { ReportExportActions } from "./report-export-actions";
 import type { Locale } from "@/lib/i18n/types";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
@@ -95,7 +96,10 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
   const scoreAvailable = report.score.score !== null;
   const adminDiagnostics = adminQaSections(report.adminQa);
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-report-print>
+      <div className="flex justify-end print:hidden">
+        <ReportExportActions label={copy.exportPdf} hint={copy.exportPdfHint} />
+      </div>
       {report.dataStatus === "stale" ? (
         <Card className="border-red-300/30 bg-red-950/20 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-red-200">

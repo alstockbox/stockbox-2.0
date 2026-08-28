@@ -5,7 +5,7 @@ export const p0Copy = {
   en: {
     nav: {
       dashboard: "Dashboard", analyze: "Analyze", watchlist: "Watchlist", portfolio: "Portfolio",
-      batch: "Batch", profile: "Profile", billing: "Billing", admin: "Admin",
+      batch: "Batch", profile: "Profile", billing: "Billing", affiliate: "Affiliate", admin: "Admin",
       login: "Log in", signup: "Sign up", signOut: "Sign out", skipMain: "Skip to main content",
       accountUnavailable: "Account features are temporarily unavailable. Please try again shortly.",
     },
@@ -106,7 +106,7 @@ export const p0Copy = {
       setupTitle: "Live analysis provider setup required", setupDetail: "Batch analysis is unavailable until the financial provider is configured.",
       duplicateRemoved: "duplicate ticker removed automatically", duplicatesRemoved: "duplicate tickers removed automatically", invalid: "Invalid",
       rowsPerBatch: "rows per batch", successfulUsesOne: "Each successful report uses one monthly analysis. Failed attempts are released automatically.",
-      run: "Run", retry: "Retry", ticker: "Ticker", company: "Company", status: "Status", score: "Score", coverage: "Coverage", result: "Result",
+      run: "Run", retry: "Retry", rank: "Rank", ticker: "Ticker", company: "Company", status: "Status", score: "Score", coverage: "Coverage", result: "Result",
       exportQaCopy: "Export the full QA file when you want the analysis engine reviewed and calibrated.",
     },
     pricing: {
@@ -122,7 +122,7 @@ export const p0Copy = {
   sv: {
     nav: {
       dashboard: "Översikt", analyze: "Analysera", watchlist: "Bevakningslista", portfolio: "Portfölj",
-      batch: "Batch", profile: "Profil", billing: "Betalning", admin: "Admin",
+      batch: "Batch", profile: "Profil", billing: "Betalning", affiliate: "Affiliate", admin: "Admin",
       login: "Logga in", signup: "Skapa konto", signOut: "Logga ut", skipMain: "Hoppa till huvudinnehåll",
       accountUnavailable: "Kontofunktioner är tillfälligt otillgängliga. Försök igen om en stund.",
     },
@@ -223,7 +223,7 @@ export const p0Copy = {
       setupTitle: "Liveleverant\u00f6r f\u00f6r analys m\u00e5ste konfigureras", setupDetail: "Batchanalys \u00e4r otillg\u00e4nglig tills den finansiella leverant\u00f6ren \u00e4r konfigurerad.",
       duplicateRemoved: "dubblett-ticker togs bort automatiskt", duplicatesRemoved: "dubblett-tickers togs bort automatiskt", invalid: "Ogiltiga",
       rowsPerBatch: "rader per batch", successfulUsesOne: "Varje lyckad rapport anv\u00e4nder en m\u00e5natlig analys. Misslyckade f\u00f6rs\u00f6k frisl\u00e4pps automatiskt.",
-      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", coverage: "T\u00e4ckning", result: "Resultat",
+      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", rank: "Placering", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", coverage: "T\u00e4ckning", result: "Resultat",
       exportQaCopy: "Exportera hela QA-filen n\u00e4r du vill granska och kalibrera analysmotorn.",
     },
     pricing: {

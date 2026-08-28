@@ -3,6 +3,7 @@ import type { Locale } from "./types";
 export const reportCopy = {
   en: {
     unavailable: "Unavailable", noRating: "No Rating", insufficientData: "Insufficient data",
+    exportPdf: "Print / Save PDF", exportPdfHint: "Use the print dialog to save a clean PDF copy.",
     noFlags: "No deterministic flags detected from available data.",
     staleTitle: "Stale financial data - No Rating",
     staleCopy: "Latest reliable financial statements are too old for a current analysis.",
@@ -37,6 +38,7 @@ export const reportCopy = {
   },
   sv: {
     unavailable: "Ej tillgängligt", noRating: "Ingen rating", insufficientData: "Otillräcklig data",
+    exportPdf: "Skriv ut / Spara PDF", exportPdfHint: "Använd utskriftsdialogen för att spara en ren PDF-kopia.",
     noFlags: "Inga deterministiska flaggor identifierades från tillgänglig data.",
     staleTitle: "För gammal finansiell data - Ingen rating",
     staleCopy: "De senaste tillförlitliga finansiella rapporterna är för gamla för en aktuell analys.",

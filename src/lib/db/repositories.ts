@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getPlan, type PlanKey } from "@/lib/billing/plans";
 import { hasPaidAccessStatus } from "@/lib/billing/subscriptions";
 import { MODEL_VERSION } from "@/lib/analysis/config";
+import { sanitizeDiagnosticContext, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 
 export type EntitlementPlanKey = PlanKey | "affiliate_ambassador";
 
@@ -255,8 +256,8 @@ export async function logApplicationError(input: {
   await supabase.from("error_logs").insert({
     user_id: input.userId ?? null,
     service: input.service,
-    sanitized_error: input.message,
-    context: input.context ?? {}
+    sanitized_error: sanitizeDiagnosticMessage(input.message, "Application error"),
+    context: sanitizeDiagnosticContext(input.context ?? {})
   });
 }
 

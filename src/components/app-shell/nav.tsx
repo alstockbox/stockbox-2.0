@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Bell, BriefcaseBusiness, CreditCard, Gauge, LayoutDashboard, ShieldCheck, UserRoundCog } from "lucide-react";
+import { BarChart3, Bell, BriefcaseBusiness, CreditCard, Gauge, Handshake, LayoutDashboard, ShieldCheck, UserRoundCog } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
@@ -49,6 +49,15 @@ export async function AppNav() {
             >
               <CreditCard className="h-4 w-4" aria-hidden="true" />
               {copy.billing}
+            </Link>
+          ) : null}
+          {user?.role === "affiliate_ambassador" ? (
+            <Link
+              href="/affiliate"
+              className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm text-[#e1cb95] hover:bg-white/8"
+            >
+              <Handshake className="h-4 w-4" aria-hidden="true" />
+              {copy.affiliate}
             </Link>
           ) : null}
           {user?.role === "admin" ? (

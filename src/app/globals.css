@@ -76,3 +76,29 @@ textarea:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  [data-report-print] {
+    color: #111827 !important;
+  }
+
+  [data-report-print] * {
+    color: #111827 !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+
+  [data-report-print] > * {
+    break-inside: avoid;
+  }
+}

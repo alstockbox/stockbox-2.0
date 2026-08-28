@@ -21,6 +21,7 @@ import type {
   InvestmentProfile,
 } from "@/lib/analysis/types";
 import { MAX_BATCH_ROWS, parseBatchInput } from "@/lib/batch/input";
+import { rankBatchResults } from "@/lib/batch/ranking";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import type { Locale } from "@/lib/i18n/types";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,12 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const processedCount = rows.filter((row) => terminalStatuses.has(row.status)).length;
   const progress = rows.length ? Math.round((processedCount / rows.length) * 100) : 0;
   const readyCount = rows.filter((row) => row.status === "ready").length;
+  const rankByInput = useMemo(() => rankBatchResults(rows.map((row) => ({
+    key: row.input,
+    score: row.report?.score.score ?? null,
+    confidence: row.report?.score.confidence ?? null,
+    coverage: row.report?.dataCoverage ?? null,
+  }))), [rows]);
 
   function updateRow(symbol: string, patch: Partial<BatchRow>) {
     setRows((current) =>
@@ -240,6 +247,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
 
   function exportCsv() {
     const header = [
+      "Rank",
       "Ticker",
       "Company",
       "Status",
@@ -251,6 +259,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
       "Error",
     ];
     const data = rows.map((row) => [
+      rankByInput[row.input] ?? "",
       row.company?.canonicalTicker ?? row.company?.ticker ?? row.input,
       row.company?.name ?? "",
       statusLabel(row.status, copy),
@@ -470,6 +479,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-[#9aa7b8]">
                 <tr>
+                  <th className="px-5 py-3 text-right font-semibold">{copy.rank}</th>
                   <th className="px-5 py-3 font-semibold">{copy.ticker}</th>
                   <th className="px-5 py-3 font-semibold">{copy.company}</th>
                   <th className="px-5 py-3 font-semibold">{copy.status}</th>
@@ -481,6 +491,9 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
               <tbody className="divide-y divide-white/8">
                 {rows.map((row) => (
                   <tr key={row.input} className="text-[#c9d2df]">
+                    <td className="number px-5 py-4 text-right font-semibold text-[#e1cb95]">
+                      {rankByInput[row.input] ?? "—"}
+                    </td>
                     <td className="px-5 py-4 font-mono font-semibold text-[#f4efe5]">
                       {row.company?.canonicalTicker ?? row.company?.ticker ?? row.input}
                     </td>
