@@ -20,9 +20,12 @@ export async function GET(request: NextRequest) {
     const { error } = (await supabase?.auth.exchangeCodeForSession(code)) ?? { error: new Error("Auth is not configured.") };
     if (!error) return NextResponse.redirect(new URL(next, request.url));
 
-    // Supabase may already have verified the email before redirecting here.
-    // If the link was opened on another device, the PKCE verifier cookie is absent,
-    // so a session cannot be exchanged even though the account is confirmed.
+    // Supabase may already have consumed a PKCE verification link before redirecting here.
+    // Recovery links opened on another device cannot exchange a session without the verifier cookie,
+    // so send the user back through recovery instead of showing the signup-confirmed state.
+    if (next === "/auth/reset") {
+      return NextResponse.redirect(new URL("/auth/forgot?retry=1", request.url));
+    }
     return NextResponse.redirect(new URL("/auth/login?confirmed=1", request.url));
   }
 

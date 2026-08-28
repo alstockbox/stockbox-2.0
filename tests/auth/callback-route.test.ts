@@ -23,6 +23,13 @@ describe("auth callback", () => {
     expect(response.headers.get("location")).toBe("https://www.getstockbox.app/auth/login?confirmed=1");
   });
 
+  it("sends cross-device recovery PKCE failures back to password recovery", async () => {
+    mocks.exchangeCodeForSession.mockResolvedValue({ error: new Error("PKCE code verifier not found") });
+    const response = await GET(new NextRequest("https://www.getstockbox.app/auth/callback?code=recovery-code&next=/auth/reset"));
+
+    expect(response.headers.get("location")).toBe("https://www.getstockbox.app/auth/forgot?retry=1");
+  });
+
   it("verifies a token-hash signup link server-side and redirects to onboarding", async () => {
     mocks.verifyOtp.mockResolvedValue({ error: null });
     const response = await GET(new NextRequest("https://www.getstockbox.app/auth/callback?token_hash=signup-hash&type=email&next=/onboarding"));
