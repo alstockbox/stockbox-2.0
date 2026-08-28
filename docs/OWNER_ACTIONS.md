@@ -1,13 +1,32 @@
-# StockBox 2.0 Owner Actions
+# StockBox 2.0 - Release Status / Owner Actions
 
-Required before public launch. These are external actions that cannot be truthfully completed from the local repository alone.
+Verified against production on 28 August 2026. Verified application code: `9484afe` (`Harden global market data fallback`).
 
-1. **Supabase production:** create/select the production project; set URL, anon key and service-role key; apply **all migrations through `20260827180007_distributed_rate_limits.sql` in order**; configure Auth site/redirect URLs and email delivery; verify migration success, RLS isolation (user A cannot access user B), service-role-only RPCs, workspace limits, batch-QA persistence, Stripe ordering RPCs and distributed rate limiting against the real database.
-2. **Stripe:** reconnect authenticated Stripe access; create/confirm the approved Basic recurring price at 79 SEK/month and the approved first-three-month 49 SEK launch offer; configure the least-privilege restricted server key, price/coupon IDs and `/api/stripe/webhook` signing secret; verify checkout, portal, duplicate/stale webhook ordering, payment failure/recovery, cancellation and resubscribe in test mode before live activation.
-3. **Financial providers:** set a compliant `SEC_USER_AGENT` product/contact value. Confirm the production provider policy and licensed market coverage. The market-data chain now uses only the explicitly configured primary/fallback providers, so set `MARKET_DATA_PROVIDER=twelve_data`, `TWELVE_DATA_API_KEY`, and `MARKET_DATA_FALLBACK_PROVIDERS=stooq` (or another owner-approved explicit chain). Do not enable estimates/news/transcripts or other promised coverage until a licensed, tested provider is actually configured.
-4. **Vercel/domain:** create/import the Vercel project, add production/preview environment variables, connect `getstockbox.app` and DNS, deploy a release candidate, and perform the HTTPS smoke test. Verify the Supabase-backed distributed limiter works across deployed instances; add/validate Vercel WAF/edge limits as defense in depth.
-5. **Legal/commercial facts:** supply/approve legal entity name, required address, support contact, privacy contact, governing law, VAT/refund policy, retention/deletion policy, Terms, Privacy and the final financial disclaimer. These facts must not be invented in code or documentation.
-6. **Operations:** configure `ADMIN_EMAILS`; optionally configure PostHog and Resend plus `ADMIN_ALERT_EMAIL`/`FROM_EMAIL`. Verify analytics contains no secrets, report bodies or unnecessary personal data and verify Strong Buy delivery/dedup if email is enabled.
-7. **Final human QA:** automated accessibility regressions are present locally, but production still requires manual mobile/tablet/desktop QA for responsive layout, keyboard navigation, focus states, contrast, browser console, auth recovery, canonical company selection, watchlist/portfolio persistence, billing, admin denial for customers and production RLS isolation.
+## Verified complete
 
-Current external blockers: production credentials/authorization are not present in the local workspace; Supabase CLI/Docker are not installed on the development machine, so the full migration chain has not been runtime-applied to an isolated local PostgreSQL instance; legal owner facts and live Stripe/Vercel/Supabase setup still require owner action.
+1. **Code gates:** 77/77 test files and 753/753 tests pass; typecheck, lint and production build exit 0; production and full npm audits report 0 vulnerabilities.
+2. **Vercel:** production deployment for `9484afe` is READY. `stockbox-2-0.vercel.app` serves the current app. Runtime smoke window has no warning/error/fatal logs.
+3. **Market data:** production primary is Yahoo Finance chart data with Stooq fallback. Provider health resolves `yahoo-chart`, reports global market-data capability and keeps Stooq configured as fallback. Swedish/global search smoke passed.
+4. **SEC/fundamentals:** SEC contact is explicitly configured. Missing/unsupported fundamentals remain visible as missing rather than fabricated.
+5. **Supabase:** all 12 repository migrations are applied through `20260827180007_distributed_rate_limits.sql` in order. Production project is healthy.
+6. **Database security:** RLS is enabled on all public tables. Runtime authenticated isolation verified that a real user cannot read another user's profiles, analyses or subscriptions.
+7. **Privileged RPCs:** entitlement, billing-ordering, workspace and rate-limit SECURITY DEFINER functions are not executable by `anon`/`authenticated`; intended public RPCs are service-role only.
+8. **Rate limiting:** production distributed limiter passed an atomic allow/allow/deny test with rollback.
+9. **Batch QA:** production batch-QA insert/update/read persistence passed under service role with rollback.
+10. **Stripe:** live Basic v2 price is 79 SEK/month. Launch coupon reduces it by 30 SEK for exactly 3 months, producing 49 SEK/month for the first 3 months. Vercel points to the correct v2 price/coupon IDs.
+11. **Stripe webhook:** the Vercel subscription webhook is enabled for subscription created/updated/deleted. Invalid-signature probes return HTTP 400 without DB mutation. Duplicate, stale-event and stale-subscription ordering passed against production with rollback.
+12. **Legacy billing webhook:** the old `getstockbox.app/api/v1/billing/webhook` Stripe endpoint has been disabled (not deleted), removing duplicate-processing risk.
+
+## Remaining before public launch
+
+1. **DNS cutover at STRATO:** Vercel's project-specific inspection requires `A getstockbox.app 76.76.21.21` and `A www.getstockbox.app 76.76.21.21`. Current DNS still points to the legacy Coming Soon host (`216.24.57.1`). Change DNS only when ready to expose the app publicly, then re-run HTTPS/domain smoke.
+2. **Legal/commercial approval:** Privacy and Terms are still explicit drafts. Owner/legal input is required for controller/company identity, contact details, lawful bases, retention, international transfers, VAT/refund/trial treatment, governing law and final disclaimer. Do not publish the current draft notices as final legal terms.
+3. **Supabase Auth:** security advisor reports Leaked Password Protection disabled. If the project plan supports it, enable **Authentication > Email/password settings > Prevent the use of leaked passwords**, then re-run the security advisor. Also review minimum password requirements before launch.
+4. **Final human QA:** manually test mobile/tablet/desktop layout, keyboard/focus/contrast, browser console, signup/login/reset/recovery, canonical security selection, saved analyses/watchlist/portfolio persistence, Basic checkout + billing portal, customer denial from admin routes, and a real cancellation/resubscribe lifecycle.
+5. **DNS-dependent auth:** after DNS cutover, verify Supabase Auth Site URL/redirect allow-list and all email links use the final production domain rather than a temporary Vercel URL.
+
+## Non-blocking observations
+
+- Supabase performance advisor reports INFO-only unindexed foreign keys and currently-unused indexes. These should be reviewed after release using real workload/query data rather than changed immediately before launch.
+- Service-only tables with RLS enabled and no policies are intentionally deny-by-default; this is not the same as missing RLS protection.
+- Twelve Data remains optional. Production no longer depends on a missing Twelve Data API key because Yahoo is the active global market provider and Stooq is the configured fallback.
