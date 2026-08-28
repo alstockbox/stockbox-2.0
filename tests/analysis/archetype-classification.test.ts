@@ -54,6 +54,7 @@ describe("global operating-sector classification", () => {
     ["Information Technology Services Technology", "technology", "standard"],
     ["Scientific & Technical Instruments Technology", "technology", "standard"],
     ["Specialty Business Services Industrials", "industrials", "standard"],
+    ["Tools & Accessories Industrials", "industrials", "standard"],
   ] as const)("routes %s without generic services/retail leakage", (sicDescription, sector, archetype) => {
     expect(classifyCompany({ sicDescription, name: "Global Operating Company" })).toEqual(expect.objectContaining({
       sector,

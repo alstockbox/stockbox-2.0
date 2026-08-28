@@ -1,7 +1,7 @@
 import type { InvestmentProfile, ScoreDimensionKey, Sector } from "./types";
 import { normalizeWeights } from "./math";
 
-export const MODEL_VERSION = "stockbox-analysis-engine-v2.5.0";
+export const MODEL_VERSION = "stockbox-analysis-engine-v2.6.0";
 export const REPORT_SCHEMA_VERSION = "stockbox-analysis-report-v5";
 export const SCORE_POLICY_VERSION = "stockbox-score-policy-v7";
 export const STATIC_BENCHMARK_VERSION = "stockbox-static-benchmarks-v1";

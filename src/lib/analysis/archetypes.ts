@@ -157,7 +157,7 @@ export function classifyCompany(input: {
   if (/financial services|finance compan|broker/.test(text)) {
     return classified("financials", "unknown", "Financial-services wording is not specific enough to select a bank, insurer, asset-manager, or holding-company model.", "description", 0.35);
   }
-  if (/security\s*(?:&|and)\s*protection services|specialty business services|manufactur|industrial machinery|aerospace|defense|construction|electrical equipment|conglomerates?/.test(text)) {
+  if (/security\s*(?:&|and)\s*protection services|specialty business services|tools?\s*(?:&|and)\s*accessories|manufactur|industrial machinery|aerospace|defense|construction|electrical equipment|conglomerates?/.test(text)) {
     return classified("industrials", "standard", "Industry description identifies a conventional industrial or business-services operating company.", "description", 0.76);
   }
 

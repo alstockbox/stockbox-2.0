@@ -18,7 +18,7 @@ describe("analyzeFinancials", () => {
   it("builds a complete deterministic analysis result", () => {
     const result = analyzeFinancials(durableCompounderInput);
 
-    expect(result.modelVersion).toBe("stockbox-analysis-engine-v2.5.0");
+    expect(result.modelVersion).toBe("stockbox-analysis-engine-v2.6.0");
     expect(result.reportSchemaVersion).toBe("stockbox-analysis-report-v5");
     expect(result.scores.stockBoxScore).toBeGreaterThan(70);
     expect(result.scores.methodology.personalizedWeights).not.toEqual(result.scores.methodology.sectorWeights);
@@ -107,6 +107,24 @@ describe("analyzeFinancials", () => {
         severity: "high",
       }),
     ]));
+  });
+
+  it("keeps fundamental freshness current when scoring is blocked by currency integrity", () => {
+    const datedInput = datedDurableInput();
+    const result = analyzeFinancials({
+      ...datedInput,
+      annualPeriods: datedInput.annualPeriods.map((period, index) => ({
+        ...period,
+        currency: index === datedInput.annualPeriods.length - 1 ? "EUR" : "USD",
+      })),
+    });
+
+    expect(result.dataStatus).toBe("unavailable");
+    expect(result.reconciliation.find((check) => check.code === "financial_currency_consistency")?.status).toBe("warning");
+    expect(result.reconciliation.find((check) => check.code === "fundamental_data_freshness")).toEqual(expect.objectContaining({
+      status: "pass",
+      message: "Financial statements are within the current-analysis freshness threshold.",
+    }));
   });
 
   it("does not score fundamentals across mixed reporting currencies", () => {

@@ -415,15 +415,23 @@ export function scoreSearchMatch(company: CompanySearchResult, query: string): S
   return match;
 }
 
+function isUsListing(company: CompanySearchResult): boolean {
+  const country = normalizedIdentifier(company.country);
+  const exchange = normalizedText(company.exchange ?? "");
+  return country === "us" || /^(?:us|nasdaq|nyse|nyse arca|amex|nasdaqgs|nasdaqgm|nasdaqcm)$/.test(exchange);
+}
+
 function canonicalListingMergeKey(company: CompanySearchResult): string | null {
   const ticker = (company.canonicalTicker ?? company.ticker).trim().toUpperCase();
-  if (!hasExchangeQualifiedTicker(ticker)) return null;
-  return `${ticker}:${inferSecurityType(company)}`;
+  if (hasExchangeQualifiedTicker(ticker)) return `${ticker}:${inferSecurityType(company)}`;
+  if (isUsListing(company)) return `US:${ticker}:${inferSecurityType(company)}`;
+  return null;
 }
 
 function listingRepresentationsCompatible(current: CompanySearchResult, candidate: CompanySearchResult): boolean {
   if (canonicalListingMergeKey(current) !== canonicalListingMergeKey(candidate)) return false;
   const conflicts = [[current.securityId, candidate.securityId], [current.isin, candidate.isin], [current.figi, candidate.figi]];
+  if (current.cik && candidate.cik && normalizedCik(current.cik) !== normalizedCik(candidate.cik)) return false;
   if (conflicts.some(([l, r]) => l && r && normalizedIdentifier(l) !== normalizedIdentifier(r))) return false;
   if (current.country && candidate.country && normalizedIdentifier(current.country) !== normalizedIdentifier(candidate.country)) return false;
   if (current.mic && candidate.mic && normalizedIdentifier(current.mic) !== normalizedIdentifier(candidate.mic)) return false;

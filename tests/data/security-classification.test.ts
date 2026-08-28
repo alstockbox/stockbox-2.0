@@ -44,6 +44,12 @@ describe("preferred-security text inference", () => {
     expect(inferSecurityType(company({ ticker: "VALE3.SA", canonicalTicker: "VALE3.SA", name: "Vale S.A.", securityType: "Common Stock" }))).toBe("Common Stock");
   });
 
+  it("treats Roche participation certificates as a non-common security", () => {
+    expect(inferSecurityType(company({
+      ticker: "ROP.SW", canonicalTicker: "ROP.SW", name: "Roche Holding AG", securityType: "Common Stock",
+    }))).toBe("Other");
+  });
+
   it.each(["FEMSAUBD.MX", "FEMSAUB.MX", "CEMEXCPO.MX"])("treats Mexican composite units/certificates as non-common securities: %s", (ticker) => {
     expect(inferSecurityType(company({ ticker, canonicalTicker: ticker, name: "Mexican listed issuer", securityType: "Common Stock" }))).toBe("Other");
   });

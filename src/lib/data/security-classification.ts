@@ -8,6 +8,9 @@ const BRAZIL_PREFERRED_TICKER_PATTERN = /(?:^|\s)[A-Z]{4,6}[456]\.SA(?=\s|$)/i;
 const GERMANY_CLASS3_PREFERRED_TICKER_PATTERN = /(?:^|\s)[A-Z]{2,5}3\.DE(?=\s|$)/i;
 const BRAZIL_COMPLEX_UNIT_PATTERN = /(?:^|\s)[A-Z]{4,6}11\.SA(?=\s|$)/i;
 const MEXICO_COMPLEX_SECURITY_PATTERN = /(?:^|\s)[A-Z0-9.-]*(?:UBD|UB|CPO)\.MX(?=\s|$)/i;
+const KNOWN_SECURITY_TYPE_OVERRIDES = new Map<string, NonNullable<CompanySearchResult["securityType"]>>([
+  ["ROP.SW", "Other"], // Roche participation certificate (SIX), not a bearer/common share.
+]);
 
 function textForSecurity(company: CompanySearchResult): string {
   return [
@@ -19,6 +22,12 @@ function textForSecurity(company: CompanySearchResult): string {
 }
 
 function inferredTypeFromText(company: CompanySearchResult): CompanySearchResult["securityType"] | null {
+  const tickerOverride = [company.canonicalTicker, company.ticker]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.trim().toUpperCase())
+    .map((value) => KNOWN_SECURITY_TYPE_OVERRIDES.get(value))
+    .find((value): value is NonNullable<CompanySearchResult["securityType"]> => Boolean(value));
+  if (tickerOverride) return tickerOverride;
   const text = textForSecurity(company);
   if (ADR_PATTERN.test(text)) return "ADR";
   if (ETF_FUND_PATTERN.test(text)) return "ETF/Fund";

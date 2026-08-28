@@ -385,7 +385,9 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
   }
   reconciliation.push({
     code: "fundamental_data_freshness",
-    status: unusableFinancialData ? "warning" : freshness.dataStatus === "current" ? "pass" : "unavailable",
+    status: futureFinancialData || freshness.dataStatus === "stale"
+      ? "warning"
+      : freshness.dataStatus === "current" ? "pass" : "unavailable",
     message: futureFinancialData
       ? "Latest reliable financial statements are future-dated relative to the analysis date."
       : freshness.dataStatus === "stale"

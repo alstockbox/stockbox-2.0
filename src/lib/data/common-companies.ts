@@ -27,7 +27,7 @@ const curatedCompanies: CompanySearchResult[] = [
   { ticker: "7203.T", name: "Toyota Motor Corporation", exchange: "Tokyo Stock Exchange", country: "JP", currency: "JPY", entityId: "economic-company:toyota", searchAliases: ["Toyota"] },
   { ticker: "ASML", name: "ASML Holding N.V. ADR", exchange: "NASDAQ", country: "US", currency: "USD", entityId: "economic-company:asml", securityType: "ADR", searchAliases: ["ASML"] },
   { ticker: "ASML.AS", name: "ASML Holding N.V.", exchange: "Euronext Amsterdam", country: "NL", currency: "EUR", entityId: "economic-company:asml", searchAliases: ["ASML"] },
-  { ticker: "ROG.SW", name: "Roche Holding AG", exchange: "SIX Swiss Exchange", country: "CH", currency: "CHF", entityId: "economic-company:roche", searchAliases: ["Roche"] },
+  { ticker: "RO.SW", name: "Roche Holding AG Bearer Share", exchange: "SIX Swiss Exchange", country: "CH", currency: "CHF", entityId: "economic-company:roche", searchAliases: ["Roche"] },
   { ticker: "NESN.SW", name: "Nestle S.A.", exchange: "SIX Swiss Exchange", country: "CH", currency: "CHF", entityId: "economic-company:nestle", searchAliases: ["Nestle"] },
   { ticker: "NOK", name: "Nokia Oyj ADR", exchange: "NYSE", country: "US", currency: "USD", entityId: "economic-company:nokia", securityType: "ADR", searchAliases: ["Nokia"] },
   { ticker: "NOKIA.HE", name: "Nokia Oyj", exchange: "Nasdaq Helsinki", country: "FI", currency: "EUR", entityId: "economic-company:nokia", searchAliases: ["Nokia"] },

@@ -81,7 +81,7 @@ describe("company search catalog", () => {
     ["ERIC-B.ST", "ERIC-B.ST"],
     ["Novo Nordisk", "NOVO-B.CO"],
     ["7203.T", "7203.T"],
-    ["ROG.SW", "ROG.SW"],
+    ["RO.SW", "RO.SW"],
     ["NESN.SW", "NESN.SW"],
     ["NOKIA.HE", "NOKIA.HE"],
   ])("ranks %s with canonical ticker %s first", async (query, ticker) => {
@@ -89,11 +89,49 @@ describe("company search catalog", () => {
     expect(results[0]?.canonicalTicker).toBe(ticker);
   });
 
+  it("merges duplicate bare US ticker representations when one provider supplies stable SEC identity", async () => {
+    mocks.fetchSecTickerUniverse.mockResolvedValue([
+      { ticker: "WMT", name: "Walmart Inc.", cik: "0000104169", exchange: "NYSE", country: "US" },
+    ]);
+    const yahooLikeProvider: CompanySearchProvider = {
+      id: "yahoo-like",
+      capabilities: {
+        supportedCountries: ["global"], supportedExchanges: ["global"],
+        supportsFundamentals: true, supportsMarketData: true, supportsEstimates: false,
+      },
+      search: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [{
+          ticker: "WMT", canonicalTicker: "WMT", name: "Walmart Inc.", exchange: "NASDAQ",
+          providerCapabilities: { fundamentals: true, marketData: true, providerIds: ["yahoo-search"] },
+        }],
+        diagnostic: providerDiagnostic("yahoo-like", "search", "available"),
+      }),
+    };
+
+    const results = await searchCompanyCatalog("WMT", [yahooLikeProvider]);
+    const exactWmt = results.filter((company) => company.canonicalTicker === "WMT" && company.matchType?.startsWith("exact_"));
+
+    expect(exactWmt).toHaveLength(1);
+    expect(exactWmt[0]).toEqual(expect.objectContaining({
+      cik: "0000104169",
+      entityId: "sec:0000104169",
+      providerCapabilities: expect.objectContaining({
+        providerIds: expect.arrayContaining(["sec-ticker-universe", "yahoo-search"]),
+      }),
+    }));
+  });
+
   it.each(["ABB", "Novo Nordisk", "Toyota", "ASML", "Nokia"])("keeps ADR and local listings distinct for %s", async (query) => {
     const results = await searchCompanyCatalog(query);
     const identities = new Map<string, string[]>();
     for (const company of results) identities.set(company.entityId ?? "", [...(identities.get(company.entityId ?? "") ?? []), company.ticker]);
     expect([...identities.values()].some((tickers) => tickers.length >= 2)).toBe(true);
+  });
+
+  it("does not expose Roche's retired ROG.SW security as an exact current listing", async () => {
+    const results = await searchCompanyCatalog("ROG.SW");
+    expect(results.some((company) => company.canonicalTicker === "ROG.SW" && company.matchType?.startsWith("exact_"))).toBe(false);
   });
 
   it("returns ambiguous MICRO candidates without selecting one", async () => {
