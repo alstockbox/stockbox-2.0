@@ -116,6 +116,7 @@ export function getMarketDataProviderChain(env = getServerEnv()) {
   const ordered: Array<"twelve_data" | "stooq" | "yahoo"> = [
     env.MARKET_DATA_PROVIDER,
     ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? []),
+    "yahoo",
   ];
   return [...new Set(ordered)];
 }
