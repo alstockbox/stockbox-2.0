@@ -13,6 +13,7 @@ describe("consumer withdrawal flow", () => {
     const migration = source("supabase/migrations/20260828190000_withdrawal_requests.sql");
     expect(migration).toContain("create table if not exists public.withdrawal_requests");
     expect(migration).toContain("withdrawal_requests_select_own");
+    expect(migration).toContain("revoke all on public.withdrawal_requests from anon");
     expect(migration).toContain("revoke insert, update, delete");
     expect(migration).toContain("grant select on public.withdrawal_requests to authenticated");
   });

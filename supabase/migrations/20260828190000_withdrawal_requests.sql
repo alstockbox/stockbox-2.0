@@ -23,7 +23,8 @@ create policy "withdrawal_requests_select_own"
   for select to authenticated
   using ((select auth.uid()) = user_id);
 
-revoke insert, update, delete on public.withdrawal_requests from anon, authenticated;
+revoke all on public.withdrawal_requests from anon;
+revoke insert, update, delete on public.withdrawal_requests from authenticated;
 
 grant select on public.withdrawal_requests to authenticated;
 
