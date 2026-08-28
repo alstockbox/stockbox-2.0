@@ -7,6 +7,7 @@ import {
   SEC_CONCEPTS,
   type SecCompanyFacts,
 } from "../../src/lib/data/sec-resolver";
+import { resolveSecFinancialPeriods } from "../../src/lib/data/sec";
 
 function facts(input: SecCompanyFacts["facts"]): SecCompanyFacts {
   return { cik: 1, entityName: "Fixture Corp", facts: input };
@@ -105,6 +106,60 @@ describe("SEC XBRL fact resolver", () => {
     const value = resolveAnnualFacts(fixture, SEC_CONCEPTS.revenue).get("2023-12-31");
     expect(value?.taxonomy).toBe("ifrs-full");
     expect(value?.val).toBe(90);
+  });
+
+  it("does not mislabel noncurrent debt and lease obligations as total debt", () => {
+    const fixture = facts({ "us-gaap": {
+      Revenues: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 100 }] } },
+      LongTermDebtAndCapitalLeaseObligations: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 13 }] } },
+      LongTermDebtAndCapitalLeaseObligationsCurrent: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 11 }] } },
+    } });
+    expect(resolveSecFinancialPeriods(fixture).annualPeriods[0]?.totalDebt).toBeNull();
+  });
+
+  it("derives total debt from a non-overlapping SEC debt stack", () => {
+    const fixture = facts({ "us-gaap": {
+      Revenues: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 100 }] } },
+      LongTermDebtNoncurrent: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 71 }] } },
+      LongTermDebtCurrent: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 11 }] } },
+      CommercialPaper: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 2 }] } },
+    } });
+    const period = resolveSecFinancialPeriods(fixture).annualPeriods[0];
+    expect(period?.totalDebt).toBe(84);
+    expect(period?.provenance?.totalDebt).toEqual(expect.objectContaining({ valueKind: "derived" }));
+  });
+
+  it("uses an explicit combined short and long debt SEC fact as total debt", () => {
+    const fixture = facts({ "us-gaap": {
+      Revenues: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 100 }] } },
+      DebtLongtermAndShorttermCombinedAmount: { units: { USD: [{ end: "2025-12-31", form: "10-K", filed: "2026-02-01", val: 59 }] } },
+    } });
+    expect(resolveSecFinancialPeriods(fixture).annualPeriods[0]?.totalDebt).toBe(59);
+  });
+
+  it("does not synthesize gross profit from an incomplete SEC cost-of-revenue concept", () => {
+    const fixture = facts({ "us-gaap": {
+      Revenues: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 100 }] } },
+      CostOfRevenue: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 20 }] } },
+    } });
+    const period = resolveSecFinancialPeriods(fixture).annualPeriods[0];
+    expect(period?.revenue).toBe(100);
+    expect(period?.costOfRevenue).toBe(20);
+    expect(period?.grossProfit).toBeNull();
+    expect(period?.provenance?.grossProfit).toBeUndefined();
+  });
+
+  it("marks SEC EBITDA derived from operating income plus D&A with derived provenance", () => {
+    const fixture = facts({ "us-gaap": {
+      RevenueFromContractWithCustomerExcludingAssessedTax: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 100 }] } },
+      OperatingIncomeLoss: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 20 }] } },
+      DepreciationDepletionAndAmortization: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", form: "10-K", filed: "2026-02-01", fy: 2025, val: 5 }] } },
+    } });
+    const period = resolveSecFinancialPeriods(fixture).annualPeriods[0];
+    expect(period?.ebitda).toBe(25);
+    expect(period?.provenance?.ebitda).toEqual(expect.objectContaining({
+      provider: "sec", valueKind: "derived", inputs: ["operatingIncome", "depreciationAndAmortization"],
+    }));
   });
 
   it("constructs TTM as latest FY plus current matched period minus prior matched period", () => {

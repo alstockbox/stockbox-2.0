@@ -213,7 +213,7 @@ export const SEC_CONCEPTS = {
   restrictedCash: { kind: "instant", units: ["USD"], aliases: [us("RestrictedCashAndCashEquivalentsCurrent"), us("RestrictedCashAndCashEquivalentsNoncurrent")] },
   currentAssets: { kind: "instant", units: ["USD"], aliases: [us("AssetsCurrent"), ifrs("CurrentAssets")] },
   currentLiabilities: { kind: "instant", units: ["USD"], aliases: [us("LiabilitiesCurrent"), ifrs("CurrentLiabilities")] },
-  totalDebt: { kind: "instant", units: ["USD"], aliases: [us("LongTermDebtAndFinanceLeaseObligations"), us("LongTermDebtAndCapitalLeaseObligations")] },
+  totalDebt: { kind: "instant", units: ["USD"], aliases: [us("DebtAndCapitalLeaseObligations"), us("DebtLongtermAndShorttermCombinedAmount")] },
   shortTermDebt: { kind: "instant", units: ["USD"], aliases: [us("ShortTermBorrowings")] },
   commercialPaper: { kind: "instant", units: ["USD"], aliases: [us("CommercialPaper")] },
   currentPortionLongTermDebt: { kind: "instant", units: ["USD"], aliases: [us("LongTermDebtCurrent"), us("CurrentPortionOfLongTermDebt")] },

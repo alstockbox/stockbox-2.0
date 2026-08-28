@@ -186,6 +186,27 @@ function valuesAreSemanticallyComparable(
   return primaryKind === secondaryKind;
 }
 
+type ShareBasisReconciliation = {
+  scale: number;
+  primaryProvider: string;
+  secondaryProvider: string;
+  primaryShares: number;
+  secondaryShares: number;
+};
+
+function detectShareBasisReconciliation(primary: FinancialPeriod, secondary: FinancialPeriod): ShareBasisReconciliation | null {
+  const pEps = primary.epsDiluted, sEps = secondary.epsDiluted;
+  const pShares = primary.sharesDiluted, sShares = secondary.sharesDiluted;
+  if (![pEps, sEps, pShares, sShares].every((value) => typeof value === "number" && Number.isFinite(value))) return null;
+  if ((pShares as number) <= 0 || (sShares as number) <= 0 || (pEps as number) * (sEps as number) <= 0) return null;
+  const scale = (sShares as number) / (pShares as number);
+  if (!(scale >= 1.5 || scale <= 2 / 3)) return null;
+  const epsScale = (sEps as number) / (pEps as number);
+  if (!Number.isFinite(epsScale) || epsScale <= 0 || Math.abs(epsScale * scale - 1) > 0.03) return null;
+  if (providerRelativeDifference((pEps as number) * (pShares as number), (sEps as number) * (sShares as number)) > 0.03) return null;
+  return { scale, primaryProvider: primary.provenance?.sharesDiluted?.provider ?? "sec", secondaryProvider: secondary.provenance?.sharesDiluted?.provider ?? "yahoo-fundamentals", primaryShares: pShares as number, secondaryShares: sShares as number };
+}
+
 function mergeFinancialPeriod(
   primary: FinancialPeriod,
   secondary: FinancialPeriod,
@@ -213,6 +234,19 @@ function mergeFinancialPeriod(
   const period: FinancialPeriod = { ...primary, provenance: { ...(primary.provenance ?? {}) } };
   const target = period as unknown as Record<string, unknown>;
   const secondaryRecord = secondary as unknown as Record<string, unknown>;
+  const shareBasis = detectShareBasisReconciliation(primary, secondary);
+  if (shareBasis) {
+    period.shareBasisStatus = "cross_provider_reciprocal";
+    period.shareBasisScale = shareBasis.scale;
+    conflicts.push({
+      metric: "shareBasis", periodEnd: primary.periodEndDate ?? null,
+      primaryProvider: shareBasis.primaryProvider, secondaryProvider: shareBasis.secondaryProvider,
+      primaryValue: shareBasis.primaryShares, secondaryValue: shareBasis.secondaryShares,
+      relativeDifference: providerRelativeDifference(shareBasis.primaryShares, shareBasis.secondaryShares),
+      severity: "medium", kind: "share_basis_mismatch", resolved: true,
+      reason: "Reciprocal diluted EPS/share ratios preserve implied diluted earnings and indicate a split, ADS or share-unit basis difference rather than an economic disagreement.",
+    });
+  }
   let supplemented = 0;
   for (const field of MERGEABLE_FINANCIAL_FIELDS) {
     const primaryValue = target[field];
@@ -225,6 +259,7 @@ function mergeFinancialPeriod(
       if (provenance) period.provenance![field] = provenance;
       supplemented += 1;
     } else if (primaryNumber !== null && secondaryNumber !== null) {
+      if (shareBasis && (field === "epsDiluted" || field === "sharesDiluted")) continue;
       const primaryProvenance = primary.provenance?.[field];
       const secondaryProvenance = secondary.provenance?.[field];
       const policy = MERGE_CONFLICT_POLICIES[field] ?? DEFAULT_MERGE_CONFLICT_POLICY;
@@ -305,6 +340,22 @@ function mergePeriodCollections(
   };
 }
 
+function classificationForMerge(primary: CompanyFundamentals, secondary: CompanyFundamentals): CompanyFundamentals {
+  const primaryArchetype = primary.analysisArchetype;
+  const secondaryArchetype = secondary.analysisArchetype;
+  if (!primaryArchetype) return secondary;
+  if (!secondaryArchetype) return primary;
+  const primaryConfidence = primary.classificationDiagnostics?.confidence ?? 0;
+  const secondaryConfidence = secondary.classificationDiagnostics?.confidence ?? 0;
+  const primaryUnsupported = primaryArchetype === "unknown" && primary.classificationDiagnostics?.ambiguous === false && primaryConfidence >= 0.6;
+  const secondaryUnsupported = secondaryArchetype === "unknown" && secondary.classificationDiagnostics?.ambiguous === false && secondaryConfidence >= 0.6;
+  if (primaryUnsupported) return primary;
+  if (secondaryUnsupported) return secondary;
+  if (primaryArchetype === "unknown" && secondaryArchetype !== "unknown") return secondary;
+  if (primaryArchetype === "unknown" && secondaryArchetype === "unknown" && secondaryConfidence > primaryConfidence) return secondary;
+  return primary;
+}
+
 function mergeFundamentals(
   primary: CompanyFundamentals,
   secondary: CompanyFundamentals,
@@ -321,11 +372,14 @@ function mergeFundamentals(
     trailingTwelveMonths = merged.period;
     trailingSupplemented = merged.supplemented;
   }
+  const classification = classificationForMerge(primary, secondary);
+  const otherClassification = classification === primary ? secondary : primary;
   const fundamentals: CompanyFundamentals = {
     ...primary,
-    sector: primary.sector ?? secondary.sector,
-    industry: primary.industry ?? secondary.industry,
-    analysisArchetype: primary.analysisArchetype ?? secondary.analysisArchetype,
+    sector: classification.sector ?? otherClassification.sector,
+    industry: classification.industry ?? otherClassification.industry,
+    analysisArchetype: classification.analysisArchetype ?? otherClassification.analysisArchetype,
+    classificationDiagnostics: classification.classificationDiagnostics ?? otherClassification.classificationDiagnostics,
     annualPeriods: annual.periods,
     trailingTwelveMonths: trailingTwelveMonths ?? secondary.trailingTwelveMonths,
     priorTrailingTwelveMonths: primary.priorTrailingTwelveMonths ?? secondary.priorTrailingTwelveMonths,

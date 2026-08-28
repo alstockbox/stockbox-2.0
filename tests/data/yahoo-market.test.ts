@@ -81,4 +81,44 @@ describe("Yahoo chart market adapter", () => {
     const requestedUrl = String(fetchMock.mock.calls[0]?.[0]);
     expect(requestedUrl).toContain("VOLV-B.ST");
   });
+  it("derives auditable weekly beta against the US market benchmark", async () => {
+    const marketReturns = Array.from({ length: 80 }, (_, i) => ((i % 9) - 4) * 0.004 + 0.001);
+    const prices = (scale: number) => marketReturns.reduce((rows, ret) => [...rows, rows.at(-1)! * (1 + ret * scale)], [100]);
+    const timestamps = Array.from({ length: 81 }, (_, i) => 1_688_601_600 + i * 7 * 86_400);
+    const payload = (closes: number[]) => json({ chart: { result: [{ meta: { currency: "USD", regularMarketPrice: closes.at(-1) }, timestamp: timestamps, indicators: { quote: [{ close: closes, volume: closes.map(() => 1000) }], adjclose: [{ adjclose: closes }] } }], error: null } });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(payload(prices(1.5)))
+      .mockResolvedValueOnce(payload(prices(1)));
+    const result = await yahooMarketDataProvider.fetchMarketData({ ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.", country: "US", currency: "USD" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.beta).toBeCloseTo(1.5, 2);
+    expect(result.data.betaBenchmark).toBe("^GSPC");
+    expect(result.data.betaMethod).toBe("historical_weekly_regression");
+    expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("%5EGSPC");
+  });
+
+  it("keeps beta unavailable when benchmark overlap is shorter than one year", async () => {
+    const timestamps = Array.from({ length: 30 }, (_, i) => 1_720_742_400 + i * 7 * 86_400);
+    const closes = Array.from({ length: 30 }, (_, i) => 100 + i);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ chart: { result: [{ meta: { currency: "USD", regularMarketPrice: closes.at(-1) }, timestamp: timestamps, indicators: { quote: [{ close: closes, volume: closes.map(() => 1000) }], adjclose: [{ adjclose: closes }] } }], error: null } }));
+    const result = await yahooMarketDataProvider.fetchMarketData({ ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.", country: "US", currency: "USD" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.beta).toBeNull();
+  });
+
+  it("rejects beta when the benchmark overlap is materially stale", async () => {
+    const returns = Array.from({ length: 100 }, (_, i) => ((i % 7) - 3) * 0.005 + 0.001);
+    const prices = returns.reduce((rows, ret) => [...rows, rows.at(-1)! * (1 + ret)], [100]);
+    const timestamps = Array.from({ length: 101 }, (_, i) => 1_669_852_800 + i * 7 * 86_400);
+    const payload = (ts: number[], closes: number[]) => json({ chart: { result: [{ meta: { currency: "USD", regularMarketPrice: closes.at(-1) }, timestamp: ts, indicators: { quote: [{ close: closes, volume: closes.map(() => 1000) }], adjclose: [{ adjclose: closes }] } }], error: null } });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(payload(timestamps, prices))
+      .mockResolvedValueOnce(payload(timestamps.slice(0, 81), prices.slice(0, 81)));
+    const result = await yahooMarketDataProvider.fetchMarketData({ ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.", country: "US", currency: "USD" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.beta).toBeNull();
+  });
+
 });

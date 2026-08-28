@@ -179,7 +179,12 @@ it("penalizes fallback-heavy valuation assumptions", () => {
       sharesOutstandingAsOf: "2025-01-03",
     },
   };
-  const fallbackHeavy = analyzeFinancials(currentInput);
+  const fallbackHeavy = analyzeFinancials({
+    ...currentInput,
+    annualPeriods: currentInput.annualPeriods.map((period) => ({ ...period, interestExpense: null, pretaxIncome: null, incomeTaxExpense: null })),
+    market: { ...currentInput.market, beta: null },
+    dcfAssumptions: { baseFreeCashFlow: 250 },
+  });
   const configured = analyzeFinancials({
     ...currentInput,
     dcfAssumptions: {

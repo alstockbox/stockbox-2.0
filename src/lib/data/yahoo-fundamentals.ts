@@ -45,9 +45,9 @@ type YahooMetadata = {
 };
 
 const FLOW_FIELDS = [
-  "TotalRevenue", "CostOfRevenue", "GrossProfit", "OperatingIncome", "EBITDA", "NetIncome",
+  "TotalRevenue", "CostOfRevenue", "GrossProfit", "TotalOperatingIncomeAsReported", "OperatingIncome", "EBITDA", "NetIncome",
   "NetIncomeCommonStockholders", "DilutedNIAvailtoComStockholders", "DilutedEPS",
-  "OperatingCashFlow", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
+  "OperatingCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
   "TaxProvision", "CashDividendsPaid", "StockBasedCompensation", "ResearchAndDevelopment",
   "DilutedAverageShares",
 ] as const;
@@ -205,13 +205,15 @@ function buildPeriod(
     metricProvenance[output] = provenance(fact);
     return fact.value;
   };
-  const capexFact = atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
+  const capexFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate) ?? atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
   if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
   const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
   if (dividendFact) metricProvenance.dividendsPaid = provenance(dividendFact);
   const parentEquity = balance("StockholdersEquity", "totalEquity");
   const directMinorityInterest = balance("MinorityInterest", "minorityInterest");
   const grossEquityFact = atDate(values, `${balancePrefix}TotalEquityGrossMinorityInterest`, balanceDate);
+  if (grossEquityFact) metricProvenance.totalEquity = provenance(grossEquityFact);
+  const consolidatedEquity = grossEquityFact?.value ?? parentEquity;
   let minorityInterest = directMinorityInterest;
   if (minorityInterest === null && grossEquityFact && parentEquity !== null) {
     const derivedMinority = grossEquityFact.value - parentEquity;
@@ -240,9 +242,9 @@ function buildPeriod(
     revenue: flow("TotalRevenue", "revenue"),
     costOfRevenue: flow("CostOfRevenue", "costOfRevenue"),
     grossProfit: flow("GrossProfit", "grossProfit"),
-    operatingIncome: flow("OperatingIncome", "operatingIncome"),
+    operatingIncome: flow("TotalOperatingIncomeAsReported", "operatingIncome") ?? flow("OperatingIncome", "operatingIncome"),
     ebitda: flow("EBITDA", "ebitda"),
-    netIncome: flow("NetIncome", "netIncome"),
+    netIncome: flow("NetIncomeIncludingNoncontrollingInterests", "netIncome") ?? flow("NetIncome", "netIncome"),
     netIncomeCommonStockholders: flow("NetIncomeCommonStockholders", "netIncomeCommonStockholders"),
     dilutedNetIncomeAvailableToCommon: flow("DilutedNIAvailtoComStockholders", "dilutedNetIncomeAvailableToCommon"),
     epsDiluted: flow("DilutedEPS", "epsDiluted"),
@@ -257,7 +259,7 @@ function buildPeriod(
     sharesDiluted: flow("DilutedAverageShares", "sharesDiluted"),
     totalAssets: balance("TotalAssets", "totalAssets"),
     totalLiabilities: balance("TotalLiabilitiesNetMinorityInterest", "totalLiabilities"),
-    totalEquity: parentEquity,
+    totalEquity: consolidatedEquity,
     minorityInterest,
     cashAndEquivalents: balance("CashAndCashEquivalents", "cashAndEquivalents"),
     totalDebt: balance("TotalDebt", "totalDebt"),

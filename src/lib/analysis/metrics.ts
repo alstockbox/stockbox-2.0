@@ -46,6 +46,15 @@ function average(a: number | null | undefined, b: number | null | undefined): nu
   return isFiniteNumber(a) && isFiniteNumber(b) ? (a + b) / 2 : null;
 }
 
+function shareBasisComparable(left: FinancialPeriod | null | undefined, right: FinancialPeriod | null | undefined): boolean {
+  if (!left || !right) return false;
+  const leftScale = left.shareBasisScale;
+  const rightScale = right.shareBasisScale;
+  if (!isFiniteNumber(leftScale) && !isFiniteNumber(rightScale)) return true;
+  if (!isFiniteNumber(leftScale) || !isFiniteNumber(rightScale)) return false;
+  return Math.abs(leftScale - rightScale) / Math.max(Math.abs(leftScale), Math.abs(rightScale), 1) <= 0.03;
+}
+
 function normalizedCurrency(value: string | null | undefined): string | null {
   return economicCurrencyCode(value);
 }
@@ -402,8 +411,10 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const fiveYearMatch = comparableAnnualPeriod(annual, latestAnnual, 5);
   const threeYearPrior = threeYearMatch?.period ?? null;
   const fiveYearPrior = fiveYearMatch?.period ?? null;
-  const latestFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(latestAnnual), latestAnnual?.sharesDiluted);
-  const priorFcfPerShare = safeDivide(deriveSimpleFreeCashFlow(threeYearPrior), threeYearPrior?.sharesDiluted);
+  const annualEpsYoYComparable = shareBasisComparable(latestAnnual, previousAnnual);
+  const threeYearShareBasisComparable = shareBasisComparable(latestAnnual, threeYearPrior);
+  const latestFcfPerShare = threeYearShareBasisComparable ? safeDivide(deriveSimpleFreeCashFlow(latestAnnual), latestAnnual?.sharesDiluted) : null;
+  const priorFcfPerShare = threeYearShareBasisComparable ? safeDivide(deriveSimpleFreeCashFlow(threeYearPrior), threeYearPrior?.sharesDiluted) : null;
   const currencyAlignment = valuationCurrencyAlignment(input, latest);
   const currencyMismatch = currencyAlignment === "mismatch";
   const currencyUnknown = currencyAlignment === "unknown";
@@ -446,8 +457,8 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
     revenueGrowthYoY: calculateGrowth(growthLatest?.revenue, growthComparison?.revenue),
     revenueCagr3y: cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.revenue, latestAnnual?.revenue),
     revenueCagr5y: cagrBetween(fiveYearPrior, latestAnnual, fiveYearPrior?.revenue, latestAnnual?.revenue),
-    epsGrowthYoY: calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted),
-    epsCagr3y: cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted),
+    epsGrowthYoY: annualEpsYoYComparable ? calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted) : null,
+    epsCagr3y: threeYearShareBasisComparable ? cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted) : null,
     freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(growthLatest), deriveSimpleFreeCashFlow(growthComparison)),
     freeCashFlowCagr3y: cagrBetween(threeYearPrior, latestAnnual, deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual)),
     freeCashFlowPerShareCagr3y: cagrBetween(threeYearPrior, latestAnnual, priorFcfPerShare, latestFcfPerShare),

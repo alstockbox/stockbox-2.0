@@ -320,6 +320,53 @@ describe("global fundamentals provider orchestration", () => {
     }
   });
 
+  it("reconciles stable reciprocal EPS/share basis differences without confidence penalty", async () => {
+    const makePeriod = (year: number, epsDiluted: number, sharesDiluted: number, provider: string) => ({
+      fiscalYear: year, periodEndDate: `${year}-12-31`, periodBasis: "FY" as const, currency: "USD",
+      revenue: 100, operatingIncome: 20, netIncome: epsDiluted * sharesDiluted,
+      dilutedNetIncomeAvailableToCommon: epsDiluted * sharesDiluted, operatingCashFlow: 15, capitalExpenditures: 5,
+      epsDiluted, sharesDiluted,
+      provenance: {
+        epsDiluted: { source: provider, provider, valueKind: "reported" as const, periodEnd: `${year}-12-31` },
+        sharesDiluted: { source: provider, provider, valueKind: "reported" as const, periodEnd: `${year}-12-31` },
+      },
+    });
+    const secPeriods = [makePeriod(2024, 2, 100, "sec"), makePeriod(2025, 3, 100, "sec")];
+    const yahooPeriods = [makePeriod(2024, 0.5, 400, "yahoo-fundamentals"), makePeriod(2025, 0.75, 400, "yahoo-fundamentals")];
+    mocks.sec.mockResolvedValueOnce({ ok: true, data: { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", sector: "technology", industry: "Technology Hardware", annual: [], annualPeriods: secPeriods }, diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "available") });
+    mocks.yahoo.mockResolvedValueOnce({ ok: true, data: { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", sector: "technology", industry: "Technology Hardware", annual: [], annualPeriods: yahooPeriods }, diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "available") });
+    const result = await analyzeCompany({ company: { ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", country: "US", currency: "USD" }, analysisType: "summary", investmentProfile: "balanced" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.engine?.sourceConflicts.filter((item) => item.metric === "epsDiluted" || item.metric === "sharesDiluted")).toEqual([]);
+      expect(result.data.engine?.sourceConflicts).toEqual(expect.arrayContaining([expect.objectContaining({ metric: "shareBasis", resolved: true })]));
+      expect(result.data.engine?.confidenceBreakdown.sourceConflict).toBe(100);
+      expect(result.data.engine?.metrics.growth.epsGrowthYoY).toBeCloseTo(0.5, 6);
+    }
+  });
+  it("fails closed on EPS growth when reciprocal share basis changes between comparison years", async () => {
+    const makePeriod = (year: number, epsDiluted: number, sharesDiluted: number, provider: string) => ({
+      fiscalYear: year, periodEndDate: `${year}-12-31`, periodBasis: "FY" as const, currency: "USD",
+      revenue: 100, operatingIncome: 20, netIncome: epsDiluted * sharesDiluted,
+      dilutedNetIncomeAvailableToCommon: epsDiluted * sharesDiluted, operatingCashFlow: 15, capitalExpenditures: 5,
+      epsDiluted, sharesDiluted,
+      provenance: {
+        epsDiluted: { source: provider, provider, valueKind: "reported" as const, periodEnd: `${year}-12-31` },
+        sharesDiluted: { source: provider, provider, valueKind: "reported" as const, periodEnd: `${year}-12-31` },
+      },
+    });
+    const secPeriods = [makePeriod(2024, 8, 100, "sec"), makePeriod(2025, 3, 400, "sec")];
+    const yahooPeriods = [makePeriod(2024, 2, 400, "yahoo-fundamentals"), makePeriod(2025, 3, 400, "yahoo-fundamentals")];
+    mocks.sec.mockResolvedValueOnce({ ok: true, data: { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", sector: "technology", industry: "Technology Hardware", annual: [], annualPeriods: secPeriods }, diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "available") });
+    mocks.yahoo.mockResolvedValueOnce({ ok: true, data: { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", sector: "technology", industry: "Technology Hardware", annual: [], annualPeriods: yahooPeriods }, diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "available") });
+    const result = await analyzeCompany({ company: { ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.", cik: "0000320193", entityId: "sec:0000320193", country: "US", currency: "USD" }, analysisType: "summary", investmentProfile: "balanced" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.engine?.metrics.growth.epsGrowthYoY).toBeNull();
+      expect(result.data.engine?.sourceConflicts).toEqual(expect.arrayContaining([expect.objectContaining({ metric: "shareBasis", resolved: true })]));
+    }
+  });
+
   it("preserves source conflicts already reported by primary and secondary fundamentals providers", async () => {
     const period = {
       fiscalYear: 2024,
@@ -568,4 +615,25 @@ describe("global fundamentals provider orchestration", () => {
       ]));
     }
   });
+  it("prefers a usable secondary classification over an unknown primary classification", async () => {
+    const period = { ...globalFundamentals.annualPeriods![0], currency: "USD", periodEndDate: "2025-12-31" };
+    mocks.sec.mockResolvedValueOnce({ ok: true, data: {
+      ticker: "COST", name: "Costco Wholesale Corporation", cik: "0000909832", sector: "other", industry: null,
+      analysisArchetype: "unknown", classificationDiagnostics: { reason: "SEC metadata unavailable", source: "fallback", confidence: 0.2, ambiguous: false, candidates: ["unknown"] },
+      annual: [], annualPeriods: [period],
+    }, diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "available") });
+    mocks.yahoo.mockResolvedValueOnce({ ok: true, data: {
+      ticker: "COST", name: "Costco Wholesale Corporation", entityId: "sec:0000909832", sector: "consumer", industry: "Discount Stores",
+      analysisArchetype: "standard", classificationDiagnostics: { reason: "Yahoo sector metadata supplied fallback classification", source: "fallback", confidence: 0.55, ambiguous: false, candidates: ["standard"] },
+      annual: [], annualPeriods: [period],
+    }, diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "available") });
+    const result = await analyzeCompany({ company: { ticker: "COST", canonicalTicker: "COST", name: "Costco Wholesale Corporation", cik: "0000909832", entityId: "sec:0000909832", country: "US", currency: "USD" }, analysisType: "summary", investmentProfile: "balanced" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.engine?.analysisArchetype).toBe("standard");
+      expect(result.data.engine?.scores.sector).toBe("consumer");
+      expect(result.data.engine?.classificationDiagnostics?.confidence).toBe(0.55);
+    }
+  });
+
 });

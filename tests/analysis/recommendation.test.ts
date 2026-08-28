@@ -392,3 +392,49 @@ describe("recommendation boundary matrix", () => {
     expect(recommendation.rating).toBe(expected);
   });
 });
+
+
+describe("benchmark valuation fallback", () => {
+  it("allows a regular Buy when DCF is unavailable but benchmark valuation coverage is strong", () => {
+    const score = mockScoreResult({ personalizedScore: 74, stockBoxScore: 74, confidence: 84 });
+    score.dimensions.valuation.score = 78;
+    score.dimensions.valuation.coverage = 1;
+    score.dimensions.valuation.contributors = [
+      { label: "P/E", value: 18, score: 82, weight: 0.3, impact: "positive", availability: "available" },
+      { label: "EV / Sales", value: 3, score: 76, weight: 0.3, impact: "positive", availability: "available" },
+      { label: "FCF yield", value: 0.06, score: 74, weight: 0.4, impact: "positive", availability: "available" },
+    ];
+    const recommendation = deriveRecommendation(score, [], { status: "unavailable", method: "FCFF DCF", reason: "Missing FCFF inputs", low: null, mid: null, high: null, scenarios: [], missingData: [], confidence: 0 });
+    expect(recommendation.rating).toBe("Buy");
+    expect(recommendation.constraintsApplied).toContain("Regular directional rating uses high-coverage benchmark valuation because DCF is unavailable.");
+  });
+
+  it("rejects benchmark valuation when available signals materially disagree", () => {
+    const score = mockScoreResult({ personalizedScore: 32, stockBoxScore: 32, confidence: 90 });
+    score.dimensions.valuation.score = 30;
+    score.dimensions.valuation.coverage = 0.75;
+    score.dimensions.valuation.contributors = [
+      { label: "P/E", value: 1, score: 100, weight: 0.25, impact: "positive", availability: "available" },
+      { label: "EV / Sales", value: 100, score: 0, weight: 0.25, impact: "negative", availability: "available" },
+      { label: "FCF yield", value: -1, score: 0, weight: 0.5, impact: "negative", availability: "available" },
+    ];
+    const recommendation = deriveRecommendation(score, [], { status: "unavailable", method: "FCFF DCF", reason: "Missing FCFF inputs", low: null, mid: null, high: null, scenarios: [], missingData: [], confidence: 0 });
+    expect(recommendation.rating).toBe("Hold");
+  });
+
+  it("keeps Hold when benchmark valuation disagrees with a high model score", () => {
+    const score = mockScoreResult({ personalizedScore: 74, stockBoxScore: 74, confidence: 84 });
+    score.dimensions.valuation.score = 48;
+    score.dimensions.valuation.coverage = 1;
+    const recommendation = deriveRecommendation(score, [], { status: "unavailable", method: "FCFF DCF", reason: "Missing FCFF inputs", low: null, mid: null, high: null, scenarios: [], missingData: [], confidence: 0 });
+    expect(recommendation.rating).toBe("Hold");
+  });
+
+  it("does not use benchmark fallback when valuation coverage or confidence is weak", () => {
+    const score = mockScoreResult({ personalizedScore: 74, stockBoxScore: 74, confidence: 69 });
+    score.dimensions.valuation.score = 90;
+    score.dimensions.valuation.coverage = 0.6;
+    const recommendation = deriveRecommendation(score, [], { status: "unavailable", method: "FCFF DCF", reason: "Missing FCFF inputs", low: null, mid: null, high: null, scenarios: [], missingData: [], confidence: 0 });
+    expect(recommendation.rating).toBe("Hold");
+  });
+});

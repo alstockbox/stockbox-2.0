@@ -262,18 +262,21 @@ describe("DCF calculations", () => {
     ]));
   });
 
-  it("marks a fallback-heavy DCF as illustrative rather than directional evidence", () => {
-    const result = computeDcfRange(durableCompounderInput);
+  it("marks a genuinely fallback-heavy DCF as illustrative rather than directional evidence", () => {
+    const result = computeDcfRange({
+      ...durableCompounderInput,
+      market: { ...durableCompounderInput.market, beta: null },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({ ...period, interestExpense: null, pretaxIncome: null, incomeTaxExpense: null })),
+      dcfAssumptions: { baseFreeCashFlow: 300 },
+    });
 
     expect(result.status).toBe("available");
     expect(result.directionalSupport).toBe(false);
     expect(result.assumptionQuality?.fallbackCount).toBeGreaterThanOrEqual(3);
-    expect(result.assumptionQuality?.assumptions.riskFreeRate).toEqual(expect.objectContaining({
-      value: 0.04,
-      source: "StockBox configured fallback",
-      valueKind: "fallback",
-      version: expect.any(String),
-    }));
+    expect(result.assumptionQuality?.assumptions.riskFreeRate.valueKind).toBe("policy");
+    expect(result.assumptionQuality?.assumptions.beta.valueKind).toBe("fallback");
+    expect(result.assumptionQuality?.assumptions.preTaxCostOfDebt.valueKind).toBe("fallback");
+    expect(result.assumptionQuality?.assumptions.normalizedTaxRate.valueKind).toBe("fallback");
   });
 
   it("keeps non-USD DCF illustrative without explicit country-risk premium", () => {
@@ -446,4 +449,18 @@ it("normalizes minor-unit quote prices to economic currency before DCF compariso
   expect(result.currency).toBe("GBP");
   expect(result.currentPrice).toBe(15);
   expect(result.impliedUpside).toBeCloseTo((result.mid as number) / 15 - 1, 10);
+});
+
+
+describe("DCF policy assumptions", () => {
+  it("does not classify versioned StockBox policy assumptions as emergency fallbacks", () => {
+    const result = computeDcfRange(durableCompounderInput);
+    expect(result.status).toBe("available");
+    expect(result.assumptionQuality?.level).not.toBe("fallback_heavy");
+    expect(result.assumptionQuality?.assumptions.riskFreeRate.valueKind).toBe("policy");
+    expect(result.assumptionQuality?.assumptions.equityRiskPremium.valueKind).toBe("policy");
+    expect(result.assumptionQuality?.assumptions.forecastYears.valueKind).toBe("policy");
+    expect(result.assumptionQuality?.assumptions.terminalGrowthRate.valueKind).toBe("policy");
+    expect(result.directionalSupport).toBe(true);
+  });
 });

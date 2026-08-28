@@ -11,6 +11,10 @@ const PROVIDER_ID = "yahoo-chart";
 const BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
 const MAX_PRICE = 1_000_000_000;
 const TARGET_TOLERANCE_DAYS = 7;
+const MIN_BETA_OBSERVATIONS = 52;
+const MAX_BETA_LAG_DAYS = 21;
+const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"]];
+const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = { US: "^GSPC", "UNITED STATES": "^GSPC", SE: "^OMX", SWEDEN: "^OMX", GB: "^FTSE", UK: "^FTSE", "UNITED KINGDOM": "^FTSE", DE: "^GDAXI", GERMANY: "^GDAXI", FR: "^FCHI", FRANCE: "^FCHI", NL: "^AEX", NETHERLANDS: "^AEX", CH: "^SSMI", SWITZERLAND: "^SSMI", CA: "^GSPTSE", CANADA: "^GSPTSE", AU: "^AXJO", AUSTRALIA: "^AXJO", JP: "^N225", JAPAN: "^N225", HK: "^HSI", "HONG KONG": "^HSI", CN: "000001.SS", CHINA: "000001.SS", KR: "^KS11", "SOUTH KOREA": "^KS11", TW: "^TWII", TAIWAN: "^TWII", IN: "^NSEI", INDIA: "^NSEI", BR: "^BVSP", BRAZIL: "^BVSP", MX: "^MXX", MEXICO: "^MXX", ES: "^IBEX", SPAIN: "^IBEX", IT: "FTSEMIB.MI", ITALY: "FTSEMIB.MI", DK: "^OMXC25", DENMARK: "^OMXC25", FI: "^OMXH25", FINLAND: "^OMXH25", NO: "OSEAX.OL", NORWAY: "OSEAX.OL", SG: "^STI", SINGAPORE: "^STI", ID: "^JKSE", INDONESIA: "^JKSE", MY: "^KLSE", MALAYSIA: "^KLSE", NZ: "^NZ50", "NEW ZEALAND": "^NZ50" };
 
 export const YAHOO_MARKET_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["global"],
@@ -52,6 +56,14 @@ function toYahooSymbol(company: CompanySearchResult): string {
   return symbol;
 }
 
+function betaBenchmarkSymbol(company: CompanySearchResult): string | null {
+  const symbol = toYahooSymbol(company);
+  const suffixMatch = BETA_BENCHMARK_BY_SUFFIX.find(([suffix]) => symbol.endsWith(suffix));
+  if (suffixMatch) return suffixMatch[1];
+  const country = company.country?.trim().toUpperCase();
+  return country ? BETA_BENCHMARK_BY_COUNTRY[country] ?? null : null;
+}
+
 function dateFromUnix(timestamp: number): string | null {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
   const date = new Date(timestamp * 1000);
@@ -76,6 +88,45 @@ function parseRows(result: JsonObject): PriceRow[] {
     if (Date.parse(`${date}T00:00:00Z`) > Date.now()) return [];
     return [{ date, close, volume }];
   }).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function weekKey(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  const daysSinceMonday = (value.getUTCDay() + 6) % 7;
+  value.setUTCDate(value.getUTCDate() - daysSinceMonday);
+  return value.toISOString().slice(0, 10);
+}
+
+function historicalWeeklyBeta(stockRows: PriceRow[], benchmarkRows: PriceRow[]): { beta: number; observations: number } | null {
+  const stockWeekly = new Map<string, PriceRow>();
+  const benchmarkWeekly = new Map<string, PriceRow>();
+  stockRows.forEach((row) => stockWeekly.set(weekKey(row.date), row));
+  benchmarkRows.forEach((row) => benchmarkWeekly.set(weekKey(row.date), row));
+  const commonWeeks = [...stockWeekly.keys()].filter((key) => benchmarkWeekly.has(key)).sort();
+  const latestCommonWeek = commonWeeks.at(-1);
+  const latestStockWeek = stockRows.at(-1) ? weekKey(stockRows.at(-1)!.date) : null;
+  const latestBenchmarkWeek = benchmarkRows.at(-1) ? weekKey(benchmarkRows.at(-1)!.date) : null;
+  if (!latestCommonWeek || !latestStockWeek || !latestBenchmarkWeek) return null;
+  const commonTime = Date.parse(`${latestCommonWeek}T00:00:00Z`);
+  const stockLag = (Date.parse(`${latestStockWeek}T00:00:00Z`) - commonTime) / 86_400_000;
+  const benchmarkLag = (Date.parse(`${latestBenchmarkWeek}T00:00:00Z`) - commonTime) / 86_400_000;
+  if (stockLag > MAX_BETA_LAG_DAYS || benchmarkLag > MAX_BETA_LAG_DAYS) return null;
+  const pairs: Array<{ stock: number; benchmark: number }> = [];
+  for (let index = 1; index < commonWeeks.length; index += 1) {
+    const previousKey = commonWeeks[index - 1]; const currentKey = commonWeeks[index];
+    if ((Date.parse(`${currentKey}T00:00:00Z`) - Date.parse(`${previousKey}T00:00:00Z`)) / 86_400_000 !== 7) continue;
+    const previousStock = stockWeekly.get(previousKey)!; const currentStock = stockWeekly.get(currentKey)!;
+    const previousBenchmark = benchmarkWeekly.get(previousKey)!; const currentBenchmark = benchmarkWeekly.get(currentKey)!;
+    pairs.push({ stock: currentStock.close / previousStock.close - 1, benchmark: currentBenchmark.close / previousBenchmark.close - 1 });
+  }
+  if (pairs.length < MIN_BETA_OBSERVATIONS) return null;
+  const stockMean = pairs.reduce((sum, item) => sum + item.stock, 0) / pairs.length;
+  const benchmarkMean = pairs.reduce((sum, item) => sum + item.benchmark, 0) / pairs.length;
+  const variance = pairs.reduce((sum, item) => sum + (item.benchmark - benchmarkMean) ** 2, 0);
+  if (!Number.isFinite(variance) || variance <= 1e-8) return null;
+  const covariance = pairs.reduce((sum, item) => sum + (item.stock - stockMean) * (item.benchmark - benchmarkMean), 0);
+  const beta = covariance / variance;
+  return Number.isFinite(beta) ? { beta, observations: pairs.length } : null;
 }
 
 function shiftUtcDate(date: string, months: number, years: number): Date {
@@ -201,6 +252,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
   },
   async fetchMarketData(company): Promise<AdapterResult<MarketSnapshot>> {
     const symbol = toYahooSymbol(company);
+    const benchmarkSymbol = betaBenchmarkSymbol(company);
     const response = await requestChart(symbol);
     if (!response.ok) return response;
     const result = firstChartResult(response.data);
@@ -218,6 +270,9 @@ export const yahooMarketDataProvider: MarketDataProvider = {
       return failure("future_date", "Yahoo Finance returned a future-dated market observation.");
     }
 
+    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
+    const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
+    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
     const yearRows = lastYearRows(history);
     const yearHigh = metaNumber(meta, "fiftyTwoWeekHigh") ?? (yearRows.length ? Math.max(...yearRows.map((row) => row.close)) : null);
     const yearLow = metaNumber(meta, "fiftyTwoWeekLow") ?? (yearRows.length ? Math.min(...yearRows.map((row) => row.close)) : null);
@@ -234,7 +289,10 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         yearLow,
         marketCap: null,
         sharesOutstanding: null,
-        beta: null,
+        beta: betaEstimate?.beta ?? null,
+        betaBenchmark: betaEstimate ? benchmarkSymbol : null,
+        betaMethod: betaEstimate ? "historical_weekly_regression" : null,
+        betaObservationCount: betaEstimate?.observations ?? null,
         provider: PROVIDER_ID,
         historyLength: history.length,
         performance: performance(history),

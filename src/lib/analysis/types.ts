@@ -99,6 +99,8 @@ export type ProviderSourceConflict = {
   relativeDifference?: number | null;
   severity: "medium" | "high";
   reason: string;
+  kind?: "economic_disagreement" | "definition_mismatch" | "share_basis_mismatch";
+  resolved?: boolean;
 };
 
 export type CompanySearchResult = {
@@ -166,6 +168,9 @@ export type MarketSnapshot = {
   sharesOutstanding?: number | null;
   sharesOutstandingAsOf?: string | null;
   beta?: number | null;
+  betaBenchmark?: string | null;
+  betaMethod?: "provider_statistics" | "historical_weekly_regression" | null;
+  betaObservationCount?: number | null;
   provider?: string;
   historyLength?: number;
   performance: Partial<Record<"1D" | "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y", number>>;
@@ -200,6 +205,8 @@ export type AnnualFinancials = {
   stockBasedCompensation?: number | null;
   researchAndDevelopment?: number | null;
   sharesDiluted?: number | null;
+  shareBasisStatus?: "cross_provider_reciprocal";
+  shareBasisScale?: number;
   currentSharesOutstanding?: number | null;
   provenance?: Record<string, MetricProvenance>;
 };
@@ -420,6 +427,8 @@ export type FinancialPeriod = {
   currentYtdDurationDays?: number;
   priorYtdDurationDays?: number;
   ttmConstructionMethod?: string;
+  shareBasisStatus?: "cross_provider_reciprocal";
+  shareBasisScale?: number;
   balanceSheetDate?: string;
   currency?: string;
   currencyConflict?: string[];
@@ -476,6 +485,9 @@ export type FinancialMarketSnapshot = {
   sharesOutstanding?: number | null;
   sharesOutstandingAsOf?: string | null;
   beta?: number | null;
+  betaBenchmark?: string | null;
+  betaMethod?: "provider_statistics" | "historical_weekly_regression" | null;
+  betaObservationCount?: number | null;
   provider?: string;
   currency?: string | null;
   priceDate?: string | null;
@@ -701,7 +713,7 @@ export type ValuationAssumption = {
   value: number | number[];
   source: string;
   asOf: string | null;
-  valueKind: "reported" | "market_sourced" | "configured" | "derived" | "fallback";
+  valueKind: "reported" | "market_sourced" | "configured" | "derived" | "policy" | "fallback";
   version: string;
 };
 

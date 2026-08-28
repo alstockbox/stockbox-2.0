@@ -43,6 +43,30 @@ const jpmBankFacts: SecCompanyFacts = {
 };
 
 describe("archetype-aware SEC TTM construction", () => {
+  it.each(["reit", "insurer"] as const)("prefers full Revenues over contract-only revenue for %s", (archetype) => {
+    const fixture: SecCompanyFacts = { cik: 1, entityName: "Specialist", facts: { "us-gaap": {
+      RevenueFromContractWithCustomerExcludingAssessedTax: duration(10, 4, 5),
+      Revenues: duration(100, 40, 55),
+      NetIncomeLoss: duration(12, 5, 7),
+    } } };
+    const periods = resolveSecFinancialPeriods(fixture, archetype);
+    expect(periods.annualPeriods.at(-1)?.revenue).toBe(100);
+    expect(periods.trailingTwelveMonths?.revenue).toBe(115);
+    expect(periods.trailingTwelveMonths?.provenance?.revenue.concept).toContain("Revenues");
+  });
+
+  it("prefers financial-style net revenue for unknown companies when explicitly reported", () => {
+    const fixture: SecCompanyFacts = { cik: 2, entityName: "Fintech", facts: { "us-gaap": {
+      RevenueFromContractWithCustomerExcludingAssessedTax: duration(20, 8, 9),
+      RevenuesNetOfInterestExpense: duration(200, 90, 110),
+      NetIncomeLoss: duration(8, 3, 5),
+    } } };
+    const periods = resolveSecFinancialPeriods(fixture, "unknown");
+    expect(periods.annualPeriods.at(-1)?.revenue).toBe(200);
+    expect(periods.trailingTwelveMonths?.revenue).toBe(220);
+    expect(periods.trailingTwelveMonths?.provenance?.revenue.concept).toContain("RevenuesNetOfInterestExpense");
+  });
+
   it("constructs a current bank TTM without corporate operating income, CFO or capex", () => {
     const periods = resolveSecFinancialPeriods(jpmBankFacts, "bank");
 

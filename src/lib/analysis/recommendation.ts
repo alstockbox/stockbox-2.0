@@ -32,6 +32,23 @@ function archetypeValuationScore(score: ScoreResult, valuation?: DcfRangeResult)
     : null;
 }
 
+function benchmarkValuationScore(score: ScoreResult, valuation?: DcfRangeResult): number | null {
+  if (valuation?.status !== "unavailable") return null;
+  if (!["standard", "software_growth", "cyclical", "utility"].includes(score.analysisArchetype)) return null;
+  const dimension = score.dimensions.valuation;
+  const dimensionScore = dimension.score;
+  if (score.confidence < 70 || (dimension.coverage ?? 0) < SCORE_COVERAGE_POLICY.dimensionFull) return null;
+  if (score.confidenceBreakdown.marketInputFreshness < 80 || score.confidenceBreakdown.currencyAlignment < 100) return null;
+  if (score.confidenceBreakdown.valuationInputs < 60 || score.confidenceBreakdown.sourceConflict < 45) return null;
+  if (typeof dimensionScore !== "number" || !Number.isFinite(dimensionScore)) return null;
+  const contributors = (dimension.contributors ?? []).filter((item) => item.availability !== "missing" && typeof item.score === "number" && Number.isFinite(item.score));
+  const positiveSupport = contributors.filter((item) => (item.score as number) >= 65).length;
+  const negativeSupport = contributors.filter((item) => (item.score as number) <= 35).length;
+  if (dimensionScore >= 65 && positiveSupport >= 2 && negativeSupport === 0) return dimensionScore;
+  if (dimensionScore <= 35 && negativeSupport >= 2 && positiveSupport === 0) return dimensionScore;
+  return null;
+}
+
 export function deriveRecommendation(
   score: ScoreResult,
   redFlags: RedFlag[],
@@ -58,7 +75,8 @@ export function deriveRecommendation(
       valuation.confidence === undefined
       || valuation.confidence >= MIN_DIRECTIONAL_VALUATION_CONFIDENCE
     );
-  const adequateValuationCoverage = dcfValuationConfidenceAdequate || specializedValuationScore !== null;
+  const benchmarkValuation = benchmarkValuationScore(score, valuation);
+  const adequateValuationCoverage = dcfValuationConfidenceAdequate || specializedValuationScore !== null || benchmarkValuation !== null;
 
   if (
     rating !== "No Rating"
@@ -111,18 +129,26 @@ export function deriveRecommendation(
 
   const buySupported = dcfValuationAvailable
     ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside >= 0.05
-    : specializedValuationScore !== null && specializedValuationScore >= 60;
+    : specializedValuationScore !== null
+      ? specializedValuationScore >= 60
+      : benchmarkValuation !== null && benchmarkValuation >= 65;
   if (rating === "Buy" && !buySupported) {
     rating = "Hold";
     constraintsApplied.push("Buy requires positive valuation support.");
+  } else if (rating === "Buy" && benchmarkValuation !== null) {
+    constraintsApplied.push("Regular directional rating uses high-coverage benchmark valuation because DCF is unavailable.");
   }
 
   const sellSupported = dcfValuationAvailable
     ? valuation.impliedUpside !== null && valuation.impliedUpside !== undefined && valuation.impliedUpside <= -0.05
-    : specializedValuationScore !== null && specializedValuationScore <= 40;
+    : specializedValuationScore !== null
+      ? specializedValuationScore <= 40
+      : benchmarkValuation !== null && benchmarkValuation <= 35;
   if (rating === "Sell" && !sellSupported) {
     rating = "Hold";
     constraintsApplied.push("Sell requires negative valuation support.");
+  } else if (rating === "Sell" && benchmarkValuation !== null) {
+    constraintsApplied.push("Regular directional rating uses high-coverage benchmark valuation because DCF is unavailable.");
   }
 
   if (score.confidence < 40 && rating !== "No Rating") {

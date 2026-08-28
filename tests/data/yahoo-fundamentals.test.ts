@@ -241,6 +241,59 @@ describe("Yahoo global fundamentals adapter", () => {
     }));
   });
 
+  it("prefers Yahoo PurchaseOfPPE for canonical cash capex when available", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    payload.timeseries.result.push(
+      series("annualPurchaseOfPPE", [annual("2024-12-31", -20_000), annual("2025-12-31", -21_000)]),
+      series("trailingPurchaseOfPPE", [trailing(-22_000)]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods?.at(-1)?.capitalExpenditures).toBe(21_000);
+    expect(result.data.trailingTwelveMonths?.capitalExpenditures).toBe(22_000);
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.capitalExpenditures?.concept).toBe("annualPurchaseOfPPE");
+  });
+
+  it("prefers consolidated Yahoo net income including noncontrolling interests", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    payload.timeseries.result.push(
+      series("annualNetIncomeIncludingNoncontrollingInterests", [annual("2024-12-31", 50_000), annual("2025-12-31", 44_000)]),
+      series("trailingNetIncomeIncludingNoncontrollingInterests", [trailing(46_000)]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods?.at(-1)?.netIncome).toBe(44_000);
+    expect(result.data.trailingTwelveMonths?.netIncome).toBe(46_000);
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.netIncome?.concept).toBe("annualNetIncomeIncludingNoncontrollingInterests");
+  });
+
+  it("prefers Yahoo operating income as reported over normalized OperatingIncome", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    payload.timeseries.result.push(
+      series("annualTotalOperatingIncomeAsReported", [annual("2024-12-31", 54_000), annual("2025-12-31", 47_000)]),
+      series("trailingTotalOperatingIncomeAsReported", [trailing(48_000)]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods?.at(-1)?.operatingIncome).toBe(47_000);
+    expect(result.data.trailingTwelveMonths?.operatingIncome).toBe(48_000);
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.operatingIncome?.concept).toBe("annualTotalOperatingIncomeAsReported");
+    expect(result.data.trailingTwelveMonths?.provenance?.operatingIncome?.concept).toBe("trailingTotalOperatingIncomeAsReported");
+  });
+
   it("derives minority interest from gross equity when Yahoo omits the quarterly minority-interest fact", async () => {
     const withGrossEquity = structuredClone(timeseriesPayload);
     const parentEquity = withGrossEquity.timeseries.result.find((item) => item.meta.type[0] === "quarterlyStockholdersEquity");
@@ -255,6 +308,8 @@ describe("Yahoo global fundamentals adapter", () => {
     const result = await fetchYahooFundamentalsResult(company);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.data.trailingTwelveMonths?.totalEquity).toBe(176_572);
+    expect(result.data.trailingTwelveMonths?.provenance?.totalEquity?.concept).toBe("quarterlyTotalEquityGrossMinorityInterest");
     expect(result.data.trailingTwelveMonths?.minorityInterest).toBe(10_000);
     expect(result.data.trailingTwelveMonths?.provenance?.minorityInterest).toEqual(expect.objectContaining({
       provider: "yahoo-fundamentals",
