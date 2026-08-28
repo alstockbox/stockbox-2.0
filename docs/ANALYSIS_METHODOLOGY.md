@@ -1,9 +1,9 @@
 # StockBox Analysis Methodology
 
-Model version: `stockbox-analysis-engine-v2.6.0`
+Model version: `stockbox-analysis-engine-v2.7.0`
 Report schema: `stockbox-analysis-report-v5`
-Score policy: `stockbox-score-policy-v7`
-DCF policy: `stockbox-dcf-assumptions-v3`
+Score policy: `stockbox-score-policy-v8`
+DCF policy: `stockbox-dcf-assumptions-v4`
 Static benchmarks: `stockbox-static-benchmarks-v1`
 
 ## Canonical identity and providers
@@ -46,7 +46,7 @@ Corporate FCFF is inappropriate for banks, insurers and REITs. Cyclical DCF requ
 - Sell: score at most 40 and confidence at least 55.
 - Otherwise: Hold.
 
-Confidence below 40 results in No Rating. Unknown methodology, future or mixed-currency financials, high source conflicts, and insufficient specialist coverage also fail closed. Directional Buy/Sell ratings require either an available directionally supported FCFF DCF with at least 45 confidence, or sufficiently covered archetype-specific valuation for banks, insurers and REITs. Hold is not used to disguise unsupported methodology.
+Confidence below 40 results in No Rating. Unknown methodology, future or mixed-currency financials, high source conflicts, and insufficient specialist coverage also fail closed. Directional Buy/Sell ratings require either an available directionally supported FCFF DCF with at least 45 confidence, sufficiently covered archetype-specific valuation for banks, insurers and REITs, or—only when DCF is unavailable—a high-coverage static benchmark valuation for a standard operating archetype with at least 70 model confidence, fresh market inputs, full currency alignment, sufficient valuation inputs and no severe source-conflict penalty. Benchmark fallback can support regular Buy/Sell only; Strong Buy/Sell still requires stronger directional valuation evidence. Hold is not used to disguise unsupported methodology.
 
 Confidence measures method and data trust, not company quality. It incorporates coverage, financial and market freshness, source quality, reconciliation, valuation inputs and assumptions, entity confidence, currency state, archetype confidence, specialist coverage and source conflicts. Overall confidence is capped at 35 when the archetype is unresolved, at 45 when a bank/insurer/REIT has less than 30% specialist coverage, and at 60 while specialist coverage remains below 70%. A failed provider attempt does not lower core source quality when a complete fallback succeeds; fallback use remains visible in QA.
 
@@ -54,7 +54,7 @@ Confidence measures method and data trust, not company quality. It incorporates 
 
 The engine uses a deterministic five-year FCFF-style model, fades observed growth, discounts explicit cash flows and terminal value, subtracts net debt, and divides by current shares outstanding. Bear/Base/Bull cases change growth, discount and terminal assumptions. It refuses output without positive FCFF, current shares, net debt, valid finite rates, aligned currencies and fresh market inputs.
 
-Every DCF assumption records value, source, as-of date, value kind and assumption-policy version. Multiple generic fallbacks reduce assumption quality and make output illustrative rather than directional. Terminal value above 75% of enterprise value reduces confidence. Invalid or non-finite assumptions cannot produce NaN or Infinity.
+Every DCF assumption records value, source, as-of date, value kind and assumption-policy version. Versioned StockBox policy assumptions are distinguished from emergency fallbacks. Multiple company-specific fallback assumptions reduce assumption quality and make output illustrative rather than directional. Terminal value above 75% of enterprise value reduces confidence. Invalid or non-finite assumptions cannot produce NaN or Infinity.
 
 The live report displays the engine's per-share Bear/Base/Bull range only when deterministic cash-flow, net-debt, market-value and share inputs exist. Otherwise DCF remains unavailable or inappropriate with the missing inputs shown.
 

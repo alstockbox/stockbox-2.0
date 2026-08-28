@@ -126,14 +126,28 @@ export function mergeSecCompanyFacts(factSets: SecCompanyFacts[]): SecCompanyFac
 
 type FactMaps = Record<keyof typeof SEC_CONCEPTS, Map<string, ResolvedSecFact>>;
 
-function resolveMaps(facts: SecCompanyFacts, includeQuarterlyInstants = false): FactMaps {
+function revenueSpecForArchetype(archetype: AnalysisArchetype): ConceptSpec {
+  const aliases = SEC_CONCEPTS.revenue.aliases;
+  const ordered = (concepts: string[], includeRest = false) => {
+    const preferred = concepts.flatMap((concept) => aliases.filter((alias) => alias.concept === concept));
+    const rest = includeRest ? aliases.filter((alias) => !concepts.includes(alias.concept)) : aliases.filter((alias) => alias.taxonomy === "ifrs-full" && alias.concept === "Revenue");
+    return { ...SEC_CONCEPTS.revenue, aliases: [...preferred, ...rest] } as ConceptSpec;
+  };
+  if (archetype === "reit" || archetype === "insurer") return ordered(["Revenues"]);
+  if (archetype === "bank") return ordered(["RevenuesNetOfInterestExpense", "Revenues"]);
+  if (archetype === "unknown") return ordered(["RevenuesNetOfInterestExpense", "Revenues"], true);
+  if (archetype === "utility") return ordered(["RevenueFromContractWithCustomerIncludingAssessedTax", "RegulatedAndUnregulatedOperatingRevenue", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"], true);
+  return SEC_CONCEPTS.revenue as ConceptSpec;
+}
+
+function resolveMaps(facts: SecCompanyFacts, includeQuarterlyInstants = false, archetype: AnalysisArchetype = "standard"): FactMaps {
   return Object.fromEntries(
-    Object.entries(SEC_CONCEPTS).map(([key, spec]) => [
-      key,
-      includeQuarterlyInstants && spec.kind === "instant"
-        ? resolveInstantFacts(facts, spec as ConceptSpec)
-        : resolveAnnualFacts(facts, spec as ConceptSpec),
-    ]),
+    Object.entries(SEC_CONCEPTS).map(([key, spec]) => {
+      const resolvedSpec = key === "revenue" ? revenueSpecForArchetype(archetype) : spec as ConceptSpec;
+      return [key, includeQuarterlyInstants && resolvedSpec.kind === "instant"
+        ? resolveInstantFacts(facts, resolvedSpec)
+        : resolveAnnualFacts(facts, resolvedSpec)];
+    }),
   ) as FactMaps;
 }
 
@@ -148,33 +162,23 @@ function latestAtOrBefore(map: Map<string, ResolvedSecFact>, end: string): Resol
 function debtAt(maps: FactMaps, end: string): { value: number | null; provenance?: MetricProvenance } {
   const aggregate = factAt(maps.totalDebt, end);
   if (aggregate) return { value: aggregate.val, provenance: secFactProvenance(aggregate) };
-  const shortTerm = factAt(maps.shortTermDebt, end);
+
   const longTerm = factAt(maps.longTermDebt, end);
-  if (shortTerm && longTerm) {
-    return {
-      value: shortTerm.val + longTerm.val,
-      provenance: {
-        source: "SEC Companyfacts",
-        provider: "sec",
-        valueKind: "derived",
-        periodEnd: end,
-        inputs: [shortTerm.concept, longTerm.concept],
-        note: "Total interest-bearing debt from current borrowings and non-current debt.",
-      },
-    };
-  }
-  const commercialPaper = factAt(maps.commercialPaper, end);
   const currentPortion = factAt(maps.currentPortionLongTermDebt, end);
-  if (!commercialPaper || !currentPortion || !longTerm) return { value: null };
+  const commercialPaper = factAt(maps.commercialPaper, end);
+  const shortTerm = factAt(maps.shortTermDebt, end);
+  const nonOverlappingDebtStack = longTerm && currentPortion && commercialPaper && !shortTerm;
+  if (!nonOverlappingDebtStack) return { value: null };
+
   return {
-    value: commercialPaper.val + currentPortion.val + longTerm.val,
+    value: longTerm.val + currentPortion.val + commercialPaper.val,
     provenance: {
-      source: "SEC Companyfacts",
+      source: "StockBox SEC resolver",
       provider: "sec",
       valueKind: "derived",
       periodEnd: end,
-      inputs: [commercialPaper.concept, currentPortion.concept, longTerm.concept],
-      note: "Total interest-bearing debt from non-overlapping commercial paper, current maturities and non-current debt.",
+      inputs: [longTerm.concept, currentPortion.concept, commercialPaper.concept],
+      note: "Total debt derived from noncurrent long-term debt, current portion of long-term debt and commercial paper when no separate short-term-borrowings fact is present.",
     },
   };
 }
@@ -190,13 +194,17 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
   };
   const revenue = value("revenue");
   const costOfRevenue = value("costOfRevenue");
-  let grossProfit = value("grossProfit");
-  if (grossProfit === null && revenue !== null && costOfRevenue !== null) {
-    grossProfit = revenue - costOfRevenue;
-    provenance.grossProfit = { source: "StockBox SEC resolver", provider: "sec", valueKind: "derived", periodEnd: end, inputs: ["revenue", "costOfRevenue"] };
-  }
+  const grossProfit = value("grossProfit");
   const operatingIncome = value("operatingIncome");
   const depreciation = value("depreciationAndAmortization");
+  const ebitda = operatingIncome !== null && depreciation !== null ? operatingIncome + depreciation : null;
+  if (ebitda !== null) {
+    provenance.ebitda = {
+      source: "StockBox SEC resolver", provider: "sec", valueKind: "derived", periodEnd: end,
+      inputs: ["operatingIncome", "depreciationAndAmortization"],
+      note: "EBITDA derived as operating income plus reported depreciation and amortization.",
+    };
+  }
   const debt = debtAt(maps, end);
   if (debt.provenance) provenance.totalDebt = debt.provenance;
   const primary = get("revenue") ?? get("netIncome") ?? get("assets") ?? get("operatingCashFlow");
@@ -213,7 +221,7 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
     costOfRevenue,
     grossProfit,
     operatingIncome,
-    ebitda: operatingIncome !== null && depreciation !== null ? operatingIncome + depreciation : null,
+    ebitda,
     netIncome: value("netIncome"),
     netIncomeCommonStockholders: value("netIncomeCommonStockholders"),
     dilutedNetIncomeAvailableToCommon: value("dilutedNetIncomeAvailableToCommon"),
@@ -351,7 +359,7 @@ function buildTtmPeriods(
   prior?: FinancialPeriod;
 } {
   const series = Object.fromEntries(
-    TTM_FLOW_KEYS.map((key) => [key, resolveTtmFacts(facts, SEC_CONCEPTS[key] as ConceptSpec)]),
+    TTM_FLOW_KEYS.map((key) => [key, resolveTtmFacts(facts, key === "revenue" ? revenueSpecForArchetype(archetype) : SEC_CONCEPTS[key] as ConceptSpec)]),
   ) as Record<TtmFlowKey, ResolvedSecFact[]>;
   const requiredKeys = TTM_REQUIREMENT_PROFILES[archetype];
   const anchorKey = requiredKeys[0];
@@ -370,18 +378,17 @@ function buildTtmPeriods(
     const value = (key: keyof typeof resolved) => resolved[key]?.val ?? null;
     const revenue = value("revenue");
     const cost = value("costOfRevenue");
-    const reportedGross = value("grossProfit");
-    const grossProfit = reportedGross ?? (revenue !== null && cost !== null ? revenue - cost : null);
-    if (reportedGross === null && grossProfit !== null) {
-      provenance.grossProfit = {
-        source: "StockBox SEC resolver",
-        provider: "sec",
-        valueKind: "derived",
-        periodEnd: anchorFact.end,
-        periodBasis: anchorFact.periodBasis,
-        currentYtdDurationDays: anchorFact.currentYtdDurationDays,
-        priorYtdDurationDays: anchorFact.priorYtdDurationDays,
-        inputs: ["revenue", "costOfRevenue"],
+    const grossProfit = value("grossProfit");
+    const operatingIncome = value("operatingIncome");
+    const depreciationAndAmortization = value("depreciationAndAmortization");
+    const ebitda = operatingIncome !== null && depreciationAndAmortization !== null
+      ? operatingIncome + depreciationAndAmortization
+      : null;
+    if (ebitda !== null) {
+      provenance.ebitda = {
+        source: "StockBox SEC resolver", provider: "sec", valueKind: "derived", periodEnd: anchorFact.end,
+        periodBasis: anchorFact.periodBasis, inputs: ["operatingIncome", "depreciationAndAmortization"],
+        note: "TTM EBITDA derived as operating income plus depreciation and amortization on the same TTM basis.",
       };
     }
     const balance = balanceSnapshotAt(instantMaps, anchorFact.end, anchorFact.accn);
@@ -400,10 +407,8 @@ function buildTtmPeriods(
       revenue,
       costOfRevenue: cost,
       grossProfit,
-      operatingIncome: value("operatingIncome"),
-      ebitda: value("operatingIncome") !== null && value("depreciationAndAmortization") !== null
-        ? (value("operatingIncome") as number) + (value("depreciationAndAmortization") as number)
-        : null,
+      operatingIncome,
+      ebitda,
       netIncome: value("netIncome"),
       netIncomeCommonStockholders: value("netIncomeCommonStockholders"),
       dilutedNetIncomeAvailableToCommon: value("dilutedNetIncomeAvailableToCommon"),
@@ -537,8 +542,8 @@ export function resolveSecFinancialPeriods(
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
 } {
-  const annualMaps = resolveMaps(facts);
-  const instantMaps = resolveMaps(facts, true);
+  const annualMaps = resolveMaps(facts, false, archetype);
+  const instantMaps = resolveMaps(facts, true, archetype);
   const periodEnds = [...new Set([
     ...annualMaps.revenue.keys(),
     ...annualMaps.netIncome.keys(),

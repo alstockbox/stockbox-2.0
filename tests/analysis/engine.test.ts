@@ -18,7 +18,7 @@ describe("analyzeFinancials", () => {
   it("builds a complete deterministic analysis result", () => {
     const result = analyzeFinancials(durableCompounderInput);
 
-    expect(result.modelVersion).toBe("stockbox-analysis-engine-v2.6.0");
+    expect(result.modelVersion).toBe("stockbox-analysis-engine-v2.7.0");
     expect(result.reportSchemaVersion).toBe("stockbox-analysis-report-v5");
     expect(result.scores.stockBoxScore).toBeGreaterThan(70);
     expect(result.scores.methodology.personalizedWeights).not.toEqual(result.scores.methodology.sectorWeights);
@@ -204,6 +204,27 @@ describe("analyzeFinancials", () => {
     ]));
   });
 
+  it("keeps a current high supporting-metric conflict non-blocking while reducing confidence", () => {
+    const datedInput = datedDurableInput();
+    const clean = analyzeFinancials(datedInput);
+    const latestPeriodEnd = datedInput.annualPeriods.at(-1)?.periodEndDate ?? null;
+    const result = analyzeFinancials({
+      ...datedInput,
+      sourceConflicts: [{
+        metric: "costOfRevenue", periodEnd: latestPeriodEnd,
+        primaryProvider: "sec", secondaryProvider: "yahoo-fundamentals",
+        primaryValue: 400, secondaryValue: 800, relativeDifference: 0.5,
+        severity: "high", reason: "Cost-of-revenue definitions differ materially.",
+      }],
+    });
+    expect(result.dataStatus).not.toBe("unavailable");
+    expect(result.scores.stockBoxScore).not.toBeNull();
+    expect(result.scores.confidence).toBeLessThan(clean.scores.confidence);
+    expect(result.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sourceConflict", severity: "medium" }),
+    ]));
+  });
+
   it("blocks a material disagreement affecting the latest financial period", () => {
     const result = analyzeFinancials({
       ...durableCompounderInput,
@@ -291,6 +312,25 @@ describe("analyzeFinancials", () => {
     expect(result.missingData).toEqual(expect.arrayContaining([
       expect.objectContaining({ field: "sourceConflict", severity: "medium" }),
     ]));
+  });
+
+  it("does not stack repeated historical conflicts from the same metric and provider pair as independent risks", () => {
+    const datedInput = datedDurableInput();
+    const conflict = (periodEnd: string) => ({
+      metric: "totalDebt", periodEnd,
+      primaryProvider: "sec", secondaryProvider: "yahoo-fundamentals",
+      primaryValue: 190, secondaryValue: 250, relativeDifference: 0.24,
+      severity: "high" as const, reason: "Historical provider debt values differ materially.",
+    });
+    const single = analyzeFinancials({ ...datedInput, sourceConflicts: [conflict("2022-12-31")] });
+    const repeated = analyzeFinancials({
+      ...datedInput,
+      sourceConflicts: [conflict("2020-12-31"), conflict("2021-12-31"), conflict("2022-12-31")],
+    });
+    expect(repeated.dataStatus).not.toBe("unavailable");
+    expect(repeated.scores.stockBoxScore).not.toBeNull();
+    expect(repeated.scores.confidenceBreakdown.sourceConflict).toBe(single.scores.confidenceBreakdown.sourceConflict);
+    expect(repeated.scores.confidence).toBe(single.scores.confidence);
   });
 
   it("penalizes multiple historical high conflicts without blocking current SEC facts", () => {

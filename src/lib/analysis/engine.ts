@@ -164,6 +164,9 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
       sharesOutstanding: input.market.sharesOutstanding,
       sharesOutstandingAsOf: input.market.sharesOutstandingAsOf ?? input.market.date,
       beta: input.market.beta,
+      betaBenchmark: input.market.betaBenchmark,
+      betaMethod: input.market.betaMethod,
+      betaObservationCount: input.market.betaObservationCount,
       provider: input.market.provider,
       pricePerformance: {
         oneMonth: input.market.performance["1M"] ?? null,

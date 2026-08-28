@@ -163,25 +163,25 @@ function deriveWacc(input: FinancialAnalysisInput, metrics: FinancialMetrics) {
   const riskFree = isFiniteNumber(configuredRiskFree) ? configuredRiskFree : 0.04;
   assumptions.riskFreeRate = assumption(
     riskFree,
-    isFiniteNumber(configuredRiskFree) ? "Analysis configuration" : "StockBox configured fallback",
+    isFiniteNumber(configuredRiskFree) ? "Analysis configuration" : "StockBox versioned policy",
     analysisAsOf,
-    isFiniteNumber(configuredRiskFree) ? "configured" : "fallback",
+    isFiniteNumber(configuredRiskFree) ? "configured" : "policy",
   );
   const configuredErp = input.dcfAssumptions?.equityRiskPremium;
   const erp = isFiniteNumber(configuredErp) ? configuredErp : 0.05;
   assumptions.equityRiskPremium = assumption(
     erp,
-    isFiniteNumber(configuredErp) ? "Analysis configuration" : "StockBox configured fallback",
+    isFiniteNumber(configuredErp) ? "Analysis configuration" : "StockBox versioned policy",
     analysisAsOf,
-    isFiniteNumber(configuredErp) ? "configured" : "fallback",
+    isFiniteNumber(configuredErp) ? "configured" : "policy",
   );
   const configuredCountryRisk = input.dcfAssumptions?.countryRiskPremium;
   const countryRisk = isFiniteNumber(configuredCountryRisk) ? configuredCountryRisk : 0;
   assumptions.countryRiskPremium = assumption(
     countryRisk,
-    isFiniteNumber(configuredCountryRisk) ? "Analysis configuration" : "StockBox configured fallback",
+    isFiniteNumber(configuredCountryRisk) ? "Analysis configuration" : "StockBox versioned policy",
     analysisAsOf,
-    isFiniteNumber(configuredCountryRisk) ? "configured" : "fallback",
+    isFiniteNumber(configuredCountryRisk) ? "configured" : "policy",
   );
   const beta = isFiniteNumber(input.market?.beta) ? input.market.beta : 1;
   assumptions.beta = assumption(
@@ -190,9 +190,9 @@ function deriveWacc(input: FinancialAnalysisInput, metrics: FinancialMetrics) {
     input.market?.priceDate ?? analysisAsOf,
     isFiniteNumber(input.market?.beta) ? "market_sourced" : "fallback",
   );
-  if (!isFiniteNumber(configuredRiskFree)) notes.push("Fallback risk-free rate: 4.0%.");
-  if (!isFiniteNumber(configuredErp)) notes.push("Fallback equity risk premium: 5.0%.");
-  if (!isFiniteNumber(configuredCountryRisk)) notes.push("Fallback country risk premium: 0.0%.");
+  if (!isFiniteNumber(configuredRiskFree)) notes.push("StockBox policy risk-free rate: 4.0%.");
+  if (!isFiniteNumber(configuredErp)) notes.push("StockBox policy equity risk premium: 5.0%.");
+  if (!isFiniteNumber(configuredCountryRisk)) notes.push("StockBox policy country risk premium: 0.0%.");
   if (!isFiniteNumber(input.market?.beta)) notes.push("Fallback beta: 1.0.");
   const interest = metrics.latestPeriod?.interestExpense;
   const observedDebtCost = isFiniteNumber(interest) && debt > 0 ? Math.abs(interest) / debt : null;
@@ -442,7 +442,7 @@ export function computeDcfRange(
     return unavailable("unavailable", archetype === "cyclical" ? "Normalized FCFF DCF" : "FCFF DCF", "A valid discount rate could not be established.", currency, missingData);
   }
   const terminalGrowth = clamp(input.dcfAssumptions?.terminalGrowthRate ?? 0.025, 0, Math.min(0.03, effectiveDiscountRate - 0.015));
-  if (!isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate)) assumptionNotes.push("Fallback terminal growth: 2.5%, capped below WACC and 3.0%.");
+  if (!isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate)) assumptionNotes.push("StockBox policy terminal growth: 2.5%, capped below WACC and 3.0%.");
   const baseGrowth = clamp(startGrowth, -0.1, maxGrowth);
   const boundedGrowthRates = customGrowthRates?.slice(0, forecastYears).map((growth) => clamp(growth, -0.2, maxGrowth));
   const discountRate = clamp(effectiveDiscountRate, 0.06, 0.18);
@@ -515,9 +515,9 @@ export function computeDcfRange(
     ),
     forecastYears: assumption(
       forecastYears,
-      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "Analysis configuration" : "StockBox configured forecast horizon",
+      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "Analysis configuration" : "StockBox versioned forecast policy",
       input.analysisDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "configured" : "fallback",
+      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "configured" : "policy",
     ),
     discountRate: assumption(
       discountRate,
@@ -527,9 +527,9 @@ export function computeDcfRange(
     ),
     terminalGrowthRate: assumption(
       terminalGrowth,
-      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "Analysis configuration" : "StockBox configured fallback",
+      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "Analysis configuration" : "StockBox versioned terminal-growth policy",
       input.analysisDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "configured" : "fallback",
+      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "configured" : "policy",
     ),
     nearTermGrowth: assumption(
       baseGrowth,

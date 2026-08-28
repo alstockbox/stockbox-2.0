@@ -132,11 +132,12 @@ export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: F
     freshnessCheck("market_cap_freshness", "Market cap", freshness.marketCapStatus),
     freshnessCheck("shares_outstanding_freshness", "Current shares outstanding", freshness.sharesOutstandingStatus),
   );
-  if (input.sourceConflicts?.length) {
+  const unresolvedSourceConflicts = (input.sourceConflicts ?? []).filter((conflict) => !conflict.resolved);
+  if (unresolvedSourceConflicts.length) {
     checks.push({
       code: "provider_source_conflict",
       status: "warning",
-      message: `${input.sourceConflicts.length} material provider source conflict(s) require review.`,
+      message: `${unresolvedSourceConflicts.length} material provider source conflict(s) require review.`,
     });
   }
   const classification = input.company.classificationDiagnostics;
