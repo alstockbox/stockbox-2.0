@@ -12,7 +12,7 @@ export default async function ResetPasswordPage() {
   const copy = getP0Copy(locale).auth;
   return (
     <AuthShell title={copy.resetTitle} copy={copy.resetCopy} alternate={<Link href="/dashboard" className="text-[#e1cb95]">{copy.continueDashboard}</Link>}>
-      <AuthForm action={updatePasswordAction} submitLabel={copy.updatePassword} email={false} passwordLabel={copy.password} workingLabel={copy.working} locale={locale} />
+      <AuthForm action={updatePasswordAction} submitLabel={copy.updatePassword} email={false} passwordLabel={copy.password} passwordMode="new" passwordHint={copy.strongPasswordRequirement} workingLabel={copy.working} locale={locale} />
     </AuthShell>
   );
 }
