@@ -22,11 +22,13 @@ describe("affiliate attribution persistence", () => {
     expect(source).toContain("self_referral");
     expect(source).toContain("first_touch_preserved");
   });
-  it("provisions an affiliate identity when ambassador access is granted", () => {
+
+  it("keeps one affiliate identity while ambassador settings change", () => {
     const source = sql();
     expect(source).toContain("insert into public.affiliates");
+    expect(source).toContain("on conflict (user_id) do update");
     expect(source).toContain("commission_basis_points");
-    expect(source).toContain("affiliate_ambassador_granted");
+    expect(source).toContain("set_affiliate_ambassador_access");
     expect(source).toContain("set status = 'inactive'");
   });
 });

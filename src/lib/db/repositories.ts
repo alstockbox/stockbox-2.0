@@ -318,7 +318,25 @@ export async function getBatchEntitlement(input: {
     return { allowed: true, configured: true, plan: "elite", rowLimit: 50 };
   }
   if (input.isAffiliateAmbassador) {
-    return { allowed: true, configured: true, plan: "affiliate_ambassador", rowLimit: 50 };
+    const supabase = createAdminClient();
+    if (!supabase) {
+      return { allowed: true, configured: false, plan: "affiliate_ambassador", rowLimit: 50 };
+    }
+    const { data, error } = await supabase
+      .from("ambassador_entitlements")
+      .select("batch_rows")
+      .eq("user_id", input.userId)
+      .single();
+    if (error || !data) {
+      await logApplicationError({
+        service: "ambassador-entitlements",
+        message: "Ambassador entitlement row missing; using historical fallback.",
+        userId: input.userId,
+      });
+      return { allowed: true, configured: true, plan: "affiliate_ambassador", rowLimit: 50 };
+    }
+    const rowLimit = Math.min(Math.max(Number(data.batch_rows) || 0, 0), 50);
+    return { allowed: rowLimit > 0, configured: true, plan: "affiliate_ambassador", rowLimit };
   }
 
   const supabase = createAdminClient();

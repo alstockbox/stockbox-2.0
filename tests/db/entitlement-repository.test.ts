@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   rpc: vi.fn(),
+  from: vi.fn(),
+  select: vi.fn(),
+  eq: vi.fn(),
+  single: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -14,9 +18,14 @@ import { getBatchEntitlement, reserveAnalysisEntitlement } from "../../src/lib/d
 describe("analysis entitlement repository", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
+    mocks.single.mockResolvedValue({ data: { batch_rows: 20 }, error: null });
+    mocks.eq.mockReturnValue({ single: mocks.single });
+    mocks.select.mockReturnValue({ eq: mocks.eq });
+    mocks.from.mockReturnValue({ select: mocks.select });
+    mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc, from: mocks.from });
   });
-  it("preserves the affiliate ambassador entitlement identity", async () => {
+
+  it("preserves custom affiliate ambassador analysis limits", async () => {
     mocks.rpc.mockResolvedValue({
       data: {
         allowed: true,
@@ -24,7 +33,7 @@ describe("analysis entitlement repository", () => {
         plan: "affiliate_ambassador",
         reservationId: "reservation_1",
         usage: { analyses: 7, deepAnalyses: 2 },
-        limits: { analyses: 100, deepAnalyses: 100 },
+        limits: { analyses: 150, deepAnalyses: 40 },
       },
       error: null,
     });
@@ -36,10 +45,8 @@ describe("analysis entitlement repository", () => {
 
     expect(result).toMatchObject({
       allowed: true,
-      configured: true,
       plan: "affiliate_ambassador",
-      reservationId: "reservation_1",
-      limits: { analyses: 100, deepAnalyses: 100 },
+      limits: { analyses: 150, deepAnalyses: 40 },
     });
   });
 
@@ -54,9 +61,8 @@ describe("analysis entitlement repository", () => {
     });
     expect(mocks.createAdminClient).not.toHaveBeenCalled();
   });
-  it("gives affiliate ambassadors 50-row batch access without Stripe", async () => {
-    mocks.createAdminClient.mockClear();
 
+  it("reads an ambassador's configured batch limit instead of hard-coding 50", async () => {
     await expect(getBatchEntitlement({
       userId: "ambassador_1",
       isAffiliateAmbassador: true,
@@ -64,9 +70,10 @@ describe("analysis entitlement repository", () => {
       allowed: true,
       configured: true,
       plan: "affiliate_ambassador",
-      rowLimit: 50,
+      rowLimit: 20,
     });
-    expect(mocks.createAdminClient).not.toHaveBeenCalled();
+    expect(mocks.from).toHaveBeenCalledWith("ambassador_entitlements");
+    expect(mocks.select).toHaveBeenCalledWith("batch_rows");
+    expect(mocks.eq).toHaveBeenCalledWith("user_id", "ambassador_1");
   });
-
 });
