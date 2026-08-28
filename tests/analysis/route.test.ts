@@ -260,6 +260,18 @@ describe("analysis API authentication and entitlement enforcement", () => {
     mocks.sendStrongBuyAlert.mockResolvedValue(undefined);
   });
 
+  it("denies anonymous malformed analysis requests before validation details are exposed", async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+    const request = new Request("http://localhost/api/analysis", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Sign in to run an analysis." });
+    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
+    expect(mocks.searchCompanies).not.toHaveBeenCalled();
+  });
+
   it("denies anonymous analysis before provider calls or persistence", async () => {
     mocks.getCurrentUser.mockResolvedValue(null);
 
@@ -587,39 +599,33 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.analyzeCompany).not.toHaveBeenCalled();
   });
 
-  it("allows admin analyses without quota reservations", async () => {
-    mocks.getCurrentUser.mockResolvedValue({
-      id: "admin_1",
-      email: "owner@stockbox.test",
-      role: "admin"
-    });
-    mocks.reserveAnalysisEntitlement.mockResolvedValue(
-      deniedEntitlement("free", "deep")
-    );
+  it.each<AnalysisType>(["summary", "numbers", "deep", "research"])(
+    "keeps admin quota-exempt for %s analyses",
+    async (analysisType) => {
+      mocks.getCurrentUser.mockResolvedValue({
+        id: "admin_1",
+        email: "owner@stockbox.test",
+        role: "admin"
+      });
+      mocks.reserveAnalysisEntitlement.mockResolvedValue(
+        deniedEntitlement("free", analysisType)
+      );
 
-    const response = await POST(analysisRequest("deep"));
-    const payload = await response.json();
+      const response = await POST(analysisRequest(analysisType));
+      const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.data.adminQa).toBeDefined();
-    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
-    expect(mocks.analyzeCompany).toHaveBeenCalledWith(
-      expect.objectContaining({ analysisType: "deep" })
-    );
-    expect(mocks.persistAnalysis).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "admin_1",
-      rawProviderWarnings: []
-    }));
-    expect(mocks.recordUsageEvent).toHaveBeenCalledWith({
-      userId: "admin_1",
-      event: "analysis_completed",
-      metadata: {
-        ticker: "BOX",
-        score: 88,
-        recommendation: "Buy"
-      }
-    });
-  });
+      expect(response.status).toBe(200);
+      expect(payload.data.adminQa).toBeDefined();
+      expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
+      expect(mocks.analyzeCompany).toHaveBeenCalledWith(
+        expect.objectContaining({ analysisType })
+      );
+      expect(mocks.persistAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+        userId: "admin_1",
+        rawProviderWarnings: []
+      }));
+    }
+  );
 
   it("does not expose Admin QA diagnostics in a customer response", async () => {
     const response = await POST(analysisRequest());
@@ -655,12 +661,13 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.recordUsageEvent).toHaveBeenCalledWith({
       userId: "user_1",
       event: "analysis_failed",
-      metadata: { ticker: "BOX", error: "upstream provider secret: token=internal-debug-value" }
+      metadata: { ticker: "BOX", errorCode: "provider_unavailable" }
     });
+    expect(JSON.stringify(mocks.recordUsageEvent.mock.calls)).not.toContain("internal-debug-value");
   });
 
   it("releases the quota reservation when the provider throws unexpectedly", async () => {
-    mocks.analyzeCompany.mockRejectedValue(new Error("provider crashed unexpectedly"));
+    mocks.analyzeCompany.mockRejectedValue(new Error("provider crashed unexpectedly token=super-secret-provider-token"));
 
     const response = await POST(analysisRequest("research"));
     const payload = await response.json();
@@ -678,11 +685,12 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.recordUsageEvent).toHaveBeenCalledWith({
       userId: "user_1",
       event: "analysis_failed",
-      metadata: { ticker: "BOX", error: "provider crashed unexpectedly" }
+      metadata: { ticker: "BOX", errorCode: "analysis_exception" }
     });
+    expect(JSON.stringify(mocks.recordUsageEvent.mock.calls)).not.toContain("super-secret-provider-token");
     expect(mocks.logApplicationError).toHaveBeenCalledWith({
       service: "analysis-api",
-      message: "provider crashed unexpectedly",
+      message: "provider crashed unexpectedly token=[redacted]",
       userId: "user_1",
       context: { ticker: "BOX", stage: "analysis" }
     });
@@ -719,7 +727,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.recordUsageEvent).toHaveBeenCalledWith({
       userId: "user_1",
       event: "analysis_failed",
-      metadata: { ticker: "BOX", error: "database unavailable" }
+      metadata: { ticker: "BOX", errorCode: "persistence_failed" }
     });
     expect(mocks.captureServerEvent).toHaveBeenCalledWith("analysis_failed", {
       userId: "user_1",
@@ -754,7 +762,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.recordUsageEvent).toHaveBeenCalledWith({
       userId: "user_1",
       event: "analysis_failed",
-      metadata: { ticker: "BOX", error: "database connection crashed" }
+      metadata: { ticker: "BOX", errorCode: "persistence_exception" }
     });
     expect(mocks.logApplicationError).toHaveBeenCalledWith({
       service: "analysis-api",

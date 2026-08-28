@@ -4,12 +4,13 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   getBillingReadiness: vi.fn(),
   getStripe: vi.fn(),
-  getUserSubscription: vi.fn()
+  getUserSubscription: vi.fn(),
+  requireUser: vi.fn()
 }));
 
 vi.mock("@/lib/analytics/events", () => ({ captureServerEvent: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({
-  requireUser: vi.fn(async () => ({ id: "user_1", email: "user@example.com", role: "customer" }))
+  requireUser: mocks.requireUser
 }));
 vi.mock("@/lib/billing/readiness", async () => {
   const actual = await vi.importActual<typeof import("@/lib/billing/readiness")>(
@@ -67,6 +68,8 @@ describe("Basic checkout flow", () => {
     mocks.getBillingReadiness.mockReset();
     mocks.getStripe.mockReset();
     mocks.getUserSubscription.mockReset();
+    mocks.requireUser.mockReset();
+    mocks.requireUser.mockResolvedValue({ id: "user_1", email: "user@example.com", role: "customer" });
     mocks.createSession.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
     mocks.getBillingReadiness.mockReturnValue({
       checkoutReady: true,
@@ -77,6 +80,18 @@ describe("Basic checkout flow", () => {
       missingVariables: []
     });
     mocks.getStripe.mockReturnValue({ checkout: { sessions: { create: mocks.createSession } } });
+  });
+
+  it("requires authentication before malformed checkout validation details are exposed", async () => {
+    const authRedirect = new Error("AUTH_REDIRECT");
+    mocks.requireUser.mockRejectedValue(authRedirect);
+    const request = new Request("http://localhost/api/stripe/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    });
+    await expect(POST(request)).rejects.toBe(authRedirect);
+    expect(mocks.getBillingReadiness).not.toHaveBeenCalled();
+    expect(mocks.getUserSubscription).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
   it("opens Checkout for a Free user", async () => {
@@ -115,7 +130,8 @@ describe("Basic checkout flow", () => {
       subscription_data: {
         metadata: {
           userId: "user_1",
-          plan: "basic"
+          plan: "basic",
+          offer: "basic_launch_3_months"
         }
       }
     });
@@ -149,6 +165,31 @@ describe("Basic checkout flow", () => {
       expect(params).toHaveProperty("customer_email", "user@example.com");
     }
   );
+
+  it("does not reapply the launch coupon after a previous Basic subscription redeemed it", async () => {
+    mocks.getUserSubscription.mockResolvedValue({
+      ok: true,
+      subscription: {
+        planKey: "basic",
+        status: "canceled",
+        stripeCustomerId: "cus_historical",
+        stripeSubscriptionId: "sub_historical",
+        currentPeriodEnd: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+        cancelAtPeriodEnd: false,
+        cancelAt: null,
+        launchOfferRedeemedAt: "2026-08-01T00:00:00.000Z"
+      }
+    });
+
+    const response = await POST(checkoutRequest());
+
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toBeUndefined();
+    expect(params.metadata).toMatchObject({ offer: "none" });
+    expect(params.subscription_data?.metadata).toMatchObject({ offer: "none" });
+  });
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);

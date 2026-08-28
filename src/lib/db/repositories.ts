@@ -18,7 +18,7 @@ type AnalysisEntitlementResult = {
 export type BatchEntitlementResult = {
   allowed: boolean;
   configured: boolean;
-  plan: PlanKey;
+  plan: EntitlementPlanKey;
   rowLimit: number;
 };
 
@@ -185,6 +185,27 @@ export async function getBatchQaResults(batchId: string, rerunKey: string) {
   return { ok: true as const, data: results };
 }
 
+export async function getUserAnalysisHistory(input: {
+  userId: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false as const, error: "Supabase admin client is not configured.", data: [], count: 0 };
+  const page = Math.max(1, Math.floor(input.page ?? 1));
+  const pageSize = Math.min(50, Math.max(1, Math.floor(input.pageSize ?? 20)));
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await supabase
+    .from("analyses")
+    .select("id,ticker,company_name,recommendation,score,confidence,created_at", { count: "exact" })
+    .eq("user_id", input.userId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+  if (error) return { ok: false as const, error: error.message, data: [], count: 0 };
+  return { ok: true as const, data: data ?? [], count: count ?? 0, page, pageSize };
+}
+
 export async function getAnalysis(id: string, userId: string) {
   const supabase = createAdminClient();
   if (!supabase) return null;
@@ -242,9 +263,13 @@ export async function logApplicationError(input: {
 export async function getBatchEntitlement(input: {
   userId: string;
   isAdmin?: boolean;
+  isAffiliateAmbassador?: boolean;
 }): Promise<BatchEntitlementResult> {
   if (input.isAdmin) {
     return { allowed: true, configured: true, plan: "elite", rowLimit: 50 };
+  }
+  if (input.isAffiliateAmbassador) {
+    return { allowed: true, configured: true, plan: "affiliate_ambassador", rowLimit: 50 };
   }
 
   const supabase = createAdminClient();

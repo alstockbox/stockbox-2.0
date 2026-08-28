@@ -7,6 +7,9 @@ export type UserSubscription = {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  cancelAt: string | null;
+  launchOfferRedeemedAt: string | null;
   createdAt: string | null;
 };
 
@@ -45,6 +48,13 @@ export function subscriptionBillingState(
   return "free";
 }
 
+export function scheduledSubscriptionEnd(
+  subscription: UserSubscription | null
+): string | null {
+  if (!subscription?.cancelAtPeriodEnd) return null;
+  return subscription.cancelAt ?? subscription.currentPeriodEnd;
+}
+
 export function reusableStripeCustomerId(
   subscription: UserSubscription | null
 ): string | null {
@@ -78,7 +88,7 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionL
   const { data, error } = await supabase
     .from("subscriptions")
     .select(
-      "plan_key,status,stripe_customer_id,stripe_subscription_id,current_period_end,created_at"
+      "plan_key,status,stripe_customer_id,stripe_subscription_id,current_period_end,cancel_at_period_end,cancel_at,launch_offer_redeemed_at,created_at"
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -102,6 +112,9 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionL
       stripeCustomerId: data.stripe_customer_id,
       stripeSubscriptionId: data.stripe_subscription_id,
       currentPeriodEnd: data.current_period_end,
+      cancelAtPeriodEnd: data.cancel_at_period_end === true,
+      cancelAt: data.cancel_at,
+      launchOfferRedeemedAt: data.launch_offer_redeemed_at,
       createdAt: data.created_at
     }
   };

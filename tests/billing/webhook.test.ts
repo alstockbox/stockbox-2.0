@@ -112,6 +112,24 @@ describe("Stripe subscription webhook", () => {
     );
   });
 
+  it("persists scheduled cancellation and launch-offer redemption through the ordered RPC", async () => {
+    const response = await deliver(subscription({
+      metadata: { userId: "user_1", plan: "basic", offer: "basic_launch_3_months" },
+      cancel_at_period_end: true,
+      cancel_at: 1_800_000_000,
+    }), "customer.subscription.updated");
+
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "sync_subscription_from_stripe",
+      expect.objectContaining({
+        p_cancel_at_period_end: true,
+        p_cancel_at: new Date(1_800_000_000 * 1000).toISOString(),
+        p_launch_offer_redeemed: true,
+      })
+    );
+  });
+
   it("maps customer.subscription.deleted to canceled", async () => {
     const response = await deliver(
       subscription({ status: "active" }),

@@ -34,6 +34,15 @@ describe("Stripe webhook ordering", () => {
     expect(sql).toContain("stale_subscription");
   });
 
+  it("persists subscription lifecycle and one-time launch-offer state atomically", () => {
+    const sql = migrationSql();
+    expect(sql).toContain("cancel_at_period_end");
+    expect(sql).toContain("cancel_at");
+    expect(sql).toContain("launch_offer_redeemed_at");
+    expect(sql).toContain("p_cancel_at_period_end");
+    expect(sql).toContain("p_launch_offer_redeemed");
+  });
+
   it("routes event ordering metadata through the atomic RPC", () => {
     const route = readFileSync(
       join(process.cwd(), "src/app/api/stripe/webhook/route.ts"),

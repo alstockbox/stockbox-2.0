@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/auth/session", () => ({
+  requireUser: vi.fn(async () => ({
+    id: "user_1",
+    email: "user@stockbox.test",
+    role: "customer"
+  }))
+}));
+
 import { POST } from "../../src/app/api/stripe/checkout/route";
 
 describe("Stripe checkout plan gate", () => {

@@ -14,6 +14,7 @@ import {
 } from "@/lib/billing/readiness";
 import {
   getUserSubscription,
+  scheduledSubscriptionEnd,
   subscriptionBillingState
 } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
@@ -60,7 +61,10 @@ export default async function BillingPage() {
   const status = hasStripeBasic
     ? localizedSubscriptionStatus(subscriptionLookup.subscription?.status ?? "active", copy)
     : copy.active;
-  const nextBillingDate = hasStripeBasic
+  const scheduledEnd = hasStripeBasic
+    ? scheduledSubscriptionEnd(subscriptionLookup.subscription)
+    : null;
+  const nextBillingDate = hasStripeBasic && !scheduledEnd
     ? subscriptionLookup.subscription?.currentPeriodEnd
     : null;
   const portalEnabled = Boolean(getServerEnv().STRIPE_RESTRICTED_KEY);
@@ -97,7 +101,12 @@ export default async function BillingPage() {
             </div>
           </div>
 
-          {nextBillingDate ? (
+          {scheduledEnd ? (
+            <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-5 text-sm text-amber-200">
+              <CalendarDays className="h-4 w-4 text-[#e1cb95]" aria-hidden="true" />
+              {copy.subscriptionEnds}: {formatBillingDate(scheduledEnd, locale)}
+            </div>
+          ) : nextBillingDate ? (
             <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-5 text-sm text-[#c9d2df]">
               <CalendarDays className="h-4 w-4 text-[#e1cb95]" aria-hidden="true" />
               {copy.nextBillingDate}: {formatBillingDate(nextBillingDate, locale)}

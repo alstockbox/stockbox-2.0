@@ -72,6 +72,11 @@ async function syncSubscription(
   const currentPeriodEnd = firstItem?.current_period_end
     ? new Date(firstItem.current_period_end * 1000).toISOString()
     : null;
+  const cancelAtPeriodEnd = subscription.cancel_at_period_end === true;
+  const cancelAt = subscription.cancel_at
+    ? new Date(subscription.cancel_at * 1000).toISOString()
+    : null;
+  const launchOfferRedeemed = subscription.metadata.offer === "basic_launch_3_months";
 
   const { data, error } = await supabase.rpc("sync_subscription_from_stripe", {
     p_user_id: userId,
@@ -84,7 +89,10 @@ async function syncSubscription(
     p_stripe_price_id: priceId ?? null,
     p_plan_key: plan.key,
     p_status: status,
-    p_current_period_end: currentPeriodEnd
+    p_current_period_end: currentPeriodEnd,
+    p_cancel_at_period_end: cancelAtPeriodEnd,
+    p_cancel_at: cancelAt,
+    p_launch_offer_redeemed: launchOfferRedeemed
   });
 
   if (error) {

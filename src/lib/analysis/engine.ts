@@ -595,6 +595,7 @@ export function presentAnalysisReport(
     reportSchemaVersion: result.reportSchemaVersion,
     analysisArchetype: result.analysisArchetype,
     dataCoverage: result.dataCoverage,
+    reportingCurrency: canonicalInput.company.reportingCurrency ?? canonicalInput.company.currency ?? null,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,
     dataStatus: result.dataStatus,
     confidenceBreakdown: result.confidenceBreakdown,

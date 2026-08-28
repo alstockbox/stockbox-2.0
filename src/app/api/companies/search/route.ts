@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   }
 
   const companies = await searchCompanies(query.data);
-  captureServerEvent("company_searched", { query: query.data, resultCount: companies.length });
+  captureServerEvent("company_searched", { queryLength: query.data.length, resultCount: companies.length });
 
   return Response.json({ companies });
 }

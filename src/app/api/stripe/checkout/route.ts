@@ -21,6 +21,7 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
+  const user = await requireUser();
   const body = schema.safeParse(await request.json().catch(() => null));
   if (!body.success) return Response.json({ error: "Invalid plan." }, { status: 422 });
 
@@ -41,7 +42,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const user = await requireUser();
   const subscriptionLookup = await getUserSubscription(user.id);
   if (!subscriptionLookup.ok) {
     return Response.json(
@@ -71,9 +71,14 @@ export async function POST(request: Request) {
   const stripe = getStripe();
   const env = getServerEnv();
   const priceId = plan.stripeEnv ? env[plan.stripeEnv] : null;
-  const couponId = plan.launchOffer ? env[plan.launchOffer.stripeCouponEnv] : null;
+  const launchOfferAvailable = Boolean(
+    plan.launchOffer && !subscriptionLookup.subscription?.launchOfferRedeemedAt
+  );
+  const couponId = launchOfferAvailable && plan.launchOffer
+    ? env[plan.launchOffer.stripeCouponEnv]
+    : null;
 
-  if (!stripe || !priceId || (plan.launchOffer && !couponId)) {
+  if (!stripe || !priceId || (launchOfferAvailable && !couponId)) {
     reportBillingReadiness(getBillingReadiness(env));
     return Response.json(
       { error: SUBSCRIPTIONS_UNAVAILABLE_MESSAGE },
@@ -82,6 +87,7 @@ export async function POST(request: Request) {
   }
 
   const stripeCustomerId = reusableStripeCustomerId(subscriptionLookup.subscription);
+  const offer = launchOfferAvailable ? "basic_launch_3_months" : "none";
 
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
@@ -96,12 +102,13 @@ export async function POST(request: Request) {
     metadata: {
       userId: user.id,
       plan: plan.key,
-      offer: plan.launchOffer ? "basic_launch_3_months" : "none"
+      offer
     },
     subscription_data: {
       metadata: {
         userId: user.id,
-        plan: plan.key
+        plan: plan.key,
+        offer
       }
     }
   };

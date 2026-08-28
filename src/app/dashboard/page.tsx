@@ -5,7 +5,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getUserSubscription, subscriptionBillingState } from "@/lib/billing/subscriptions";
-import { createClient } from "@/lib/supabase/server";
+import { getUserAnalysisHistory } from "@/lib/db/repositories";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import { getLocale } from "@/lib/i18n/server";
 
@@ -14,14 +14,14 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const [user, locale] = await Promise.all([getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).dashboard;
-  const supabase = user ? await createClient() : null;
-  const [analysesResult, subscriptionLookup] = await Promise.all([
-    supabase
-      ? supabase.from("analyses").select("id,ticker,company_name,recommendation,score,confidence,created_at").order("created_at", { ascending: false }).limit(8)
-      : Promise.resolve({ data: [] }),
+  const [historyResult, subscriptionLookup] = await Promise.all([
+    user
+      ? getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 8 })
+      : Promise.resolve({ ok: true as const, data: [], count: 0 }),
     user ? getUserSubscription(user.id) : Promise.resolve(null)
   ]);
-  const analyses = analysesResult.data;
+  const analyses = historyResult.ok ? historyResult.data : [];
+  const savedAnalysisCount = historyResult.ok ? historyResult.count : 0;
   const billingState = subscriptionLookup?.ok
     ? subscriptionBillingState(subscriptionLookup.subscription)
     : null;
@@ -47,7 +47,7 @@ export default async function DashboardPage() {
         ) : (
           <>
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              <Card><BarChart3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.savedAnalyses}</p><p className="number mt-1 text-3xl font-semibold">{analyses?.length ?? 0}</p></Card>
+              <Card><BarChart3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.savedAnalyses}</p><p className="number mt-1 text-3xl font-semibold">{savedAnalysisCount}</p><Link href="/history" className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{locale === "sv" ? "Visa alla" : "View all"}</Link></Card>
               <Card><Clock3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.currentAccess}</p><p className="mt-1 text-xl font-semibold">{planLabel}</p><Link href={billingState === "basic" || billingState === "basic_manage" ? "/settings/billing" : "/pricing"} className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{billingState === "basic_manage" ? copy.resolveBilling : billingState === "basic" ? copy.managePlan : copy.viewPlans}</Link></Card>
               <Card><Search className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.defaultWorkflow}</p><p className="mt-1 text-xl font-semibold">{copy.workflow}</p></Card>
             </div>

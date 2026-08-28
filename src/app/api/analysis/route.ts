@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/repositories";
 import { sendStrongBuyAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
+import { publicDiagnosticCode, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse, RATE_LIMITS } from "@/lib/security/rate-limit";
 
 const requestSchema = z.object({
@@ -45,14 +46,14 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const body = requestSchema.safeParse(await request.json().catch(() => null));
-  if (!body.success) {
-    return Response.json({ error: "Invalid analysis request.", issues: body.error.flatten() }, { status: 422 });
-  }
-
   const user = await getCurrentUser();
   if (!user) {
     return Response.json({ error: "Sign in to run an analysis." }, { status: 401 });
+  }
+
+  const body = requestSchema.safeParse(await request.json().catch(() => null));
+  if (!body.success) {
+    return Response.json({ error: "Invalid analysis request.", issues: body.error.flatten() }, { status: 422 });
   }
 
   const rateLimit = await checkDistributedRateLimit(
@@ -113,7 +114,7 @@ export async function POST(request: Request) {
   });
 
   const result = await analyzeCompany({ ...body.data, company: canonicalCompany }).catch(async (error) => {
-    const message = error instanceof Error ? error.message : "Analysis failed unexpectedly.";
+    const message = sanitizeDiagnosticMessage(error, "Analysis failed unexpectedly.");
     if (quotaReservationId) {
       await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
     }
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
     await recordUsageEvent({
       userId: user.id,
       event: "analysis_failed",
-      metadata: { ticker: canonicalCompany.ticker, error: message }
+      metadata: { ticker: canonicalCompany.ticker, errorCode: publicDiagnosticCode(error, "analysis_exception") }
     });
     captureServerEvent("analysis_failed", { userId: user.id, ticker: canonicalCompany.ticker });
     return null;
@@ -146,7 +147,7 @@ export async function POST(request: Request) {
     await recordUsageEvent({
       userId: user.id,
       event: "analysis_failed",
-      metadata: { ticker: canonicalCompany.ticker, error: result.error }
+      metadata: { ticker: canonicalCompany.ticker, errorCode: publicDiagnosticCode(result.error, "provider_unavailable") }
     });
     captureServerEvent("analysis_failed", { userId: user.id, ticker: canonicalCompany.ticker });
     return Response.json(
@@ -160,7 +161,7 @@ export async function POST(request: Request) {
     report: result.data,
     rawProviderWarnings: result.warnings
   }).catch(async (error) => {
-    const message = error instanceof Error ? error.message : "Analysis persistence failed unexpectedly.";
+    const message = sanitizeDiagnosticMessage(error, "Analysis persistence failed unexpectedly.");
     if (quotaReservationId) {
       await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
     }
@@ -173,7 +174,7 @@ export async function POST(request: Request) {
     await recordUsageEvent({
       userId: user.id,
       event: "analysis_failed",
-      metadata: { ticker: result.data.ticker, error: message }
+      metadata: { ticker: result.data.ticker, errorCode: publicDiagnosticCode(error, "persistence_exception") }
     });
     captureServerEvent("analysis_failed", { userId: user.id, ticker: result.data.ticker });
     return null;
@@ -192,19 +193,20 @@ export async function POST(request: Request) {
       await completeAnalysisReservation({ reservationId: quotaReservationId, analysisId: persisted.id });
     }
   } else {
+    const persistenceMessage = sanitizeDiagnosticMessage(persisted.error, "Analysis persistence failed.");
     if (quotaReservationId) {
       await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
     }
     await logApplicationError({
       service: "analysis-api",
-      message: persisted.error,
+      message: persistenceMessage,
       userId: user.id,
       context: { ticker: result.data.ticker }
     });
     await recordUsageEvent({
       userId: user.id,
       event: "analysis_failed",
-      metadata: { ticker: result.data.ticker, error: persisted.error }
+      metadata: { ticker: result.data.ticker, errorCode: publicDiagnosticCode(persisted.error, "persistence_failed") }
     });
     captureServerEvent("analysis_failed", { userId: user.id, ticker: result.data.ticker });
     return Response.json(
@@ -242,7 +244,7 @@ export async function POST(request: Request) {
   } catch (error) {
     await logApplicationError({
       service: "admin-alerts",
-      message: error instanceof Error ? error.message : "Strong Buy alert failed unexpectedly.",
+      message: sanitizeDiagnosticMessage(error, "Strong Buy alert failed unexpectedly."),
       userId: user.id,
       context: {
         ticker: result.data.ticker,

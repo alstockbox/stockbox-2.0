@@ -28,6 +28,18 @@ describe("company search API", () => {
     ]);
   });
 
+  it("does not send raw free-text search queries to analytics", async () => {
+    const sensitiveQuery = "person@example.com";
+    const response = await GET(searchRequest(sensitiveQuery, "203.0.113.61"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.captureServerEvent).toHaveBeenCalledWith("company_searched", {
+      queryLength: sensitiveQuery.length,
+      resultCount: 1,
+    });
+    expect(JSON.stringify(mocks.captureServerEvent.mock.calls)).not.toContain(sensitiveQuery);
+  });
+
   it("rate limits repeated public search before provider work", async () => {
     const responses: Response[] = [];
     for (let index = 0; index < 61; index += 1) {

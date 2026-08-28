@@ -378,6 +378,7 @@ export type AnalysisReport = {
   reportSchemaVersion?: string;
   analysisArchetype?: AnalysisArchetype;
   dataCoverage?: number;
+  reportingCurrency?: string | null;
   dataAsOf?: string | null;
   dataStatus?: DataStatus;
   confidenceBreakdown?: ConfidenceBreakdown;

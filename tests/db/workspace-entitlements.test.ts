@@ -24,4 +24,11 @@ describe("workspace entitlement enforcement", () => {
     expect(sql).toContain("portfolios");
     expect(sql).toContain("grant execute on function public.create_portfolio_with_entitlement");
   });
+
+  it("gives affiliate ambassadors an explicit Stripe-independent workspace package", () => {
+    expect(sql).toContain("if v_role = 'affiliate_ambassador' then");
+    expect(sql).toContain("'watchlistitems', 75");
+    expect(sql).toContain("'batchrows', 50");
+    expect(sql).toContain("'portfolios', 5");
+  });
 });

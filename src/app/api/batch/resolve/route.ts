@@ -19,16 +19,16 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return Response.json({ error: "Sign in to prepare a batch." }, { status: 401 });
+  }
   const body = requestSchema.safeParse(await request.json().catch(() => null));
   if (!body.success) {
     return Response.json(
       { error: `Enter between 1 and ${MAX_BATCH_ROWS} valid ticker symbols.`, issues: body.error.flatten() },
       { status: 422 },
     );
-  }
-  const user = await getCurrentUser();
-  if (!user) {
-    return Response.json({ error: "Sign in to prepare a batch." }, { status: 401 });
   }
 
   const rateLimit = await checkDistributedRateLimit(
@@ -42,6 +42,7 @@ export async function POST(request: Request) {
   const entitlement = await getBatchEntitlement({
     userId: user.id,
     isAdmin: user.role === "admin",
+    isAffiliateAmbassador: user.role === "affiliate_ambassador",
   });
   if (!entitlement.configured) {
     return Response.json({ error: "Batch entitlements are temporarily unavailable." }, { status: 503 });

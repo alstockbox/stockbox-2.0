@@ -42,6 +42,18 @@ describe("batch resolve API", () => {
     mocks.searchCompanies.mockResolvedValue([]);
   });
 
+  it("requires authentication before malformed batch validation details are exposed", async () => {
+    mocks.getCurrentUser.mockResolvedValue(null);
+    const request = new Request("http://localhost/api/batch/resolve", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Sign in to prepare a batch." });
+    expect(mocks.getBatchEntitlement).not.toHaveBeenCalled();
+    expect(mocks.searchCompanies).not.toHaveBeenCalled();
+  });
+
   it("requires authentication before company lookups", async () => {
     mocks.getCurrentUser.mockResolvedValue(null);
 
@@ -120,6 +132,29 @@ describe("batch resolve API", () => {
     expect(mocks.getBatchEntitlement).toHaveBeenCalledWith({
       userId: "user_1",
       isAdmin: false,
+      isAffiliateAmbassador: false,
+    });
+  });
+
+  it("passes affiliate ambassador entitlement identity to the repository", async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: "ambassador_1",
+      email: "ambassador@stockbox.test",
+      role: "affiliate_ambassador",
+    });
+    mocks.searchCompanies.mockResolvedValue([{
+      ticker: "AAPL", canonicalTicker: "AAPL", name: "Apple Inc.",
+      securityType: "Common Stock",
+      providerCapabilities: { fundamentals: true, marketData: true, providerIds: ["sec"] },
+    }]);
+
+    const response = await POST(batchRequest(["AAPL"]));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getBatchEntitlement).toHaveBeenCalledWith({
+      userId: "ambassador_1",
+      isAdmin: false,
+      isAffiliateAmbassador: true,
     });
   });
 

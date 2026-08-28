@@ -4,6 +4,7 @@ import {
   hasActiveBasicAccess,
   isCurrentBasicSubscription,
   reusableStripeCustomerId,
+  scheduledSubscriptionEnd,
   subscriptionBillingState,
   type UserSubscription
 } from "../../src/lib/billing/subscriptions";
@@ -15,6 +16,9 @@ function basicSubscription(status: string): UserSubscription {
     stripeCustomerId: "cus_test",
     stripeSubscriptionId: "sub_test",
     currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    cancelAt: null,
+    launchOfferRedeemedAt: null,
     createdAt: null
   };
 }
@@ -51,6 +55,18 @@ describe("subscription state", () => {
       expect(subscriptionBillingState(subscription)).toBe("free");
     }
   );
+
+  it("uses cancel_at first and period end as fallback for scheduled cancellation", () => {
+    const subscription = basicSubscription("active");
+    subscription.cancelAtPeriodEnd = true;
+    subscription.currentPeriodEnd = "2026-09-30T00:00:00.000Z";
+    subscription.cancelAt = "2026-09-28T00:00:00.000Z";
+    expect(scheduledSubscriptionEnd(subscription)).toBe("2026-09-28T00:00:00.000Z");
+    subscription.cancelAt = null;
+    expect(scheduledSubscriptionEnd(subscription)).toBe("2026-09-30T00:00:00.000Z");
+    subscription.cancelAtPeriodEnd = false;
+    expect(scheduledSubscriptionEnd(subscription)).toBeNull();
+  });
 
   it("does not invent access for a missing subscription", () => {
     expect(hasActiveBasicAccess(null)).toBe(false);

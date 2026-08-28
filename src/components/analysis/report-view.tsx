@@ -20,9 +20,9 @@ function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<k
   };
 }
 
-function formatMetric(key: keyof Metrics, value: number | null, unavailable: string) {
+function formatMetric(key: keyof Metrics, value: number | null, unavailable: string, reportingCurrency?: string | null) {
   if (value === null) return unavailable;
-  if (["fcf", "netDebt"].includes(key)) return formatCompactCurrency(value);
+  if (["fcf", "netDebt"].includes(key)) return formatCompactCurrency(value, reportingCurrency ?? undefined);
   if (
     [
       "revenueGrowth1y",
@@ -232,7 +232,7 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
             <div key={key} className="rounded-md border border-white/10 bg-white/5 p-3">
               <p className="text-xs text-[#9aa7b8]">{displayedMetricLabels[key]}</p>
               <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
-                {formatMetric(key, report.metrics[key], copy.unavailable)}
+                {formatMetric(key, report.metrics[key], copy.unavailable, report.reportingCurrency)}
               </p>
               {report.metrics[key] === null && engine ? (
                 <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">
