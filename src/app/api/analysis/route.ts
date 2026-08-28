@@ -55,9 +55,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Sign in to run an analysis." }, { status: 401 });
   }
 
+  const analysisRateLimit = user.role === "admin" ? RATE_LIMITS.adminAnalysis : RATE_LIMITS.analysis;
   const rateLimit = await checkDistributedRateLimit(
     clientRateLimitKey(request, "analysis", user.id),
-    RATE_LIMITS.analysis
+    analysisRateLimit
   );
   if (!rateLimit.allowed) {
     return rateLimitExceededResponse(rateLimit);

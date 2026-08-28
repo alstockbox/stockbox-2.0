@@ -831,6 +831,24 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.persistAnalysis).toHaveBeenCalledTimes(80);
   });
 
+  it("allows admin QA traffic beyond the customer limiter without removing rate limiting", async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: "admin_batch_rate_user",
+      email: "owner@stockbox.test",
+      role: "admin"
+    });
+
+    const responses: Response[] = [];
+    for (let index = 0; index < 81; index += 1) {
+      responses.push(await POST(analysisRequest()));
+    }
+
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect(mocks.analyzeCompany).toHaveBeenCalledTimes(81);
+    expect(mocks.persistAnalysis).toHaveBeenCalledTimes(81);
+    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
+  });
+
   it("does not let concurrent calls bypass reservation denial", async () => {
     mocks.reserveAnalysisEntitlement
       .mockResolvedValueOnce(allowedEntitlement("free", "reservation-a"))

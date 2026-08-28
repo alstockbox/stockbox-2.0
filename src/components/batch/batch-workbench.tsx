@@ -52,7 +52,7 @@ type ResolvePayload = {
 type AnalysisPayload =
   | { ok: true; data: AnalysisReport; persisted: boolean; warnings: string[] }
   | { ok: false; error: string; warnings?: string[] }
-  | { error: string };
+  | { error: string; entitlement?: unknown };
 const terminalStatuses = new Set<BatchStatus>([
   "completed",
   "failed",
@@ -207,15 +207,20 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           continue;
         }
 
+        if (response.status === 429) {
+          const limitMessage = "entitlement" in payload && payload.entitlement
+            ? copy.monthlyLimit
+            : copy.rateLimited;
+          updateRow(candidate.input, { status: "failed", error: limitMessage });
+          setError(limitMessage);
+          break;
+        }
+
         const message =
           locale === "en" && "error" in payload
             ? payload.error
             : copy.saveFailed;
         updateRow(candidate.input, { status: "failed", error: message });
-        if (response.status === 429) {
-          setError(copy.monthlyLimit);
-          break;
-        }
       } catch {
         updateRow(candidate.input, {
           status: "failed",

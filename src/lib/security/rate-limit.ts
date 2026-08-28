@@ -26,6 +26,7 @@ type HeaderReader = {
 export const RATE_LIMITS = {
   authAction: { limit: 10, windowMs: 10 * 60 * 1000 },
   analysis: { limit: 80, windowMs: 10 * 60 * 1000 },
+  adminAnalysis: { limit: 400, windowMs: 10 * 60 * 1000 },
   batchResolve: { limit: 30, windowMs: 10 * 60 * 1000 },
   companySearch: { limit: 60, windowMs: 60 * 1000 },
   share: { limit: 30, windowMs: 10 * 60 * 1000 },
