@@ -10,10 +10,6 @@ set launch_offer_redeemed_at = coalesce(launch_offer_redeemed_at, created_at)
 where plan_key = 'basic'
   and stripe_subscription_id is not null;
 
-drop function if exists public.sync_subscription_from_stripe(
-  uuid, text, bigint, text, text, bigint, text, text, text, text, timestamptz
-);
-
 alter table public.subscriptions
   add column if not exists stripe_subscription_created bigint,
   add column if not exists last_stripe_event_id text,
@@ -177,6 +173,51 @@ revoke all on function public.sync_subscription_from_stripe(
 ) from public, anon, authenticated;
 grant execute on function public.sync_subscription_from_stripe(
   uuid, text, bigint, text, text, bigint, text, text, text, text, timestamptz, boolean, timestamptz, boolean
+) to service_role;
+
+create or replace function public.sync_subscription_from_stripe(
+  p_user_id uuid,
+  p_event_id text,
+  p_event_created bigint,
+  p_event_type text,
+  p_stripe_subscription_id text,
+  p_subscription_created bigint,
+  p_stripe_customer_id text,
+  p_stripe_price_id text,
+  p_plan_key text,
+  p_status text,
+  p_current_period_end timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cancel_at_period_end boolean := false;
+  v_cancel_at timestamptz := null;
+  v_launch_offer_redeemed boolean := false;
+begin
+  select coalesce(cancel_at_period_end, false), cancel_at,
+         launch_offer_redeemed_at is not null
+    into v_cancel_at_period_end, v_cancel_at, v_launch_offer_redeemed
+  from public.subscriptions
+  where user_id = p_user_id;
+
+  return public.sync_subscription_from_stripe(
+    p_user_id, p_event_id, p_event_created, p_event_type,
+    p_stripe_subscription_id, p_subscription_created,
+    p_stripe_customer_id, p_stripe_price_id, p_plan_key, p_status,
+    p_current_period_end, v_cancel_at_period_end, v_cancel_at,
+    v_launch_offer_redeemed
+  );
+end;
+$$;
+
+revoke all on function public.sync_subscription_from_stripe(
+  uuid, text, bigint, text, text, bigint, text, text, text, text, timestamptz
+) from public, anon, authenticated;
+grant execute on function public.sync_subscription_from_stripe(
+  uuid, text, bigint, text, text, bigint, text, text, text, text, timestamptz
 ) to service_role;
 
 commit;

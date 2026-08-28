@@ -55,4 +55,16 @@ describe("Stripe webhook ordering", () => {
     expect(route).toContain("event.id");
     expect(route).toContain("event.created");
   });
+  it("keeps the legacy webhook RPC signature as a rollout-safe compatibility wrapper", () => {
+    const latest = readFileSync(
+      join(process.cwd(), "supabase/migrations/20260828130000_subscription_lifecycle_and_launch_offer.sql"),
+      "utf8"
+    ).replace(/\s+/g, " ").toLowerCase();
+    expect(latest).not.toContain("drop function if exists public.sync_subscription_from_stripe");
+    expect(latest.match(/create or replace function public\.sync_subscription_from_stripe/g)?.length).toBe(2);
+    expect(latest).toContain("v_cancel_at_period_end");
+    expect(latest).toContain("v_launch_offer_redeemed");
+    expect(latest).toContain("return public.sync_subscription_from_stripe(");
+  });
+
 });
