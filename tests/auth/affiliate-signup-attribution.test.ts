@@ -27,7 +27,7 @@ import { signUpAction } from "../../src/lib/auth/actions";
 function signupData() {
   const data = new FormData();
   data.set("email", "new@stockbox.test");
-  data.set("password", "password123");
+  data.set("password", "StrongPass123!");
   return data;
 }
 

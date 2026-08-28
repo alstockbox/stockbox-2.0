@@ -13,6 +13,12 @@ import { getP0Copy } from "@/lib/i18n/p0-copy";
 
 const emailSchema = z.string().email();
 const passwordSchema = z.string().min(8);
+const newPasswordSchema = z.string()
+  .min(12)
+  .regex(/[a-z]/)
+  .regex(/[A-Z]/)
+  .regex(/[0-9]/)
+  .regex(/[^A-Za-z0-9]/);
 
 export type AuthActionState = {
   ok: boolean;
@@ -93,10 +99,13 @@ export async function signUpAction(
   if (!isSupabaseConfigured()) return disabledState(copy);
 
   const email = emailSchema.safeParse(formData.get("email"));
-  const password = passwordSchema.safeParse(formData.get("password"));
+  const password = newPasswordSchema.safeParse(formData.get("password"));
 
-  if (!email.success || !password.success) {
-    return { ok: false, message: copy.invalidCredentialsInput };
+  if (!email.success) {
+    return { ok: false, message: copy.invalidEmail };
+  }
+  if (!password.success) {
+    return { ok: false, message: copy.strongPasswordRequirement };
   }
 
   const rateLimit = await checkAuthActionRateLimit("auth-sign-up", copy, email.data);
@@ -175,8 +184,8 @@ export async function updatePasswordAction(
   const copy = authActionCopy(formData);
   if (!isSupabaseConfigured()) return disabledState(copy);
 
-  const password = passwordSchema.safeParse(formData.get("password"));
-  if (!password.success) return { ok: false, message: copy.invalidPassword };
+  const password = newPasswordSchema.safeParse(formData.get("password"));
+  if (!password.success) return { ok: false, message: copy.strongPasswordRequirement };
 
   const rateLimit = await checkAuthActionRateLimit("auth-password-update", copy);
   if (rateLimit) return rateLimit;

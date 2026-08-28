@@ -78,7 +78,7 @@ describe("auth actions", () => {
     for (let index = 0; index < 11; index += 1) {
       await signUpAction(
         { ok: false, message: "" },
-        formData({ email: "signup-rate@stockbox.test", password: "password123" }),
+        formData({ email: "signup-rate@stockbox.test", password: "StrongPass123!" }),
       );
     }
 
@@ -100,11 +100,52 @@ describe("auth actions", () => {
     for (let index = 0; index < 11; index += 1) {
       await updatePasswordAction(
         { ok: false, message: "" },
-        formData({ password: "password123" }),
+        formData({ password: "StrongPass123!" }),
       );
     }
 
     expect(mocks.updateUser).toHaveBeenCalledTimes(10);
+  });
+
+  it("rejects weak new passwords at sign-up before Supabase auth work", async () => {
+    mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.51" }));
+    const result = await signUpAction(
+      { ok: false, message: "" },
+      formData({ email: "new-user@stockbox.test", password: "password123" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
+    });
+    expect(mocks.signUp).not.toHaveBeenCalled();
+  });
+
+  it("rejects weak replacement passwords before updating the user", async () => {
+    mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.52" }));
+    const result = await updatePasswordAction(
+      { ok: false, message: "" },
+      formData({ locale: "sv", password: "Password123" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Använd minst 12 tecken med stor bokstav, liten bokstav, siffra och symbol.",
+    });
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps existing eight-character passwords eligible for sign-in", async () => {
+    mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "198.51.100.53" }));
+    await signInAction(
+      { ok: false, message: "" },
+      formData({ email: "existing@stockbox.test", password: "oldpass8" }),
+    );
+
+    expect(mocks.signInWithPassword).toHaveBeenCalledWith({
+      email: "existing@stockbox.test",
+      password: "oldpass8",
+    });
   });
 
   it("returns localized Swedish validation messages without changing auth behavior", async () => {

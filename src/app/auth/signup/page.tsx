@@ -12,7 +12,7 @@ export default async function SignupPage() {
   const copy = getP0Copy(locale).auth;
   return (
     <AuthShell title={copy.signupTitle} copy={copy.signupCopy} alternate={<>{copy.alreadyAccount} <Link href="/auth/login" className="text-[#e1cb95]">{copy.login}</Link>.</>}>
-      <AuthForm action={signUpAction} submitLabel={copy.signup} emailLabel={copy.email} passwordLabel={copy.password} workingLabel={copy.working} locale={locale} />
+      <AuthForm action={signUpAction} submitLabel={copy.signup} emailLabel={copy.email} passwordLabel={copy.password} passwordMode="new" passwordHint={copy.strongPasswordRequirement} workingLabel={copy.working} locale={locale} />
     </AuthShell>
   );
 }
