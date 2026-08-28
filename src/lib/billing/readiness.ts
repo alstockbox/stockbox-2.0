@@ -1,4 +1,5 @@
 import { getServerEnv, type ServerEnv } from "@/lib/env/server";
+import { getLegalCommerceReadiness, type LegalCommerceVariable } from "@/lib/legal/commerce";
 
 export const SUBSCRIPTIONS_UNAVAILABLE_MESSAGE =
   "Subscriptions are temporarily unavailable. Please try again shortly.";
@@ -8,7 +9,8 @@ export type BillingEnvironmentVariable =
   | "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
   | "STRIPE_RESTRICTED_KEY"
   | "STRIPE_PRICE_BASIC_MONTHLY"
-  | "STRIPE_COUPON_BASIC_LAUNCH";
+  | "STRIPE_COUPON_BASIC_LAUNCH"
+  | LegalCommerceVariable;
 
 export type BillingReadiness = {
   checkoutReady: boolean;
@@ -16,6 +18,7 @@ export type BillingReadiness = {
   restrictedKeyPresent: boolean;
   basicPricePresent: boolean;
   launchCouponPresent: boolean;
+  legalCommerceReady: boolean;
   missingVariables: BillingEnvironmentVariable[];
 };
 
@@ -25,6 +28,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
   const restrictedKeyPresent = Boolean(env.STRIPE_RESTRICTED_KEY);
   const basicPricePresent = Boolean(env.STRIPE_PRICE_BASIC_MONTHLY);
   const launchCouponPresent = Boolean(env.STRIPE_COUPON_BASIC_LAUNCH);
+  const legalReadiness = getLegalCommerceReadiness(env);
   const missingVariables: BillingEnvironmentVariable[] = [];
 
   if (!supabaseUrlPresent) missingVariables.push("NEXT_PUBLIC_SUPABASE_URL");
@@ -32,6 +36,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
   if (!restrictedKeyPresent) missingVariables.push("STRIPE_RESTRICTED_KEY");
   if (!basicPricePresent) missingVariables.push("STRIPE_PRICE_BASIC_MONTHLY");
   if (!launchCouponPresent) missingVariables.push("STRIPE_COUPON_BASIC_LAUNCH");
+  missingVariables.push(...legalReadiness.missingVariables);
 
   return {
     checkoutReady: missingVariables.length === 0,
@@ -39,6 +44,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
     restrictedKeyPresent,
     basicPricePresent,
     launchCouponPresent,
+    legalCommerceReady: legalReadiness.ready,
     missingVariables
   };
 }
@@ -55,6 +61,7 @@ export function reportBillingReadiness(
     restrictedKeyPresent: readiness.restrictedKeyPresent,
     basicPricePresent: readiness.basicPricePresent,
     launchCouponPresent: readiness.launchCouponPresent,
+    legalCommerceReady: readiness.legalCommerceReady,
     missingVariables: readiness.missingVariables
   });
 }

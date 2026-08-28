@@ -92,6 +92,9 @@ export async function POST(request: Request) {
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
+    ...(env.LEGAL_VAT_MODE === "vat_registered"
+      ? { automatic_tax: { enabled: true } }
+      : {}),
     success_url: `${env.NEXT_PUBLIC_APP_URL}/settings/billing?checkout=success`,
     cancel_url: `${env.NEXT_PUBLIC_APP_URL}/pricing?checkout=cancelled`,
     ...(stripeCustomerId

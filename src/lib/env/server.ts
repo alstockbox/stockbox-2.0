@@ -45,6 +45,13 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional().or(z.literal("")),
   ADMIN_ALERT_EMAIL: z.string().email().optional().or(z.literal("")),
   FROM_EMAIL: z.string().email().optional().or(z.literal("")),
+  LEGAL_BUSINESS_NAME: z.string().trim().optional().or(z.literal("")),
+  LEGAL_ORGANIZATION_NUMBER: z.string().trim().optional().or(z.literal("")),
+  LEGAL_POSTAL_ADDRESS: z.string().trim().optional().or(z.literal("")),
+  LEGAL_SUPPORT_EMAIL: z.string().trim().email().optional().or(z.literal("")),
+  LEGAL_SUPPORT_PHONE: z.string().trim().optional().or(z.literal("")),
+  LEGAL_VAT_MODE: z.enum(["small_business_exempt", "vat_registered"]).optional().or(z.literal("")),
+  LEGAL_VAT_NUMBER: z.string().trim().optional().or(z.literal("")),
   NEXT_PUBLIC_POSTHOG_KEY: z.string().optional().or(z.literal("")),
   NEXT_PUBLIC_POSTHOG_HOST: z
     .string()
