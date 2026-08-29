@@ -20,7 +20,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 1. Create a production Supabase project.
 2. Store project URL, anon key, service-role key, and database connection values in the deployment environment.
-3. Apply all database migrations in order through `20260829125157_atomic_ambassador_role_affiliate.sql`. Production is currently synchronized through this version. This includes affiliate operations, click attribution/custom ambassador quotas, payout hardening/clawbacks, and atomic ambassador role/profile management.
+3. Apply all database migrations in order through `20260829135927_release_fk_indexes.sql`. Production is currently synchronized through this version. This includes affiliate operations, click attribution/custom ambassador quotas, payout hardening/clawbacks, and atomic ambassador role/profile management.
 4. Enable RLS on user-owned tables and write explicit policies.
 5. Configure Auth site URL and redirect URLs for production and preview domains.
 6. Configure email/SMTP settings if Supabase default emails are not acceptable.

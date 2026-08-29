@@ -25,10 +25,12 @@ Current date: August 29, 2026. Release deadline: August 31, 2026.
 
 ## Required release gates
 
-- [x] Local release gate passes on the current working tree: 97/97 test files and 806/806 tests, TypeScript typecheck, ESLint with zero errors/warnings, Next.js production build, `git diff --check`, and local production smoke checks for public/auth-protected routes. Re-run the same gate on the final release commit after production-only configuration changes.
+- [x] Local release gate passes on the current working tree: 98/98 test files and 808/808 tests, TypeScript typecheck, ESLint with zero errors/warnings, Next.js production build, `git diff --check`, and local production smoke checks for public/auth-protected routes. Re-run the same gate on the final release commit after production-only configuration changes.
 - [x] Run the diagnostic pre-batch live gauntlet and review entity, currency, provenance, specialist-data and recommendation safety; 22/22 diagnostic issuers completed with safe fail-closed behavior. This was not the official 25-company calibration batch.
-- [x] Production migration history is synchronized through `20260829125157_atomic_ambassador_role_affiliate.sql`; new affiliate tables/columns exist with RLS enabled and authenticated roles are denied execution of privileged affiliate/payout/ambassador RPCs while `service_role` retains execution.
+- [x] Production migration history is synchronized through `20260829135927_release_fk_indexes.sql`; new affiliate tables/columns exist with RLS enabled and authenticated roles are denied execution of privileged affiliate/payout/ambassador RPCs while `service_role` retains execution.
+- [x] Production affiliate runtime probes pass without persistent QA data: ambassador entitlement returns the configured 100-analysis limit, atomic customer-to-ambassador role/profile mutation works inside a rolled-back transaction, and payout queuing fails closed with `not_enabled` before Stripe Connect onboarding.
 - [x] Production RLS runtime probe confirms user A cannot read user B profile, analyses, watchlist or portfolio; authenticated users cannot execute admin, Stripe-sync, workspace-entitlement or distributed-rate-limit service RPCs.
+- [ ] Configure Supabase for the Vercel release preview: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are required to remove the account-unavailable fallback; include `SUPABASE_SERVICE_ROLE_KEY` for full authenticated/server-side preview QA, then redeploy the release branch.
 - [ ] Verify signup, email confirmation, login, logout and password recovery against production Auth.
 - [ ] Verify Summary, Numbers and Deep reports against several real issuers, unsupported securities, stale market data, cross-currency data and missing-data cases.
 - [x] Complete English/Swedish localization for P0 operational UI strings. Canonical engine-generated financial narrative/diagnostic terminology remains English to avoid semantic drift.
