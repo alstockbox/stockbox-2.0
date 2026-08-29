@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildAffiliateConnectAccountParams,
+  buildIndividualAffiliateConnectUpdateParams,
   isAffiliateConnectReady,
+  shouldNormalizeAffiliateConnectAccount,
 } from "@/lib/affiliate/connect";
 
 const route = readFileSync(join(process.cwd(), "src/app/api/affiliate/connect/route.ts"), "utf8");
@@ -16,6 +18,17 @@ describe("Stripe Connect affiliate onboarding", () => {
     expect(params.controller?.requirement_collection).toBe("stripe");
     expect(params.controller?.stripe_dashboard?.type).toBe("express");
     expect(params.capabilities?.transfers?.requested).toBe(true);
+    expect(params.business_type).toBe("individual");
+    expect(params.business_profile?.product_description).toContain("referral commission");
+  });
+
+  it("normalizes incomplete legacy company accounts to individual", () => {
+    expect(shouldNormalizeAffiliateConnectAccount({ business_type: "company", details_submitted: false })).toBe(true);
+    expect(shouldNormalizeAffiliateConnectAccount({ business_type: "individual", details_submitted: false })).toBe(false);
+    expect(shouldNormalizeAffiliateConnectAccount({ business_type: "company", details_submitted: true })).toBe(false);
+    const update = buildIndividualAffiliateConnectUpdateParams();
+    expect(update.business_type).toBe("individual");
+    expect(update.business_profile?.product_description).toContain("referral commission");
   });
 
   it("enables payouts only when transfers and external payouts are active", () => {
@@ -31,5 +44,7 @@ describe("Stripe Connect affiliate onboarding", () => {
     expect(route).toContain("accountLinks.create");
     expect(route).toContain("payout_enabled");
     expect(route).toContain("stripe_connect_account_id");
+    expect(route).toContain("shouldNormalizeAffiliateConnectAccount");
+    expect(route).toContain("stripe.accounts.update");
   });
 });

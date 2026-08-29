@@ -79,7 +79,7 @@ export default async function AffiliatePage({ searchParams }: PageProps) {
           <div className="text-left sm:text-right">
             <p className="text-xs uppercase tracking-[0.14em] text-[#7f8b9b]">Lifetime earnings</p>
             <p className="number mt-1 text-3xl font-semibold text-[#f4efe5]">{money(metrics.lifetimeEarningsCents)}</p>
-            <p className="mt-1 text-xs text-[#9aa7b8]">{data.commissionPercent}% commission · {data.status}</p>
+            <p className="mt-1 text-xs text-[#9aa7b8]">{data.commissionPercent}% commission on sales excluding VAT/tax | {data.status}</p>
           </div>
         </div>
 

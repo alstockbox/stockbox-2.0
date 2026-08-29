@@ -1,9 +1,20 @@
+import type Stripe from "stripe";
+
 export type CommissionStatus =
   | "pending"
   | "approved"
   | "payable"
   | "paid"
   | "reversed";
+
+export function commissionableInvoiceAmountCents(
+  invoice: Pick<Stripe.Invoice, "amount_paid" | "total_excluding_tax">
+) {
+  const paid = Number.isFinite(invoice.amount_paid) ? Math.max(0, Math.floor(invoice.amount_paid)) : 0;
+  const pretax = invoice.total_excluding_tax;
+  if (paid <= 0 || pretax === null || !Number.isFinite(pretax)) return 0;
+  return Math.min(paid, Math.max(0, Math.floor(pretax)));
+}
 
 export function calculateCommissionCents(amountPaidCents: number, basisPoints: number) {
   if (!Number.isFinite(amountPaidCents) || !Number.isFinite(basisPoints)) return 0;

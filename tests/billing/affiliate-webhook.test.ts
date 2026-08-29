@@ -40,7 +40,7 @@ describe("affiliate billing webhooks", () => {
 
   it("creates one commission from a paid subscription invoice", async () => {
     const invoice = {
-      id: "in_paid_1", amount_paid: 7900, currency: "sek",
+      id: "in_paid_1", amount_paid: 7900, total_excluding_tax: 6320, currency: "sek",
       parent: {
         type: "subscription_details", quote_details: null,
         subscription_details: {
@@ -59,6 +59,7 @@ describe("affiliate billing webhooks", () => {
       p_stripe_subscription_id: "sub_1",
       p_stripe_payment_intent_id: "pi_1",
       p_gross_amount_cents: 7900,
+      p_commissionable_amount_cents: 6320,
       p_currency: "sek",
       p_paid_at: expect.any(String),
     });

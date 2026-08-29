@@ -7,6 +7,10 @@ export function buildAffiliateConnectAccountParams(input: {
 }): Stripe.AccountCreateParams {
   return {
     email: input.email ?? undefined,
+    business_type: "individual",
+    business_profile: {
+      product_description: "Individual affiliate receiving referral commission payouts from StockBox.",
+    },
     controller: {
       fees: { payer: "application" },
       losses: { payments: "application" },
@@ -21,6 +25,21 @@ export function buildAffiliateConnectAccountParams(input: {
       stockboxAffiliateId: input.affiliateId,
     },
   };
+}
+
+export function buildIndividualAffiliateConnectUpdateParams(): Stripe.AccountUpdateParams {
+  return {
+    business_type: "individual",
+    business_profile: {
+      product_description: "Individual affiliate receiving referral commission payouts from StockBox.",
+    },
+  };
+}
+
+export function shouldNormalizeAffiliateConnectAccount(
+  account: Pick<Stripe.Account, "business_type" | "details_submitted">
+) {
+  return account.details_submitted !== true && account.business_type !== "individual";
 }
 
 export function isAffiliateConnectReady(

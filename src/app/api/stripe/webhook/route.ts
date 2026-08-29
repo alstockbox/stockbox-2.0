@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { captureServerEvent } from "@/lib/analytics/events";
+import { commissionableInvoiceAmountCents } from "@/lib/affiliate/commission";
 import { getPlanByStripePrice } from "@/lib/billing/plans";
 import { getStripe } from "@/lib/billing/stripe";
 import { getServerEnv } from "@/lib/env/server";
@@ -139,6 +140,8 @@ async function syncSubscription(
 async function recordAffiliateCommission(invoice: Stripe.Invoice, eventId: string, eventCreated: number) {
   const details = invoiceSubscriptionDetails(invoice);
   if (!details?.userId || invoice.amount_paid <= 0) return;
+  const commissionableAmountCents = commissionableInvoiceAmountCents(invoice);
+  if (commissionableAmountCents <= 0) return;
 
   const supabase = createAdminClient();
   if (!supabase) throw new Error("Supabase admin client is unavailable.");
@@ -150,6 +153,7 @@ async function recordAffiliateCommission(invoice: Stripe.Invoice, eventId: strin
     p_stripe_subscription_id: details.subscriptionId,
     p_stripe_payment_intent_id: invoicePaymentIntentId(invoice),
     p_gross_amount_cents: invoice.amount_paid,
+    p_commissionable_amount_cents: commissionableAmountCents,
     p_currency: invoice.currency.toLowerCase(),
     p_paid_at: new Date(paidAtSeconds * 1000).toISOString(),
   });

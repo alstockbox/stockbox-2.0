@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { NextResponse } from "next/server";
-import { buildAffiliateConnectAccountParams, isAffiliateConnectReady } from "@/lib/affiliate/connect";
+import { buildAffiliateConnectAccountParams, buildIndividualAffiliateConnectUpdateParams, isAffiliateConnectReady, shouldNormalizeAffiliateConnectAccount } from "@/lib/affiliate/connect";
 import { requireUser } from "@/lib/auth/session";
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import { getServerEnv } from "@/lib/env/server";
@@ -60,6 +60,12 @@ export async function POST() {
     let account: Stripe.Account;
     if (affiliate.stripe_connect_account_id) {
       account = await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
+      if (shouldNormalizeAffiliateConnectAccount(account)) {
+        account = await stripe.accounts.update(
+          account.id,
+          buildIndividualAffiliateConnectUpdateParams()
+        );
+      }
     } else {
       account = await stripe.accounts.create(buildAffiliateConnectAccountParams({
         userId: user.id,

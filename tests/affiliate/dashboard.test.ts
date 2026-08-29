@@ -14,6 +14,7 @@ describe("affiliate dashboard", () => {
     expect(page).toContain("Signups");
     expect(page).toContain("Paying customers");
     expect(page).toContain("Lifetime earnings");
+    expect(page).toContain("commission on sales excluding VAT/tax");
     expect(page).not.toContain("referred_email");
   });
 
