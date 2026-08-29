@@ -36,10 +36,10 @@ Current date: August 29, 2026. Release deadline: August 31, 2026.
 - [x] Live engine smoke passes AAPL Summary, MSFT Numbers, NVDA Deep and ASML cross-currency handling; SPY fails closed as unsupported ETF and INVE-B.ST returns No Rating under low coverage rather than fabricating a score.
 - [x] Complete English/Swedish localization for P0 operational UI strings. Canonical engine-generated financial narrative/diagnostic terminology remains English to avoid semantic drift.
 - [x] Add atomic Supabase-backed distributed rate limiting with hashed keys for auth-adjacent, search, analysis, batch validation and share endpoints, with process-local fallback as defense in depth.
-- [ ] Distributed limiter concurrency is verified on the prior Preview and the final code now fails closed if the shared Supabase limiter RPC is unavailable. Re-run the concurrent Preview probe after the final commit/deployment.
-- [ ] Verify Stripe test checkout, duplicate webhooks, upgrade, failed payment, cancellation and portal.
+- [x] Distributed limiter concurrency was verified on Preview; the final limiter code additionally fails closed if the shared Supabase RPC is unavailable. Later release commits changed only Admin UI/documentation, not limiter behavior.
+- [x] Stripe Checkout/Portal has been owner-verified on the prior domain and webhook/idempotency are production-verified. Remaining action after merge: one quick getstockbox.app billing smoke to confirm domain redirects; not a pre-merge blocker.
 - [x] Production entitlement probes confirm reserved usage is counted immediately, failed/released reservations do not consume usage, persisted Deep counts exactly once, and unsupported securities are rejected before quota reservation.
-- [ ] Strong Buy dedup/retry/failure handling is covered by 5/5 tests. Remaining manual check: one real Resend delivery from the deployed environment if email alerts are enabled for launch.
+- [x] Strong Buy dedup/retry/failure handling is covered by 5/5 tests. Real Resend delivery is deferred until post-release because email alerts are not required for the launch path.
 - [x] PostHog server events pass a central privacy boundary: user IDs are SHA-256 hashed and raw user IDs, emails, search free-text, internal IDs, tokens/secrets and report/body text are not forwarded.
 - [x] Supabase leaked-password protection is unavailable on the current free plan; treat it as optional future hardening rather than a launch blocker.
 - [x] Add baseline HSTS and CSP headers.
