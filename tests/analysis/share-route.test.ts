@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   analysesEq: vi.fn(),
   analysesSingle: vi.fn(),
   shareInsert: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock("@/lib/analytics/events", () => ({
@@ -52,7 +53,20 @@ describe("share API", () => {
     mocks.shareInsert.mockResolvedValue({ error: null });
 
     mocks.from.mockImplementation((table: string) => table === "analyses" ? analysesQuery : shareLinksQuery);
-    mocks.createAdminClient.mockReturnValue({ from: mocks.from });
+    let rateCount = 0;
+    mocks.rpc.mockImplementation(async () => {
+      rateCount += 1;
+      return {
+        data: {
+          allowed: rateCount <= 30,
+          remaining: Math.max(30 - rateCount, 0),
+          reset_at: "2026-08-29T18:00:00.000Z",
+          retry_after_seconds: rateCount <= 30 ? 0 : 60,
+        },
+        error: null,
+      };
+    });
+    mocks.createAdminClient.mockReturnValue({ from: mocks.from, rpc: mocks.rpc });
     mocks.getCurrentUser.mockResolvedValue({
       id: "share_rate_user",
       email: "share-rate@stockbox.test",

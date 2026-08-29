@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   redirect: vi.fn(),
   resetPasswordForEmail: vi.fn(),
+  rpc: vi.fn(),
   signInWithPassword: vi.fn(),
   signUp: vi.fn(),
   updateUser: vi.fn(),
@@ -50,7 +51,21 @@ describe("auth actions", () => {
     mocks.isSupabaseConfigured.mockReturnValue(true);
     mocks.signInWithPassword.mockResolvedValue({ error: { message: "Invalid login credentials" } });
     mocks.signUp.mockResolvedValue({ data: { user: null }, error: null });
-    mocks.createAdminClient.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: null, error: null }) });
+    const rateCounts = new Map<string, number>();
+    mocks.rpc.mockImplementation(async (fn: string, args: Record<string, unknown>) => {
+      if (fn === "consume_rate_limit") {
+        const key = String(args.p_key_hash);
+        const count = (rateCounts.get(key) ?? 0) + 1;
+        rateCounts.set(key, count);
+        const limit = Number(args.p_limit);
+        const allowed = count <= limit;
+        return { data: { allowed, remaining: Math.max(0, limit - count),
+          reset_at: "2026-08-29T16:00:00.000Z", retry_after_seconds: allowed ? 0 : 60 }, error: null };
+      }
+      if (fn === "record_affiliate_referral") return { data: { ok: true }, error: null };
+      return { data: null, error: null };
+    });
+    mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
     mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
     mocks.updateUser.mockResolvedValue({ error: null });
     mocks.createClient.mockResolvedValue({
@@ -92,8 +107,6 @@ describe("auth actions", () => {
 
   it("records first-touch affiliate attribution after successful signup", async () => {
     mocks.headers.mockResolvedValue(new Headers({ "x-forwarded-for": "203.0.113.77" }));
-    const rpc = vi.fn().mockResolvedValue({ data: { ok: true }, error: null });
-    mocks.createAdminClient.mockReturnValue({ rpc });
     mocks.signUp.mockResolvedValueOnce({ data: { user: { id: "11111111-1111-4111-8111-111111111111" } }, error: null });
 
     const result = await signUpAction(
@@ -102,7 +115,7 @@ describe("auth actions", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(rpc).toHaveBeenCalledWith("record_affiliate_referral", {
+    expect(mocks.rpc).toHaveBeenCalledWith("record_affiliate_referral", {
       p_referred_id: "11111111-1111-4111-8111-111111111111",
       p_code: "ARTHUR-01",
     });

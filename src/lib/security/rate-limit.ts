@@ -135,8 +135,15 @@ export async function checkDistributedRateLimit(
     if (!result) throw new Error("distributed limiter returned invalid data");
     return result;
   } catch {
-    console.error("Distributed rate limiter unavailable; using process-local fallback.");
-    return checkRateLimit(key, policy, now);
+    console.error("Distributed rate limiter unavailable; failing closed until the shared limiter recovers.");
+    const retryWindowMs = Math.min(policy.windowMs, 30_000);
+    return {
+      allowed: false,
+      limit: policy.limit,
+      remaining: 0,
+      resetAt: now + retryWindowMs,
+      retryAfterSeconds: Math.max(1, Math.ceil(retryWindowMs / 1000)),
+    };
   }
 }
 
