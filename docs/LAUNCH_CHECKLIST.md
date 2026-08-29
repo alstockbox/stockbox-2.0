@@ -31,7 +31,7 @@ Current date: August 29, 2026. Release deadline: August 31, 2026.
 - [x] Production affiliate runtime probes pass without persistent QA data: ambassador entitlement returns the configured 100-analysis limit, atomic customer-to-ambassador role/profile mutation works inside a rolled-back transaction, and payout queuing fails closed with `not_enabled` before Stripe Connect onboarding.
 - [x] Production RLS runtime probe confirms user A cannot read user B profile, analyses, watchlist or portfolio; authenticated users cannot execute admin, Stripe-sync, workspace-entitlement or distributed-rate-limit service RPCs.
 - [x] Vercel release Preview is configured with Supabase URL/publishable/server-side credentials; the account-unavailable fallback is gone and protected routes redirect anonymous users to login.
-- [ ] Production Auth automation passes signup creation + confirmation-email delivery, login, logout/session invalidation and recovery-email delivery. Remaining manual check: consume one real email-confirmation link in browser and finish the redirected onboarding flow.
+- [x] Production Auth passes signup creation, confirmation-email delivery/link consumption, login, logout/session invalidation and recovery-email delivery. Admin-created ambassador accounts are created with confirmed email and do not require a separate confirmation flow.
 - [x] Live engine smoke passes AAPL Summary, MSFT Numbers, NVDA Deep and ASML cross-currency handling; SPY fails closed as unsupported ETF and INVE-B.ST returns No Rating under low coverage rather than fabricating a score.
 - [x] Complete English/Swedish localization for P0 operational UI strings. Canonical engine-generated financial narrative/diagnostic terminology remains English to avoid semantic drift.
 - [x] Add atomic Supabase-backed distributed rate limiting with hashed keys for auth-adjacent, search, analysis, batch validation and share endpoints, with process-local fallback as defense in depth.
@@ -40,6 +40,7 @@ Current date: August 29, 2026. Release deadline: August 31, 2026.
 - [x] Production entitlement probes confirm reserved usage is counted immediately, failed/released reservations do not consume usage, persisted Deep counts exactly once, and unsupported securities are rejected before quota reservation.
 - [ ] Strong Buy dedup/retry/failure handling is covered by 5/5 tests. Remaining manual check: one real Resend delivery from the deployed environment if email alerts are enabled for launch.
 - [x] PostHog server events pass a central privacy boundary: user IDs are SHA-256 hashed and raw user IDs, emails, search free-text, internal IDs, tokens/secrets and report/body text are not forwarded.
+- [x] Supabase leaked-password protection is unavailable on the current free plan; treat it as optional future hardening rather than a launch blocker.
 - [x] Add baseline HSTS and CSP headers.
 - [x] Run dependency audit with no unresolved critical/high finding.
 - [ ] Validate CSP in production browser QA and complete final security review with no unresolved critical/high finding.

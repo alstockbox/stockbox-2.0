@@ -8,6 +8,8 @@ describe("admin ambassador operations UI", () => {
   it("includes the create ambassador workflow", () => {
     expect(page).toContain("AmbassadorCreateForm");
     expect(page).toContain("Add ambassador");
+    expect(page).toContain('href="#add-ambassador"');
+    expect(page).toContain(">+ Add ambassador<");
   });
 
   it("includes a safe affiliate dashboard preview", () => {

@@ -86,7 +86,7 @@ export default async function AdminPage() {
             ))}
           </div>
         </section>
-        <section className="mt-10">
+        <section id="add-ambassador" className="mt-10 scroll-mt-24">
           <div>
             <p className="text-sm font-semibold text-[#e1cb95]">Affiliate operations</p>
             <h2 className="serif mt-2 text-2xl font-semibold">Add ambassador</h2>
@@ -103,6 +103,7 @@ export default async function AdminPage() {
               <h2 className="text-lg font-semibold">Affiliate ambassadors</h2>
               <p className="mt-1 text-sm text-[#9aa7b8]">Change quota, commission or pause access. Preview opens a read-only admin view.</p>
             </div>
+            <Link href="#add-ambassador" className="inline-flex h-10 items-center justify-center rounded-md border border-[#e1cb95]/35 bg-[#e1cb95]/10 px-4 text-sm font-semibold text-[#f4e5b8] hover:bg-[#e1cb95]/15">+ Add ambassador</Link>
           </div>
           <div className="mt-4 space-y-3">
             {profiles.filter((profile) => profile.role === "affiliate_ambassador").map((profile) => {
