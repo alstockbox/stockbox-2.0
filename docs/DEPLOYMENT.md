@@ -1,9 +1,9 @@
 # StockBox 2.0 Deployment
 
-Current date: August 20, 2026
+Current date: August 29, 2026
 Release deadline: August 31, 2026
 
-Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts supplies filings, Twelve Data is the production market-data provider, Stooq is the explicit end-of-day fallback, news and AI are disabled, and Resend is the optional email adapter.
+Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts supplies filings. Production market data should use Twelve Data as the primary provider and Stooq as the explicitly configured end-of-day fallback; StockBox does not append an unconfigured market-data provider to that chain. Yahoo remains available only when explicitly selected/configured for market data, while Yahoo reported fundamentals may still supplement SEC fundamentals under the engine's provider-orchestration rules. News and AI are disabled, and Resend is the optional email adapter.
 
 ## P0 Deployment Principles
 
@@ -20,7 +20,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 1. Create a production Supabase project.
 2. Store project URL, anon key, service-role key, and database connection values in the deployment environment.
-3. Apply all database migrations, including `20260821020000_p0_billing_state.sql`.
+3. Apply all database migrations in order through `20260829125157_atomic_ambassador_role_affiliate.sql`. Production is currently synchronized through this version. This includes affiliate operations, click attribution/custom ambassador quotas, payout hardening/clawbacks, and atomic ambassador role/profile management.
 4. Enable RLS on user-owned tables and write explicit policies.
 5. Configure Auth site URL and redirect URLs for production and preview domains.
 6. Configure email/SMTP settings if Supabase default emails are not acceptable.
@@ -36,16 +36,16 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 1. Create the Basic recurring price at 79 SEK/month and a repeating three-month coupon that reduces the first three payments to 49 SEK/month. Keep Standard, Premium, and Elite unpriced and inactive.
 2. Configure checkout success/cancel URLs.
 3. Configure billing portal.
-4. Create production webhook endpoint for subscription, invoice, checkout, customer, and payment events.
-5. Store a least-privilege restricted server key, the Basic price ID, Basic launch coupon ID, and webhook signing secret in environment variables.
-6. Implement idempotent webhook handling and entitlement sync from Stripe events.
+4. Create the production webhook endpoint and subscribe at minimum to the subscription events used by entitlement sync plus `invoice.paid`, `charge.refunded`, and `charge.dispute.created` for the affiliate ledger.
+5. Enable Stripe Connect for affiliate payouts and complete the platform requirements needed to create connected accounts and transfers.
+6. Store a least-privilege restricted server key, the Basic price ID, Basic launch coupon ID, and webhook signing secret in environment variables.
 7. Verify in test mode before live mode:
-   - checkout starts;
-   - subscription activates;
+   - checkout starts and subscription activates;
    - credits/limits update;
-   - cancellation/downgrade updates access;
-   - duplicate webhook delivery does not duplicate credits;
-   - failed payment is reflected correctly.
+   - cancellation/downgrade and failed-payment recovery update access;
+   - duplicate/stale webhook delivery does not duplicate credits or affiliate commissions;
+   - a referral payment creates one commission, refund/chargeback reverses it, and an already-paid reversal becomes a future clawback;
+   - an ambassador completes Stripe-hosted Connect onboarding and a test payout reaches the expected connected account exactly once.
 
 ## PostHog Setup
 
@@ -115,7 +115,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 8. Hit free limit and see the correct paywall.
 9. Complete Stripe test/live penny checkout as approved by owner.
 10. Confirm webhook-driven entitlement update.
-11. Create share link and open it logged out.
+11. Confirm user-facing share creation remains hidden for v1 unless owner share-management/revocation UI is explicitly enabled and production-tested.
 12. Verify referral/affiliate attribution where enabled.
 13. Log in as admin and inspect user, analysis, provider, billing, error, and audit records.
 14. Cancel/manage subscription through billing portal.
@@ -135,5 +135,5 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 - Failed migrations or unverified RLS policies.
 - Stripe live mode not approved or webhooks not verified.
 - PostHog leaking sensitive data.
-- Production app cannot complete signup, analysis, upgrade, share, and admin smoke tests.
+- Production app cannot complete signup, analysis, workspace, upgrade, billing-management, and admin smoke tests.
 - Any P0 feature exposed but incomplete.

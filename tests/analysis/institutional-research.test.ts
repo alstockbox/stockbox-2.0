@@ -4,6 +4,7 @@ import {
   analyzeInsiderTransactions,
   buildAnalysis,
   buildBatchQaResult,
+  buildResearchResult,
   classifyMaterialNews,
   computeInflectionScore,
   type AnalysisInput,
@@ -67,5 +68,52 @@ describe("institutional research architecture", () => {
     expect(qa.rerunKey).toBe("daily-25:2026-08-23");
     expect(qa.flags).toContain("SPECIALIZED_DATA_MISSING");
     expect(qa.modelVersion).toBe(report.modelVersion);
+  });
+
+  it("links research signals only to sources relevant to their capability", () => {
+    const input = legacy("deep");
+    input.market = { ...input.market!, price: 13, yearLow: 12, yearHigh: 25, provider: "yahoo-chart" };
+    const report = buildAnalysis(input);
+    report.sources = [
+      {
+        name: "SEC Companyfacts",
+        url: "https://data.sec.gov/api/xbrl/companyfacts/CIK0000000000.json",
+        accessedAt: "2026-08-20T00:00:00.000Z",
+        freshness: "current",
+        provider: "sec-companyfacts",
+        capability: "fundamentals",
+        dataAsOf: "2025-12-31",
+        version: "sec-companyfacts-v1",
+      },
+      {
+        name: "Yahoo Chart",
+        url: "https://query1.finance.yahoo.com/v8/finance/chart/TEST",
+        accessedAt: "2026-08-20T00:00:00.000Z",
+        freshness: "current",
+        provider: "yahoo-chart",
+        capability: "market_data",
+        dataAsOf: "2026-08-20",
+        version: "yahoo-chart-v1",
+      },
+      {
+        name: "SEC Submissions",
+        url: "https://data.sec.gov/submissions/CIK0000000000.json",
+        accessedAt: "2026-08-20T00:00:00.000Z",
+        freshness: "current",
+        provider: "sec-submissions",
+        capability: "filings_events",
+        dataAsOf: "2026-08-19",
+        version: "sec-submissions-v1",
+      },
+    ];
+
+    const research = buildResearchResult(report, report.engine!, undefined, { market: input.market });
+    const qualitySignals = [...research.quality.positiveSignals, ...research.quality.negativeSignals];
+    const rangeSignal = [...research.opportunity.positiveSignals, ...research.opportunity.negativeSignals]
+      .find((signal) => signal.metric === "range");
+
+    expect(qualitySignals.length).toBeGreaterThan(0);
+    expect(qualitySignals.every((signal) => signal.evidenceIds.join(",") === "source-1")).toBe(true);
+    expect(rangeSignal?.evidenceIds).toEqual(["source-2"]);
   });
 });

@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
-  findExactBatchCompany,
   mapWithConcurrency,
   MAX_BATCH_ROWS,
   normalizeBatchSymbol,
 } from "@/lib/batch/input";
-import { supportsLiveFundamentals } from "@/components/analysis/analysis-workbench-state";
+import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { searchCompanies } from "@/lib/data/provider";
+import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
 import { getBatchEntitlement } from "@/lib/db/repositories";
+import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse, RATE_LIMITS } from "@/lib/security/rate-limit";
 
 const requestSchema = z.object({
   symbols: z
@@ -28,6 +29,14 @@ export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return Response.json({ error: "Sign in to prepare a batch." }, { status: 401 });
+  }
+
+  const rateLimit = await checkDistributedRateLimit(
+    clientRateLimitKey(request, "batch-resolve", user.id),
+    RATE_LIMITS.batchResolve
+  );
+  if (!rateLimit.allowed) {
+    return rateLimitExceededResponse(rateLimit);
   }
 
   const entitlement = await getBatchEntitlement({
@@ -53,15 +62,21 @@ export async function POST(request: Request) {
   }
   const items = await mapWithConcurrency(symbols, 4, async (symbol) => {
     try {
-      const company = findExactBatchCompany(symbol, await searchCompanies(symbol));
-      if (!company) {
+      const resolution = resolveCanonicalCompanySelection(
+        { ticker: symbol, canonicalTicker: symbol, name: symbol },
+        await searchCompanies(symbol),
+      );
+      if (!resolution.ok) {
         return {
           input: symbol,
-          status: "not_found" as const,
-          error: "No exact ticker match was found.",
+          status: resolution.reason === "ambiguous" ? "ambiguous" as const : "not_found" as const,
+          error: resolution.reason === "ambiguous"
+            ? "Multiple exact listings matched. Select a stable security identifier."
+            : "No exact ticker match was found.",
         };
       }
-      if (!supportsLiveFundamentals(company)) {
+      const company = resolution.company;
+      if (!supportsLiveFundamentalsSecurity(company)) {
         return {
           input: symbol,
           company,

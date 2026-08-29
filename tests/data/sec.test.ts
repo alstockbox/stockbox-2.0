@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/env/server", () => ({
   getSecUserAgent: mocks.getSecUserAgent,
+  isSupabaseConfigured: vi.fn(() => false),
   getServerEnv: vi.fn(() => ({ NEXT_PUBLIC_POSTHOG_KEY: "" }))
 }));
 

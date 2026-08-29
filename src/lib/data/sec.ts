@@ -215,6 +215,8 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
     operatingIncome,
     ebitda: operatingIncome !== null && depreciation !== null ? operatingIncome + depreciation : null,
     netIncome: value("netIncome"),
+    netIncomeCommonStockholders: value("netIncomeCommonStockholders"),
+    dilutedNetIncomeAvailableToCommon: value("dilutedNetIncomeAvailableToCommon"),
     pretaxIncome: value("pretaxIncome"),
     incomeTaxExpense: value("incomeTaxExpense"),
     epsDiluted: value("epsDiluted"),
@@ -245,14 +247,30 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
   };
 }
 
+const MAX_SHARE_SNAPSHOT_DISTANCE_DAYS = 95;
+
 function sharesForPeriod(maps: FactMaps, targetEnd: string, filingAccession?: string): ResolvedSecFact | undefined {
   const exact = factAt(maps.currentShares, targetEnd);
   if (exact) return exact;
-  if (!filingAccession) return undefined;
+
+  const targetTime = Date.parse(`${targetEnd}T00:00:00Z`);
+  if (!Number.isFinite(targetTime)) return undefined;
+
   return [...maps.currentShares.values()]
-    .filter((fact) => fact.accn === filingAccession)
-    .sort((left, right) => left.end.localeCompare(right.end))
-    .at(-1);
+    .flatMap((fact) => {
+      const factTime = Date.parse(`${fact.end}T00:00:00Z`);
+      if (!Number.isFinite(factTime)) return [];
+      const distanceDays = Math.abs(factTime - targetTime) / 86_400_000;
+      return distanceDays <= MAX_SHARE_SNAPSHOT_DISTANCE_DAYS
+        ? [{ fact, distanceDays, sameAccession: Boolean(filingAccession && fact.accn === filingAccession) }]
+        : [];
+    })
+    .sort((left, right) =>
+      left.distanceDays - right.distanceDays
+      || Number(right.sameAccession) - Number(left.sameAccession)
+      || right.fact.end.localeCompare(left.fact.end)
+    )
+    .at(0)?.fact;
 }
 
 function balanceSnapshotAt(maps: FactMaps, targetEnd: string, filingAccession?: string): Partial<FinancialPeriod> {
@@ -293,8 +311,8 @@ function balanceSnapshotAt(maps: FactMaps, targetEnd: string, filingAccession?: 
 }
 
 const TTM_FLOW_KEYS = [
-  "revenue", "costOfRevenue", "grossProfit", "operatingIncome", "netIncome", "pretaxIncome",
-  "incomeTaxExpense", "operatingCashFlow", "capitalExpenditures", "interestExpense",
+  "revenue", "costOfRevenue", "grossProfit", "operatingIncome", "netIncome",
+  "netIncomeCommonStockholders", "dilutedNetIncomeAvailableToCommon", "pretaxIncome", "incomeTaxExpense", "operatingCashFlow", "capitalExpenditures", "interestExpense",
   "depreciationAndAmortization", "dividendsPaid", "stockBasedCompensation", "researchAndDevelopment",
 ] as const;
 
@@ -387,6 +405,8 @@ function buildTtmPeriods(
         ? (value("operatingIncome") as number) + (value("depreciationAndAmortization") as number)
         : null,
       netIncome: value("netIncome"),
+      netIncomeCommonStockholders: value("netIncomeCommonStockholders"),
+      dilutedNetIncomeAvailableToCommon: value("dilutedNetIncomeAvailableToCommon"),
       pretaxIncome: value("pretaxIncome"),
       incomeTaxExpense: value("incomeTaxExpense"),
       operatingCashFlow: value("operatingCashFlow"),
@@ -421,6 +441,8 @@ function toLegacy(period: FinancialPeriod): AnnualFinancials {
     operatingIncome: period.operatingIncome ?? null,
     ebitda: period.ebitda ?? null,
     netIncome: period.netIncome ?? null,
+    netIncomeCommonStockholders: period.netIncomeCommonStockholders ?? null,
+    dilutedNetIncomeAvailableToCommon: period.dilutedNetIncomeAvailableToCommon ?? null,
     pretaxIncome: period.pretaxIncome ?? null,
     incomeTaxExpense: period.incomeTaxExpense ?? null,
     epsDiluted: period.epsDiluted ?? null,
@@ -464,6 +486,21 @@ export function resolveSecSpecializedData(
   facts: SecCompanyFacts,
   archetype: AnalysisArchetype,
 ): SpecializedCompanyData | undefined {
+  if (archetype === "insurer") {
+    const missing = unavailableSpecializedMetric;
+    return {
+      kind: "insurer",
+      premiumGrowth: missing("Reported comparable premium growth."),
+      combinedRatio: missing("Reported combined ratio."),
+      lossRatio: missing("Reported loss ratio."),
+      expenseRatio: missing("Reported underwriting expense ratio."),
+      bookValue: missing("Reported insurer book value."),
+      tangibleBookValue: missing("Reported insurer tangible book value."),
+      returnOnEquity: missing("Reported insurer return on average equity."),
+      regulatoryCapitalRatio: missing("Reported risk-based regulatory capital ratio."),
+      reserveDevelopment: missing("Reported prior-year reserve development."),
+    };
+  }
   if (archetype !== "bank") return undefined;
 
   const netInterestIncome = resolveTtmFact(facts, SEC_CONCEPTS.netInterestIncome)
@@ -558,6 +595,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
       industry: classification.industry,
       sic: submissions?.sic,
       analysisArchetype: classification.analysisArchetype,
+      classificationDiagnostics: classification.classificationDiagnostics,
       annual: annualPeriods.map(toLegacy),
       annualPeriods,
       trailingTwelveMonths,

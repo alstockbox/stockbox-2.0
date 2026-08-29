@@ -1,4 +1,5 @@
 import { clamp, isFiniteNumber, safeDivide } from "./math";
+import { MIN_DIRECTIONAL_VALUATION_CONFIDENCE } from "./config";
 import { deriveSimpleFreeCashFlow } from "./metrics";
 import type {
   AnalysisReport, AnalysisSource, DeepReport, DeepReportSection, DeepSectionId, FinancialAnalysisInput,
@@ -63,7 +64,7 @@ function sourceTier(source: AnalysisSource): SourceTier {
 export function evidenceFromSources(sources: AnalysisSource[]): ResearchEvidence[] {
   return sources.map((source, index) => ({
     id: `source-${index + 1}`, kind: "reported_fact", sourceTier: sourceTier(source), title: source.name,
-    source, dataAsOf: source.accessedAt,
+    source, dataAsOf: source.dataAsOf ?? null,
   }));
 }
 
@@ -82,8 +83,38 @@ function scoreSignal(category: ResearchSignal["category"], contributor: Research
   });
 }
 
-function scoreWithEvidence(score: ResearchScore, evidenceIds: string[]): ResearchScore {
-  const attach = (item: ResearchSignal): ResearchSignal => item.evidenceIds.length ? item : { ...item, evidenceIds };
+function evidenceForSignal(signal: ResearchSignal, evidence: ResearchEvidence[]): string[] {
+  if (signal.source) {
+    const provenanceKeys = [signal.source.provider, signal.source.source]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase());
+    const exact = evidence.filter((item) => {
+      const sourceKeys = [item.source.provider, item.source.name]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase());
+      return provenanceKeys.some((provenanceKey) => sourceKeys.some(
+        (sourceKey) => sourceKey === provenanceKey || sourceKey.includes(provenanceKey) || provenanceKey.includes(sourceKey),
+      ));
+    });
+    if (exact.length) return exact.map((item) => item.id);
+  }
+
+  const capabilities = signal.category === "quality"
+    ? ["fundamentals", "specialized"]
+    : signal.category === "inflection"
+      ? signal.metric === "priceMomentumConfirmation" ? ["market_data"] : ["fundamentals"]
+      : ["range", "momentum"].includes(signal.metric)
+        ? ["market_data"]
+        : ["fundamentals", "specialized", "market_data", "estimates"];
+  return evidence
+    .filter((item) => item.source.capability && capabilities.includes(item.source.capability))
+    .map((item) => item.id);
+}
+
+function scoreWithEvidence(score: ResearchScore, evidence: ResearchEvidence[]): ResearchScore {
+  const attach = (item: ResearchSignal): ResearchSignal => item.evidenceIds.length
+    ? item
+    : { ...item, evidenceIds: evidenceForSignal(item, evidence) };
   return {
     ...score,
     positiveSignals: score.positiveSignals.map(attach),
@@ -128,6 +159,9 @@ function dcfOpportunity(result: FinancialAnalysisResult, market: MarketSnapshot 
   if (result.dcf.status === "inappropriate") return contributor("dcf", "DCF upside", null, 0.15, 0, "unsuitable", result.dcf.reason);
   if (result.dcf.status !== "available" || !isFiniteNumber(result.dcf.mid) || !isFiniteNumber(market?.price) || market.price <= 0) {
     return contributor("dcf", "DCF upside", null, 0.15, 0, "missing", result.dcf.reason ?? "Usable DCF and market price are required.");
+  }
+  if (result.dcf.confidence !== undefined && result.dcf.confidence < MIN_DIRECTIONAL_VALUATION_CONFIDENCE) {
+    return contributor("dcf", "DCF upside", null, 0.15, 0, "missing", "DCF confidence is too low for opportunity scoring.");
   }
   const upside = result.dcf.mid / market.price - 1;
   return contributor("dcf", "DCF upside", clamp(50 + upside * 100, 0, 100), 0.15, 1, "available", undefined, upside);
@@ -251,12 +285,18 @@ function layer(layerId: ResearchLayerId, label: string, status: ResearchLayerSta
 }
 
 function researchLayers(result: FinancialAnalysisResult, resources: DeepResearchResources, evidence: ResearchEvidence[]): ResearchLayerStatus[] {
-  const sourceIds = evidence.map((item) => item.id); const valuation = result.scores.dimensions.valuation;
+  const sourceIds = (...capabilities: NonNullable<AnalysisSource["capability"]>[]) => evidence
+    .filter((item) => item.source.capability && capabilities.includes(item.source.capability))
+    .map((item) => item.id);
+  const fundamentalSourceIds = sourceIds("fundamentals", "specialized");
+  const valuationSourceIds = sourceIds("fundamentals", "specialized", "market_data", "estimates");
+  const marketSourceIds = sourceIds("market_data");
+  const valuation = result.scores.dimensions.valuation;
   const marketAvailable = isFiniteNumber(resources.market?.price); const filings = resources.filings;
   return [
-    layer("fundamental", "Fundamentals", result.dataStatus === "current" ? "available" : result.dataStatus === "stale" ? "unavailable" : "partial", result.dataCoverage, result.scores.confidence, result.diagnostics.latestFinancialPeriodEnd, sourceIds, result.dataStatus === "stale" ? "Stale-data gate is active." : undefined),
-    layer("valuation", "Valuation", isFiniteNumber(valuation.score) ? "available" : (valuation.coverage ?? 0) > 0 ? "partial" : "unavailable", valuation.coverage ?? 0, result.confidenceBreakdown.valuationInputs, result.diagnostics.marketPriceDate ?? null, sourceIds, valuation.rationale),
-    layer("market", "Market", marketAvailable ? "available" : "unavailable", marketAvailable ? 1 : 0, marketAvailable ? 85 : 0, resources.market?.date ?? null, sourceIds, marketAvailable ? undefined : "No configured market provider returned a price."),
+    layer("fundamental", "Fundamentals", result.dataStatus === "current" ? "available" : result.dataStatus === "stale" ? "unavailable" : "partial", result.dataCoverage, result.scores.confidence, result.diagnostics.latestFinancialPeriodEnd, fundamentalSourceIds, result.dataStatus === "stale" ? "Stale-data gate is active." : undefined),
+    layer("valuation", "Valuation", isFiniteNumber(valuation.score) ? "available" : (valuation.coverage ?? 0) > 0 ? "partial" : "unavailable", valuation.coverage ?? 0, result.confidenceBreakdown.valuationInputs, result.diagnostics.marketPriceDate ?? null, valuationSourceIds, valuation.rationale),
+    layer("market", "Market", marketAvailable ? "available" : "unavailable", marketAvailable ? 1 : 0, marketAvailable ? 85 : 0, resources.market?.date ?? null, marketSourceIds, marketAvailable ? undefined : "No configured market provider returned a price."),
     layer("filings_events", "Filings / events", filings?.status ?? "unavailable", filings?.coverage ?? 0, filings?.confidence ?? 0, filings?.dataAsOf ?? null, filings?.evidence.map((item) => item.id) ?? [], filings?.reason ?? "Deep SEC submissions research was unavailable."),
     layer("earnings_expectations", "Earnings expectations", "unavailable", 0, 0, null, [], "No earnings-estimates provider is configured."),
     layer("news_events", "News", "unavailable", 0, 0, null, [], "No news provider is configured for deterministic research."),
@@ -284,10 +324,9 @@ function moduleResults(report: AnalysisReport, result: FinancialAnalysisResult, 
 export function buildResearchResult(report: AnalysisReport, result: FinancialAnalysisResult, input?: FinancialAnalysisInput, resources: DeepResearchResources = {}): ResearchResult {
   const coreEvidence = evidenceFromSources(report.sources);
   const evidence = [...coreEvidence, ...(resources.filings?.evidence ?? [])];
-  const coreEvidenceIds = coreEvidence.map((item) => item.id);
-  const quality = scoreWithEvidence(computeQualityScore(result), coreEvidenceIds);
-  const inflection = scoreWithEvidence(inflectionResearchScore(result, input, resources.market), coreEvidenceIds);
-  const opportunity = scoreWithEvidence(computeOpportunityScore(result, quality, inflection, resources.market), evidence.map((item) => item.id));
+  const quality = scoreWithEvidence(computeQualityScore(result), coreEvidence);
+  const inflection = scoreWithEvidence(inflectionResearchScore(result, input, resources.market), coreEvidence);
+  const opportunity = scoreWithEvidence(computeOpportunityScore(result, quality, inflection, resources.market), coreEvidence);
   const layers = researchLayers(result, resources, evidence);
   const coverage = layers.reduce((sum, item) => sum + item.coverage * LAYER_WEIGHTS[item.layer], 0);
   const confidence = layers.reduce((sum, item) => sum + item.confidence * item.coverage * LAYER_WEIGHTS[item.layer], 0);

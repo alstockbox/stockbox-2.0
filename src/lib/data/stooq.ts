@@ -152,10 +152,15 @@ function safeProviderDiagnostic(input: {
   headerColumns: string[];
   parseFailure: ProviderFailureReason;
 }): void {
-  console.error("Market data provider response rejected", {
+  const diagnostic = {
     ...input,
     resolvedProvider: STOOQ_PROVIDER_ID,
-  });
+  };
+  if (input.parseFailure === "upstream_error" || input.parseFailure === "timeout") {
+    console.error("Market data provider response rejected", diagnostic);
+    return;
+  }
+  console.warn("Market data provider response rejected", diagnostic);
 }
 
 function performance(rows: PriceRow[], tradingDays: number): number | null {

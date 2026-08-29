@@ -103,6 +103,53 @@ describe("Yahoo global fundamentals adapter", () => {
     }));
   });
 
+  it("keeps Yahoo ADR search results discovery-only until ADR fundamentals are supported", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ quotes: [{
+      symbol: "NVO", quoteType: "EQUITY", longname: "Novo Nordisk A/S ADR",
+      exchDisp: "NYSE", country: "US", currency: "USD",
+    }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await yahooCompanySearchProvider.search("NVO");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data[0]).toEqual(expect.objectContaining({
+      ticker: "NVO",
+      securityType: "ADR",
+      providerCapabilities: expect.objectContaining({ fundamentals: false, marketData: true }),
+    }));
+  });
+
+  it.each([
+    ["PETR4.SA", "Petróleo Brasileiro S.A. - Petrobras", "Preferred"],
+    ["FEMSAUBD.MX", "Fomento Económico Mexicano, S.A.B. de C.V.", "Other"],
+  ] as const)("keeps structurally non-common global listings discovery-only: %s", async (symbol, longname, securityType) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ quotes: [{
+      symbol, quoteType: "EQUITY", longname, exchDisp: "Global", currency: "USD",
+    }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await yahooCompanySearchProvider.search(symbol);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data[0]).toEqual(expect.objectContaining({
+      ticker: symbol,
+      securityType,
+      providerCapabilities: expect.objectContaining({ fundamentals: false, marketData: true }),
+    }));
+  });
+
+  it("keeps Yahoo preferred depositary-share results discovery-only", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ quotes: [{
+      symbol: "JPM-PD", quoteType: "EQUITY", longname: "JPMorgan Chase & Co. Depositary Shares Series DD",
+      exchDisp: "NYSE", country: "US", currency: "USD",
+    }] }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await yahooCompanySearchProvider.search("JPM-PD");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data[0]).toEqual(expect.objectContaining({
+      ticker: "JPM-PD",
+      securityType: "Preferred",
+      providerCapabilities: expect.objectContaining({ fundamentals: false, marketData: true }),
+    }));
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -115,12 +162,56 @@ describe("Yahoo global fundamentals adapter", () => {
     }));
   });
 
+  it("uses one stable Yahoo timeseries cache key throughout the same UTC day", async () => {
+    vi.useFakeTimers();
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      const payload = url.includes("fundamentals-timeseries") ? timeseriesPayload : metadataPayload;
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    try {
+      vi.setSystemTime(new Date("2026-08-27T01:00:00.000Z"));
+      await fetchYahooFundamentalsResult(company);
+      vi.setSystemTime(new Date("2026-08-27T22:00:00.000Z"));
+      await fetchYahooFundamentalsResult(company);
+      const timeseriesUrls = requested.filter((url) => url.includes("fundamentals-timeseries"));
+      expect(timeseriesUrls).toHaveLength(2);
+      expect(new URL(timeseriesUrls[0]).searchParams.get("period2")).toBe(new URL(timeseriesUrls[1]).searchParams.get("period2"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["Financial Services", "Asset Management", "unknown", 0.75],
+    ["Real Estate", "Real Estate Services", "unknown", 0.7],
+  ] as const)("preserves a confident unsupported specialist classification instead of replacing it with a generic sector fallback: %s / %s", async (sector, industry, archetype, minimumConfidence) => {
+    const specialistMetadata = {
+      quotes: [{ symbol: "VOLV-B.ST", sector, industry, longname: "Specialist Company" }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? timeseriesPayload : specialistMetadata
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.analysisArchetype).toBe(archetype);
+    expect(result.data.classificationDiagnostics).toEqual(expect.objectContaining({
+      ambiguous: false,
+      confidence: expect.any(Number),
+    }));
+    expect(result.data.classificationDiagnostics?.confidence ?? 0).toBeGreaterThanOrEqual(minimumConfidence);
+  });
+
   it("builds verified local-currency TTM and annual periods without SEC", async () => {
     const result = await fetchYahooFundamentalsResult(company);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data.analysisArchetype).toBe("standard");
+    expect(result.data.analysisArchetype).toBe("cyclical");
     expect(result.data.trailingTwelveMonths).toEqual(expect.objectContaining({
       periodEndDate: "2026-06-30",
       balanceSheetDate: "2026-06-30",
@@ -150,6 +241,28 @@ describe("Yahoo global fundamentals adapter", () => {
     }));
   });
 
+  it("derives minority interest from gross equity when Yahoo omits the quarterly minority-interest fact", async () => {
+    const withGrossEquity = structuredClone(timeseriesPayload);
+    const parentEquity = withGrossEquity.timeseries.result.find((item) => item.meta.type[0] === "quarterlyStockholdersEquity");
+    if (parentEquity && "quarterlyStockholdersEquity" in parentEquity) {
+      (parentEquity.quarterlyStockholdersEquity as Row[])[0].reportedValue.raw = 166_572;
+    }
+    withGrossEquity.timeseries.result.push(series("quarterlyTotalEquityGrossMinorityInterest", [quarter(176_572)]));
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? withGrossEquity : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.trailingTwelveMonths?.minorityInterest).toBe(10_000);
+    expect(result.data.trailingTwelveMonths?.provenance?.minorityInterest).toEqual(expect.objectContaining({
+      provider: "yahoo-fundamentals",
+      valueKind: "derived",
+      inputs: ["quarterlyTotalEquityGrossMinorityInterest", "quarterlyStockholdersEquity"],
+    }));
+  });
+
   it("never substitutes diluted average shares for current ordinary shares", async () => {
     const stripped = structuredClone(timeseriesPayload);
     stripped.timeseries.result = stripped.timeseries.result.filter((item) => item.meta.type[0] !== "quarterlyOrdinarySharesNumber" && item.meta.type[0] !== "annualOrdinarySharesNumber");
@@ -161,5 +274,64 @@ describe("Yahoo global fundamentals adapter", () => {
     if (!result.ok) return;
     expect(result.data.trailingTwelveMonths?.currentSharesOutstanding).toBeNull();
     expect(result.data.annualPeriods?.at(-1)?.sharesDiluted).toBe(2_033);
+  });
+
+  it("assigns each historical period the currency reported for that exact period", async () => {
+    const changedCurrency = structuredClone(timeseriesPayload);
+    for (const result of changedCurrency.timeseries.result) {
+      for (const row of result[result.meta.type[0]] as Row[]) {
+        if (row.asOfDate === "2024-12-31") row.currencyCode = "EUR";
+        if (row.asOfDate === "2025-12-31") row.currencyCode = "USD";
+      }
+    }
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? changedCurrency : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods?.map((period) => period.currency)).toEqual(["EUR", "USD"]);
+  });
+
+  it("flags conflicting monetary currencies inside one period instead of choosing one", async () => {
+    const conflicting = structuredClone(timeseriesPayload);
+    const assets = conflicting.timeseries.result.find((result) => result.meta.type[0] === "annualTotalAssets");
+    const currentAssets = assets && "annualTotalAssets" in assets
+      ? (assets.annualTotalAssets as Row[]).find((row) => row.asOfDate === "2025-12-31")
+      : undefined;
+    if (currentAssets) currentAssets.currencyCode = "EUR";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? conflicting : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods?.at(-1)).toMatchObject({
+      currency: undefined,
+      currencyConflict: ["EUR", "SEK"],
+    });
+  });
+});
+
+describe("Yahoo semantic units", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const payload = String(input).includes("fundamentals-timeseries") ? timeseriesPayload : metadataPayload;
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+  });
+
+  it("labels share-count provenance as shares rather than statement currency", async () => {
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.trailingTwelveMonths?.provenance?.currentSharesOutstanding?.unit).toBe("shares");
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.sharesDiluted?.unit).toBe("shares");
+    expect(result.data.trailingTwelveMonths?.provenance?.revenue?.unit).toBe("SEK");
   });
 });

@@ -14,16 +14,33 @@ function mean(values: number[]): number | null {
 }
 
 function ranks(values: number[]): number[] {
-  return values.map((value) => [...values].sort((a, b) => a - b).indexOf(value) + 1);
+  const ordered = values
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => left.value - right.value);
+  const result = new Array<number>(values.length);
+  for (let start = 0; start < ordered.length;) {
+    let end = start + 1;
+    while (end < ordered.length && ordered[end].value === ordered[start].value) end += 1;
+    const averageRank = ((start + 1) + end) / 2;
+    for (let index = start; index < end; index += 1) result[ordered[index].index] = averageRank;
+    start = end;
+  }
+  return result;
 }
 
 export function spearmanRankCorrelation(left: number[], right: number[]): number | null {
-  if (left.length !== right.length || left.length < 2) return null;
+  if (left.length !== right.length || left.length < 2 || [...left, ...right].some((value) => !Number.isFinite(value))) return null;
   const a = ranks(left);
   const b = ranks(right);
-  const n = left.length;
-  const squared = a.reduce((sum, value, index) => sum + (value - b[index]) ** 2, 0);
-  return 1 - (6 * squared) / (n * (n ** 2 - 1));
+  const meanA = a.reduce((sum, value) => sum + value, 0) / a.length;
+  const meanB = b.reduce((sum, value) => sum + value, 0) / b.length;
+  const covariance = a.reduce((sum, value, index) => sum + (value - meanA) * (b[index] - meanB), 0);
+  const varianceA = a.reduce((sum, value) => sum + (value - meanA) ** 2, 0);
+  const varianceB = b.reduce((sum, value) => sum + (value - meanB) ** 2, 0);
+  const denominator = Math.sqrt(varianceA * varianceB);
+  if (!Number.isFinite(denominator) || denominator === 0) return null;
+  const correlation = covariance / denominator;
+  return Number.isFinite(correlation) ? correlation : null;
 }
 
 export function evaluateScoreModel(observations: EvaluationObservation[]) {

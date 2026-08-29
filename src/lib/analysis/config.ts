@@ -1,16 +1,19 @@
 import type { InvestmentProfile, ScoreDimensionKey, Sector } from "./types";
 import { normalizeWeights } from "./math";
 
-export const MODEL_VERSION = "stockbox-analysis-engine-v1.0.0";
-export const REPORT_SCHEMA_VERSION = "stockbox-analysis-report-v3";
-export const SCORE_POLICY_VERSION = "stockbox-score-policy-v1";
+export const MODEL_VERSION = "stockbox-analysis-engine-v2.5.0";
+export const REPORT_SCHEMA_VERSION = "stockbox-analysis-report-v5";
+export const SCORE_POLICY_VERSION = "stockbox-score-policy-v7";
 export const STATIC_BENCHMARK_VERSION = "stockbox-static-benchmarks-v1";
+export const DCF_ASSUMPTION_POLICY_VERSION = "stockbox-dcf-assumptions-v3";
 
 export const SCORE_COVERAGE_POLICY = {
   dimensionMinimum: 0.5,
   dimensionFull: 0.75,
   overallMinimum: 0.55,
 } as const;
+
+export const MIN_DIRECTIONAL_VALUATION_CONFIDENCE = 45;
 
 export interface SectorBenchmarks {
   revenueGrowthWeak: number;

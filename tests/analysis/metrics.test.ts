@@ -30,6 +30,18 @@ describe("computeFinancialMetrics", () => {
     expect(metrics.valuation.freeCashFlowYield).toBeCloseTo(260 / 3060, 5);
   });
 
+  it("uses common-shareholder earnings rather than broader net income for P/E", () => {
+    const latest = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      netIncome: 240,
+      netIncomeCommonStockholders: 120,
+    };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, annualPeriods: [latest] });
+
+    expect(metrics.valuation.priceEarnings).toBeCloseTo(3060 / 120, 5);
+    expect(metrics.valuation.earningsYield).toBeCloseTo(120 / 3060, 5);
+  });
+
   it("reconciles the Apple FY2025 golden financial statement values", () => {
     const metrics = computeFinancialMetrics(appleFy2025Input);
 
@@ -75,6 +87,385 @@ describe("computeFinancialMetrics", () => {
       },
     });
     expect(metrics.valuation.marketCap).toBeNull();
+  });
+
+  it("refuses valuation metrics when financial and market currencies differ", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      company: { ...durableCompounderInput.company, currency: "SEK" },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({
+        ...period,
+        currency: "SEK",
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+      },
+    });
+
+    expect(metrics.valuation).toMatchObject({
+      marketCap: null,
+      enterpriseValue: null,
+      priceEarnings: null,
+      priceSales: null,
+      freeCashFlowYield: null,
+      earningsYield: null,
+    });
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "currencyAlignment",
+        impact: "metric",
+        severity: "high",
+      }),
+    ]));
+  });
+
+  it("treats unknown reporting currency as unsafe instead of assuming the trading currency", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      company: {
+        ...durableCompounderInput.company,
+        currency: undefined,
+      },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({
+        ...period,
+        currency: undefined,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+      },
+    });
+
+    expect(metrics.valuation).toMatchObject({
+      marketCap: null,
+      enterpriseValue: null,
+      priceEarnings: null,
+      freeCashFlowYield: null,
+    });
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "currencyAlignment",
+        reason: expect.stringContaining("unknown"),
+        severity: "high",
+      }),
+    ]));
+  });
+
+  it("allows valuation when explicit reporting and trading currencies align", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      company: {
+        ...durableCompounderInput.company,
+        currency: undefined,
+        reportingCurrency: "USD",
+        tradingCurrency: "USD",
+      },
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+      },
+    });
+
+    expect(metrics.valuation.marketCap).toBe(3060);
+    expect(metrics.valuation.priceEarnings).toBeCloseTo(3060 / 240, 5);
+  });
+
+  it("blocks market-based valuation when a current reported market cap materially disagrees with current price times shares", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-27T00:00:00.000Z",
+      company: {
+        ...durableCompounderInput.company,
+        reportingCurrency: "USD",
+        tradingCurrency: "USD",
+      },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => ({
+        ...period,
+        periodEndDate: `${2022 + index}-12-31`,
+        balanceSheetDate: `${2022 + index}-12-31`,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        price: 30,
+        priceDate: "2026-08-27",
+        currency: "USD",
+        marketCap: 6000,
+        marketCapAsOf: "2026-08-27",
+        marketCapCurrency: "USD",
+        sharesOutstanding: 102,
+        sharesOutstandingAsOf: "2026-08-27",
+        enterpriseValue: 6100,
+      },
+    });
+
+    expect(metrics.valuation).toMatchObject({
+      marketCap: null,
+      enterpriseValue: null,
+      priceEarnings: null,
+      priceSales: null,
+      evEbitda: null,
+      freeCashFlowYield: null,
+      earningsYield: null,
+    });
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "shareBasisAlignment", severity: "high" }),
+    ]));
+  });
+
+  it("uses actual fiscal-year distance for three-year CAGR when an intermediate year is missing", () => {
+    const annualPeriods = [
+      { fiscalYear: 2020, periodEndDate: "2020-12-31", currency: "USD", revenue: 80 },
+      { fiscalYear: 2021, periodEndDate: "2021-12-31", currency: "USD", revenue: 100 },
+      { fiscalYear: 2023, periodEndDate: "2023-12-31", currency: "USD", revenue: 150 },
+      { fiscalYear: 2024, periodEndDate: "2024-12-31", currency: "USD", revenue: 200 },
+    ];
+
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods,
+      market: undefined,
+    });
+
+    const years = (Date.parse("2024-12-31") - Date.parse("2021-12-31")) / 86_400_000 / 365.2425;
+    expect(metrics.growth.revenueCagr3y).toBeCloseTo((200 / 100) ** (1 / years) - 1, 8);
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(200 / 150 - 1, 5);
+  });
+
+  it("returns null instead of labeling a two-year history as three-year CAGR", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [
+        { fiscalYear: 2022, periodEndDate: "2022-12-31", currency: "USD", revenue: 100 },
+        { fiscalYear: 2024, periodEndDate: "2024-12-31", currency: "USD", revenue: 160 },
+      ],
+      market: undefined,
+    });
+
+    expect(metrics.growth.revenueCagr3y).toBeNull();
+    expect(metrics.growth.revenueGrowthYoY).toBeNull();
+  });
+
+  it("uses the real date span for a near-three-year CAGR", () => {
+    const days = (Date.parse("2024-01-15") - Date.parse("2021-01-01")) / 86_400_000;
+    const years = days / 365.2425;
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [
+        { fiscalYear: 2020, periodEndDate: "2021-01-01", currency: "USD", revenue: 100 },
+        { fiscalYear: 2023, periodEndDate: "2024-01-15", currency: "USD", revenue: 160 },
+      ],
+      market: undefined,
+    });
+
+    expect(metrics.growth.revenueCagr3y).toBeCloseTo((160 / 100) ** (1 / years) - 1, 8);
+  });
+
+  it("accepts adjacent 53-week fiscal years as comparable annual periods", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [
+        { fiscalYear: 2023, periodEndDate: "2023-09-30", currency: "USD", revenue: 100 },
+        { fiscalYear: 2024, periodEndDate: "2024-10-05", currency: "USD", revenue: 110 },
+      ],
+      market: undefined,
+    });
+
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(0.1, 8);
+  });
+
+  it("computes dividend CAGR from comparable annual periods even when TTM exists", () => {
+    const annualPeriods = [
+      { fiscalYear: 2021, periodEndDate: "2021-12-31", currency: "USD", dividendsPaid: 100 },
+      { fiscalYear: 2022, periodEndDate: "2022-12-31", currency: "USD", dividendsPaid: 110 },
+      { fiscalYear: 2023, periodEndDate: "2023-12-31", currency: "USD", dividendsPaid: 120 },
+      { fiscalYear: 2024, periodEndDate: "2024-12-31", currency: "USD", dividendsPaid: 133.1 },
+    ];
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods,
+      trailingTwelveMonths: {
+        form: "TTM",
+        periodBasis: "TTM_REPORTED",
+        periodEndDate: "2025-06-30",
+        currency: "USD",
+        dividendsPaid: 500,
+      },
+      market: undefined,
+    });
+
+    const years = (Date.parse("2024-12-31") - Date.parse("2021-12-31")) / 86_400_000 / 365.2425;
+    expect(metrics.cashFlow.dividendCagr3y).toBeCloseTo((133.1 / 100) ** (1 / years) - 1, 8);
+  });
+
+  it("calculates revenue acceleration from two comparable annual growth intervals", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [
+        { fiscalYear: 2022, periodEndDate: "2022-12-31", currency: "USD", revenue: 100 },
+        { fiscalYear: 2023, periodEndDate: "2023-12-31", currency: "USD", revenue: 110 },
+        { fiscalYear: 2024, periodEndDate: "2024-12-31", currency: "USD", revenue: 132 },
+      ],
+      market: undefined,
+    });
+
+    expect(metrics.trends.revenueAcceleration).toBeCloseTo(0.1, 8);
+  });
+
+  it("does not report perfect stability from non-contiguous random fiscal years", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods: [
+        { fiscalYear: 2018, periodEndDate: "2018-12-31", currency: "USD", revenue: 100, operatingIncome: 20, grossProfit: 50, operatingCashFlow: 30, capitalExpenditures: 10 },
+        { fiscalYear: 2021, periodEndDate: "2021-12-31", currency: "USD", revenue: 100, operatingIncome: 20, grossProfit: 50, operatingCashFlow: 30, capitalExpenditures: 10 },
+        { fiscalYear: 2024, periodEndDate: "2024-12-31", currency: "USD", revenue: 100, operatingIncome: 20, grossProfit: 50, operatingCashFlow: 30, capitalExpenditures: 10 },
+      ],
+      market: undefined,
+    });
+
+    expect(metrics.cashFlow.operatingMarginStability).toBeNull();
+    expect(metrics.cashFlow.grossMarginStability).toBeNull();
+    expect(metrics.cashFlow.freeCashFlowStability).toBeNull();
+  });
+
+  it("refuses valuation metrics when market price data is stale", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-07-01",
+      },
+    });
+
+    expect(metrics.valuation).toMatchObject({
+      marketCap: null,
+      enterpriseValue: null,
+      priceEarnings: null,
+      priceSales: null,
+      freeCashFlowYield: null,
+      earningsYield: null,
+    });
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "marketPriceFreshness",
+        impact: "metric",
+        severity: "high",
+      }),
+    ]));
+  });
+
+  it("rejects stale reported market cap when no fresh derivation path exists", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => ({
+        ...period,
+        currentSharesOutstanding: index === durableCompounderInput.annualPeriods.length - 1 ? null : period.currentSharesOutstanding,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-08-25",
+        marketCap: 9_999,
+        marketCapAsOf: "2026-06-01",
+        marketCapCurrency: "USD",
+        sharesOutstanding: null,
+      },
+    });
+
+    expect(metrics.valuation.marketCap).toBeNull();
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "marketCapFreshness", severity: "high" }),
+    ]));
+  });
+
+  it("derives current market cap only from fresh current shares and a fresh price", () => {
+    const fresh = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        price: 30,
+        priceDate: "2026-08-25",
+        marketCap: 9_999,
+        marketCapAsOf: "2026-06-01",
+        marketCapCurrency: "USD",
+        sharesOutstanding: 102,
+        sharesOutstandingAsOf: "2026-08-20",
+      },
+    });
+    const staleShares = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({ ...period, currentSharesOutstanding: null })),
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        price: 30,
+        priceDate: "2026-08-25",
+        marketCap: null,
+        sharesOutstanding: 102,
+        sharesOutstandingAsOf: "2025-12-31",
+      },
+    });
+
+    expect(fresh.valuation.marketCap).toBe(3_060);
+    expect(staleShares.valuation.marketCap).toBeNull();
+    expect(staleShares.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sharesOutstandingFreshness", severity: "high" }),
+    ]));
+  });
+
+  it("rejects a market cap reported in a currency different from the trading currency", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-08-25",
+        marketCap: 3_060,
+        marketCapAsOf: "2026-08-25",
+        marketCapCurrency: "EUR",
+        sharesOutstanding: null,
+      },
+    });
+
+    expect(metrics.valuation.marketCap).toBeNull();
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "marketCapCurrency", severity: "high" }),
+    ]));
+  });
+
+  it("refuses valuation metrics when market price data is future-dated", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-09-15",
+      },
+    });
+
+    expect(metrics.valuation).toMatchObject({
+      marketCap: null,
+      enterpriseValue: null,
+      priceEarnings: null,
+      priceSales: null,
+      freeCashFlowYield: null,
+      earningsYield: null,
+    });
+    expect(metrics.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "marketPriceFreshness",
+        impact: "metric",
+        severity: "high",
+      }),
+    ]));
   });
 
   it("reports missing or unsafe denominators instead of producing misleading growth", () => {

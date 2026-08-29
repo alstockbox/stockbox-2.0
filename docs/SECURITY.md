@@ -1,11 +1,11 @@
 # StockBox 2.0 Security And Financial Safety
 
-Current date: August 20, 2026
+Current date: August 27, 2026
 Release deadline: August 31, 2026
 
 ## Security Posture
 
-StockBox handles user accounts, paid subscriptions, usage credits, financial research data, and internal admin operations. The repository now includes least-privilege service boundaries, ownership checks, RLS, signed webhooks, validation, sanitized errors, and fail-closed feature flags. Public release remains blocked until those controls are applied and tested in production, rate limiting and CSP are completed, and the final security review passes.
+StockBox handles user accounts, paid subscriptions, usage credits, financial research data, and internal admin operations. The repository now includes least-privilege service boundaries, ownership checks, RLS, signed webhooks, validation, sanitized errors, fail-closed feature flags, a Supabase-backed distributed rate limiter with process-local fallback, and baseline CSP/HSTS headers. Public release remains blocked until migrations are applied and tested in production, edge/WAF rate limiting and CSP browser QA are validated, and the final security review passes.
 
 ## P0 Security Controls
 
@@ -19,7 +19,7 @@ StockBox handles user accounts, paid subscriptions, usage credits, financial res
 | Input validation | Validate all API inputs, route params, tickers, provider responses, webhook payloads, and admin mutations. |
 | Injection protection | Use parameterized database APIs; sanitize rendered provider/AI text; encode output. |
 | IDOR protection | Every user-scoped read/write must check ownership server-side. |
-| Rate limiting | Protect auth, search, analysis, AI, share, referral, affiliate, and admin endpoints. |
+| Rate limiting | Sensitive/expensive application routes use an atomic Supabase-backed limiter with hashed keys and process-local fallback. Validate Vercel edge/WAF limits in production as additional defense in depth. |
 | SSRF protection | Server fetchers must use allowlisted provider hosts and block arbitrary internal/private URLs. |
 | Headers | Enable HTTPS-only cookies, HSTS, frame protections, MIME sniffing protection, referrer policy, and CSP where practical. |
 | Logging | Log sanitized context only; never log passwords, tokens, card data, service keys, or unnecessary personal data. |
@@ -46,7 +46,7 @@ StockBox handles user accounts, paid subscriptions, usage credits, financial res
 
 ## P1 Hardening
 
-- Automated security tests for RLS policies, entitlement bypasses, webhook replay, and admin routes.
+- Extend the existing automated security suite with runtime production/isolated-Postgres RLS probes, WAF abuse tests and browser CSP validation.
 - CSP violation reporting.
 - Admin approval workflow for model threshold changes.
 - Provider-specific data retention rules.

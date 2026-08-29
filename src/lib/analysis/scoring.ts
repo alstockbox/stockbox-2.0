@@ -1,6 +1,7 @@
 import {
   MODEL_VERSION,
   SCORE_COVERAGE_POLICY,
+  SCORE_POLICY_VERSION,
   STATIC_BENCHMARK_VERSION,
   benchmarksForSector,
   longTermWeights,
@@ -8,7 +9,7 @@ import {
   weightsForSector,
   weightsForSectorAndProfile,
 } from "./config";
-import { resolveArchetype } from "./archetypes";
+import { resolveFinancialArchetype } from "./archetypes";
 import {
   clamp,
   isFiniteNumber,
@@ -21,13 +22,17 @@ import type {
   ConfidenceBreakdown,
   FinancialAnalysisInput,
   FinancialMetrics,
-  Metrics,
   ScoreContributor,
   ScoreDimension,
   ScoreDimensionKey,
   ScoreResult,
-  StockBoxScore,
+  SpecializedCompanyData,
+  SpecializedCoverage,
+  ValuationAssumptionQuality,
 } from "./types";
+import { valuationCurrencyAlignment } from "./metrics";
+import { summarizeSourceConflicts } from "./source-conflicts";
+import { insurerRequiredFields, isPropertyCasualtyInsurer, resolveInsurerSubtype } from "./insurer-subtypes";
 
 const dimensionLabels: Record<ScoreDimensionKey, string> = {
   growth: "Growth",
@@ -65,10 +70,10 @@ function contributor(input: ContributorInput): ScoreContributor {
     impact: !isFiniteNumber(score) ? "neutral" : score >= 60 ? "positive" : score <= 40 ? "negative" : "neutral",
   };
 }
-
 function dimension(key: ScoreDimensionKey, contributors: ScoreContributor[], rationale: string): ScoreDimension {
-  const plannedWeight = contributors.reduce((sum, item) => sum + item.weight, 0);
-  const available = contributors.filter((item) => item.availability === "available" && isFiniteNumber(item.score));
+  const applicable = contributors.filter((item) => item.availability !== "unsuitable");
+  const plannedWeight = applicable.reduce((sum, item) => sum + item.weight, 0);
+  const available = applicable.filter((item) => item.availability === "available" && isFiniteNumber(item.score));
   const availableWeight = available.reduce((sum, item) => sum + item.weight, 0);
   const coverage = plannedWeight > 0 ? availableWeight / plannedWeight : 0;
   const rawScore = availableWeight > 0
@@ -99,6 +104,52 @@ function dimension(key: ScoreDimensionKey, contributors: ScoreContributor[], rat
         impact: "score" as const,
         severity: "medium" as const,
       })),
+  };
+}
+
+const specializedRequiredFields: Partial<Record<AnalysisArchetype, string[]>> = {
+  bank: [
+    "netInterestIncome", "netInterestMargin", "grossLoans", "deposits", "depositGrowth",
+    "fundingCost", "cet1CapitalRatio", "tangibleCommonEquity", "tangibleBookValuePerShare",
+    "nonPerformingLoans", "netChargeOffs", "loanLossProvisions", "efficiencyRatio",
+    "returnOnAssets", "returnOnEquity", "returnOnTangibleCommonEquity",
+  ],
+  reit: [
+    "fundsFromOperations", "fundsFromOperationsPerShare", "adjustedFundsFromOperations",
+    "adjustedFundsFromOperationsPerShare", "fundsFromOperationsGrowth",
+    "adjustedFundsFromOperationsGrowth", "adjustedFundsFromOperationsPayout",
+    "dividendCoverage", "occupancy", "sameStoreNoiGrowth", "netDebtToEbitdare",
+    "debtMaturities", "fixedChargeCoverage", "netAssetValue",
+  ],
+};
+
+function specializedRequiredFieldsFor(
+  archetype: AnalysisArchetype,
+  company: FinancialAnalysisInput["company"],
+): string[] | undefined {
+  if (archetype === "insurer") {
+    return insurerRequiredFields(company);
+  }
+  return specializedRequiredFields[archetype];
+}
+
+function specializedCoverageFor(
+  archetype: AnalysisArchetype,
+  company: FinancialAnalysisInput["company"],
+  specialized?: SpecializedCompanyData,
+): SpecializedCoverage | undefined {
+  const required = specializedRequiredFieldsFor(archetype, company);
+  if (!required) return undefined;
+  const values = specialized?.kind === archetype
+    ? specialized as unknown as Record<string, { value?: number | null }>
+    : {};
+  const available = required.filter((field) => isFiniteNumber(values[field]?.value));
+  return {
+    overall: required.length ? available.length / required.length : 0,
+    required,
+    available,
+    missing: required.filter((field) => !available.includes(field)),
+    ...(archetype === "insurer" ? { insurerSubtype: resolveInsurerSubtype(company) } : {}),
   };
 }
 
@@ -176,30 +227,190 @@ function archetypeDimensions(
   const c = (label: string, value: number | null, score: number | null, weight: number, unsuitable = false) =>
     contributor({ label, value, score, weight, period, unsuitable });
 
-  if (archetype === "bank" || archetype === "insurer") {
+  if (archetype === "bank") {
+    const bank = input.specialized?.kind === "bank" ? input.specialized : null;
+    const netInterestMargin = bank?.netInterestMargin.value ?? null;
+    const bankRoa = bank?.returnOnAssets.value ?? null;
+    const bankRoe = bank?.returnOnEquity.value ?? null;
+    const efficiencyRatio = bank?.efficiencyRatio.value ?? null;
+    const cet1 = bank?.cet1CapitalRatio.value ?? null;
+    const grossLoans = bank?.grossLoans.value ?? null;
+    const deposits = bank?.deposits.value ?? null;
+    const nonPerformingLoanRatio = isFiniteNumber(bank?.nonPerformingLoans.value) && isFiniteNumber(grossLoans) && grossLoans !== 0
+      ? bank.nonPerformingLoans.value / grossLoans
+      : null;
+    const netChargeOffRatio = isFiniteNumber(bank?.netChargeOffs.value) && isFiniteNumber(grossLoans) && grossLoans !== 0
+      ? bank.netChargeOffs.value / grossLoans
+      : null;
+    const depositFundingRatio = isFiniteNumber(deposits) && isFiniteNumber(grossLoans) && grossLoans !== 0
+      ? deposits / grossLoans
+      : null;
+    const priceTangibleBook = isFiniteNumber(input.market?.price) && isFiniteNumber(bank?.tangibleBookValuePerShare.value)
+      && bank.tangibleBookValuePerShare.value > 0
+      ? input.market.price / bank.tangibleBookValuePerShare.value
+      : isFiniteNumber(metrics.valuation.marketCap) && isFiniteNumber(bank?.tangibleCommonEquity.value)
+        && bank.tangibleCommonEquity.value > 0
+        ? metrics.valuation.marketCap / bank.tangibleCommonEquity.value
+        : null;
     dimensions.profitability = dimension("profitability", [
-      c("ROE", metrics.ratios.returnOnEquity, scoreHigherIsBetter(metrics.ratios.returnOnEquity, 0.05, 0.18), 0.45),
-      c("ROA", metrics.ratios.returnOnAssets, scoreHigherIsBetter(metrics.ratios.returnOnAssets, 0.003, 0.018), 0.3),
-      c("Net margin", metrics.margins.netMargin, scoreHigherIsBetter(metrics.margins.netMargin, 0.05, 0.25), 0.25),
-    ], "Equity and asset returns replace industrial capital metrics for financial institutions.");
+      c("Net interest margin", netInterestMargin, scoreHigherIsBetter(netInterestMargin, 0.015, 0.04), 0.3),
+      c("Return on assets", bankRoa, scoreHigherIsBetter(bankRoa, 0.003, 0.018), 0.25),
+      c("Return on equity", bankRoe, scoreHigherIsBetter(bankRoe, 0.05, 0.18), 0.25),
+      c("Efficiency ratio", efficiencyRatio, scoreLowerIsBetter(efficiencyRatio, 0.75, 0.45), 0.2),
+    ], "Reported banking margins, returns and operating efficiency determine profitability coverage.");
     dimensions.financialHealth = dimension("financialHealth", [
-      c("Equity / assets", metrics.ratios.equityToAssets, scoreHigherIsBetter(metrics.ratios.equityToAssets, 0.04, 0.12), 0.6),
-      c("Current ratio", null, null, 0.4, true),
-    ], "Corporate leverage ratios are unsuitable; specialized regulatory capital data is required for full coverage.");
+      c("CET1 capital ratio", cet1, scoreHigherIsBetter(cet1, 0.07, 0.15), 0.35),
+      c("Nonperforming loans / gross loans", nonPerformingLoanRatio, scoreLowerIsBetter(nonPerformingLoanRatio, 0.05, 0.01), 0.2),
+      c("Net charge-offs / gross loans", netChargeOffRatio, scoreLowerIsBetter(netChargeOffRatio, 0.025, 0.003), 0.15),
+      c("Deposits / gross loans", depositFundingRatio, scoreHigherIsBetter(depositFundingRatio, 0.65, 1.1), 0.15),
+      c("Equity / assets", metrics.ratios.equityToAssets, scoreHigherIsBetter(metrics.ratios.equityToAssets, 0.04, 0.12), 0.15),
+    ], "Regulatory capital, asset quality and deposit funding are required; corporate current ratios are not substituted.");
     dimensions.cashFlow = dimension("cashFlow", [c("Corporate FCF", null, null, 1, true)], "Corporate free cash flow is not a valid primary measure for this archetype.");
     dimensions.valuation = dimension("valuation", [
-      c("P / Book", metrics.valuation.priceBook, scoreLowerIsBetter(metrics.valuation.priceBook, 3, 0.8), 0.55),
-      c("P / E", metrics.valuation.priceEarnings, scoreLowerIsBetter(metrics.valuation.priceEarnings, 24, 9), 0.45),
-    ], "Equity-oriented multiples are used; residual-income inputs remain unavailable from the current provider.");
+      c("P / Tangible Book", priceTangibleBook, scoreLowerIsBetter(priceTangibleBook, 3, 0.8), 0.4),
+      c("P / Book", metrics.valuation.priceBook, scoreLowerIsBetter(metrics.valuation.priceBook, 3, 0.8), 0.3),
+      c("P / E", metrics.valuation.priceEarnings, scoreLowerIsBetter(metrics.valuation.priceEarnings, 24, 9), 0.3),
+    ], "Equity-oriented bank multiples require reported tangible book inputs.");
+    const provisionRatio = isFiniteNumber(bank?.loanLossProvisions.value) && isFiniteNumber(grossLoans) && grossLoans !== 0
+      ? bank.loanLossProvisions.value / grossLoans
+      : null;
+    dimensions.growth = dimension("growth", [
+      c("Deposit growth", bank?.depositGrowth.value ?? null, scoreHigherIsBetter(bank?.depositGrowth.value ?? null, -0.05, 0.12), 0.4),
+      c("Net interest income growth", null, null, 0.3),
+      c("Gross loan growth", null, null, 0.3),
+    ], "Bank growth requires deposit, loan and net-interest-income growth; unavailable specialist growth is not replaced by corporate FCF or EPS growth.");
+    dimensions.earningsQuality = dimension("earningsQuality", [
+      c("Nonperforming loans / gross loans", nonPerformingLoanRatio, scoreLowerIsBetter(nonPerformingLoanRatio, 0.05, 0.01), 0.45),
+      c("Net charge-offs / gross loans", netChargeOffRatio, scoreLowerIsBetter(netChargeOffRatio, 0.025, 0.003), 0.35),
+      c("Loan-loss provisions / gross loans", provisionRatio, scoreTargetRange(provisionRatio, 0, 0.004, 0.025, 0.06), 0.2),
+    ], "Bank earnings quality is evaluated through reported asset-quality and credit-loss metrics, not corporate accrual ratios.");
+    dimensions.quality = dimension("quality", [
+      c("Return on tangible common equity", bank?.returnOnTangibleCommonEquity.value ?? null, scoreHigherIsBetter(bank?.returnOnTangibleCommonEquity.value ?? null, 0.06, 0.2), 0.45),
+      c("Efficiency ratio", efficiencyRatio, scoreLowerIsBetter(efficiencyRatio, 0.75, 0.45), 0.3),
+      c("Deposits / gross loans", depositFundingRatio, scoreHigherIsBetter(depositFundingRatio, 0.65, 1.1), 0.25),
+    ], "Bank quality uses tangible-equity returns, operating efficiency and deposit funding rather than industrial ROIC.");
+    dimensions.risk = dimension("risk", [
+      c("CET1 capital ratio", cet1, scoreHigherIsBetter(cet1, 0.07, 0.15), 0.35),
+      c("Nonperforming loans / gross loans", nonPerformingLoanRatio, scoreLowerIsBetter(nonPerformingLoanRatio, 0.05, 0.01), 0.25),
+      c("Deposits / gross loans", depositFundingRatio, scoreHigherIsBetter(depositFundingRatio, 0.65, 1.1), 0.2),
+      c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.2),
+    ], "Bank risk uses regulatory capital, asset quality, funding resilience and bounded market sensitivity.");
+  }
+
+  if (archetype === "insurer") {
+    const insurer = input.specialized?.kind === "insurer" ? input.specialized : null;
+    const propertyCasualty = isPropertyCasualtyInsurer(input.company);
+    const combinedRatio = insurer?.combinedRatio.value ?? null;
+    const lossRatio = insurer?.lossRatio.value ?? null;
+    const expenseRatio = insurer?.expenseRatio.value ?? null;
+    const insurerRoe = insurer?.returnOnEquity.value ?? null;
+    const regulatoryCapital = insurer?.regulatoryCapitalRatio.value ?? null;
+    const reserveDevelopment = insurer?.reserveDevelopment.value ?? null;
+    const priceBook = isFiniteNumber(metrics.valuation.marketCap) && isFiniteNumber(insurer?.bookValue.value)
+      && insurer.bookValue.value > 0
+      ? metrics.valuation.marketCap / insurer.bookValue.value
+      : metrics.valuation.priceBook;
+    const priceTangibleBook = isFiniteNumber(metrics.valuation.marketCap) && isFiniteNumber(insurer?.tangibleBookValue.value)
+      && insurer.tangibleBookValue.value > 0
+      ? metrics.valuation.marketCap / insurer.tangibleBookValue.value
+      : null;
+    dimensions.growth = dimension("growth", [
+      c("Premium growth", insurer?.premiumGrowth.value ?? null, scoreHigherIsBetter(insurer?.premiumGrowth.value ?? null, -0.03, 0.12), 1),
+    ], "Reported premium growth replaces generic industrial revenue-growth assumptions.");
+    dimensions.profitability = propertyCasualty
+      ? dimension("profitability", [
+        c("Combined ratio", combinedRatio, scoreLowerIsBetter(combinedRatio, 1.05, 0.88), 0.3),
+        c("Loss ratio", lossRatio, scoreLowerIsBetter(lossRatio, 0.78, 0.55), 0.25),
+        c("Expense ratio", expenseRatio, scoreLowerIsBetter(expenseRatio, 0.42, 0.25), 0.2),
+        c("Return on equity", insurerRoe, scoreHigherIsBetter(insurerRoe, 0.05, 0.18), 0.25),
+      ], "Underwriting ratios and reported insurer return on equity determine profitability.")
+      : dimension("profitability", [
+        c("Premium growth", insurer?.premiumGrowth.value ?? null, scoreHigherIsBetter(insurer?.premiumGrowth.value ?? null, -0.03, 0.12), 0.4),
+        c("Return on equity", insurerRoe, scoreHigherIsBetter(insurerRoe, 0.05, 0.18), 0.6),
+      ], "Premium growth and reported insurer return on equity determine profitability when P&C underwriting ratios are not comparable.");
+    dimensions.financialHealth = propertyCasualty
+      ? dimension("financialHealth", [
+        c("Regulatory capital ratio", regulatoryCapital, scoreHigherIsBetter(regulatoryCapital, 1, 2), 0.6),
+        c("Reserve development", reserveDevelopment, scoreLowerIsBetter(reserveDevelopment, 0.08, -0.02), 0.4),
+      ], "Regulatory capital and reserve development replace corporate leverage ratios for insurers.")
+      : dimension("financialHealth", [
+        c("Regulatory capital ratio", regulatoryCapital, scoreHigherIsBetter(regulatoryCapital, 1, 2), 1),
+      ], "Reported regulatory capital replaces corporate leverage ratios for insurers.");
+    dimensions.cashFlow = dimension("cashFlow", [c("Corporate FCF", null, null, 1, true)], "Corporate free cash flow is not a valid primary measure for this archetype.");
+    dimensions.valuation = dimension("valuation", [
+      c("P / Tangible Book", priceTangibleBook, scoreLowerIsBetter(priceTangibleBook, 3, 0.8), 0.4),
+      c("P / Book", priceBook, scoreLowerIsBetter(priceBook, 3, 0.8), 0.3),
+      c("P / E", metrics.valuation.priceEarnings, scoreLowerIsBetter(metrics.valuation.priceEarnings, 24, 9), 0.3),
+    ], "Insurer valuation uses reported book, tangible book and earnings multiples.");
+    dimensions.earningsQuality = propertyCasualty
+      ? dimension("earningsQuality", [
+        c("Reserve development", reserveDevelopment, scoreLowerIsBetter(reserveDevelopment, 0.08, -0.02), 0.5),
+        c("Combined ratio", combinedRatio, scoreLowerIsBetter(combinedRatio, 1.05, 0.88), 0.5),
+      ], "P&C earnings quality uses reserve development and underwriting performance rather than corporate accrual ratios.")
+      : dimension("earningsQuality", [
+        c("Specialized insurance earnings quality", null, null, 1),
+      ], "Life, reinsurance and other non-P&C earnings quality requires specialist reserve or policy data that is not substituted with corporate accrual metrics.");
+    dimensions.quality = dimension("quality", [
+      c("Return on equity", insurerRoe, scoreHigherIsBetter(insurerRoe, 0.05, 0.18), 0.6),
+      c("Regulatory capital ratio", regulatoryCapital, scoreHigherIsBetter(regulatoryCapital, 1, 2), 0.4),
+    ], "Insurer quality uses reported equity returns and regulatory capital rather than industrial ROIC.");
+    dimensions.risk = propertyCasualty
+      ? dimension("risk", [
+        c("Regulatory capital ratio", regulatoryCapital, scoreHigherIsBetter(regulatoryCapital, 1, 2), 0.5),
+        c("Reserve development", reserveDevelopment, scoreLowerIsBetter(reserveDevelopment, 0.08, -0.02), 0.3),
+        c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.2),
+      ], "P&C risk uses regulatory capital, reserve development and bounded market sensitivity.")
+      : dimension("risk", [
+        c("Regulatory capital ratio", regulatoryCapital, scoreHigherIsBetter(regulatoryCapital, 1, 2), 0.7),
+        c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.3),
+      ], "Non-P&C insurer risk uses regulatory capital and bounded market sensitivity; industrial leverage ratios are not substituted.");
   }
 
   if (archetype === "reit") {
-    const ffoYield = isFiniteNumber(latest?.fundsFromOperations) && isFiniteNumber(metrics.valuation.marketCap)
-      ? latest.fundsFromOperations / metrics.valuation.marketCap
+    const reit = input.specialized?.kind === "reit" ? input.specialized : null;
+    const ffo = reit?.fundsFromOperations.value ?? latest?.fundsFromOperations ?? null;
+    const affo = reit?.adjustedFundsFromOperations.value ?? latest?.adjustedFundsFromOperations ?? null;
+    const ffoMargin = isFiniteNumber(ffo) && isFiniteNumber(latest?.revenue) && latest.revenue !== 0
+      ? ffo / latest.revenue
       : null;
-    dimensions.profitability = dimension("profitability", [c("FFO margin", isFiniteNumber(latest?.fundsFromOperations) && isFiniteNumber(latest?.revenue) ? latest.fundsFromOperations / latest.revenue : null, null, 1)], "REIT profitability requires FFO/AFFO rather than GAAP EPS.");
+    const ffoYield = isFiniteNumber(ffo) && isFiniteNumber(metrics.valuation.marketCap)
+      ? ffo / metrics.valuation.marketCap
+      : null;
+    dimensions.growth = dimension("growth", [
+      c("FFO growth", reit?.fundsFromOperationsGrowth.value ?? null, scoreHigherIsBetter(reit?.fundsFromOperationsGrowth.value ?? null, -0.08, 0.1), 0.5),
+      c("AFFO growth", reit?.adjustedFundsFromOperationsGrowth.value ?? null, scoreHigherIsBetter(reit?.adjustedFundsFromOperationsGrowth.value ?? null, -0.08, 0.1), 0.5),
+    ], "Reported FFO and AFFO growth replace GAAP EPS growth for REITs.");
+    dimensions.profitability = dimension("profitability", [
+      c("FFO margin", ffoMargin, scoreHigherIsBetter(ffoMargin, 0.15, 0.55), 0.4),
+      c("Occupancy", reit?.occupancy.value ?? null, scoreHigherIsBetter(reit?.occupancy.value ?? null, 0.8, 0.97), 0.3),
+      c("Same-store NOI growth", reit?.sameStoreNoiGrowth.value ?? null, scoreHigherIsBetter(reit?.sameStoreNoiGrowth.value ?? null, -0.03, 0.06), 0.3),
+    ], "REIT profitability requires reported FFO and property operating metrics rather than GAAP EPS.");
     dimensions.valuation = dimension("valuation", [c("FFO yield", ffoYield, scoreHigherIsBetter(ffoYield, 0.025, 0.08), 1)], "P/FFO is used only when provider-reported FFO exists; P/E does not dominate.");
-    dimensions.earningsQuality = dimension("earningsQuality", [c("AFFO availability", latest?.adjustedFundsFromOperations ?? null, null, 1)], "AFFO coverage is required for a full REIT quality assessment.");
+    dimensions.financialHealth = dimension("financialHealth", [
+      c("Net debt / EBITDAre", reit?.netDebtToEbitdare.value ?? null, scoreLowerIsBetter(reit?.netDebtToEbitdare.value ?? null, 8, 4), 0.5),
+      c("Fixed-charge coverage", reit?.fixedChargeCoverage.value ?? null, scoreHigherIsBetter(reit?.fixedChargeCoverage.value ?? null, 1.2, 3), 0.5),
+    ], "REIT leverage and fixed-charge coverage replace generic industrial leverage ratios.");
+    dimensions.cashFlow = dimension("cashFlow", [
+      c("FFO margin", ffoMargin, scoreHigherIsBetter(ffoMargin, 0.15, 0.55), 0.25),
+      c("AFFO payout", reit?.adjustedFundsFromOperationsPayout.value ?? null, scoreTargetRange(reit?.adjustedFundsFromOperationsPayout.value ?? null, 0, 0.25, 0.8, 1.2), 0.3),
+      c("Dividend coverage", reit?.dividendCoverage.value ?? null, scoreHigherIsBetter(reit?.dividendCoverage.value ?? null, 0.8, 1.5), 0.25),
+      c("AFFO growth", reit?.adjustedFundsFromOperationsGrowth.value ?? null, scoreHigherIsBetter(reit?.adjustedFundsFromOperationsGrowth.value ?? null, -0.08, 0.1), 0.2),
+    ], "REIT cash generation uses reported FFO/AFFO economics rather than corporate free-cash-flow conversion.");
+    dimensions.earningsQuality = dimension("earningsQuality", [
+      c("AFFO payout", reit?.adjustedFundsFromOperationsPayout.value ?? null, scoreTargetRange(reit?.adjustedFundsFromOperationsPayout.value ?? null, 0, 0.25, 0.8, 1.2), 0.4),
+      c("Dividend coverage", reit?.dividendCoverage.value ?? null, scoreHigherIsBetter(reit?.dividendCoverage.value ?? null, 0.8, 1.5), 0.3),
+      c("AFFO", affo, isFiniteNumber(affo) && affo > 0 ? 70 : isFiniteNumber(affo) ? 20 : null, 0.3),
+    ], "Reported AFFO, payout and dividend coverage determine REIT earnings quality.");
+    dimensions.quality = dimension("quality", [
+      c("Occupancy", reit?.occupancy.value ?? null, scoreHigherIsBetter(reit?.occupancy.value ?? null, 0.8, 0.97), 0.4),
+      c("Same-store NOI growth", reit?.sameStoreNoiGrowth.value ?? null, scoreHigherIsBetter(reit?.sameStoreNoiGrowth.value ?? null, -0.03, 0.06), 0.3),
+      c("AFFO growth", reit?.adjustedFundsFromOperationsGrowth.value ?? null, scoreHigherIsBetter(reit?.adjustedFundsFromOperationsGrowth.value ?? null, -0.08, 0.1), 0.3),
+    ], "REIT quality uses occupancy and recurring property/AFFO growth rather than industrial ROIC or ROA.");
+    dimensions.risk = dimension("risk", [
+      c("Net debt / EBITDAre", reit?.netDebtToEbitdare.value ?? null, scoreLowerIsBetter(reit?.netDebtToEbitdare.value ?? null, 8, 4), 0.4),
+      c("Fixed-charge coverage", reit?.fixedChargeCoverage.value ?? null, scoreHigherIsBetter(reit?.fixedChargeCoverage.value ?? null, 1.2, 3), 0.4),
+      c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.2),
+    ], "REIT risk uses property leverage, fixed-charge coverage and bounded market sensitivity instead of industrial interest coverage.");
   }
 
   if (archetype === "software_growth") {
@@ -246,13 +457,21 @@ function archetypeDimensions(
     dimensions.valuation = dimension("valuation", [c("NAV / SOTP", null, null, 1)], "NAV and look-through holdings data are required for valuation.");
   }
 
-  if (input.company.investmentProfile === "dividend") {
+  if (input.company.investmentProfile === "dividend" && ["standard", "software_growth", "cyclical", "utility"].includes(archetype)) {
     dimensions.cashFlow = dimension("cashFlow", [
       c("Dividend yield", metrics.cashFlow.dividendYield, scoreTargetRange(metrics.cashFlow.dividendYield, 0, 0.02, 0.06, 0.12), 0.2),
       c("FCF payout ratio", metrics.cashFlow.freeCashFlowPayoutRatio, scoreTargetRange(metrics.cashFlow.freeCashFlowPayoutRatio, 0, 0.2, 0.7, 1.2), 0.35),
       c("Dividend growth YoY", metrics.cashFlow.dividendGrowthYoY, scoreHigherIsBetter(metrics.cashFlow.dividendGrowthYoY, -0.1, 0.1), 0.2),
       c("Dividend CAGR 3Y", metrics.cashFlow.dividendCagr3y, scoreHigherIsBetter(metrics.cashFlow.dividendCagr3y, -0.03, 0.1), 0.25),
     ], "Yield is rewarded only alongside free-cash-flow coverage and dividend growth.");
+  } else if (input.company.investmentProfile === "dividend" && archetype === "reit") {
+    const reit = input.specialized?.kind === "reit" ? input.specialized : null;
+    dimensions.cashFlow = dimension("cashFlow", [
+      c("Dividend yield", metrics.cashFlow.dividendYield, scoreTargetRange(metrics.cashFlow.dividendYield, 0, 0.02, 0.06, 0.12), 0.2),
+      c("AFFO payout", reit?.adjustedFundsFromOperationsPayout.value ?? null, scoreTargetRange(reit?.adjustedFundsFromOperationsPayout.value ?? null, 0, 0.25, 0.8, 1.2), 0.3),
+      c("Dividend coverage", reit?.dividendCoverage.value ?? null, scoreHigherIsBetter(reit?.dividendCoverage.value ?? null, 0.8, 1.5), 0.3),
+      c("AFFO growth", reit?.adjustedFundsFromOperationsGrowth.value ?? null, scoreHigherIsBetter(reit?.adjustedFundsFromOperationsGrowth.value ?? null, -0.08, 0.1), 0.2),
+    ], "REIT dividends require reported AFFO payout and dividend coverage rather than generic FCF payout.");
   }
 
   return dimensions;
@@ -260,8 +479,12 @@ function archetypeDimensions(
 
 function aggregate(dimensions: Record<ScoreDimensionKey, ScoreDimension>, weights: Record<ScoreDimensionKey, number>) {
   const entries = Object.entries(weights) as Array<[ScoreDimensionKey, number]>;
-  const coverage = entries.reduce((sum, [key, weight]) => sum + (dimensions[key].coverage ?? 0) * weight, 0);
-  const available = entries.filter(([key]) => isFiniteNumber(dimensions[key].score));
+  const applicable = entries.filter(([key]) => (dimensions[key].plannedWeight ?? 0) > 0);
+  const applicableWeight = applicable.reduce((sum, [, weight]) => sum + weight, 0);
+  const coverage = applicableWeight > 0
+    ? applicable.reduce((sum, [key, weight]) => sum + (dimensions[key].coverage ?? 0) * weight, 0) / applicableWeight
+    : 0;
+  const available = applicable.filter(([key]) => isFiniteNumber(dimensions[key].score));
   const availableWeight = available.reduce((sum, [, weight]) => sum + weight, 0);
   const rawScore = availableWeight > 0
     ? available.reduce((sum, [key, weight]) => sum + (dimensions[key].score as number) * weight, 0) / availableWeight
@@ -285,19 +508,54 @@ function freshnessScore(input: FinancialAnalysisInput, metrics: FinancialMetrics
 
 function sourceQuality(input: FinancialAnalysisInput): number {
   const diagnostics = input.providerDiagnostics ?? [];
-  if (!diagnostics.length) return 60;
-  const scores = diagnostics.map((item) => item.status === "available" ? 100 : item.status === "partial" ? 65 : 20);
+  const coreCapabilities = new Set(["fundamentals", "market_data", "estimates"] as const);
+  const coreDiagnostics = diagnostics.filter((item) => coreCapabilities.has(item.capability as "fundamentals" | "market_data" | "estimates"));
+  if (!coreDiagnostics.length) return 60;
+  const statusScore = { available: 100, partial: 65, unavailable: 20, unsupported: 20 } as const;
+  const bestByCapability = new Map<string, number>();
+  for (const item of coreDiagnostics) {
+    const score = statusScore[item.status];
+    bestByCapability.set(item.capability, Math.max(bestByCapability.get(item.capability) ?? 0, score));
+  }
+  const scores = [...bestByCapability.values()];
   return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+}
+
+function marketInputFreshness(input: FinancialAnalysisInput): number {
+  if (!isFiniteNumber(input.market?.price)) return 20;
+  if (!input.market?.priceDate) return 55;
+  const analysisTime = Date.parse(input.analysisDate ?? new Date().toISOString());
+  const marketTime = Date.parse(input.market.priceDate);
+  const ageDays = (analysisTime - marketTime) / 86_400_000;
+  if (!Number.isFinite(ageDays) || ageDays < -1) return 0;
+  if (ageDays <= 10) return 100;
+  return 10;
+}
+
+function valuationAssumptionConfidence(
+  quality: ValuationAssumptionQuality | null | undefined,
+  status: "available" | "unavailable" | "inappropriate" | undefined,
+): number {
+  if (status === "inappropriate") return 100;
+  if (status === "unavailable") return 20;
+  if (!quality) return 50;
+  if (quality.level === "high") return 100;
+  if (quality.level === "moderate") return 65;
+  return 20;
 }
 
 export function computeScores(
   input: FinancialAnalysisInput,
   metrics: FinancialMetrics,
-  context: { reconciliation?: number } = {},
+  context: {
+    reconciliation?: number;
+    valuationAssumptionQuality?: ValuationAssumptionQuality | null;
+    valuationStatus?: "available" | "unavailable" | "inappropriate";
+  } = {},
 ): ScoreResult {
   const sector = input.company.sector ?? "other";
   const investmentProfile = input.company.investmentProfile ?? "balanced";
-  const analysisArchetype = resolveArchetype(input.company);
+  const analysisArchetype = resolveFinancialArchetype(input);
   const sectorWeights = weightsForSector(sector);
   const personalizedWeights = weightsForSectorAndProfile(sector, investmentProfile);
   const dimensions = archetypeDimensions(input, metrics, analysisArchetype);
@@ -305,10 +563,14 @@ export function computeScores(
   const personalized = aggregate(dimensions, personalizedWeights);
   const shortTerm = aggregate(dimensions, shortTermWeights);
   const longTerm = aggregate(dimensions, longTermWeights);
+  const specializedCoverage = specializedCoverageFor(analysisArchetype, input.company, input.specialized);
   for (const key of Object.keys(dimensions) as ScoreDimensionKey[]) dimensions[key].weight = sectorWeights[key];
 
   const estimateAvailability = input.estimates && Object.values(input.estimates).some(isFiniteNumber) ? 90 : 45;
   const valuationInputs = isFiniteNumber(metrics.valuation.marketCap) && isFiniteNumber(metrics.valuation.enterpriseValue) ? 100 : isFiniteNumber(metrics.valuation.marketCap) ? 60 : 20;
+  const currencyState = valuationCurrencyAlignment(input, metrics.latestPeriod);
+  const classification = input.company.classificationDiagnostics;
+  const sourceConflictPolicy = summarizeSourceConflicts(input);
   const confidenceBreakdown: ConfidenceBreakdown = {
     dataCoverage: Math.round(general.coverage * 100),
     dataFreshness: Math.round(freshnessScore(input, metrics)),
@@ -316,18 +578,63 @@ export function computeScores(
     reconciliation: Math.round(context.reconciliation ?? 70),
     estimateAvailability,
     valuationInputs,
+    entityIdentity: Math.round(clamp(
+      input.company.entityIdentityConfidence ?? (input.company.entityId || input.company.cik ? 90 : 70),
+      0,
+      100,
+    )),
+    currencyAlignment: currencyState === "aligned" ? 100 : currencyState === "unknown" ? 25 : 0,
+    archetypeConfidence: Math.round(clamp(
+      classification
+        ? classification.ambiguous
+          ? Math.min(classification.confidence * 100, 35)
+          : classification.confidence * 100
+        : analysisArchetype === "unknown"
+          ? 0
+          : input.company.analysisArchetype
+            ? 90
+            : 70,
+      0,
+      100,
+    )),
+    specializedCoverage: specializedCoverage ? Math.round(specializedCoverage.overall * 100) : null,
+    marketInputFreshness: marketInputFreshness(input),
+    valuationAssumptions: valuationAssumptionConfidence(context.valuationAssumptionQuality, context.valuationStatus),
+    sourceConflict: sourceConflictPolicy.confidenceScore,
   };
-  const confidence = Math.round(clamp(
-    confidenceBreakdown.dataCoverage * 0.35 + confidenceBreakdown.dataFreshness * 0.2 +
-      confidenceBreakdown.sourceQuality * 0.15 + confidenceBreakdown.reconciliation * 0.15 +
-      confidenceBreakdown.estimateAvailability * 0.05 + confidenceBreakdown.valuationInputs * 0.1,
-    5,
-    98,
-  ));
+  const confidenceComponents: Array<[number | null, number]> = [
+    [confidenceBreakdown.dataCoverage, 0.25], [confidenceBreakdown.dataFreshness, 0.15],
+    [confidenceBreakdown.sourceQuality, 0.08], [confidenceBreakdown.reconciliation, 0.08],
+    [confidenceBreakdown.estimateAvailability, 0.03], [confidenceBreakdown.valuationInputs, 0.05],
+    [confidenceBreakdown.entityIdentity, 0.05], [confidenceBreakdown.currencyAlignment, 0.08],
+    [confidenceBreakdown.archetypeConfidence, 0.05], [confidenceBreakdown.specializedCoverage, 0.06],
+    [confidenceBreakdown.marketInputFreshness, 0.05], [confidenceBreakdown.valuationAssumptions, 0.03],
+    [confidenceBreakdown.sourceConflict, 0.04],
+  ];
+  let confidenceWeightedSum = 0;
+  let confidenceWeight = 0;
+  for (const [value, weight] of confidenceComponents) {
+    if (value === null) continue;
+    confidenceWeightedSum += value * weight;
+    confidenceWeight += weight;
+  }
+  const uncappedConfidence = confidenceWeight > 0 ? confidenceWeightedSum / confidenceWeight : 5;
+  let confidenceCeiling = 98;
+  if (general.score === null) {
+    confidenceCeiling = Math.min(confidenceCeiling, general.coverage < 0.35 ? 40 : 55);
+  }
+  if (analysisArchetype === "unknown") confidenceCeiling = Math.min(confidenceCeiling, 35);
+  if (classification?.ambiguous) confidenceCeiling = Math.min(confidenceCeiling, 40);
+  if (["bank", "insurer", "reit"].includes(analysisArchetype) && specializedCoverage) {
+    if (specializedCoverage.overall < 0.3) confidenceCeiling = Math.min(confidenceCeiling, 45);
+    else if (specializedCoverage.overall < 0.7) confidenceCeiling = Math.min(confidenceCeiling, 60);
+  }
+  const confidence = Math.round(clamp(Math.min(uncappedConfidence, confidenceCeiling), 5, 98));
   const missingData = [...metrics.missingData, ...Object.values(dimensions).flatMap((item) => item.missingData ?? [])];
+  const archetypeCanBeScored = !["unknown", "pre_revenue_biotech", "holding_company"].includes(analysisArchetype);
   return {
-    stockBoxScore: general.score === null ? null : Math.round(general.score * 10) / 10,
-    personalizedScore: personalized.score === null ? null : Math.round(personalized.score * 10) / 10,
+    stockBoxScore: !archetypeCanBeScored || general.score === null ? null : Math.round(general.score * 10) / 10,
+    personalizedScore: !archetypeCanBeScored || personalized.score === null ? null : Math.round(personalized.score * 10) / 10,
     investmentProfile,
     sector,
     analysisArchetype,
@@ -335,22 +642,16 @@ export function computeScores(
     confidenceBreakdown,
     dataCoverage: general.coverage,
     dimensions,
-    shortTermScore: shortTerm.score === null ? null : Math.round(shortTerm.score),
-    longTermScore: longTerm.score === null ? null : Math.round(longTerm.score),
-    methodology: { modelVersion: MODEL_VERSION, sectorWeights, personalizedWeights },
+    shortTermScore: !archetypeCanBeScored || shortTerm.score === null ? null : Math.round(shortTerm.score),
+    longTermScore: !archetypeCanBeScored || longTerm.score === null ? null : Math.round(longTerm.score),
+    specializedCoverage,
+    methodology: {
+      modelVersion: MODEL_VERSION,
+      scorePolicyVersion: SCORE_POLICY_VERSION,
+      benchmarkVersion: STATIC_BENCHMARK_VERSION,
+      sectorWeights,
+      personalizedWeights,
+    },
     missingData,
-  };
-}
-
-/** @deprecated Production uses computeScores through analyzeFinancials. */
-export function scoreAnalysis(metrics: Metrics): StockBoxScore {
-  const available = Object.values(metrics).filter(isFiniteNumber).length;
-  const coverage = available / Object.keys(metrics).length;
-  return {
-    score: null,
-    personalizedScore: null,
-    confidence: Math.round(coverage * 100),
-    dimensions: [],
-    missingData: Object.entries(metrics).filter(([, value]) => !isFiniteNumber(value)).map(([key]) => key),
   };
 }

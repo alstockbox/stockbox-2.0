@@ -17,6 +17,7 @@ async function failureReason(body: string, init: ResponseInit = {}): Promise<str
 describe("Stooq market-data adapter", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -75,11 +76,11 @@ describe("Stooq market-data adapter", () => {
     await expect(failureReason(body, init)).resolves.toBe(reason);
   });
 
-  it("logs only safe response diagnostics for rejected HTML", async () => {
+  it("logs expected rejected provider payloads as warnings without polluting runtime errors", async () => {
     const body = "<!DOCTYPE html><html><body>Provider challenge</body></html>";
     await failureReason(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 
-    expect(console.error).toHaveBeenCalledWith(
+    expect(console.warn).toHaveBeenCalledWith(
       "Market data provider response rejected",
       expect.objectContaining({
         httpStatus: 200,
@@ -92,9 +93,19 @@ describe("Stooq market-data adapter", () => {
         parseFailure: "html_response",
       }),
     );
-    const diagnostic = vi.mocked(console.error).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(console.error).not.toHaveBeenCalled();
+    const diagnostic = vi.mocked(console.warn).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(diagnostic).not.toHaveProperty("body");
     expect(diagnostic).not.toHaveProperty("headers");
+  });
+
+  it("keeps terminal upstream failures at error severity", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("error", { status: 500 })));
+    await fetchStooqMarketData(company, { retries: 0 });
+    expect(console.error).toHaveBeenCalledWith(
+      "Market data provider response rejected",
+      expect.objectContaining({ parseFailure: "upstream_error" }),
+    );
   });
 
   it("reports 429 as rate limiting", async () => {

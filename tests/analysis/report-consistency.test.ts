@@ -61,6 +61,6 @@ describe("report depth consistency", () => {
     expect(deep.score.score).toBe(research.score.score);
     expect(deep.deepReport?.sections).toHaveLength(27);
     expect(research.research?.modules).toHaveLength(15);
-    expect(summary.engine?.modelVersion).toBe("stockbox-analysis-engine-v1.0.0");
+    expect(summary.engine?.modelVersion).toBe("stockbox-analysis-engine-v2.5.0");
   });
 });

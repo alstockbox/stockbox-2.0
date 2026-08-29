@@ -2,9 +2,7 @@ import type {
   AnalysisScenario,
   DcfRangeResult,
   FinancialMetrics,
-  Metrics,
   ScoreResult,
-  Scenario,
   ScenarioName,
   ScenarioStatus,
 } from "./types";
@@ -13,51 +11,6 @@ export function scenarioStatusFor(metrics: FinancialMetrics, scores: ScoreResult
   const usefulValuation = dcf.status === "available" || Object.values(metrics.valuation).some((value) => typeof value === "number" && Number.isFinite(value));
   if (scores.stockBoxScore === null && scores.dataCoverage < 0.5 && !usefulValuation) return "insufficient_data";
   return dcf.status === "available" ? "valuation" : "qualitative_research";
-}
-
-export function buildScenarios(metrics: Metrics, confidence: number): Scenario[] {
-  const growthPositive = (metrics.revenueCagr3y ?? metrics.revenueGrowth1y ?? 0) > 0.08;
-  const cashStrong = (metrics.fcfMargin ?? 0) > 0.08;
-  const valuationSupport = (metrics.fcfYield ?? metrics.earningsYield ?? 0) > 0.04;
-
-  return [
-    {
-      caseName: "Bull",
-      assumptions: [
-        growthPositive ? "Revenue growth remains above market average." : "Growth stabilizes from current levels.",
-        cashStrong ? "Free cash flow remains resilient." : "Cash conversion improves toward peer norms.",
-        valuationSupport ? "Current valuation leaves room for multiple support." : "Valuation pressure eases as fundamentals improve."
-      ],
-      drivers: ["Revenue durability", "Margin discipline", "Cash flow conversion"],
-      risks: ["Execution risk", "Market multiple compression", "Unexpected macro pressure"],
-      qualitativeOutcome: "The model can justify a favorable outcome if growth and cash flow both hold up.",
-      confidence: Math.min(95, confidence + 5)
-    },
-    {
-      caseName: "Base",
-      assumptions: [
-        "Recent growth and profitability remain broadly representative.",
-        "No major deterioration in balance-sheet risk.",
-        "Valuation remains tied to delivered cash flow and earnings quality."
-      ],
-      drivers: ["Reported fundamentals", "Observed market trend", "Balance-sheet resilience"],
-      risks: ["Missing data may hide important changes", "Future estimates are not fully modeled"],
-      qualitativeOutcome: "The base case follows the current StockBox score and confidence level.",
-      confidence
-    },
-    {
-      caseName: "Bear",
-      assumptions: [
-        "Growth slows or reverses.",
-        "Margins compress under competitive or macro pressure.",
-        "Investors demand a lower multiple for the same fundamentals."
-      ],
-      drivers: ["Revenue deceleration", "Margin pressure", "Leverage or cash-flow weakness"],
-      risks: ["Negative surprises", "Rising discount rates", "Unresolved red flags"],
-      qualitativeOutcome: "The downside case becomes more relevant if red flags persist or cash generation weakens.",
-      confidence: Math.max(25, confidence - 10)
-    }
-  ];
 }
 
 export function buildAnalysisScenarios(

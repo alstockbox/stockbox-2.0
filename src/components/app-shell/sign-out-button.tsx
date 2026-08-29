@@ -1,7 +1,7 @@
 import { LogOut } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 
-export function SignOutButton() {
+export function SignOutButton({ label }: { label: string }) {
   return (
     <form action={signOutAction}>
       <button
@@ -9,7 +9,7 @@ export function SignOutButton() {
         type="submit"
       >
         <LogOut className="h-4 w-4" aria-hidden="true" />
-        Sign out
+        {label}
       </button>
     </form>
   );

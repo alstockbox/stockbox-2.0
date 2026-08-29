@@ -21,6 +21,8 @@ import type {
   InvestmentProfile,
 } from "@/lib/analysis/types";
 import { MAX_BATCH_ROWS, parseBatchInput } from "@/lib/batch/input";
+import { getP0Copy } from "@/lib/i18n/p0-copy";
+import type { Locale } from "@/lib/i18n/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SetupNotice } from "@/components/ui/setup-notice";
@@ -73,15 +75,15 @@ function downloadFile(name: string, content: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-function statusLabel(status: BatchStatus) {
+function statusLabel(status: BatchStatus, copy: ReturnType<typeof getP0Copy>["batch"]) {
   return {
-    ready: "Ready",
-    running: "Analyzing",
-    completed: "Completed",
-    failed: "Failed",
-    not_found: "Not found",
-    unsupported: "Unsupported",
-    lookup_failed: "Lookup failed",
+    ready: copy.statusReady,
+    running: copy.statusAnalyzing,
+    completed: copy.statusCompleted,
+    failed: copy.statusFailed,
+    not_found: copy.statusNotFound,
+    unsupported: copy.statusUnsupported,
+    lookup_failed: copy.statusLookupFailed,
   }[status];
 }
 function StatusIcon({ status }: { status: BatchStatus }) {
@@ -97,7 +99,10 @@ function StatusIcon({ status }: { status: BatchStatus }) {
   return <CircleDashed className="h-4 w-4 text-[#9aa7b8]" aria-hidden="true" />;
 }
 
-export function BatchWorkbench({ financialConfigured }: { financialConfigured: boolean }) {
+export function BatchWorkbench({ financialConfigured, locale }: { financialConfigured: boolean; locale: Locale }) {
+  const allCopy = getP0Copy(locale);
+  const copy = allCopy.batch;
+  const analyzeCopy = allCopy.analyze;
   const [input, setInput] = useState("");
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
@@ -123,7 +128,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
   async function importFile(file?: File) {
     if (!file) return;
     if (file.size > 250_000) {
-      setError("The import file is too large. Use a TXT or CSV file below 250 KB.");
+      setError(copy.fileTooLarge);
       return;
     }
     setInput(await file.text());
@@ -134,19 +139,19 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
     setError(null);
     setRows([]);
     if (!financialConfigured) {
-      setError("Live financial data is not configured for this deployment.");
+      setError(copy.liveNotConfigured);
       return;
     }
     if (!parsed.symbols.length) {
-      setError("Enter at least one ticker symbol.");
+      setError(copy.enterTicker);
       return;
     }
     if (parsed.invalid.length) {
-      setError(`Remove invalid values: ${parsed.invalid.slice(0, 6).join(", ")}.`);
+      setError(`${copy.removeInvalid}: ${parsed.invalid.slice(0, 6).join(", ")}.`);
       return;
     }
     if (parsed.overLimit) {
-      setError(`A release batch can contain at most ${MAX_BATCH_ROWS} unique companies.`);
+      setError(copy.overLimit);
       return;
     }
 
@@ -159,14 +164,14 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
       });
       const payload = (await response.json()) as ResolvePayload;
       if (!response.ok || !payload.items) {
-        setError(payload.error ?? "The batch could not be validated.");
+        setError(locale === "en" ? (payload.error ?? copy.validationFailed) : copy.validationFailed);
         setEntitlement(payload.entitlement);
         return;
       }
       setRows(payload.items);
       setEntitlement(payload.entitlement);
     } catch {
-      setError("The batch could not be validated. Check your connection and try again.");
+      setError(copy.validationConnection);
     } finally {
       setIsResolving(false);
     }
@@ -203,18 +208,18 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
         }
 
         const message =
-          "error" in payload
+          locale === "en" && "error" in payload
             ? payload.error
-            : "Analysis completed but could not be saved. Try again.";
+            : copy.saveFailed;
         updateRow(candidate.input, { status: "failed", error: message });
         if (response.status === 429) {
-          setError("Your monthly analysis limit has been reached. Unstarted companies remain ready.");
+          setError(copy.monthlyLimit);
           break;
         }
       } catch {
         updateRow(candidate.input, {
           status: "failed",
-          error: "Connection interrupted. This company can be retried safely.",
+          error: copy.connectionInterrupted,
         });
       }
     }
@@ -223,7 +228,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
 
   function stopBatch() {
     cancelled.current = true;
-    setError("The batch will stop after the current company finishes.");
+    setError(copy.stopAfterCurrent);
   }
 
   function resetBatch() {
@@ -248,7 +253,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
     const data = rows.map((row) => [
       row.company?.canonicalTicker ?? row.company?.ticker ?? row.input,
       row.company?.name ?? "",
-      statusLabel(row.status),
+      statusLabel(row.status, copy),
       row.report?.score.score ?? "",
       row.report?.score.confidence ?? "",
       row.report?.recommendation ?? "",
@@ -280,8 +285,8 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
     <div className="space-y-6">
       {!financialConfigured ? (
         <SetupNotice
-          title="Live analysis provider setup required"
-          detail="Batch analysis is unavailable until the financial provider is configured."
+          title={copy.setupTitle}
+          detail={copy.setupDetail}
         />
       ) : null}
 
@@ -289,17 +294,17 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
         <div className="border-b border-white/10 bg-white/[0.03] px-5 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">Step 1</p>
-              <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">Add companies</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{copy.step1}</p>
+              <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{copy.addCompanies}</h2>
             </div>
             <span className="rounded-full border border-white/10 bg-[#07111f] px-3 py-1 text-xs text-[#c9d2df]">
-              {parsed.symbols.length}/{MAX_BATCH_ROWS} unique tickers
+              {parsed.symbols.length}/{MAX_BATCH_ROWS} {copy.uniqueTickers}
             </span>
           </div>
         </div>
         <div className="p-5">
           <label htmlFor="batch-tickers" className="text-sm font-semibold text-[#f4efe5]">
-            Ticker symbols
+            {copy.tickerSymbols}
           </label>
           <textarea
             id="batch-tickers"
@@ -317,7 +322,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 bg-white/7 px-4 text-sm font-semibold text-[#f4efe5] hover:bg-white/12">
               <FileUp className="h-4 w-4" aria-hidden="true" />
-              Import TXT or CSV
+              {copy.importFile}
               <input
                 type="file"
                 accept=".txt,.csv,text/plain,text/csv"
@@ -327,17 +332,17 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
               />
             </label>
             <p className="text-xs text-[#9aa7b8]">
-              Commas, spaces, semicolons and new lines are supported.
+              {copy.separators}
             </p>
           </div>
           {parsed.duplicates.length ? (
             <p className="mt-3 text-xs text-[#e1cb95]">
-              {parsed.duplicates.length} duplicate ticker{parsed.duplicates.length === 1 ? "" : "s"} removed automatically.
+              {parsed.duplicates.length} {parsed.duplicates.length === 1 ? copy.duplicateRemoved : copy.duplicatesRemoved}.
             </p>
           ) : null}
           {parsed.invalid.length ? (
             <p className="mt-2 text-xs text-red-200">
-              Invalid: {parsed.invalid.slice(0, 8).join(", ")}
+              {copy.invalid}: {parsed.invalid.slice(0, 8).join(", ")}
             </p>
           ) : null}
         </div>
@@ -346,45 +351,45 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">Step 2</p>
-            <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">Configure the batch</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{copy.step2}</p>
+            <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{copy.configure}</h2>
           </div>
           {entitlement ? (
             <span className="text-xs text-[#9aa7b8]">
-              {entitlement.plan} plan · {entitlement.rowLimit} rows per batch
+              {entitlement.plan} plan · {entitlement.rowLimit} {copy.rowsPerBatch}
             </span>
           ) : null}
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[#f4efe5]">Report type</span>
+            <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
             <select
               value={analysisType}
               onChange={(event) => setAnalysisType(event.target.value as AnalysisType)}
               disabled={isRunning}
               className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
             >
-              <option value="summary">Summary</option>
-              <option value="numbers">Numbers</option>
-              <option value="deep">Deep</option>
-              <option value="research">Research / Extra Deep</option>
+              <option value="summary">{analyzeCopy.summary}</option>
+              <option value="numbers">{analyzeCopy.numbers}</option>
+              <option value="deep">{analyzeCopy.deep}</option>
+              <option value="research">{analyzeCopy.research}</option>
             </select>
           </label>
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[#f4efe5]">Investment profile</span>
+            <span className="font-semibold text-[#f4efe5]">{copy.investmentProfile}</span>
             <select
               value={investmentProfile}
               onChange={(event) => setInvestmentProfile(event.target.value as InvestmentProfile)}
               disabled={isRunning}
               className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
             >
-              <option value="balanced">Balanced</option>
-              <option value="long_term">Long-term</option>
-              <option value="short_term">Short-term</option>
-              <option value="growth">Growth</option>
-              <option value="value">Value</option>
-              <option value="quality">Quality</option>
-              <option value="dividend">Dividend</option>
+              <option value="balanced">{analyzeCopy.balanced}</option>
+              <option value="long_term">{analyzeCopy.longTerm}</option>
+              <option value="short_term">{analyzeCopy.shortTerm}</option>
+              <option value="growth">{analyzeCopy.growth}</option>
+              <option value="value">{analyzeCopy.value}</option>
+              <option value="quality">{analyzeCopy.quality}</option>
+              <option value="dividend">{analyzeCopy.dividend}</option>
             </select>
           </label>
         </div>
@@ -395,63 +400,69 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
             disabled={!financialConfigured || isResolving || isRunning || !parsed.symbols.length}
           >
             {isResolving ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" aria-hidden="true" />}
-            {isResolving ? "Validating" : "Validate companies"}
+            {isResolving ? copy.validating : copy.validate}
           </Button>
           {rows.length && !isRunning ? (
             <Button type="button" variant="ghost" onClick={resetBatch}>
-              Clear validation
+              {copy.clear}
             </Button>
           ) : null}
           <p className="text-xs leading-5 text-[#9aa7b8]">
-            Each successful report uses one monthly analysis. Failed attempts are released automatically.
+            {copy.successfulUsesOne}
           </p>
         </div>
       </Card>
 
-      {error ? <SetupNotice title="Batch notice" detail={error} /> : null}
+      {error ? <SetupNotice title={copy.notice} detail={error} /> : null}
 
       {rows.length ? (
         <Card className="overflow-hidden p-0">
           <div className="border-b border-white/10 px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">Step 3</p>
-                <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">Run and review</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{copy.step3}</p>
+                <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{copy.runReview}</h2>
                 <p className="mt-1 text-xs text-[#9aa7b8]">
-                  Keep this tab open while the queue is running.
+                  {copy.keepOpen}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {!isRunning && readyCount ? (
                   <Button type="button" onClick={() => void executeBatch(rows.filter((row) => row.status === "ready"))}>
                     <Play className="h-4 w-4" aria-hidden="true" />
-                    Run {readyCount}
+                    {copy.run} {readyCount}
                   </Button>
                 ) : null}
                 {isRunning ? (
                   <Button type="button" variant="danger" onClick={stopBatch}>
                     <Square className="h-4 w-4" aria-hidden="true" />
-                    Stop safely
+                    {copy.stopSafely}
                   </Button>
                 ) : null}
                 {!isRunning && failedRows.length ? (
                   <Button type="button" variant="secondary" onClick={() => void executeBatch(failedRows)}>
                     <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                    Retry {failedRows.length}
+                    {copy.retry} {failedRows.length}
                   </Button>
                 ) : null}
               </div>
             </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/8">
+            <div
+              className="mt-4 h-2 overflow-hidden rounded-full bg-white/8"
+              role="progressbar"
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
               <div
                 className="h-full rounded-full bg-[#b99b5f] transition-all"
                 style={{ width: `${progress}%` }}
               />
             </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[#9aa7b8]">
-              <span>{processedCount}/{rows.length} processed</span>
-              <span className="text-emerald-200">{completedRows.length} completed</span>
-              <span className="text-red-200">{rows.length - readyCount - completedRows.length - (isRunning ? 1 : 0)} issues or failures</span>
+              <span>{processedCount}/{rows.length} {copy.processed}</span>
+              <span className="text-emerald-200">{completedRows.length} {copy.completed}</span>
+              <span className="text-red-200">{rows.length - readyCount - completedRows.length - (isRunning ? 1 : 0)} {copy.issues}</span>
             </div>
           </div>
 
@@ -459,12 +470,12 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-[#9aa7b8]">
                 <tr>
-                  <th className="px-5 py-3 font-semibold">Ticker</th>
-                  <th className="px-5 py-3 font-semibold">Company</th>
-                  <th className="px-5 py-3 font-semibold">Status</th>
-                  <th className="px-5 py-3 text-right font-semibold">Score</th>
-                  <th className="px-5 py-3 text-right font-semibold">Coverage</th>
-                  <th className="px-5 py-3 font-semibold">Result</th>
+                  <th className="px-5 py-3 font-semibold">{copy.ticker}</th>
+                  <th className="px-5 py-3 font-semibold">{copy.company}</th>
+                  <th className="px-5 py-3 font-semibold">{copy.status}</th>
+                  <th className="px-5 py-3 text-right font-semibold">{copy.score}</th>
+                  <th className="px-5 py-3 text-right font-semibold">{copy.coverage}</th>
+                  <th className="px-5 py-3 font-semibold">{copy.result}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/8">
@@ -480,7 +491,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
                     <td className="px-5 py-4">
                       <span className="inline-flex items-center gap-2">
                         <StatusIcon status={row.status} />
-                        {statusLabel(row.status)}
+                        {statusLabel(row.status, copy)}
                       </span>
                     </td>
                     <td className="number px-5 py-4 text-right text-[#f4efe5]">
@@ -494,7 +505,7 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
                     <td className="px-5 py-4">
                       {row.report?.id ? (
                         <Link className="font-semibold text-[#e1cb95] hover:text-[#f4efe5]" href={`/analysis/${row.report.id}`}>
-                          Open report
+                          {copy.openReport}
                         </Link>
                       ) : "—"}
                     </td>
@@ -507,16 +518,16 @@ export function BatchWorkbench({ financialConfigured }: { financialConfigured: b
           {completedRows.length ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-5 py-4">
               <p className="text-xs leading-5 text-[#9aa7b8]">
-                Export the full QA file when you want the analysis engine reviewed and calibrated.
+                {copy.exportQaCopy}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="secondary" onClick={exportCsv}>
                   <Download className="h-4 w-4" aria-hidden="true" />
-                  Download CSV
+                  {copy.downloadCsv}
                 </Button>
                 <Button type="button" variant="secondary" onClick={exportQaJson}>
                   <Download className="h-4 w-4" aria-hidden="true" />
-                  Download QA JSON
+                  {copy.downloadQa}
                 </Button>
               </div>
             </div>

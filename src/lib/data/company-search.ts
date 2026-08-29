@@ -3,6 +3,7 @@ import { commonCompanies } from "./common-companies";
 import { entityIdentityFor } from "./entity-identities";
 import { fetchSecTickerUniverse } from "./sec";
 import { providerDiagnostic, type AdapterResult, type CompanySearchProvider, type ProviderCapabilities } from "./providers";
+import { inferSecurityType } from "./security-classification";
 import { securityMasterCompanySearchProvider } from "./security-master";
 import { normalizeText as normalizeSecurityText, normalizeTicker as normalizeSecurityTicker } from "./security-master/normalization";
 
@@ -22,13 +23,91 @@ export function normalizedTicker(value: string): string {
   return normalizeSecurityTicker(value);
 }
 
-function securityType(company: CompanySearchResult): NonNullable<CompanySearchResult["securityType"]> {
-  if (company.securityType) return company.securityType;
-  const text = `${company.ticker} ${company.name}`.toLowerCase();
-  if (/preferred|depositary shares|\bpfd\b|[-.]p[a-z]?\b/.test(text)) return "Preferred";
-  if (/\betf\b|\bfund\b|portfolio|trust index/.test(text)) return "ETF/Fund";
-  if (/\badr\b|american depositary/.test(text)) return "ADR";
-  return "Common Stock";
+export type CanonicalCompanyResolution =
+  | { ok: true; company: CompanySearchResult }
+  | { ok: false; reason: "not_found" | "ambiguous" | "identity_mismatch" };
+
+function normalizedIdentifier(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : null;
+}
+
+function normalizedCik(value: string | null | undefined): string | null {
+  const digits = value?.replace(/\D/g, "");
+  return digits ? digits.padStart(10, "0") : null;
+}
+
+function rawTickerCandidates(company: CompanySearchResult): string[] {
+  return [
+    company.canonicalTicker,
+    company.ticker,
+    company.localTicker,
+    ...(company.providerTickers ?? []),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.trim().toUpperCase());
+}
+
+function identifierMatches(
+  requested: string | null | undefined,
+  canonical: string | null | undefined,
+): boolean {
+  const expected = normalizedIdentifier(requested);
+  return !expected || expected === normalizedIdentifier(canonical);
+}
+
+function cikMatchesCompany(requestedCik: string | undefined, company: CompanySearchResult): boolean {
+  const requested = normalizedCik(requestedCik);
+  if (!requested) return true;
+  if (requested === normalizedCik(company.cik)) return true;
+  const identity = entityIdentityFor(company);
+  return Boolean(identity && [identity.currentCik, ...identity.predecessorCiks].includes(requested));
+}
+
+function stableIdentifierMatches(requested: CompanySearchResult, company: CompanySearchResult): boolean {
+  return identifierMatches(requested.securityId, company.securityId)
+    && identifierMatches(requested.isin, company.isin)
+    && identifierMatches(requested.figi, company.figi)
+    && identifierMatches(requested.lei, company.lei)
+    && identifierMatches(requested.issuerId, company.issuerId)
+    && identifierMatches(requested.entityId, company.entityId)
+    && cikMatchesCompany(requested.cik, company);
+}
+
+function narrowByStableIdentifiers(
+  requested: CompanySearchResult,
+  candidates: CompanySearchResult[],
+): CompanySearchResult[] {
+  const supplied = [
+    requested.securityId,
+    requested.isin,
+    requested.figi,
+    requested.lei,
+    requested.issuerId,
+    requested.entityId,
+    requested.cik,
+  ].some(Boolean);
+  if (!supplied) return candidates;
+  return candidates.filter((candidate) => stableIdentifierMatches(requested, candidate));
+}
+
+export function resolveCanonicalCompanySelection(
+  requested: CompanySearchResult,
+  candidates: CompanySearchResult[],
+): CanonicalCompanyResolution {
+  const requestedTicker = (requested.canonicalTicker ?? requested.ticker).trim().toUpperCase();
+  const exactListings = candidates.filter((candidate) => rawTickerCandidates(candidate).includes(requestedTicker));
+  if (!exactListings.length) return { ok: false, reason: "not_found" };
+
+  const stableMatches = narrowByStableIdentifiers(requested, exactListings);
+  if (!stableMatches.length) return { ok: false, reason: "identity_mismatch" };
+  if (stableMatches.length > 1) return { ok: false, reason: "ambiguous" };
+
+  const company = stableMatches[0];
+  if (!stableIdentifierMatches(requested, company)) {
+    return { ok: false, reason: "identity_mismatch" };
+  }
+  return { ok: true, company };
 }
 
 function enrich(
@@ -37,10 +116,11 @@ function enrich(
 ): CompanySearchResult {
   const identity = entityIdentityFor(company);
   const cik = identity?.currentCik ?? company.cik;
-  const type = securityType(company);
+  const type = inferSecurityType(company);
   const providerIds = new Set([...(company.providerCapabilities?.providerIds ?? []), provider.id]);
-  const fundamentalsSupported = company.providerCapabilities?.fundamentals
+  const rawFundamentalsSupported = company.providerCapabilities?.fundamentals
     ?? (provider.capabilities.supportsFundamentals && Boolean(cik));
+  const fundamentalsSupported = type === "Common Stock" && rawFundamentalsSupported;
   if (fundamentalsSupported) providerIds.add("sec-companyfacts");
   return {
     ...company,
@@ -335,19 +415,55 @@ export function scoreSearchMatch(company: CompanySearchResult, query: string): S
   return match;
 }
 
+function canonicalListingMergeKey(company: CompanySearchResult): string | null {
+  const ticker = (company.canonicalTicker ?? company.ticker).trim().toUpperCase();
+  if (!hasExchangeQualifiedTicker(ticker)) return null;
+  return `${ticker}:${inferSecurityType(company)}`;
+}
+
+function listingRepresentationsCompatible(current: CompanySearchResult, candidate: CompanySearchResult): boolean {
+  if (canonicalListingMergeKey(current) !== canonicalListingMergeKey(candidate)) return false;
+  const conflicts = [[current.securityId, candidate.securityId], [current.isin, candidate.isin], [current.figi, candidate.figi]];
+  if (conflicts.some(([l, r]) => l && r && normalizedIdentifier(l) !== normalizedIdentifier(r))) return false;
+  if (current.country && candidate.country && normalizedIdentifier(current.country) !== normalizedIdentifier(candidate.country)) return false;
+  if (current.mic && candidate.mic && normalizedIdentifier(current.mic) !== normalizedIdentifier(candidate.mic)) return false;
+  return true;
+}
+
 function mergeCompany(current: CompanySearchResult | undefined, candidate: CompanySearchResult): CompanySearchResult {
   if (!current) return candidate;
   const providerIds = new Set([...(current.providerCapabilities?.providerIds ?? []), ...(candidate.providerCapabilities?.providerIds ?? [])]);
+  const fundamentals = Boolean(current.providerCapabilities?.fundamentals || candidate.providerCapabilities?.fundamentals);
+  const marketData = Boolean(current.providerCapabilities?.marketData || candidate.providerCapabilities?.marketData);
+  const preferredIdentity = securityIdentityRank(candidate) > securityIdentityRank(current) ? candidate : current;
+  const secondaryIdentity = preferredIdentity === current ? candidate : current;
+  const levels = [current.analysisCapability?.fundamentals, candidate.analysisCapability?.fundamentals];
+  const fundamentalsCapability = levels.includes("full") ? "full" as const
+    : levels.includes("partial") || fundamentals ? "partial" as const
+    : "unavailable" as const;
+  const supportiveReason = [current, candidate]
+    .find((item) => item.analysisCapability?.fundamentals && item.analysisCapability.fundamentals !== "unavailable")
+    ?.analysisCapability?.reason;
   return {
     ...candidate,
     ...current,
+    securityId: preferredIdentity.securityId ?? secondaryIdentity.securityId,
+    issuerId: preferredIdentity.issuerId ?? secondaryIdentity.issuerId,
+    entityId: preferredIdentity.entityId ?? secondaryIdentity.entityId,
+    isin: preferredIdentity.isin ?? secondaryIdentity.isin,
+    figi: preferredIdentity.figi ?? secondaryIdentity.figi,
+    lei: preferredIdentity.lei ?? secondaryIdentity.lei,
     cik: candidate.cik ?? current.cik,
     exchange: current.exchange && current.exchange !== "US" ? current.exchange : candidate.exchange ?? current.exchange,
+    country: current.country ?? candidate.country,
+    currency: current.currency ?? candidate.currency,
+    mic: current.mic ?? candidate.mic,
     searchAliases: [...new Set([...(current.searchAliases ?? []), ...(candidate.searchAliases ?? [])])],
-    providerCapabilities: {
-      fundamentals: Boolean(current.providerCapabilities?.fundamentals || candidate.providerCapabilities?.fundamentals),
-      marketData: Boolean(current.providerCapabilities?.marketData || candidate.providerCapabilities?.marketData),
-      providerIds: [...providerIds].sort(),
+    providerCapabilities: { fundamentals, marketData, providerIds: [...providerIds].sort() },
+    analysisCapability: {
+      fundamentals: fundamentalsCapability,
+      marketData: marketData ? "available" : "unavailable",
+      ...(supportiveReason ? { reason: supportiveReason } : {}),
     },
   };
 }
@@ -386,12 +502,24 @@ export async function searchCompanyCatalog(
   const providers = [...configuredCatalogProviders, securityMasterCompanySearchProvider, curatedCompanySearchProvider, secCompanySearchProvider];
   const providerResults = await Promise.all(providers.map((provider) => provider.search(normalizedQuery)));
   const merged = new Map<string, CompanySearchResult>();
+  const listingIndex = new Map<string, string[]>();
   for (const [providerIndex, result] of providerResults.entries()) {
     if (!result.ok) continue;
     for (const company of result.data) {
       const enriched = enrich(company, providers[providerIndex]);
-      const key = enriched.securityId
+      const intrinsicKey = enriched.securityId
         ?? `${enriched.entityId ?? `${enriched.country ?? "unknown"}:unknown-issuer`}:${normalizedTicker(enriched.canonicalTicker ?? enriched.ticker)}:${enriched.securityType}`;
+      const listingKey = canonicalListingMergeKey(enriched);
+      let key = intrinsicKey;
+      if (listingKey) {
+        const indexedKeys = listingIndex.get(listingKey) ?? [];
+        const compatibleKey = indexedKeys.find((candidateKey) => {
+          const current = merged.get(candidateKey);
+          return current ? listingRepresentationsCompatible(current, enriched) : false;
+        });
+        if (compatibleKey) key = compatibleKey;
+        else { indexedKeys.push(intrinsicKey); listingIndex.set(listingKey, indexedKeys); }
+      }
       merged.set(key, mergeCompany(merged.get(key), enriched));
     }
   }

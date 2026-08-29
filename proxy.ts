@@ -1,8 +1,8 @@
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 
-export function proxy(request: NextRequest) {
-  return updateSession(request);
+export function proxy(request: NextRequest, event: NextFetchEvent) {
+  return updateSession(request, event);
 }
 
 export const config = {

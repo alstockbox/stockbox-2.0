@@ -8,7 +8,7 @@ const marketDataProviderSchema = z.preprocess(
     const normalized = value.trim().toLowerCase();
     return normalized || undefined;
   },
-  z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("stooq")
+  z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("yahoo")
 );
 
 const providerListSchema = z.preprocess(
@@ -28,6 +28,7 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_BASIC_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_COUPON_BASIC_LAUNCH: z.string().optional().or(z.literal("")),
+  CRON_SECRET: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_STANDARD_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_PREMIUM_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional().or(z.literal("")),
@@ -116,7 +117,6 @@ export function getMarketDataProviderChain(env = getServerEnv()) {
   const ordered: Array<"twelve_data" | "stooq" | "yahoo"> = [
     env.MARKET_DATA_PROVIDER,
     ...(env.MARKET_DATA_FALLBACK_PROVIDERS ?? []),
-    "yahoo",
   ];
   return [...new Set(ordered)];
 }

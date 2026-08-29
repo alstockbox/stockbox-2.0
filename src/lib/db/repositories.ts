@@ -1,12 +1,15 @@
 import type { AnalysisReport, BatchQaResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPlan, type PlanKey } from "@/lib/billing/plans";
+import { hasPaidAccessStatus } from "@/lib/billing/subscriptions";
 import { MODEL_VERSION } from "@/lib/analysis/config";
+
+export type EntitlementPlanKey = PlanKey | "affiliate_ambassador";
 
 type AnalysisEntitlementResult = {
   allowed: boolean;
   configured: boolean;
-  plan: PlanKey;
+  plan: EntitlementPlanKey;
   reservationId?: string | null;
   usage: { analyses: number; deepAnalyses: number };
   limits: { analyses: number; deepAnalyses: number };
@@ -15,7 +18,7 @@ type AnalysisEntitlementResult = {
 export type BatchEntitlementResult = {
   allowed: boolean;
   configured: boolean;
-  plan: PlanKey;
+  plan: EntitlementPlanKey;
   rowLimit: number;
 };
 
@@ -38,20 +41,22 @@ function numberFromJson(value: unknown): number {
 function entitlementFromJson(value: unknown): AnalysisEntitlementResult {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return fallbackEntitlement(false);
   const payload = value as Record<string, unknown>;
-  const planKey = typeof payload.plan === "string" && getPlan(payload.plan as PlanKey).key === payload.plan
-    ? payload.plan as PlanKey
-    : "free";
+  const planKey: EntitlementPlanKey = payload.plan === "affiliate_ambassador"
+    ? "affiliate_ambassador"
+    : typeof payload.plan === "string" && getPlan(payload.plan as PlanKey).key === payload.plan
+      ? payload.plan as PlanKey
+      : "free";
   const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
     ? payload.usage as Record<string, unknown>
     : {};
   const limits = payload.limits && typeof payload.limits === "object" && !Array.isArray(payload.limits)
     ? payload.limits as Record<string, unknown>
     : {};
-  const plan = getPlan(planKey);
+  const plan = getPlan(planKey === "affiliate_ambassador" ? "free" : planKey);
   return {
     allowed: payload.allowed === true,
     configured: payload.configured === true,
-    plan: plan.key,
+    plan: planKey,
     reservationId: typeof payload.reservationId === "string" ? payload.reservationId : null,
     usage: {
       analyses: numberFromJson(usage.analyses),
@@ -132,17 +137,52 @@ export async function persistBatchQaResult(result: BatchQaResult) {
     batch_id: result.batchId,
     rerun_key: result.rerunKey,
     model_version: result.modelVersion,
+    score_policy_version: result.scorePolicyVersion,
+    benchmark_version: result.benchmarkVersion,
+    canonical_input_fingerprint: result.canonicalInputFingerprint,
     provider_versions: result.providerVersions,
     analysis_timestamp: result.analysisTimestamp,
     canonical_entity: result.canonicalEntity,
     analysis_archetype: result.archetype,
     data_coverage: result.coverage,
     confidence: result.confidence,
+    score: result.score,
+    rating: result.rating,
     qa_flags: result.flags,
     updated_at: new Date().toISOString(),
   }, { onConflict: "batch_id,rerun_key,canonical_entity" });
   if (error) return { ok: false as const, error: error.message };
   return { ok: true as const };
+}
+
+export async function getBatchQaResults(batchId: string, rerunKey: string) {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false as const, error: "Supabase admin client is not configured." };
+  const { data, error } = await supabase
+    .from("analysis_batch_qa_results")
+    .select("*")
+    .eq("batch_id", batchId)
+    .eq("rerun_key", rerunKey)
+    .order("canonical_entity", { ascending: true });
+  if (error) return { ok: false as const, error: error.message };
+  const results: BatchQaResult[] = (data ?? []).map((row) => ({
+    batchId: row.batch_id,
+    rerunKey: row.rerun_key,
+    modelVersion: row.model_version,
+    scorePolicyVersion: row.score_policy_version,
+    benchmarkVersion: row.benchmark_version,
+    canonicalInputFingerprint: row.canonical_input_fingerprint,
+    providerVersions: row.provider_versions ?? {},
+    analysisTimestamp: row.analysis_timestamp,
+    canonicalEntity: row.canonical_entity,
+    archetype: row.analysis_archetype as BatchQaResult["archetype"],
+    coverage: Number(row.data_coverage),
+    confidence: Number(row.confidence),
+    score: row.score === null || row.score === undefined ? null : Number(row.score),
+    rating: row.rating as BatchQaResult["rating"],
+    flags: (row.qa_flags ?? []) as BatchQaResult["flags"],
+  }));
+  return { ok: true as const, data: results };
 }
 
 export async function getAnalysis(id: string, userId: string) {
@@ -199,34 +239,6 @@ export async function logApplicationError(input: {
   });
 }
 
-export async function checkAnalysisEntitlement(input: { userId: string; analysisType: AnalysisReport["analysisType"] }) {
-  const supabase = createAdminClient();
-  if (!supabase) return { allowed: true as const, configured: false as const };
-
-  const monthStart = new Date();
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-  const [{ data: subscription }, { count: total }, { count: deep }] = await Promise.all([
-    supabase.from("subscriptions").select("plan_key,status").eq("user_id", input.userId).single(),
-    supabase.from("analyses").select("id", { count: "exact", head: true }).eq("user_id", input.userId).gte("created_at", monthStart.toISOString()),
-    supabase.from("analyses").select("id", { count: "exact", head: true }).eq("user_id", input.userId).in("analysis_type", ["deep", "research"]).gte("created_at", monthStart.toISOString()),
-  ]);
-  const active = subscription && ["active", "trialing"].includes(subscription.status);
-  const plan = getPlan(active ? subscription.plan_key : "free");
-  const used = total ?? 0;
-  const deepUsed = deep ?? 0;
-  const usesDeepQuota = input.analysisType === "deep" || input.analysisType === "research";
-  const allowed = used < plan.entitlements.monthlyAnalyses && (!usesDeepQuota || deepUsed < plan.entitlements.deepAnalyses);
-
-  return {
-    allowed,
-    configured: true as const,
-    plan: plan.key,
-    usage: { analyses: used, deepAnalyses: deepUsed },
-    limits: { analyses: plan.entitlements.monthlyAnalyses, deepAnalyses: plan.entitlements.deepAnalyses },
-  };
-}
-
 export async function getBatchEntitlement(input: {
   userId: string;
   isAdmin?: boolean;
@@ -240,12 +252,28 @@ export async function getBatchEntitlement(input: {
     return { allowed: false, configured: false, plan: "free", rowLimit: 0 };
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", input.userId)
+    .maybeSingle();
+
+  if (profile?.role === "affiliate_ambassador") {
+    const { data: affiliate } = await supabase
+      .from("affiliates")
+      .select("status,monthly_analysis_limit")
+      .eq("user_id", input.userId)
+      .maybeSingle();
+    const allowed = affiliate?.status === "active" && Number(affiliate.monthly_analysis_limit) > 0;
+    return { allowed, configured: true, plan: "affiliate_ambassador", rowLimit: allowed ? 50 : 0 };
+  }
+
   const { data: subscription } = await supabase
     .from("subscriptions")
     .select("plan_key,status")
     .eq("user_id", input.userId)
     .single();
-  const active = subscription && ["active", "trialing"].includes(subscription.status);
+  const active = subscription && hasPaidAccessStatus(subscription.status);
   const plan = getPlan(active ? subscription.plan_key : "free");
   const rowLimit = Math.min(plan.entitlements.batchRows, 50);
 

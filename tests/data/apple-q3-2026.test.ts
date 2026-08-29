@@ -46,9 +46,30 @@ describe("Apple Q3 2026 Companyfacts regression", () => {
       balanceSheetDate: "2025-06-28",
       periodBasis: "TTM_Q3_9M",
       revenue: 408_625_000_000,
+      currentSharesOutstanding: 14_840_390_000,
+    }));
+    expect(prior?.provenance?.currentSharesOutstanding).toEqual(expect.objectContaining({
+      concept: "EntityCommonStockSharesOutstanding", periodEnd: "2025-07-18", accession: "q3-2025-ytd",
     }));
     expect(current?.revenue).not.toBe(431_542_000_000);
     expect(ttmPeriodBasisCheck(current)).toEqual(expect.objectContaining({ status: "pass" }));
+  });
+
+  it("does not leak a future shares snapshot into a prior comparative TTM period", () => {
+    const facts = structuredClone(appleQ3CompanyFacts);
+    const sharesFact = facts.facts?.dei?.EntityCommonStockSharesOutstanding;
+    if (!sharesFact?.units) throw new Error("Apple fixture is missing the expected shares fact.");
+    sharesFact.units.shares = [
+      { end: "2026-07-17", form: "10-Q", filed: "2026-07-31", accn: "q3-2025-ytd", val: 99_999_999_999 },
+      { end: "2026-07-17", form: "10-Q", filed: "2026-07-31", accn: "q3-2026-ytd", val: 14_594_180_000 },
+    ];
+
+    const periods = resolveSecFinancialPeriods(facts);
+    expect(periods.priorTrailingTwelveMonths).toEqual(expect.objectContaining({
+      periodEndDate: "2025-06-28",
+      currentSharesOutstanding: null,
+    }));
+    expect(periods.priorTrailingTwelveMonths?.provenance?.currentSharesOutstanding).toBeUndefined();
   });
 
   it("uses current quarter balances and prior comparable TTM growth", () => {
