@@ -23,6 +23,11 @@ describe("server environment parsing", () => {
     expect(env.NEXT_PUBLIC_POSTHOG_HOST).toBe("https://eu.posthog.com");
   });
 
+  it("preserves the payout cron secret for authenticated cron routes", () => {
+    const env = parseServerEnv({ CRON_SECRET: "test-cron-secret" });
+    expect(env.CRON_SECRET).toBe("test-cron-secret");
+  });
+
   it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the reliable no-env Yahoo fallback", (provider) => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: provider });
     expect(getMarketDataProvider(env)).toBe("yahoo");

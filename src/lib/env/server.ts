@@ -26,6 +26,7 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().or(z.literal("")),
   STRIPE_RESTRICTED_KEY: z.string().optional().or(z.literal("")),
   STRIPE_WEBHOOK_SECRET: z.string().optional().or(z.literal("")),
+  CRON_SECRET: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_BASIC_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_COUPON_BASIC_LAUNCH: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_STANDARD_MONTHLY: z.string().optional().or(z.literal("")),

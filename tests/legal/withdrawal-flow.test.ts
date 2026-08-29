@@ -10,7 +10,7 @@ function source(path: string) {
 
 describe("consumer withdrawal flow", () => {
   it("creates an own-readable, service-written audit trail", () => {
-    const migration = source("supabase/migrations/20260828190000_withdrawal_requests.sql");
+    const migration = source("supabase/migrations/20260828194306_withdrawal_requests.sql");
     expect(migration).toContain("create table if not exists public.withdrawal_requests");
     expect(migration).toContain("withdrawal_requests_select_own");
     expect(migration).toContain("revoke all on public.withdrawal_requests from anon");

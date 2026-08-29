@@ -40,7 +40,15 @@ describe("affiliate signup attribution", () => {
     mocks.signUp.mockResolvedValue({ data: { user: { id: "referred_user_1" } }, error: null });
     mocks.createClient.mockResolvedValue({ auth: { signUp: mocks.signUp } });
     mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
-    mocks.rpc.mockResolvedValue({ data: { attributed: true }, error: null });
+    mocks.rpc.mockImplementation(async (fn: string, args: Record<string, unknown>) => {
+      if (fn === "consume_rate_limit") {
+        const limit = Number(args.p_limit);
+        return { data: { allowed: true, remaining: Math.max(0, limit - 1), reset_at: "2026-08-29T20:30:00.000Z", retry_after_seconds: 0 }, error: null };
+      }
+      if (fn === "attribute_affiliate_signup") return { data: { attributed: true }, error: null };
+      if (fn === "record_affiliate_referral") return { data: { ok: true }, error: null };
+      return { data: null, error: null };
+    });
     mocks.cookies.mockResolvedValue({
       get: vi.fn((name: string) => name === "stockbox_ref" ? { value: "sb_partner" } : undefined),
       delete: mocks.cookieDelete,
@@ -53,11 +61,21 @@ describe("affiliate signup attribution", () => {
       p_code: "sb_partner",
       p_referred_user_id: "referred_user_1",
     });
+    expect(mocks.rpc).toHaveBeenCalledWith("record_affiliate_referral", {
+      p_code: "sb_partner",
+      p_referred_id: "referred_user_1",
+    });
     expect(mocks.cookieDelete).toHaveBeenCalledWith("stockbox_ref");
   });
 
   it("never blocks account creation when attribution persistence fails", async () => {
-    mocks.rpc.mockRejectedValueOnce(new Error("affiliate database unavailable"));
+    mocks.rpc.mockImplementation(async (fn: string, args: Record<string, unknown>) => {
+      if (fn === "consume_rate_limit") {
+        const limit = Number(args.p_limit);
+        return { data: { allowed: true, remaining: Math.max(0, limit - 1), reset_at: "2026-08-29T20:30:00.000Z", retry_after_seconds: 0 }, error: null };
+      }
+      throw new Error("affiliate database unavailable");
+    });
     const result = await signUpAction({ ok: false, message: "" }, signupData());
     expect(result.ok).toBe(true);
   });

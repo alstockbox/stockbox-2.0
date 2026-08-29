@@ -143,10 +143,16 @@ export async function signUpAction(
       try {
         const admin = createAdminClient();
         if (admin) {
-          await admin.rpc("attribute_affiliate_signup", {
-            p_code: referralCode,
-            p_referred_user_id: data.user.id,
-          });
+          await Promise.allSettled([
+            admin.rpc("attribute_affiliate_signup", {
+              p_code: referralCode,
+              p_referred_user_id: data.user.id,
+            }),
+            admin.rpc("record_affiliate_referral", {
+              p_code: referralCode,
+              p_referred_id: data.user.id,
+            }),
+          ]);
         }
       } catch {
         // Attribution must never block account creation.

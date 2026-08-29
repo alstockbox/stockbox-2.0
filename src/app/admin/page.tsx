@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { AlertTriangle, CheckCircle2, Database, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, Database, Eye, ShieldCheck } from "lucide-react";
+import { AmbassadorCreateForm } from "@/components/admin/ambassador-create-form";
 import { Card, Container, Section } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth/session";
 import { adminEmails, getServerEnv, isFinancialProviderConfigured, isStripeConfigured, isSupabaseConfigured } from "@/lib/env/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { setAffiliateAmbassadorAccessAction } from "./actions";
+import { setAffiliateAmbassadorAccessAction, updateContactMessageAction, updateFeedbackAction } from "./actions";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -45,6 +47,12 @@ export default async function AdminPage() {
       .filter((row) => Boolean(row.user_id))
       .map((row) => [row.user_id as string, row] as const),
   );
+  const [feedbackResult, contactResult] = supabase ? await Promise.all([
+    supabase.from("feedback_submissions").select("id,rating,comment,status,testimonial_approved,created_at").order("created_at", { ascending: false }).limit(50),
+    supabase.from("contact_messages").select("id,name,email,subject,message,status,created_at").order("created_at", { ascending: false }).limit(50),
+  ]) : [{ data: [] }, { data: [] }];
+  const feedback = feedbackResult.data ?? [];
+  const contactMessages = contactResult.data ?? [];
   const [providerHealthResult, errorLogResult, withdrawalResult] = supabase ? await Promise.all([
     supabase.from("provider_health")
       .select("provider,operation,ok,latency_ms,status_code,error_class,created_at")
@@ -135,6 +143,13 @@ export default async function AdminPage() {
           </div>
         </section>
 
+        <section id="add-ambassador" className="mt-10 scroll-mt-24">
+          <p className="text-sm font-semibold text-[#e1cb95]">Affiliate operations</p>
+          <h2 className="serif mt-2 text-2xl font-semibold">Add ambassador</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">Create the login, choose commission and monthly analysis allowance, then send the temporary credentials to the ambassador.</p>
+          <AmbassadorCreateForm />
+        </section>
+
         <section className="mt-10">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -218,6 +233,7 @@ export default async function AdminPage() {
               <h2 className="text-lg font-semibold">Affiliate ambassadors</h2>
               <p className="mt-1 text-sm text-[#9aa7b8]">Configure individual access, referral status and commission for each ambassador.</p>
             </div>
+            <Link href="#add-ambassador" className="inline-flex h-10 items-center justify-center rounded-md border border-[#e1cb95]/35 bg-[#e1cb95]/10 px-4 text-sm font-semibold text-[#f4e5b8] hover:bg-[#e1cb95]/15">+ Add ambassador</Link>
           </div>
           <div className="mt-4 space-y-4">
             {profiles.length ? profiles.map((profile) => {
@@ -270,6 +286,11 @@ export default async function AdminPage() {
                       <button type="submit" disabled={protectedAccount} className="rounded-md border border-[#e1cb95]/30 px-3 py-2 text-xs font-medium text-[#f4e5b8] transition hover:bg-[#e1cb95]/10 disabled:cursor-not-allowed disabled:opacity-40">
                         {protectedAccount ? "Protected" : ambassador ? "Save settings" : "Make ambassador"}
                       </button>
+                      {ambassador ? (
+                        <Link href={`/affiliate?preview=${profile.id}`} className="inline-flex items-center gap-2 rounded-md border border-white/15 px-3 py-2 text-xs font-semibold text-[#f4efe5] hover:bg-white/8">
+                          <Eye className="h-4 w-4" aria-hidden="true" />View dashboard
+                        </Link>
+                      ) : null}
                     </div>
                   </form>
 
@@ -291,6 +312,59 @@ export default async function AdminPage() {
             }) : (
               <p className="rounded-lg border border-white/10 bg-[#0d1c2e]/70 px-4 py-4 text-sm text-[#9aa7b8]">No profiles are available yet.</p>
             )}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Feedback queue</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">Review feedback and explicitly approve testimonials.</p>
+          <div className="mt-4 space-y-3">
+            {feedback.map((item) => (
+              <Card key={item.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                <div>
+                  <p className="text-sm font-semibold text-[#f4efe5]">{item.rating}/5 ★</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-[#c9d2df]">{item.comment}</p>
+                </div>
+                <form action={updateFeedbackAction} className="grid gap-2 sm:grid-cols-2 lg:w-[360px]">
+                  <input type="hidden" name="feedbackId" value={item.id} />
+                  <select name="status" defaultValue={item.status} className="h-10 rounded-md border border-white/12 bg-[#07111f] px-3 text-sm">
+                    <option value="new">New</option>
+                    <option value="reviewed">Reviewed</option>
+                    <option value="resolved">Resolved</option>
+                  </select>
+                  <select name="testimonialApproved" defaultValue={item.testimonial_approved ? "true" : "false"} className="h-10 rounded-md border border-white/12 bg-[#07111f] px-3 text-sm">
+                    <option value="false">Not testimonial</option>
+                    <option value="true">Approve testimonial</option>
+                  </select>
+                  <button className="sm:col-span-2 rounded-md border border-[#e1cb95]/30 px-3 py-2 text-xs font-medium text-[#f4e5b8]">Save feedback</button>
+                </form>
+              </Card>
+            ))}            {!feedback.length ? <p className="rounded-lg border border-white/10 bg-[#0d1c2e]/70 px-4 py-5 text-sm text-[#9aa7b8]">No feedback yet.</p> : null}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Contact inbox</h2>
+          <div className="mt-4 space-y-3">
+            {contactMessages.map((message) => (
+              <Card key={message.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                <div>
+                  <p className="font-semibold text-[#f4efe5]">{message.subject}</p>
+                  <p className="mt-1 text-xs text-[#9aa7b8]">{message.name} · {message.email}</p>
+                  <p className="mt-3 whitespace-pre-wrap text-sm text-[#c9d2df]">{message.message}</p>
+                </div>
+                <form action={updateContactMessageAction} className="flex gap-2">
+                  <input type="hidden" name="contactId" value={message.id} />
+                  <select name="status" defaultValue={message.status} className="h-10 rounded-md border border-white/12 bg-[#07111f] px-3 text-sm">
+                    <option value="new">New</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="spam">Spam</option>
+                  </select>
+                  <button className="rounded-md border border-[#e1cb95]/30 px-3 text-xs font-medium text-[#f4e5b8]">Save</button>
+                </form>
+              </Card>
+            ))}            {!contactMessages.length ? <p className="rounded-lg border border-white/10 bg-[#0d1c2e]/70 px-4 py-5 text-sm text-[#9aa7b8]">No contact messages yet.</p> : null}
           </div>
         </section>
       </Container>
