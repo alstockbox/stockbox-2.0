@@ -27,16 +27,7 @@ export function buildAffiliateConnectAccountParams(input: {
   };
 }
 
-export function buildIndividualAffiliateConnectUpdateParams(): Stripe.AccountUpdateParams {
-  return {
-    business_type: "individual",
-    business_profile: {
-      product_description: "Individual affiliate receiving referral commission payouts from StockBox.",
-    },
-  };
-}
-
-export function shouldNormalizeAffiliateConnectAccount(
+export function shouldReplaceAffiliateConnectAccount(
   account: Pick<Stripe.Account, "business_type" | "details_submitted">
 ) {
   return account.details_submitted !== true && account.business_type !== "individual";

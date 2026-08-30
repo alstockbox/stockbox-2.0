@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { NextResponse } from "next/server";
-import { buildAffiliateConnectAccountParams, buildIndividualAffiliateConnectUpdateParams, isAffiliateConnectReady, shouldNormalizeAffiliateConnectAccount } from "@/lib/affiliate/connect";
+import { buildAffiliateConnectAccountParams, isAffiliateConnectReady, shouldReplaceAffiliateConnectAccount } from "@/lib/affiliate/connect";
 import { requireUser } from "@/lib/auth/session";
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import { getServerEnv } from "@/lib/env/server";
@@ -57,21 +57,20 @@ export async function POST() {
 
   const { user, affiliate, supabase, stripe } = context;
   try {
+    const createIndividualAccount = () => stripe.accounts.create(buildAffiliateConnectAccountParams({
+      userId: user.id,
+      affiliateId: affiliate.id,
+      email: user.email,
+    }));
+
     let account: Stripe.Account;
     if (affiliate.stripe_connect_account_id) {
       account = await stripe.accounts.retrieve(affiliate.stripe_connect_account_id);
-      if (shouldNormalizeAffiliateConnectAccount(account)) {
-        account = await stripe.accounts.update(
-          account.id,
-          buildIndividualAffiliateConnectUpdateParams()
-        );
+      if (shouldReplaceAffiliateConnectAccount(account)) {
+        account = await createIndividualAccount();
       }
     } else {
-      account = await stripe.accounts.create(buildAffiliateConnectAccountParams({
-        userId: user.id,
-        affiliateId: affiliate.id,
-        email: user.email,
-      }));
+      account = await createIndividualAccount();
     }
 
     await persistAccountState(supabase, affiliate.id, account);
