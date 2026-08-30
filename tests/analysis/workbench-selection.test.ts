@@ -53,7 +53,7 @@ describe("analysis workbench selection state", () => {
     expect(selectionAfterQueryChange(nvda, "NVIDIA Corporation")).toBe(nvda);
   });
 
-  it("allows common-stock fundamentals attempts even when discovery coverage is stale", () => {
+  it("allows common-stock listings to attempt global fundamentals even when discovery metadata has no fundamentals flag", () => {
     expect(supportsLiveFundamentals(company("INVE.B"))).toBe(true);
     expect(supportsLiveFundamentals({
       ticker: "ATCO B", canonicalTicker: "ATCO-B.ST", name: "Atlas Copco B", securityType: "Common Stock",

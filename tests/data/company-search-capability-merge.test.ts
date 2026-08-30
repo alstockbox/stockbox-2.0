@@ -44,5 +44,6 @@ describe("company search capability merge", () => {
     expect(truecaller[0]?.providerCapabilities?.providerIds).toEqual(
       expect.arrayContaining(["swedish-listed-security-master", "global-live-provider", "yahoo-fundamentals"]),
     );
+    expect(truecaller[0]?.providerCapabilities?.providerIds).not.toContain("sec-companyfacts");
   });
 });
