@@ -43,9 +43,7 @@ export function inferSecurityType(company: CompanySearchResult): NonNullable<Com
 }
 
 export function supportsLiveFundamentalsSecurity(company: CompanySearchResult | null): boolean {
-  if (!company) return false;
-  if (inferSecurityType(company) !== "Common Stock") return false;
-  return Boolean(company.providerCapabilities?.fundamentals ?? company.cik);
+  return company ? canAttemptConfiguredFundamentals(company) : false;
 }
 
 export function canAttemptConfiguredFundamentals(company: CompanySearchResult): boolean {
