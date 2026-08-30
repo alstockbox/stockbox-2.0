@@ -15,10 +15,11 @@ describe("new password UI", () => {
     }
   });
 
-  it("uses 12-character browser validation only for new passwords", () => {
+  it("uses 15-character browser validation only for new passwords", () => {
     const form = source("src/components/auth/auth-form.tsx");
     expect(form).toContain('passwordMode?: "current" | "new"');
-    expect(form).toContain('minLength={passwordMode === "new" ? 12 : 8}');
+    expect(form).toContain('minLength={passwordMode === "new" ? 15 : 8}');
+    expect(form).toContain('maxLength={passwordMode === "new" ? 128 : undefined}');
     expect(form).toContain('autoComplete={passwordMode === "new" ? "new-password" : "current-password"}');
   });
 });

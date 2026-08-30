@@ -6,10 +6,14 @@ const mocks = vi.hoisted(() => ({
   getServerEnv: vi.fn(),
   getStripe: vi.fn(),
   getUserSubscription: vi.fn(),
+  getAffiliateCheckoutDiscount: vi.fn(),
   requireUser: vi.fn()
 }));
 
 vi.mock("@/lib/analytics/events", () => ({ captureServerEvent: vi.fn() }));
+vi.mock("@/lib/affiliate/discount", () => ({
+  getAffiliateCheckoutDiscount: mocks.getAffiliateCheckoutDiscount
+}));
 vi.mock("@/lib/auth/session", () => ({
   requireUser: mocks.requireUser
 }));
@@ -68,8 +72,10 @@ describe("Basic checkout flow", () => {
     mocks.getServerEnv.mockReset();
     mocks.getStripe.mockReset();
     mocks.getUserSubscription.mockReset();
+    mocks.getAffiliateCheckoutDiscount.mockReset();
     mocks.requireUser.mockReset();
     mocks.requireUser.mockResolvedValue({ id: "user_1", email: "user@example.com", role: "customer" });
+    mocks.getAffiliateCheckoutDiscount.mockResolvedValue({ eligible: false, percent: 0 });
     mocks.createSession.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
     mocks.getServerEnv.mockReturnValue({
       NEXT_PUBLIC_APP_URL: "https://stockbox.test",
@@ -81,6 +87,7 @@ describe("Basic checkout flow", () => {
       STRIPE_PRICE_PREMIUM_MONTHLY: "price_pro",
       STRIPE_COUPON_PREMIUM_LAUNCH: "coupon_pro",
       STRIPE_PRICE_ELITE_MONTHLY: "price_elite",
+      STRIPE_COUPON_AFFILIATE_10: "coupon_affiliate_10",
       LEGAL_VAT_MODE: "small_business_exempt"
     });
     mocks.getBillingReadiness.mockReturnValue({
@@ -272,7 +279,7 @@ describe("Basic checkout flow", () => {
     expect(params.custom_text?.submit?.message).not.toContain("49");
   });
 
-  it("still offers Standard launch after only Basic launch was redeemed", async () => {
+  it("does not offer another launch discount after any paid-plan launch was redeemed", async () => {
     mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
       planKey: "basic", status: "canceled", stripeCustomerId: "cus_historical",
       stripeSubscriptionId: "sub_historical", currentPeriodEnd: null,
@@ -289,8 +296,8 @@ describe("Basic checkout flow", () => {
 
     expect(response.status).toBe(200);
     const params = mocks.createSession.mock.calls[0]?.[0];
-    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
-    expect(params.metadata).toMatchObject({ offer: "standard_launch_3_months" });
+    expect(params.discounts).toBeUndefined();
+    expect(params.metadata).toMatchObject({ offer: "none" });
   });
 
   it("opens Standard checkout with the Standard launch offer", async () => {
@@ -310,6 +317,50 @@ describe("Basic checkout flow", () => {
     expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
     expect(params.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
     expect(params.subscription_data?.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
+  });
+
+  it("applies the 10 percent affiliate coupon when no launch offer exists", async () => {
+    mocks.getAffiliateCheckoutDiscount.mockResolvedValue({ eligible: true, percent: 10 });
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "free", status: "active", stripeCustomerId: null, stripeSubscriptionId: null,
+      currentPeriodEnd: null, cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: null, launchOfferRedeemedPlans: [], createdAt: null
+    } });
+    const response = await POST(checkoutRequest("elite"));
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toEqual([{ coupon: "coupon_affiliate_10" }]);
+    expect(params.metadata).toMatchObject({ offer: "affiliate_10" });
+    expect(params.custom_text?.submit?.message).toContain("Affiliate price SEK 359.10/month");
+    expect(params.custom_text?.submit?.message).toContain("10% off the regular SEK 399/month");
+  });
+
+  it("uses affiliate discount after a previous launch offer was redeemed", async () => {
+    mocks.getAffiliateCheckoutDiscount.mockResolvedValue({ eligible: true, percent: 10 });
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "basic", status: "canceled", stripeCustomerId: null, stripeSubscriptionId: "sub_old",
+      currentPeriodEnd: null, cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: "2026-08-01T00:00:00.000Z", launchOfferRedeemedPlans: ["basic"], createdAt: null
+    } });
+    const response = await POST(checkoutRequest("standard"));
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toEqual([{ coupon: "coupon_affiliate_10" }]);
+    expect(params.metadata).toMatchObject({ offer: "affiliate_10" });
+  });
+
+  it("prefers a better launch offer instead of stacking an affiliate coupon", async () => {
+    mocks.getAffiliateCheckoutDiscount.mockResolvedValue({ eligible: true, percent: 10 });
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "free", status: "active", stripeCustomerId: null, stripeSubscriptionId: null,
+      currentPeriodEnd: null, cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: null, launchOfferRedeemedPlans: [], createdAt: null
+    } });
+    const response = await POST(checkoutRequest("standard"));
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
+    expect(params.metadata).toMatchObject({ offer: "standard_launch_3_months" });
   });
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {

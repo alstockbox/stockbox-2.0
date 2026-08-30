@@ -31,6 +31,7 @@ const envSchema = z.object({
   STRIPE_COUPON_BASIC_LAUNCH: z.string().optional().or(z.literal("")),
   STRIPE_COUPON_STANDARD_LAUNCH: z.string().optional().or(z.literal("")),
   STRIPE_COUPON_PREMIUM_LAUNCH: z.string().optional().or(z.literal("")),
+  STRIPE_COUPON_AFFILIATE_10: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_STANDARD_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_PREMIUM_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional().or(z.literal("")),

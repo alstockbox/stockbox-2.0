@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Container, Section } from "@/components/ui/card";
-import { findPlan } from "@/lib/billing/plans";
+import { commerciallyActivePlans } from "@/lib/billing/plans";
 import { getLocale } from "@/lib/i18n/server";
 import { getLegalCommerceReadiness, legalVatDescription } from "@/lib/legal/commerce";
 
@@ -12,10 +12,7 @@ export default async function TermsPage() {
   const sv = locale === "sv";
   const legal = getLegalCommerceReadiness();
   const seller = legal.seller;
-  const basic = findPlan("basic");
-  if (!basic?.launchOffer || basic.monthlyPriceSek === null) {
-    throw new Error("Basic billing plan is not configured for legal disclosure.");
-  }
+  const paidPlans = commerciallyActivePlans.filter((plan) => plan.key !== "free");
 
   const heading = "text-lg font-semibold text-[#f4efe5]";
   const paragraph = "mt-2";
@@ -39,8 +36,8 @@ export default async function TermsPage() {
             ) : (
               <p className={`${paragraph} text-amber-200`}>
                 {sv
-                  ? "Betald checkout är spärrad tills säljarens juridiska identitet och kontaktuppgifter har verifierats."
-                  : "Paid checkout is blocked until the seller's legal identity and contact details have been verified."}
+                  ? "Säljarens kontaktuppgifter är tillfälligt otillgängliga. Betalda abonnemang erbjuds inte medan denna information saknas."
+                  : "Seller contact details are temporarily unavailable. Paid subscriptions are not offered while this information is unavailable."}
               </p>
             )}
           </section>
@@ -60,9 +57,21 @@ export default async function TermsPage() {
 
           <section>
             <h2 className={heading}>{sv ? "Pris och abonnemang" : "Price and subscription"}</h2>
+            <div className={`${paragraph} space-y-2`}>
+              {paidPlans.map((plan) => (
+                <p key={plan.key}>
+                  <strong className="text-[#f4efe5]">{plan.name}:</strong>{" "}
+                  {plan.launchOffer
+                    ? (sv
+                      ? `${plan.launchOffer.monthlyPriceSek} kr/mån under de första ${plan.launchOffer.durationMonths} månaderna när lanseringserbjudandet gäller, därefter ${plan.launchOffer.thenMonthlyPriceSek} kr/mån.`
+                      : `SEK ${plan.launchOffer.monthlyPriceSek}/month for the first ${plan.launchOffer.durationMonths} months when the launch offer applies, then SEK ${plan.launchOffer.thenMonthlyPriceSek}/month.`)
+                    : (sv ? `${plan.monthlyPriceSek} kr/mån.` : `SEK ${plan.monthlyPriceSek}/month.`)}
+                </p>
+              ))}
+            </div>
             <p className={paragraph}>{sv
-              ? `Basic kostar ${basic.launchOffer.monthlyPriceSek} kr per månad under de första ${basic.launchOffer.durationMonths} månaderna när lanseringserbjudandet gäller och därefter ${basic.launchOffer.thenMonthlyPriceSek} kr per månad. Abonnemanget förnyas månadsvis tills det sägs upp. Det bindande totalpriset visas i Stripe Checkout innan betalning.`
-              : `Basic costs SEK ${basic.launchOffer.monthlyPriceSek} per month for the first ${basic.launchOffer.durationMonths} months when the launch offer applies and SEK ${basic.launchOffer.thenMonthlyPriceSek} per month thereafter. The subscription renews monthly until cancelled. The binding total price is shown in Stripe Checkout before payment.`}</p>
+              ? "Abonnemang förnyas månadsvis tills de sägs upp. Det bindande totalpriset och eventuella skatter eller avgifter visas innan betalning."
+              : "Subscriptions renew monthly until cancelled. The binding total price and any applicable taxes or fees are shown before payment."}</p>
             <p className={paragraph}>{legalVatDescription(seller, sv ? "sv" : "en")}</p>
             <p className={paragraph}>{sv
               ? "Betalningar behandlas av Stripe. Du kan stoppa framtida förnyelser via Betalning/Billing. En uppsägning påverkar normalt inte redan betald åtkomst fram till periodens slut, om inte tvingande lag eller en giltig ånger-/reklamationsbegäran kräver annat."

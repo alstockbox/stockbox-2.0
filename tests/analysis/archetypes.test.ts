@@ -503,6 +503,14 @@ describe("archetype coverage fairness", () => {
     expect(result.scores.stockBoxScore).toEqual(expect.any(Number));
     expect(result.recommendation.rating).not.toBe("No Rating");
     expect(result.missingData.map((item) => item.field)).not.toContain("Archetype-specific valuation model");
+    expect(result.missingData.map((item) => item.field)).not.toContain("archetype_classification");
+    expect(result.classificationDiagnostics).toEqual(expect.objectContaining({
+      source: "fallback",
+      confidence: expect.any(Number),
+      ambiguous: false,
+      candidates: ["standard"],
+    }));
+    expect(result.classificationDiagnostics?.confidence).toBeGreaterThanOrEqual(0.6);
   });
 
   it("does not reuse operating-company score dimensions for unresolved financial specialists", () => {

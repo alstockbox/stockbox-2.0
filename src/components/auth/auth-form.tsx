@@ -43,7 +43,7 @@ export function AuthForm({ action, submitLabel, password = true, email = true, e
           {passwordLabel}
           <span className="relative mt-2 block">
             <LockKeyhole className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[#7f8b9b]" aria-hidden="true" />
-            <input name="password" type="password" minLength={passwordMode === "new" ? 12 : 8} autoComplete={passwordMode === "new" ? "new-password" : "current-password"} required className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-3 text-[#f4efe5]" />
+            <input name="password" type="password" minLength={passwordMode === "new" ? 15 : 8} maxLength={passwordMode === "new" ? 128 : undefined} autoComplete={passwordMode === "new" ? "new-password" : "current-password"} required className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-3 text-[#f4efe5]" />
           </span>
           {passwordHint ? <span className="mt-2 block text-xs leading-5 text-[#9aa7b8]">{passwordHint}</span> : null}
         </label>

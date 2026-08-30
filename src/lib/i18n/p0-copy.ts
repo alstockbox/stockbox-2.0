@@ -4,7 +4,7 @@ import { reportCopy } from "./report-copy";
 export const p0Copy = {
   en: {
     nav: {
-      dashboard: "Dashboard", analyze: "Analyze", watchlist: "Watchlist", portfolio: "Portfolio",
+      dashboard: "Dashboard", analyze: "Analyze", history: "History", compare: "Compare", watchlist: "Watchlist", portfolio: "Portfolio",
       batch: "Batch", profile: "Profile", billing: "Billing", affiliate: "Affiliate", admin: "Admin",
       login: "Log in", signup: "Sign up", signOut: "Sign out", skipMain: "Skip to main content",
       accountUnavailable: "Account features are temporarily unavailable. Please try again shortly.",
@@ -17,10 +17,10 @@ export const p0Copy = {
       signupTitle: "Start researching", signupCopy: "The Free plan includes real company analysis and no payment card.",
       alreadyAccount: "Already have an account?", forgotTitle: "Reset password",
       forgotCopy: "We will send a secure recovery link to your verified email.", recoveryRetry: "That recovery link was opened without the browser session that requested it. Request a new link here and open it in the same browser, or use the cross-device link once StockBox email verification is updated.", returnLogin: "Return to log in",
-      sendRecovery: "Send recovery link", resetTitle: "Choose a new password", resetCopy: "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
+      sendRecovery: "Send recovery link", resetTitle: "Choose a new password", resetCopy: "Use at least 15 characters. Passphrases, spaces and symbols are allowed.",
       continueDashboard: "Continue to dashboard", updatePassword: "Update password", login: "Log in", signup: "Create account",
       invalidCredentialsInput: "Use a valid email and a password of at least 8 characters.", invalidEmail: "Use a valid email address.", invalidPassword: "Use a password of at least 8 characters.",
-      strongPasswordRequirement: "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
+      strongPasswordRequirement: "Use at least 15 characters. Passphrases, spaces and symbols are allowed.",
       authUnavailable: "Authentication is not configured. Add Supabase environment variables first.", rateLimited: "Too many requests. Please try again shortly.",
       emailDeliveryBusy: "Verification email is temporarily unavailable. Please wait a moment and try again.",
       signInError: "Unable to sign in. Check your email and password and try again.", signUpError: "Unable to create the account right now. Please try again shortly.",
@@ -110,7 +110,7 @@ export const p0Copy = {
       setupTitle: "Live analysis provider setup required", setupDetail: "Batch analysis is unavailable until the financial provider is configured.",
       duplicateRemoved: "duplicate ticker removed automatically", duplicatesRemoved: "duplicate tickers removed automatically", invalid: "Invalid",
       rowsPerBatch: "rows per batch", successfulUsesOne: "Each successful report uses one monthly analysis. Failed attempts are released automatically.",
-      run: "Run", retry: "Retry", rank: "Rank", ticker: "Ticker", company: "Company", status: "Status", score: "Score", coverage: "Coverage", result: "Result",
+      run: "Run", retry: "Retry", rank: "Rank", ticker: "Ticker", company: "Company", status: "Status", score: "Score", recommendation: "Recommendation", coverage: "Coverage", result: "Result",
       exportQaCopy: "Export the full QA file when you want the analysis engine reviewed and calibrated.",
     },
     pricing: {
@@ -127,7 +127,7 @@ export const p0Copy = {
   },
   sv: {
     nav: {
-      dashboard: "Översikt", analyze: "Analysera", watchlist: "Bevakningslista", portfolio: "Portfölj",
+      dashboard: "Översikt", analyze: "Analysera", history: "Historik", compare: "Jämför", watchlist: "Bevakningslista", portfolio: "Portfölj",
       batch: "Batch", profile: "Profil", billing: "Betalning", affiliate: "Affiliate", admin: "Admin",
       login: "Logga in", signup: "Skapa konto", signOut: "Logga ut", skipMain: "Hoppa till huvudinnehåll",
       accountUnavailable: "Kontofunktioner är tillfälligt otillgängliga. Försök igen om en stund.",
@@ -140,10 +140,10 @@ export const p0Copy = {
       signupTitle: "Börja analysera", signupCopy: "Gratisplanen innehåller riktiga bolagsanalyser och kräver inget betalkort.",
       alreadyAccount: "Har du redan ett konto?", forgotTitle: "Återställ lösenord",
       forgotCopy: "Vi skickar en säker återställningslänk till din verifierade e-postadress.", recoveryRetry: "Återställningslänken öppnades utan webbläsarsessionen som begärde den. Begär en ny länk här och öppna den i samma webbläsare tills StockBox e-postverifiering har uppdaterats för enhetsoberoende återställning.", returnLogin: "Tillbaka till inloggning",
-      sendRecovery: "Skicka återställningslänk", resetTitle: "Välj ett nytt lösenord", resetCopy: "Använd minst 12 tecken med stor bokstav, liten bokstav, siffra och symbol.",
+      sendRecovery: "Skicka återställningslänk", resetTitle: "Välj ett nytt lösenord", resetCopy: "Använd minst 15 tecken. Lösenfraser, mellanslag och symboler är tillåtna.",
       continueDashboard: "Fortsätt till översikten", updatePassword: "Uppdatera lösenord", login: "Logga in", signup: "Skapa konto",
       invalidCredentialsInput: "Använd en giltig e-postadress och ett lösenord med minst 8 tecken.", invalidEmail: "Använd en giltig e-postadress.", invalidPassword: "Använd ett lösenord med minst 8 tecken.",
-      strongPasswordRequirement: "Använd minst 12 tecken med stor bokstav, liten bokstav, siffra och symbol.",
+      strongPasswordRequirement: "Använd minst 15 tecken. Lösenfraser, mellanslag och symboler är tillåtna.",
       authUnavailable: "Autentisering är inte konfigurerad. Lägg först till Supabase-miljövariabler.", rateLimited: "För många förfrågningar. Försök igen om en stund.",
       emailDeliveryBusy: "Verifieringsmejl är tillfälligt otillgängliga. Vänta en stund och försök igen.",
       signInError: "Det gick inte att logga in. Kontrollera e-post och lösenord och försök igen.", signUpError: "Kontot kunde inte skapas just nu. Försök igen om en stund.",
@@ -233,7 +233,7 @@ export const p0Copy = {
       setupTitle: "Liveleverant\u00f6r f\u00f6r analys m\u00e5ste konfigureras", setupDetail: "Batchanalys \u00e4r otillg\u00e4nglig tills den finansiella leverant\u00f6ren \u00e4r konfigurerad.",
       duplicateRemoved: "dubblett-ticker togs bort automatiskt", duplicatesRemoved: "dubblett-tickers togs bort automatiskt", invalid: "Ogiltiga",
       rowsPerBatch: "rader per batch", successfulUsesOne: "Varje lyckad rapport anv\u00e4nder en m\u00e5natlig analys. Misslyckade f\u00f6rs\u00f6k frisl\u00e4pps automatiskt.",
-      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", rank: "Placering", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", coverage: "T\u00e4ckning", result: "Resultat",
+      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", rank: "Placering", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", recommendation: "Rekommendation", coverage: "T\u00e4ckning", result: "Resultat",
       exportQaCopy: "Exportera hela QA-filen n\u00e4r du vill granska och kalibrera analysmotorn.",
     },
     pricing: {

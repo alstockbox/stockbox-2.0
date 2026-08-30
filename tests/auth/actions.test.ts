@@ -78,7 +78,7 @@ describe("auth actions", () => {
     for (let index = 0; index < 11; index += 1) {
       await signUpAction(
         { ok: false, message: "" },
-        formData({ email: "signup-rate@stockbox.test", password: "StrongPass123!" }),
+        formData({ email: "signup-rate@stockbox.test", password: "correct horse battery staple" }),
       );
     }
 
@@ -100,7 +100,7 @@ describe("auth actions", () => {
     for (let index = 0; index < 11; index += 1) {
       await updatePasswordAction(
         { ok: false, message: "" },
-        formData({ password: "StrongPass123!" }),
+        formData({ password: "correct horse battery staple" }),
       );
     }
 
@@ -115,7 +115,7 @@ describe("auth actions", () => {
 
     const result = await signUpAction(
       { ok: false, message: "" },
-      formData({ email: "email-busy-signup@stockbox.test", password: "StrongPass123!" }),
+      formData({ email: "email-busy-signup@stockbox.test", password: "correct horse battery staple" }),
     );
 
     expect(result).toEqual({
@@ -150,7 +150,7 @@ describe("auth actions", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
+      message: "Use at least 15 characters. Passphrases, spaces and symbols are allowed.",
     });
     expect(mocks.signUp).not.toHaveBeenCalled();
   });
@@ -164,7 +164,7 @@ describe("auth actions", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "Använd minst 12 tecken med stor bokstav, liten bokstav, siffra och symbol.",
+      message: "Använd minst 15 tecken. Lösenfraser, mellanslag och symboler är tillåtna.",
     });
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });

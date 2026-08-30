@@ -317,6 +317,21 @@ function hasConfidentUnresolvedSpecialistStop(input: FinancialAnalysisInput): bo
   );
 }
 
+export function resolveFinancialClassificationDiagnostics(input: FinancialAnalysisInput): ArchetypeClassificationDiagnostics | undefined {
+  const diagnostics = input.company.classificationDiagnostics;
+  const base = resolveArchetype(input.company);
+  if (base === "unknown" && hasConventionalOperatingFinancialSignature(input)) {
+    return {
+      reason: "Repeated reported revenue, operating-statement and balance-sheet facts support the standard operating-company model despite unavailable SIC or industry metadata.",
+      source: "fallback",
+      confidence: 0.65,
+      ambiguous: false,
+      candidates: ["standard"],
+    };
+  }
+  return diagnostics;
+}
+
 export function resolveFinancialArchetype(input: FinancialAnalysisInput): AnalysisArchetype {
   const base = resolveArchetype(input.company);
   if (base === "pre_revenue_biotech") return base;

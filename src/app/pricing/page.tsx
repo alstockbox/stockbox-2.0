@@ -23,7 +23,16 @@ import { getLocale } from "@/lib/i18n/server";
 import type { Locale } from "@/lib/i18n/types";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 
-export const metadata: Metadata = { title: "Pricing", description: "StockBox subscription plans and research limits." };
+export const metadata: Metadata = { title: "Pricing", description: "StockBox launch pricing for source-backed stock analysis, deep research reports and batch analysis." };
+
+function formatDeepReports(count: number, locale: Locale) {
+  if (locale === "sv") return `${count} ${count === 1 ? "djup rapport" : "djupa rapporter"}`;
+  return `${count} ${count === 1 ? "deep report" : "deep reports"}`;
+}
+
+function formatBatchCompanies(count: number, locale: Locale) {
+  return locale === "sv" ? `Analysera upp till ${count} bolag per batch` : `Analyze up to ${count} companies per batch`;
+}
 
 function pricingActionLabel(action: PricingAction, plan: PlanKey, copy: ReturnType<typeof getP0Copy>["pricing"]) {
   if (action.kind === "signup") return plan === "free" ? copy.startFree : `${copy.getPlanPrefix} ${findPlan(plan)?.name ?? plan}`;
@@ -134,9 +143,9 @@ export default async function PricingPage() {
                 )}
                 <ul className="mt-5 min-h-44 space-y-3 text-sm text-[#c9d2df]">
                   <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.key === "free" ? copy.freeIntroAnalyses : `${plan.entitlements.monthlyAnalyses} ${copy.analysesMonth}`}</li>
-                  <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.deepAnalyses} {copy.deepReports}</li>
+                  <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{formatDeepReports(plan.entitlements.deepAnalyses, locale)}</li>
                   <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.watchlistItems} {copy.watchlistCompanies}</li>
-                  {plan.entitlements.batchRows ? <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.batchRows} {copy.batchRows}</li> : null}
+                  {plan.entitlements.batchRows ? <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{formatBatchCompanies(plan.entitlements.batchRows, locale)}</li> : null}
                   {plan.entitlements.aiAssistant ? <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{copy.aiAssistant}</li> : null}
                 </ul>
                 <PlanAction

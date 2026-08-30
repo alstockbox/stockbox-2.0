@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getServerEnv, isSupabaseConfigured } from "@/lib/env/server";
 import { safeInternalPath } from "@/lib/auth/redirects";
+import { newPasswordSchema } from "@/lib/auth/password-policy";
 import { checkDistributedRateLimit, rateLimitKeyFromHeaders, RATE_LIMITS } from "@/lib/security/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -15,12 +16,6 @@ import { getP0Copy } from "@/lib/i18n/p0-copy";
 
 const emailSchema = z.string().email();
 const passwordSchema = z.string().min(8);
-const newPasswordSchema = z.string()
-  .min(12)
-  .regex(/[a-z]/)
-  .regex(/[A-Z]/)
-  .regex(/[0-9]/)
-  .regex(/[^A-Za-z0-9]/);
 
 export type AuthActionState = {
   ok: boolean;

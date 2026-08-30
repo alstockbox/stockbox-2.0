@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { resolveFinancialArchetype } from "./archetypes";
+import { resolveFinancialArchetype, resolveFinancialClassificationDiagnostics } from "./archetypes";
 import {
   MODEL_VERSION,
   REPORT_SCHEMA_VERSION,
@@ -393,9 +393,35 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
   const calculationInput = unusableFinancialData
     ? { ...periodConsistentInput, annualPeriods: [], trailingTwelveMonths: undefined, priorTrailingTwelveMonths: undefined }
     : periodConsistentInput;
-  const metrics = computeFinancialMetrics(calculationInput);
+  const financialClassificationDiagnostics = resolveFinancialClassificationDiagnostics(calculationInput);
+  const financialClassificationArchetype = financialClassificationDiagnostics?.candidates.length === 1
+    ? financialClassificationDiagnostics.candidates[0]
+    : calculationInput.company.analysisArchetype;
+  const calculationInputWithResolvedClassification = financialClassificationDiagnostics === calculationInput.company.classificationDiagnostics
+    ? calculationInput
+    : {
+        ...calculationInput,
+        company: {
+          ...calculationInput.company,
+          analysisArchetype: financialClassificationArchetype,
+          classificationDiagnostics: financialClassificationDiagnostics,
+        },
+      };
+  const periodInputWithResolvedClassification = unusableFinancialData
+    ? calculationInputWithResolvedClassification
+    : financialClassificationDiagnostics === periodConsistentInput.company.classificationDiagnostics
+      ? periodConsistentInput
+      : {
+          ...periodConsistentInput,
+          company: {
+            ...periodConsistentInput.company,
+            analysisArchetype: financialClassificationArchetype,
+            classificationDiagnostics: financialClassificationDiagnostics,
+          },
+        };
+  const metrics = computeFinancialMetrics(calculationInputWithResolvedClassification);
   const currencyAlignment = valuationCurrencyAlignment(periodConsistentInput, metrics.latestPeriod);
-  const reconciliation = reconcileFinancialData(unusableFinancialData ? calculationInput : periodConsistentInput, metrics);
+  const reconciliation = reconcileFinancialData(periodInputWithResolvedClassification, metrics);
   if (ttmConsistency.status === "warning") {
     const ttmCheckIndex = reconciliation.findIndex((check) => check.code === ttmConsistency.code);
     if (ttmCheckIndex >= 0) reconciliation[ttmCheckIndex] = ttmConsistency;
@@ -432,8 +458,8 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
         ? "Financial statements are within the current-analysis freshness threshold."
         : "Financial statement freshness could not be established.",
   });
-  const dcf = computeDcfRange(calculationInput, metrics);
-  const computedScores = computeScores(calculationInput, metrics, {
+  const dcf = computeDcfRange(calculationInputWithResolvedClassification, metrics);
+  const computedScores = computeScores(calculationInputWithResolvedClassification, metrics, {
     reconciliation: reconciliationConfidence(reconciliation),
     valuationAssumptionQuality: dcf.assumptionQuality,
     valuationStatus: dcf.status,
@@ -441,8 +467,8 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
   const scores = unusableFinancialData
     ? { ...computedScores, stockBoxScore: null, personalizedScore: null, shortTermScore: null, longTermScore: null }
     : computedScores;
-  const archetype = resolveFinancialArchetype(calculationInput);
-  const redFlags = detectFinancialRedFlags(metrics, archetype, calculationInput.specialized, calculationInput.company);
+  const archetype = resolveFinancialArchetype(calculationInputWithResolvedClassification);
+  const redFlags = detectFinancialRedFlags(metrics, archetype, calculationInputWithResolvedClassification.specialized, calculationInputWithResolvedClassification.company);
   const recommendation = deriveRecommendation(scores, redFlags, dcf);
   const scenarioStatus = unusableFinancialData ? "insufficient_data" : scenarioStatusFor(metrics, scores, dcf);
   const scenarios = unusableFinancialData ? [] : buildAnalysisScenarios(metrics, scores, dcf);
@@ -452,7 +478,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
       : [],
   );
   const missing = [
-    ...specializedMissingData(archetype, calculationInput.company, metrics.latestPeriod, calculationInput.specialized),
+    ...specializedMissingData(archetype, calculationInputWithResolvedClassification.company, metrics.latestPeriod, calculationInputWithResolvedClassification.specialized),
     ...metrics.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...scores.missingData.filter((item) => !unsuitableCorporateFields.has(item.field)),
     ...dcf.missingData,
@@ -508,7 +534,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     canonicalInputFingerprint: canonicalInputFingerprint(effectiveInput),
     reportSchemaVersion: REPORT_SCHEMA_VERSION,
     analysisArchetype: archetype,
-    classificationDiagnostics: calculationInput.company.classificationDiagnostics,
+    classificationDiagnostics: calculationInputWithResolvedClassification.company.classificationDiagnostics,
     currencyAlignment,
     dataStatus: analysisDataStatus,
     metrics,

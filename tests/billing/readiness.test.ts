@@ -26,6 +26,9 @@ function readyEnv(overrides: Record<string, string | undefined> = {}) {
     NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
     STRIPE_RESTRICTED_KEY: "rk_test_checkout",
+    EMAIL_PROVIDER: "resend",
+    RESEND_API_KEY: "re_test_receipts",
+    FROM_EMAIL: "receipts@example.com",
     ...stripeCatalog,
     ...legalCatalog,
     ...overrides,
@@ -38,6 +41,7 @@ describe("billing readiness", () => {
     expect(readiness.checkoutReady).toBe(true);
     expect(readiness.paidCatalogReady).toBe(true);
     expect(readiness.legalCommerceReady).toBe(true);
+    expect(readiness.withdrawalReceiptReady).toBe(true);
     expect(readiness.missingVariables).toEqual([]);
   });
 
@@ -101,6 +105,13 @@ describe("billing readiness", () => {
     expect(readiness.paidCatalogReady).toBe(true);
     expect(readiness.legalCommerceReady).toBe(false);
     expect(readiness.missingVariables).toContain("LEGAL_VAT_NUMBER");
+  });
+
+  it("blocks paid checkout unless withdrawal receipts can be emailed", () => {
+    const readiness = getBillingReadiness(readyEnv({ EMAIL_PROVIDER: "disabled", RESEND_API_KEY: "", FROM_EMAIL: "" }));
+    expect(readiness.checkoutReady).toBe(false);
+    expect(readiness.withdrawalReceiptReady).toBe(false);
+    expect(readiness.missingVariables).toEqual(expect.arrayContaining(["EMAIL_PROVIDER", "RESEND_API_KEY", "FROM_EMAIL"]));
   });
 
   it("uses customer-safe unavailable wording", () => {

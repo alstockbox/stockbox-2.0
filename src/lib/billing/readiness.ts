@@ -15,6 +15,9 @@ export type BillingEnvironmentVariable =
   | "STRIPE_PRICE_PREMIUM_MONTHLY"
   | "STRIPE_COUPON_PREMIUM_LAUNCH"
   | "STRIPE_PRICE_ELITE_MONTHLY"
+  | "EMAIL_PROVIDER"
+  | "RESEND_API_KEY"
+  | "FROM_EMAIL"
   | LegalCommerceVariable;
 
 export type BillingReadiness = {
@@ -25,6 +28,7 @@ export type BillingReadiness = {
   launchCouponPresent: boolean;
   paidCatalogReady: boolean;
   legalCommerceReady: boolean;
+  withdrawalReceiptReady: boolean;
   missingVariables: BillingEnvironmentVariable[];
 };
 
@@ -43,11 +47,15 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
   const supabaseKeyPresent = Boolean(env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
   const restrictedKeyPresent = Boolean(env.STRIPE_RESTRICTED_KEY);
   const legalReadiness = getLegalCommerceReadiness(env);
+  const withdrawalReceiptReady = env.EMAIL_PROVIDER === "resend" && Boolean(env.RESEND_API_KEY) && Boolean(env.FROM_EMAIL);
   const missingVariables: BillingEnvironmentVariable[] = [];
 
   if (!supabaseUrlPresent) missingVariables.push("NEXT_PUBLIC_SUPABASE_URL");
   if (!supabaseKeyPresent) missingVariables.push("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
   if (!restrictedKeyPresent) missingVariables.push("STRIPE_RESTRICTED_KEY");
+  if (env.EMAIL_PROVIDER !== "resend") missingVariables.push("EMAIL_PROVIDER");
+  if (!env.RESEND_API_KEY) missingVariables.push("RESEND_API_KEY");
+  if (!env.FROM_EMAIL) missingVariables.push("FROM_EMAIL");
   for (const variable of requiredStripeCatalog) {
     if (!env[variable]) missingVariables.push(variable);
   }
@@ -63,6 +71,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
     launchCouponPresent: Boolean(env.STRIPE_COUPON_BASIC_LAUNCH),
     paidCatalogReady,
     legalCommerceReady: legalReadiness.ready,
+    withdrawalReceiptReady,
     missingVariables,
   };
 }
@@ -81,6 +90,7 @@ export function reportBillingReadiness(
     launchCouponPresent: readiness.launchCouponPresent,
     paidCatalogReady: readiness.paidCatalogReady,
     legalCommerceReady: readiness.legalCommerceReady,
+    withdrawalReceiptReady: readiness.withdrawalReceiptReady,
     missingVariables: readiness.missingVariables,
   });
 }

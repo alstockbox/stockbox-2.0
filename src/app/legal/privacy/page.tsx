@@ -32,8 +32,8 @@ export default async function PrivacyPage() {
             ) : (
               <p className={`${paragraph} text-amber-200`}>
                 {sv
-                  ? "Betald checkout är spärrad tills den personuppgiftsansvariges verifierade kontaktuppgifter har konfigurerats."
-                  : "Paid checkout is blocked until the controller's verified contact details have been configured."}
+                  ? "Den personuppgiftsansvariges kontaktuppgifter är tillfälligt otillgängliga. Betalda abonnemang erbjuds inte medan denna information saknas."
+                  : "Controller contact details are temporarily unavailable. Paid subscriptions are not offered while this information is unavailable."}
               </p>
             )}
           </section>

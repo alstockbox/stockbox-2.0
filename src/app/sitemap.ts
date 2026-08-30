@@ -2,12 +2,14 @@ import type { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return [
-    { url: base, lastModified: new Date() },
-    { url: `${base}/pricing`, lastModified: new Date() },
-    { url: `${base}/analyze`, lastModified: new Date() },
-    { url: `${base}/docs/methodology`, lastModified: new Date() },
-    { url: `${base}/legal/privacy`, lastModified: new Date() },
-    { url: `${base}/legal/terms`, lastModified: new Date() }
+  const paths = [
+    "", "/pricing", "/about", "/contact", "/data-sources", "/faq",
+    "/sample-analysis", "/docs/methodology", "/legal/privacy", "/legal/terms", "/withdraw",
   ];
+  return paths.map((path) => ({
+    url: `${base}${path}`,
+    lastModified: new Date(),
+    changeFrequency: path === "" ? "weekly" : "monthly",
+    priority: path === "" ? 1 : path === "/sample-analysis" || path === "/pricing" ? 0.8 : 0.6,
+  }));
 }

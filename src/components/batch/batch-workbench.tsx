@@ -484,7 +484,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[880px] text-left text-sm">
               <thead className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-[#9aa7b8]">
                 <tr>
                   <th className="px-5 py-3 text-right font-semibold">{copy.rank}</th>
@@ -492,6 +492,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                   <th className="px-5 py-3 font-semibold">{copy.company}</th>
                   <th className="px-5 py-3 font-semibold">{copy.status}</th>
                   <th className="px-5 py-3 text-right font-semibold">{copy.score}</th>
+                  <th className="px-5 py-3 font-semibold">{copy.recommendation}</th>
                   <th className="px-5 py-3 text-right font-semibold">{copy.coverage}</th>
                   <th className="px-5 py-3 font-semibold">{copy.result}</th>
                 </tr>
@@ -517,6 +518,9 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                     </td>
                     <td className="number px-5 py-4 text-right text-[#f4efe5]">
                       {row.report?.score.score ?? "—"}
+                    </td>
+                    <td className="px-5 py-4 font-semibold text-[#e1cb95]">
+                      {row.report?.recommendation ?? "?"}
                     </td>
                     <td className="number px-5 py-4 text-right">
                       {row.report?.dataCoverage === undefined

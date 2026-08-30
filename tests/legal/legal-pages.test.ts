@@ -34,10 +34,10 @@ describe("launch legal pages", () => {
 
     const markup = renderToStaticMarkup(await TermsPage());
 
-    expect(markup).toContain("Basic kostar 49 kr per månad");
-    expect(markup).toContain("under de första 3 månaderna");
-    expect(markup).toContain("därefter 69 kr per månad");
-    expect(markup).toContain("Abonnemanget förnyas månadsvis");
+    expect(markup).toContain("Basic:");
+    expect(markup).toContain("49 kr/mån under de första 3 månaderna");
+    expect(markup).toContain("därefter 69 kr/mån");
+    expect(markup).toContain("Abonnemang förnyas månadsvis");
   });
 
   it("removes draft placeholders from Terms and Privacy", () => {
@@ -50,8 +50,8 @@ describe("launch legal pages", () => {
 
   it("keeps the Basic renewal price tied to the billing plan source of truth", () => {
     const terms = source("src/app/legal/terms/page.tsx");
-    expect(terms).toContain('findPlan("basic")');
-    expect(terms).not.toContain("79 kr per m?nad");
+    expect(terms).toContain("commerciallyActivePlans");
+    expect(terms).not.toContain("därefter 79 kr per månad");
     expect(terms).not.toContain("SEK 79 per month thereafter");
   });
 

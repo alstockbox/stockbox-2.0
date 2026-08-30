@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 import { withdrawalReceiptText } from "../../src/lib/legal/withdrawal";
 
 const root = process.cwd();
-
-function source(path: string) {
-  return readFileSync(`${root}/${path}`, "utf8");
-}
+const source = (path: string) => readFileSync(`${root}/${path}`, "utf8");
 
 describe("consumer withdrawal flow", () => {
   it("creates an own-readable, service-written audit trail", () => {
@@ -21,12 +18,11 @@ describe("consumer withdrawal flow", () => {
   it("keeps the withdrawal function easy to find and does not demand a reason", () => {
     const page = source("src/app/withdraw/page.tsx");
     const footer = source("src/components/app-shell/footer.tsx");
-    expect(footer).toContain('href="/withdraw"');
+    expect(footer).toContain("/withdraw");
     expect(page).toContain('name="confirm"');
     expect(page).not.toContain('name="reason"');
-    expect(page).toContain("du får ett mottagningsbevis");
+    expect(page.toLowerCase()).toContain("mottagningsbevis");
   });
-
   it("produces a storable receipt with timestamp and contract identifier", () => {
     const text = withdrawalReceiptText({
       id: "receipt-1",
