@@ -212,6 +212,9 @@ describe("analysis API authentication and entitlement enforcement", () => {
           }
         }];
       }
+      if (query === "ATCO-B.ST") {
+        return [{ securityId: "xsto:tx64", issuerId: "issuer:se:atlas-copco", ticker: "ATCO-B.ST", canonicalTicker: "ATCO-B.ST", name: "Atlas Copco B", country: "SE", currency: "SEK", securityType: "Common Stock", primaryCandidate: true, providerCapabilities: { fundamentals: false, marketData: true, providerIds: ["security-master"] } }];
+      }
       if (query === "SPY") {
         return [{
           securityId: "security:spy-fund",
@@ -288,6 +291,13 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.analyzeCompany).not.toHaveBeenCalled();
     expect(mocks.persistAnalysis).not.toHaveBeenCalled();
     expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not block a common stock solely because discovery marked fundamentals unavailable", async () => {
+    const response = await POST(companyRequest({ ticker: "ATCO-B.ST", canonicalTicker: "ATCO-B.ST", name: "Atlas Copco B", securityType: "Common Stock", providerCapabilities: { fundamentals: false, marketData: true, providerIds: ["security-master"] } }));
+    expect(response.status).toBe(200);
+    expect(mocks.reserveAnalysisEntitlement).toHaveBeenCalledOnce();
+    expect(mocks.analyzeCompany).toHaveBeenCalledWith(expect.objectContaining({ company: expect.objectContaining({ canonicalTicker: "ATCO-B.ST" }) }));
   });
 
   it("rejects unsupported securities before quota reservation or provider work", async () => {

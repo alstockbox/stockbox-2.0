@@ -57,6 +57,28 @@ describe("batch input", () => {
 
     expect(findExactBatchCompany("jpm", results)?.ticker).toBe("JPM");
   });
+
+  it("does not treat an exchange-suffix local ticker root as an exact batch match", () => {
+    const results: CompanySearchResult[] = [
+      {
+        ticker: "PRO",
+        canonicalTicker: "PRO.ST",
+        name: "Promimic",
+        country: "SE",
+        exchange: "Nasdaq First North Growth Market Stockholm",
+        securityType: "Common Stock",
+        providerCapabilities: {
+          fundamentals: false,
+          marketData: true,
+          providerIds: ["swedish-listed-security-master"],
+        },
+      },
+    ];
+
+    expect(findExactBatchCompany("PRO", results)).toBeNull();
+    expect(findExactBatchCompany("PRO.ST", results)?.canonicalTicker).toBe("PRO.ST");
+  });
+
   it("preserves result order while enforcing concurrency", async () => {
     let active = 0;
     let peak = 0;

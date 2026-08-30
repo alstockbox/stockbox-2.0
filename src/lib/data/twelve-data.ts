@@ -10,6 +10,7 @@ import {
 
 const PROVIDER_ID = "twelve-data";
 const BASE_URL = "https://api.twelvedata.com";
+const TWELVE_DATA_REQUEST_TIMEOUT_MS = 10_000;
 
 export const TWELVE_DATA_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["global"],
@@ -43,8 +44,13 @@ async function request(path: string, params: Record<string, string>, apiKey: str
   const url = new URL(path, BASE_URL);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   url.searchParams.set("apikey", apiKey);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TWELVE_DATA_REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { next: { revalidate: 60 * 15 } });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      next: { revalidate: 60 * 15 },
+    });
     if (!response.ok) {
       return failure(response.status === 429 ? "rate_limited" : "upstream_error", "Twelve Data request failed.", "market_data");
     }
@@ -56,7 +62,14 @@ async function request(path: string, params: Record<string, string>, apiKey: str
     }
     return { ok: true, data: payload, diagnostic: providerDiagnostic("Twelve Data", "market_data", "available") };
   } catch (error) {
-    return failure(error instanceof SyntaxError ? "empty_response" : "upstream_error", "Twelve Data could not be reached.", "market_data");
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    return failure(
+      timedOut ? "timeout" : error instanceof SyntaxError ? "empty_response" : "upstream_error",
+      timedOut ? "Twelve Data request timed out." : "Twelve Data could not be reached.",
+      "market_data",
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

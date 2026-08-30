@@ -30,4 +30,33 @@ describe("Twelve Data adapters", () => {
   it("stays unavailable when no key is configured", async () => {
     await expect(createTwelveDataMarketProvider("").fetchMarketData({ ticker: "AAPL", name: "Apple" })).resolves.toEqual(expect.objectContaining({ ok: false, reason: "not_configured" }));
   });
+
+  it("returns timeout when market-data requests exceed the provider deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const observedSignals: AbortSignal[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        if (signal) observedSignals.push(signal);
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        });
+      });
+
+      const provider = createTwelveDataMarketProvider("secret-key");
+      const pending = provider.fetchMarketData({ ticker: "AAPL", name: "Apple", currency: "USD" });
+      await vi.runOnlyPendingTimersAsync();
+      const result = await Promise.race([pending, Promise.resolve("still_pending" as const)]);
+
+      expect(observedSignals).toHaveLength(3);
+      expect(observedSignals.every((signal) => signal.aborted)).toBe(true);
+      expect(result).toEqual(expect.objectContaining({ ok: false, reason: "timeout" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

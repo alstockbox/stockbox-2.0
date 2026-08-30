@@ -127,17 +127,104 @@ describe("DCF calculations", () => {
     ]));
   });
 
-  it("refuses DCF when the TTM balance sheet is more than 45 days behind the flow endpoint", () => {
-    const latest = durableCompounderInput.annualPeriods.at(-1)!;
+  it("does not block DCF on share-basis alignment when market cap and quote price dates differ", () => {
     const result = computeDcfRange({
       ...durableCompounderInput,
+      analysisDate: "2026-08-29T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        price: 110,
+        currency: "USD",
+        priceDate: "2026-08-28",
+        marketCap: 10_000,
+        marketCapAsOf: "2026-08-27",
+        marketCapCurrency: "USD",
+        sharesOutstanding: 100,
+        sharesOutstandingAsOf: "2026-08-28",
+      },
+      dcfAssumptions: {
+        baseFreeCashFlow: 250,
+        netDebt: 40,
+        discountRate: 0.09,
+        terminalGrowthRate: 0.02,
+        forecastYears: 5,
+        fcfGrowthRates: [0.08, 0.06, 0.05, 0.04, 0.03],
+      },
+    });
+
+    expect(result.status).toBe("available");
+    expect(result.mid).not.toBeNull();
+    expect(result.missingData.map((item) => item.field)).not.toContain("shareBasisAlignment");
+  });
+
+  it("uses annual DCF fallback when the TTM balance sheet is more than 45 days behind the flow endpoint", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      periodEndDate: `${period.fiscalYear}-12-31`,
+      balanceSheetDate: `${period.fiscalYear}-12-31`,
+    }));
+    const result = computeDcfRange({
+      ...durableCompounderInput,
+      annualPeriods,
       analysisDate: "2026-08-25T00:00:00.000Z",
       trailingTwelveMonths: {
-        ...latest,
+        ...annualPeriods.at(-1)!,
         periodEndDate: "2026-06-30",
         balanceSheetDate: "2026-03-31",
         form: "TTM",
         periodBasis: "TTM_REPORTED",
+        operatingCashFlow: 1_000,
+        capitalExpenditures: -10,
+        totalDebt: 9_000,
+        cashAndEquivalents: 10,
+      },
+      market: {
+        ...durableCompounderInput.market,
+        priceDate: "2026-08-25",
+        marketCapAsOf: "2026-08-25",
+        sharesOutstandingAsOf: "2026-08-25",
+      },
+    });
+    const annualOnly = computeDcfRange({
+      ...durableCompounderInput,
+      annualPeriods,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      market: {
+        ...durableCompounderInput.market,
+        priceDate: "2026-08-25",
+        marketCapAsOf: "2026-08-25",
+        sharesOutstandingAsOf: "2026-08-25",
+      },
+    });
+
+    expect(result.status).toBe("available");
+    expect(result.mid).toBe(annualOnly.mid);
+    expect(result.missingData.map((item) => item.field)).not.toContain("balanceSheetAlignment");
+    expect(result.assumptionNotes).toEqual(expect.arrayContaining([expect.stringContaining("Annual fallback")]));
+  });
+
+  it("does not use stale TTM capital structure when annual DCF fallback is incomplete", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      periodEndDate: `${period.fiscalYear}-12-31`,
+      balanceSheetDate: `${period.fiscalYear}-12-31`,
+      totalDebt: null,
+      cashAndEquivalents: null,
+    }));
+    const result = computeDcfRange({
+      ...durableCompounderInput,
+      annualPeriods,
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      trailingTwelveMonths: {
+        ...durableCompounderInput.annualPeriods.at(-1)!,
+        periodEndDate: "2026-06-30",
+        balanceSheetDate: "2026-03-31",
+        form: "TTM",
+        periodBasis: "TTM_REPORTED",
+        operatingCashFlow: 1_000,
+        capitalExpenditures: -10,
+        totalDebt: 9_000,
+        cashAndEquivalents: 10,
       },
       market: {
         ...durableCompounderInput.market,
@@ -149,7 +236,7 @@ describe("DCF calculations", () => {
 
     expect(result.status).toBe("unavailable");
     expect(result.missingData).toEqual(expect.arrayContaining([
-      expect.objectContaining({ field: "balanceSheetAlignment", impact: "dcf", severity: "high" }),
+      expect.objectContaining({ field: "netDebt", impact: "dcf", severity: "high" }),
     ]));
   });
 

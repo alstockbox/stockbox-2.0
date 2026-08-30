@@ -28,7 +28,7 @@ import { PROVIDER_ADAPTER_VERSIONS, providerAdapterVersion } from "./provider-ve
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
-  | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[] };
+  | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[]; providerDiagnostics: ProviderDiagnostic[] };
 
 type FundamentalsResolution = {
   result: AdapterResult<CompanyFundamentals>;
@@ -37,6 +37,7 @@ type FundamentalsResolution = {
 };
 
 const UNSUPPORTED_SECURITY_ERROR = "Live fundamentals are not available for this security.";
+const MAX_MARKET_CAP_PRICE_GAP_DAYS = 5;
 
 function yahooFundamentalsSource(company: CompanySearchResult): Omit<AnalysisSource, "accessedAt"> {
   const symbol = yahooSymbolForCompany(company);
@@ -70,6 +71,10 @@ const MERGEABLE_FINANCIAL_FIELDS = [
 function finiteMetric(period: FinancialPeriod, field: keyof FinancialPeriod): boolean {
   const value = period[field];
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function finitePositive(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 export function fundamentalsCoverageProfile(fundamentals: CompanyFundamentals) {
@@ -388,6 +393,7 @@ function mergeFundamentals(
     reportedMarketCapCurrency: primary.reportedMarketCapCurrency ?? secondary.reportedMarketCapCurrency,
     reportedSharesOutstanding: primary.reportedSharesOutstanding ?? secondary.reportedSharesOutstanding,
     reportedSharesDate: primary.reportedSharesDate ?? secondary.reportedSharesDate,
+    reportedValuation: primary.reportedValuation ?? secondary.reportedValuation,
     sourceConflicts: uniqueSourceConflicts(conflicts),
   };
   return {
@@ -749,18 +755,40 @@ function enrichMarketWithFundamentals(
   const sharesDateUsable = dataDateStatus(sharesDate, analysisDate, DATA_FRESHNESS_THRESHOLDS_DAYS.sharesOutstanding).status === "current";
   const marketCap = market.marketCap ?? (marketCurrency && capCurrency && marketCurrency === capCurrency && capDateUsable
     ? fundamentals.reportedMarketCap ?? null : null);
+  const marketCapAsOf = market.marketCap !== undefined && market.marketCap !== null ? market.marketCapAsOf ?? market.date : capDate;
+  const marketCapCurrency = market.marketCap !== undefined && market.marketCap !== null ? market.marketCapCurrency ?? market.currency : capCurrency;
   const commonEquity = !company.securityType || company.securityType === "Common Stock";
-  const sharesOutstanding = market.sharesOutstanding ?? (commonEquity && sharesDateUsable
-    ? fundamentals.reportedSharesOutstanding ?? null : null);
+  const reportedShares = commonEquity && sharesDateUsable ? fundamentals.reportedSharesOutstanding ?? null : null;
+  const priceDateUsable = dataDateStatus(market.date, analysisDate, DATA_FRESHNESS_THRESHOLDS_DAYS.marketPrice).status === "current";
+  const marketCapDateUsable = dataDateStatus(marketCapAsOf, analysisDate, DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap).status === "current";
+  const marketPrice = finitePositive(market.price) ? market.price : null;
+  const marketCapPriceGapDays = market.date && marketCapAsOf
+    ? Math.abs((Date.parse(market.date) - Date.parse(marketCapAsOf)) / 86_400_000)
+    : Number.NaN;
+  const canDeriveSharesFromMarketCap = commonEquity
+    && finitePositive(marketCap)
+    && marketPrice !== null
+    && priceDateUsable
+    && marketCapDateUsable
+    && Number.isFinite(marketCapPriceGapDays)
+    && marketCapPriceGapDays <= MAX_MARKET_CAP_PRICE_GAP_DAYS
+    && Boolean(marketCurrency && marketCapCurrency && marketCurrency === marketCapCurrency);
+  const derivedShares = canDeriveSharesFromMarketCap && marketPrice !== null ? marketCap / marketPrice : null;
+  const derivedSharesDate = canDeriveSharesFromMarketCap
+    ? [market.date, marketCapAsOf].filter((date): date is string => Boolean(date)).sort().at(-1) ?? null
+    : null;
+  const sharesOutstanding = market.sharesOutstanding ?? reportedShares ?? derivedShares;
   return {
     ...market,
     marketCap,
-    marketCapAsOf: market.marketCap !== undefined && market.marketCap !== null ? market.marketCapAsOf ?? market.date : capDate,
-    marketCapCurrency: market.marketCap !== undefined && market.marketCap !== null ? market.marketCapCurrency ?? market.currency : capCurrency,
+    marketCapAsOf,
+    marketCapCurrency,
     sharesOutstanding,
     sharesOutstandingAsOf: market.sharesOutstanding !== undefined && market.sharesOutstanding !== null
       ? market.sharesOutstandingAsOf ?? market.date
-      : sharesDate,
+      : reportedShares !== null
+        ? sharesDate
+        : derivedSharesDate ?? sharesDate,
   };
 }
 
@@ -784,6 +812,9 @@ export async function analyzeCompany({
       error: UNSUPPORTED_SECURITY_ERROR,
       sources,
       warnings: ["This security is discovery-only until supported fundamentals coverage is configured."],
+      providerDiagnostics: [
+        providerDiagnostic("StockBox security eligibility", "fundamentals", "unsupported", "unsupported_security"),
+      ],
     };
   }
 
@@ -845,6 +876,7 @@ export async function analyzeCompany({
       error: "Fundamental data is unavailable for this company.",
       sources,
       warnings,
+      providerDiagnostics,
     };
   }
 

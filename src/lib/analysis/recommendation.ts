@@ -23,6 +23,13 @@ function hasCriticalSpecializedCoverage(score: ScoreResult): boolean {
 
 function archetypeValuationScore(score: ScoreResult, valuation?: DcfRangeResult): number | null {
   if (valuation?.status !== "inappropriate") return null;
+  if (score.analysisArchetype === "property_company" || score.analysisArchetype === "asset_manager") {
+    const dimension = score.dimensions.valuation;
+    if ((dimension.coverage ?? 0) < SCORE_COVERAGE_POLICY.dimensionFull) return null;
+    if (score.confidenceBreakdown.marketInputFreshness < 80 || score.confidenceBreakdown.currencyAlignment < 100) return null;
+    if (score.confidenceBreakdown.valuationInputs < 60 || score.confidenceBreakdown.sourceConflict < 45) return null;
+    return typeof dimension.score === "number" && Number.isFinite(dimension.score) ? dimension.score : null;
+  }
   if (!["bank", "insurer", "reit"].includes(score.analysisArchetype)) return null;
   if ((score.specializedCoverage?.overall ?? 0) < 0.7) return null;
   if (!hasCriticalSpecializedCoverage(score)) return null;

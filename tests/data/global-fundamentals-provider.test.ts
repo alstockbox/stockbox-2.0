@@ -189,6 +189,10 @@ describe("global fundamentals provider orchestration", () => {
       expect(result.warnings).toEqual(expect.arrayContaining([
         "Fundamental data is unavailable: Yahoo fundamentals unavailable.",
       ]));
+      expect(result.providerDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ provider: "Yahoo Finance fundamentals", capability: "fundamentals", status: "unavailable", reason: "upstream_error" }),
+        expect.objectContaining({ provider: "Stooq", capability: "market_data", status: "available" }),
+      ]));
     }
     expect(mocks.fetchStooqMarketData).toHaveBeenCalledOnce();
   });
@@ -615,6 +619,57 @@ describe("global fundamentals provider orchestration", () => {
       ]));
     }
   });
+
+  it("derives current shares from same-currency current market cap and price when reported shares are stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T12:00:00.000Z"));
+    mocks.getMarketDataProviderChain.mockReturnValue(["stooq"]);
+    mocks.fetchStooqMarketData.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ticker: "VOLV-B.ST",
+        price: 250,
+        currency: "SEK",
+        date: "2026-08-25",
+        volume: 1_000,
+        yearHigh: 290,
+        yearLow: 210,
+        provider: "stooq-eod",
+        performance: {},
+      },
+      diagnostic: providerDiagnostic("Stooq", "market_data", "available"),
+    });
+    mocks.yahoo.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...globalFundamentals,
+        trailingTwelveMonths: {
+          ...globalFundamentals.trailingTwelveMonths!,
+          currentSharesOutstanding: null,
+        },
+        reportedMarketCap: 500_000,
+        reportedMarketCapDate: "2026-08-25",
+        reportedMarketCapCurrency: "SEK",
+        reportedSharesOutstanding: 2_033,
+        reportedSharesDate: "2025-12-31",
+      },
+      diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "available"),
+    });
+
+    const result = await analyzeCompany({
+      company: { ticker: "VOLV-B.ST", canonicalTicker: "VOLV-B.ST", name: "AB Volvo B", country: "SE", currency: "SEK" },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.engine?.diagnostics.sharesOutstandingStatus).toBe("current");
+      expect(result.data.engine?.missingData.map((item) => item.field)).not.toContain("shares_outstanding_freshness");
+      expect(result.data.engine?.dcf.missingData.map((item) => item.field)).not.toContain("sharesOutstanding");
+    }
+  });
+
   it("prefers a usable secondary classification over an unknown primary classification", async () => {
     const period = { ...globalFundamentals.annualPeriods![0], currency: "USD", periodEndDate: "2025-12-31" };
     mocks.sec.mockResolvedValueOnce({ ok: true, data: {

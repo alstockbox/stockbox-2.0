@@ -2,7 +2,7 @@ import { assessDataFreshness } from "./freshness";
 import { quotePriceToEconomic } from "./currency-units";
 import { currentSharesForDcf, deriveSimpleFreeCashFlow, valuationCurrencyAlignment } from "./metrics";
 import { firstFinite, isFiniteNumber } from "./math";
-import type { FinancialAnalysisInput, FinancialMetrics, FinancialPeriod, ReconciliationCheck } from "./types";
+import type { FinancialAnalysisInput, FinancialMetrics, FinancialPeriod, FinancialPeriodBasis, ReconciliationCheck } from "./types";
 
 const ttmFlowFields = [
   "revenue",
@@ -12,6 +12,16 @@ const ttmFlowFields = [
   "operatingCashFlow",
   "capitalExpenditures",
 ] as const;
+
+const returnMetricProvenanceFields = ["returnOnEquity", "returnOnAssets", "returnOnInvestedCapital"] as const;
+
+function returnMetricPeriodBasis(metrics: FinancialMetrics): FinancialPeriodBasis | null {
+  const bases = returnMetricProvenanceFields
+    .map((field) => metrics.provenance[field]?.periodBasis)
+    .filter((basis): basis is FinancialPeriodBasis => Boolean(basis));
+  const uniqueBases = [...new Set(bases)];
+  return uniqueBases.length === 1 ? uniqueBases[0] : null;
+}
 
 export function ttmPeriodBasisCheck(period: FinancialPeriod | undefined): ReconciliationCheck {
   if (!period || period.form !== "TTM") {
@@ -54,6 +64,77 @@ function compare(code: string, label: string, left: number | null, right: number
   };
 }
 
+function epsNetIncomeReconciliationCheck(latest: FinancialPeriod | null | undefined): ReconciliationCheck {
+  const epsTimesShares = isFiniteNumber(latest?.epsDiluted) && isFiniteNumber(latest?.sharesDiluted)
+    ? latest.epsDiluted * latest.sharesDiluted
+    : null;
+  const incomeAvailableToCommon = firstFinite(
+    latest?.dilutedNetIncomeAvailableToCommon,
+    latest?.netIncomeCommonStockholders,
+    latest?.netIncome,
+  );
+  const base = compare(
+    "eps_net_income",
+    "Diluted EPS times diluted shares versus diluted income available to common shareholders",
+    epsTimesShares,
+    incomeAvailableToCommon,
+    0.08,
+  );
+  if (base.status !== "warning" || !isFiniteNumber(epsTimesShares) || !isFiniteNumber(incomeAvailableToCommon)) {
+    return base;
+  }
+  const oppositeSigns = epsTimesShares !== 0
+    && incomeAvailableToCommon !== 0
+    && Math.sign(epsTimesShares) !== Math.sign(incomeAvailableToCommon);
+  const periodLabel = latest?.form === "TTM" || latest?.periodBasis?.startsWith("TTM") ? "TTM" : "Annual";
+  return {
+    ...base,
+    message: oppositeSigns
+      ? `${periodLabel} diluted EPS times diluted shares and diluted income available to common shareholders have opposite signs.`
+      : `${periodLabel} diluted EPS times diluted shares and diluted income available to common shareholders have a same-direction magnitude mismatch beyond the 8% tolerance.`,
+  };
+}
+
+function usesReportedMarketCap(input: FinancialAnalysisInput, metrics: FinancialMetrics): boolean {
+  return isFiniteNumber(input.market?.marketCap)
+    && isFiniteNumber(metrics.valuation.marketCap)
+    && relativeDifference(input.market.marketCap, metrics.valuation.marketCap) <= 0.000001;
+}
+
+function marketCapObservationDateGap(input: FinancialAnalysisInput, metrics: FinancialMetrics): ReconciliationCheck | null {
+  if (!usesReportedMarketCap(input, metrics)) return null;
+  const priceDate = input.market?.priceDate ?? null;
+  if (!priceDate) return null;
+  const marketCapDate = input.market?.marketCapAsOf ?? null;
+  const sharesDate = input.market?.sharesOutstandingAsOf ?? null;
+  const mismatches = [
+    marketCapDate && marketCapDate !== priceDate ? "market cap" : null,
+    sharesDate && sharesDate !== priceDate ? "shares outstanding" : null,
+  ].filter((item): item is string => Boolean(item));
+  if (!mismatches.length) return null;
+  return {
+    code: "market_cap",
+    status: "unavailable",
+    message: `Market cap versus price times current shares could not be checked because ${mismatches.join(" and ")} use different observation dates than the quote price.`,
+  };
+}
+
+function marketCapReconciliationCheck(
+  input: FinancialAnalysisInput,
+  metrics: FinancialMetrics,
+  shares: number | null,
+): ReconciliationCheck {
+  return marketCapObservationDateGap(input, metrics) ?? compare(
+    "market_cap",
+    "Market cap versus price times current shares",
+    metrics.valuation.marketCap,
+    isFiniteNumber(input.market?.price) && isFiniteNumber(shares)
+      ? (quotePriceToEconomic(input.market.price, input.market.currency ?? input.company.tradingCurrency) ?? Number.NaN) * shares
+      : null,
+    0.05,
+  );
+}
+
 export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: FinancialMetrics): ReconciliationCheck[] {
   const latest = metrics.latestPeriod;
   const simpleFcf = deriveSimpleFreeCashFlow(latest);
@@ -76,31 +157,17 @@ export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: F
       isFiniteNumber(latest?.revenue) && isFiniteNumber(latest?.costOfRevenue) ? latest.revenue - latest.costOfRevenue : null,
       0.02,
     ),
-    compare(
-      "eps_net_income",
-      "Diluted EPS times diluted shares versus diluted income available to common shareholders",
-      isFiniteNumber(latest?.epsDiluted) && isFiniteNumber(latest?.sharesDiluted) ? latest.epsDiluted * latest.sharesDiluted : null,
-      firstFinite(latest?.dilutedNetIncomeAvailableToCommon, latest?.netIncomeCommonStockholders, latest?.netIncome),
-      0.08,
-    ),
+    epsNetIncomeReconciliationCheck(latest),
     compare(
       "simple_fcf",
       "Simple FCF versus CFO less absolute capex",
       simpleFcf,
       isFiniteNumber(latest?.operatingCashFlow) && isFiniteNumber(latest?.capitalExpenditures)
         ? latest.operatingCashFlow - Math.abs(latest.capitalExpenditures)
-        : null,
+      : null,
       0.000001,
     ),
-    compare(
-      "market_cap",
-      "Market cap versus price times current shares",
-      metrics.valuation.marketCap,
-      isFiniteNumber(input.market?.price) && isFiniteNumber(shares)
-        ? (quotePriceToEconomic(input.market.price, input.market.currency ?? input.company.tradingCurrency) ?? Number.NaN) * shares
-        : null,
-      0.05,
-    ),
+    marketCapReconciliationCheck(input, metrics, shares),
   ];
   const financialCurrency = latest?.currency ?? input.company.reportingCurrency ?? input.company.currency;
   const marketCurrency = input.market?.currency ?? input.company.tradingCurrency;
@@ -168,11 +235,15 @@ export function reconcileFinancialData(input: FinancialAnalysisInput, metrics: F
       : Number.NaN;
     const hasComparableBalanceDates = Boolean(balanceEnd && priorBalanceEnd);
     const comparableBalanceGap = Number.isFinite(balanceGap) && balanceGap >= 330 && balanceGap <= 400;
+    const returnBasis = returnMetricPeriodBasis(metrics);
+    const returnMetricsUseAnnualFallback = returnBasis === "FY";
     checks.push({
       code: "return_metric_balance_alignment",
-      status: !hasComparableBalanceDates ? "unavailable" : comparableBalanceGap ? "pass" : "warning",
+      status: !hasComparableBalanceDates || returnMetricsUseAnnualFallback ? "unavailable" : comparableBalanceGap ? "pass" : "warning",
       message: !hasComparableBalanceDates
         ? "Comparable prior-year instant balances are unavailable for TTM return metrics."
+        : returnMetricsUseAnnualFallback
+          ? "TTM return balance dates are not used; ROE, ROA and ROIC use annual fallback."
         : comparableBalanceGap
           ? "TTM return metrics use current and prior-year comparable instant balances."
           : "Current and prior-year instant balances are not aligned closely enough for TTM return metrics.",

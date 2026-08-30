@@ -13,8 +13,45 @@ const MAX_PRICE = 1_000_000_000;
 const TARGET_TOLERANCE_DAYS = 7;
 const MIN_BETA_OBSERVATIONS = 52;
 const MAX_BETA_LAG_DAYS = 21;
-const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"]];
-const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = { US: "^GSPC", "UNITED STATES": "^GSPC", SE: "^OMX", SWEDEN: "^OMX", GB: "^FTSE", UK: "^FTSE", "UNITED KINGDOM": "^FTSE", DE: "^GDAXI", GERMANY: "^GDAXI", FR: "^FCHI", FRANCE: "^FCHI", NL: "^AEX", NETHERLANDS: "^AEX", CH: "^SSMI", SWITZERLAND: "^SSMI", CA: "^GSPTSE", CANADA: "^GSPTSE", AU: "^AXJO", AUSTRALIA: "^AXJO", JP: "^N225", JAPAN: "^N225", HK: "^HSI", "HONG KONG": "^HSI", CN: "000001.SS", CHINA: "000001.SS", KR: "^KS11", "SOUTH KOREA": "^KS11", TW: "^TWII", TAIWAN: "^TWII", IN: "^NSEI", INDIA: "^NSEI", BR: "^BVSP", BRAZIL: "^BVSP", MX: "^MXX", MEXICO: "^MXX", ES: "^IBEX", SPAIN: "^IBEX", IT: "FTSEMIB.MI", ITALY: "FTSEMIB.MI", DK: "^OMXC25", DENMARK: "^OMXC25", FI: "^OMXH25", FINLAND: "^OMXH25", NO: "OSEAX.OL", NORWAY: "OSEAX.OL", SG: "^STI", SINGAPORE: "^STI", ID: "^JKSE", INDONESIA: "^JKSE", MY: "^KLSE", MALAYSIA: "^KLSE", NZ: "^NZ50", "NEW ZEALAND": "^NZ50" };
+const YAHOO_REQUEST_TIMEOUT_MS = 10_000;
+const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".F", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".BA", "^MERV"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"]];
+const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = { US: "^GSPC", "UNITED STATES": "^GSPC", SE: "^OMX", SWEDEN: "^OMX", GB: "^FTSE", UK: "^FTSE", "UNITED KINGDOM": "^FTSE", DE: "^GDAXI", GERMANY: "^GDAXI", FR: "^FCHI", FRANCE: "^FCHI", NL: "^AEX", NETHERLANDS: "^AEX", CH: "^SSMI", SWITZERLAND: "^SSMI", CA: "^GSPTSE", CANADA: "^GSPTSE", AU: "^AXJO", AUSTRALIA: "^AXJO", JP: "^N225", JAPAN: "^N225", HK: "^HSI", "HONG KONG": "^HSI", CN: "000001.SS", CHINA: "000001.SS", KR: "^KS11", "SOUTH KOREA": "^KS11", TW: "^TWII", TAIWAN: "^TWII", IN: "^NSEI", INDIA: "^NSEI", BR: "^BVSP", BRAZIL: "^BVSP", MX: "^MXX", MEXICO: "^MXX", AR: "^MERV", ARGENTINA: "^MERV", ES: "^IBEX", SPAIN: "^IBEX", IT: "FTSEMIB.MI", ITALY: "FTSEMIB.MI", DK: "^OMXC25", DENMARK: "^OMXC25", FI: "^OMXH25", FINLAND: "^OMXH25", NO: "OSEAX.OL", NORWAY: "OSEAX.OL", SG: "^STI", SINGAPORE: "^STI", ID: "^JKSE", INDONESIA: "^JKSE", MY: "^KLSE", MALAYSIA: "^KLSE", NZ: "^NZ50", "NEW ZEALAND": "^NZ50" };
+const BETA_BENCHMARK_BY_EXCHANGE: Record<string, string> = {
+  AMEX: "^GSPC",
+  NASDAQ: "^GSPC",
+  NASDAQCM: "^GSPC",
+  NASDAQGM: "^GSPC",
+  NASDAQGS: "^GSPC",
+  "NASDAQ CAPITAL MARKET": "^GSPC",
+  "NASDAQ GLOBAL MARKET": "^GSPC",
+  "NASDAQ GLOBAL SELECT": "^GSPC",
+  "NEW YORK STOCK EXCHANGE": "^GSPC",
+  NYQ: "^GSPC",
+  NYSE: "^GSPC",
+  "NYSE AMERICAN": "^GSPC",
+  NYSEAMERICAN: "^GSPC",
+  "NYSE ARCA": "^GSPC",
+  "NYSE MKT": "^GSPC",
+  BATS: "^GSPC",
+  "BATS TRADING": "^GSPC",
+  BZX: "^GSPC",
+  "CBOE BZX": "^GSPC",
+  OTC: "^GSPC",
+  "OTC MARKETS": "^GSPC",
+  OQB: "^GSPC",
+  OQX: "^GSPC",
+  OID: "^GSPC",
+  "OTC QB": "^GSPC",
+  "OTC QX": "^GSPC",
+  OTCQB: "^GSPC",
+  OTCQX: "^GSPC",
+  "OTHER OTC": "^GSPC",
+  PNK: "^GSPC",
+  FRANKFURT: "^GDAXI",
+  "FRANKFURT STOCK EXCHANGE": "^GDAXI",
+  "BUENOS AIRES": "^MERV",
+  "BUENOS AIRES STOCK EXCHANGE": "^MERV",
+};
 
 export const YAHOO_MARKET_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["global"],
@@ -61,7 +98,12 @@ function betaBenchmarkSymbol(company: CompanySearchResult): string | null {
   const suffixMatch = BETA_BENCHMARK_BY_SUFFIX.find(([suffix]) => symbol.endsWith(suffix));
   if (suffixMatch) return suffixMatch[1];
   const country = company.country?.trim().toUpperCase();
-  return country ? BETA_BENCHMARK_BY_COUNTRY[country] ?? null : null;
+  const countryBenchmark = country ? BETA_BENCHMARK_BY_COUNTRY[country] ?? null : null;
+  if (countryBenchmark) return countryBenchmark;
+  const exchange = company.exchange?.trim().toUpperCase();
+  if (!exchange) return null;
+  const compactExchange = exchange.replace(/[^A-Z0-9]/g, "");
+  return BETA_BENCHMARK_BY_EXCHANGE[exchange] ?? BETA_BENCHMARK_BY_EXCHANGE[compactExchange] ?? null;
 }
 
 function dateFromUnix(timestamp: number): string | null {
@@ -196,10 +238,13 @@ async function requestChart(symbol: string): Promise<AdapterResult<JsonObject>> 
   url.searchParams.set("interval", "1d");
   url.searchParams.set("events", "div,splits");
   url.searchParams.set("includeAdjustedClose", "true");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), YAHOO_REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(url, {
       headers: { accept: "application/json" },
+      signal: controller.signal,
       next: { revalidate: 60 * 15 },
     });
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -222,7 +267,15 @@ async function requestChart(symbol: string): Promise<AdapterResult<JsonObject>> 
       diagnostic: providerDiagnostic("Yahoo Finance chart", "market_data", "available"),
     };
   } catch (error) {
-    return failure(error instanceof SyntaxError ? "empty_response" : "upstream_error", "Yahoo Finance chart data could not be reached or parsed.");
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    return failure(
+      timedOut ? "timeout" : error instanceof SyntaxError ? "empty_response" : "upstream_error",
+      timedOut
+        ? "Yahoo Finance chart request timed out."
+        : "Yahoo Finance chart data could not be reached or parsed.",
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -261,11 +314,13 @@ export const yahooMarketDataProvider: MarketDataProvider = {
     const meta = object(result.meta) ?? {};
     const history = parseRows(result);
     const latest = history.at(-1);
-    const price = metaNumber(meta, "regularMarketPrice") ?? latest?.close ?? null;
+    const metaDate = unixDate(meta.regularMarketTime);
+    const historyIsNewer = Boolean(latest?.date && metaDate && latest.date > metaDate);
+    const price = historyIsNewer ? latest?.close ?? null : metaNumber(meta, "regularMarketPrice") ?? latest?.close ?? null;
     if (price === null || price <= 0 || price > MAX_PRICE) {
       return failure("impossible_price", "Yahoo Finance returned no usable current market price.");
     }
-    const currentDate = unixDate(meta.regularMarketTime) ?? latest?.date ?? null;
+    const currentDate = historyIsNewer ? latest?.date ?? null : metaDate ?? latest?.date ?? null;
     if (currentDate && Date.parse(`${currentDate}T00:00:00Z`) > Date.now()) {
       return failure("future_date", "Yahoo Finance returned a future-dated market observation.");
     }
@@ -284,7 +339,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         price,
         currency: stringValue(meta.currency) ?? company.currency ?? null,
         date: currentDate,
-        volume: metaNumber(meta, "regularMarketVolume") ?? latest?.volume ?? null,
+        volume: historyIsNewer ? latest?.volume ?? null : metaNumber(meta, "regularMarketVolume") ?? latest?.volume ?? null,
         yearHigh,
         yearLow,
         marketCap: null,

@@ -21,6 +21,8 @@ import {
 
 const FALLBACK_TAX_RATE = 0.21;
 const FUTURE_MARKET_PRICE_TOLERANCE_DAYS = 1;
+const MAX_TTM_BALANCE_LAG_DAYS = 45;
+const DEBT_FREE_INTEREST_COVERAGE_RATIO = 99;
 
 function periodSortValue(period: FinancialPeriod): number {
   const date = period.periodEndDate ? Date.parse(period.periodEndDate) : Number.NaN;
@@ -46,7 +48,7 @@ function average(a: number | null | undefined, b: number | null | undefined): nu
   return isFiniteNumber(a) && isFiniteNumber(b) ? (a + b) / 2 : null;
 }
 
-function shareBasisComparable(left: FinancialPeriod | null | undefined, right: FinancialPeriod | null | undefined): boolean {
+export function shareBasisComparable(left: FinancialPeriod | null | undefined, right: FinancialPeriod | null | undefined): boolean {
   if (!left || !right) return false;
   const leftScale = left.shareBasisScale;
   const rightScale = right.shareBasisScale;
@@ -100,14 +102,19 @@ function comparableBalancePeriods(current: FinancialPeriod | null, prior: Financ
   return Number.isFinite(gap) && gap >= 330 && gap <= 400;
 }
 
+function ttmBalanceAlignsWithFlow(period: FinancialPeriod | null): boolean {
+  if (!period || period.form !== "TTM" || !period.periodEndDate || !period.balanceSheetDate) return false;
+  const lagDays = (Date.parse(period.periodEndDate) - Date.parse(period.balanceSheetDate)) / 86_400_000;
+  return Number.isFinite(lagDays) && lagDays >= 0 && lagDays <= MAX_TTM_BALANCE_LAG_DAYS;
+}
+
 function comparableTtmPeriods(current: FinancialPeriod | null, prior: FinancialPeriod | null): boolean {
   if (!current?.periodEndDate || !prior?.periodEndDate || !current.periodBasis || current.periodBasis !== prior.periodBasis) return false;
-  if (!isFiniteNumber(current.currentYtdDurationDays) || !isFiniteNumber(prior.currentYtdDurationDays)) return false;
   const endGap = (Date.parse(current.periodEndDate) - Date.parse(prior.periodEndDate)) / 86_400_000;
-  return Number.isFinite(endGap)
-    && endGap >= 330
-    && endGap <= 400
-    && Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
+  if (!Number.isFinite(endGap) || endGap < 330 || endGap > 400) return false;
+  if (current.periodBasis === "TTM_REPORTED") return true;
+  if (!isFiniteNumber(current.currentYtdDurationDays) || !isFiniteNumber(prior.currentYtdDurationDays)) return false;
+  return Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
 }
 
 function periodSpanYears(older: FinancialPeriod | null, newer: FinancialPeriod | null): number | null {
@@ -123,7 +130,7 @@ function periodSpanYears(older: FinancialPeriod | null, newer: FinancialPeriod |
   return null;
 }
 
-function comparableAnnualPeriod(
+export function comparableAnnualPeriod(
   periods: FinancialPeriod[],
   newer: FinancialPeriod | null,
   targetYears: number,
@@ -256,8 +263,11 @@ export function marketCapShareBasisDifference(
   input: FinancialAnalysisInput,
   latest: FinancialPeriod | null,
 ): number | null {
+  const marketCapDate = input.market?.marketCapAsOf ?? input.market?.priceDate ?? null;
+  const priceDate = input.market?.priceDate ?? null;
+  if (!marketCapDate || !priceDate || marketCapDate !== priceDate) return null;
   const marketCapStatus = dataDateStatus(
-    input.market?.marketCapAsOf ?? input.market?.priceDate,
+    marketCapDate,
     input.analysisDate ?? new Date().toISOString(),
     DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap,
   );
@@ -311,7 +321,7 @@ function deriveValuationMetrics(
   const commonEarnings = firstFinite(latest?.netIncomeCommonStockholders, latest?.netIncome);
   const equity = latest?.totalEquity ?? null;
   const tangibleBook = input.specialized?.kind === "bank"
-    ? input.specialized.tangibleCommonEquity.value
+    ? input.specialized.tangibleCommonEquity?.value ?? null
     : latest?.tangibleBookValue ?? null;
   const ebitda = firstFinite(
     latest?.ebitda,
@@ -352,6 +362,41 @@ function unavailableValuationMetrics(): ValuationMetrics {
   };
 }
 
+function providerReportedValuation(input: FinancialAnalysisInput): ValuationMetrics {
+  const reported = input.reportedValuation;
+  if (!reported || !freshnessAllows(input, reported.asOfDate, DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap)) {
+    return unavailableValuationMetrics();
+  }
+  const positive = (value: number | null | undefined) => isFiniteNumber(value) && value > 0 ? value : null;
+  const pe = positive(reported.priceEarnings);
+  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
+    && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
+  const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow);
+  const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
+    ? safeDivide(reported.freeCashFlow, reported.marketCap)
+    : null;
+  return {
+    marketCap: null,
+    enterpriseValue: null,
+    priceEarnings: pe,
+    priceSales: positive(reported.priceSales),
+    priceBook: positive(reported.priceBook),
+    priceTangibleBook: null,
+    evSales: positive(reported.evSales),
+    evEbitda: positive(reported.evEbitda),
+    freeCashFlowYield: fcfYield,
+    earningsYield: pe ? 1 / pe : null,
+    peg: positive(reported.peg),
+  };
+}
+
+function mergeValuationMetrics(primary: ValuationMetrics, fallback: ValuationMetrics): ValuationMetrics {
+  return Object.fromEntries(Object.keys(primary).map((key) => {
+    const metric = key as keyof ValuationMetrics;
+    return [metric, firstFinite(primary[metric], fallback[metric])];
+  })) as ValuationMetrics;
+}
+
 function derivedProvenance(source: string, periodEnd: string | undefined, inputs: string[], note?: string): MetricProvenance {
   return { source, valueKind: "derived", periodEnd, inputs, note };
 }
@@ -375,32 +420,52 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const latest = input.trailingTwelveMonths ?? latestAnnual;
   const priorTtmCandidate = input.trailingTwelveMonths ? input.priorTrailingTwelveMonths ?? null : null;
   const priorTtm = comparableTtmPeriods(latest, priorTtmCandidate) ? priorTtmCandidate : null;
+  const currentTtmBalanceAligned = input.trailingTwelveMonths ? ttmBalanceAlignsWithFlow(latest) : false;
+  const priorTtmBalanceAligned = input.trailingTwelveMonths ? ttmBalanceAlignsWithFlow(priorTtm) : false;
   const growthComparison = priorTtm ?? previousAnnual;
   const growthLatest = priorTtm ? latest : latestAnnual;
   const trendComparison = input.trailingTwelveMonths ? priorTtm : previousAnnual;
-  const returnBalanceComparison = input.trailingTwelveMonths
-    ? comparableBalancePeriods(latest, priorTtm) ? priorTtm : null
-    : previousAnnual;
+  const ttmReturnComparison = input.trailingTwelveMonths && currentTtmBalanceAligned && priorTtmBalanceAligned && comparableBalancePeriods(latest, priorTtm)
+    ? priorTtm
+    : null;
+  const returnUsesTtm = Boolean(ttmReturnComparison);
+  const returnLatest = returnUsesTtm ? latest : latestAnnual;
+  const returnBalanceComparison = returnUsesTtm ? ttmReturnComparison : previousAnnual;
+  const returnPeriodBasis = returnUsesTtm ? returnLatest?.periodBasis : "FY";
   const missingData: MissingDataItem[] = [];
   if (!latest) addMissingData(missingData, "annualPeriods", "No reliable financial period is available.", "metric", "high");
 
-  const simpleFcf = deriveSimpleFreeCashFlow(latest);
+  const ttmSimpleFcf = deriveSimpleFreeCashFlow(latest);
+  const useTtmCashFlow = Boolean(
+    input.trailingTwelveMonths
+    && isFiniteNumber(latest?.operatingCashFlow)
+    && isFiniteNumber(ttmSimpleFcf)
+    && isFiniteNumber(latest?.revenue)
+    && isFiniteNumber(latest?.netIncome)
+  );
+  const cashFlowLatest = useTtmCashFlow ? latest : latestAnnual;
+  const simpleFcf = deriveSimpleFreeCashFlow(cashFlowLatest);
   const tax = normalizedTaxRate(annual);
-  const fcff = deriveFcff(latest, tax.rate);
-  const fcfe = deriveFcfe(latest);
+  const fcff = deriveFcff(cashFlowLatest, tax.rate);
+  const fcfe = deriveFcfe(cashFlowLatest);
   const revenue = latest?.revenue ?? null;
   const netIncome = latest?.netIncome ?? null;
   const operatingIncome = latest?.operatingIncome ?? null;
+  const cashFlowRevenue = cashFlowLatest?.revenue ?? null;
+  const cashFlowNetIncome = cashFlowLatest?.netIncome ?? null;
+  const cashFlowOperatingCashFlow = cashFlowLatest?.operatingCashFlow ?? null;
   const ebitda = firstFinite(
     latest?.ebitda,
     isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.depreciationAndAmortization)
       ? operatingIncome + latest.depreciationAndAmortization
       : null,
   );
-  const averageCapital = average(investedCapital(latest), investedCapital(returnBalanceComparison));
-  const averageEquity = average(latest?.totalEquity, returnBalanceComparison?.totalEquity);
-  const averageAssets = average(latest?.totalAssets, returnBalanceComparison?.totalAssets);
-  const nopat = isFiniteNumber(operatingIncome) ? operatingIncome * (1 - tax.rate) : null;
+  const returnNetIncome = returnLatest?.netIncome ?? null;
+  const returnOperatingIncome = returnLatest?.operatingIncome ?? null;
+  const averageCapital = average(investedCapital(returnLatest), investedCapital(returnBalanceComparison));
+  const averageEquity = average(returnLatest?.totalEquity, returnBalanceComparison?.totalEquity);
+  const averageAssets = average(returnLatest?.totalAssets, returnBalanceComparison?.totalAssets);
+  const nopat = isFiniteNumber(returnOperatingIncome) ? returnOperatingIncome * (1 - tax.rate) : null;
   const grossMargin = safeDivide(latest?.grossProfit, revenue);
   const operatingMargin = safeDivide(operatingIncome, revenue);
   const priorGrossMargin = safeDivide(trendComparison?.grossProfit, trendComparison?.revenue);
@@ -447,10 +512,58 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const priorDividends = isFiniteNumber(growthComparison?.dividendsPaid) ? Math.abs(growthComparison.dividendsPaid) : null;
   const latestAnnualDividends = isFiniteNumber(latestAnnual?.dividendsPaid) ? Math.abs(latestAnnual.dividendsPaid) : null;
   const threeYearDividends = isFiniteNumber(threeYearPrior?.dividendsPaid) ? Math.abs(threeYearPrior.dividendsPaid) : null;
-  const netDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
+  const currentNetDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
     ? latest.totalDebt - latest.cashAndEquivalents
     : null;
+  const annualOperatingIncome = latestAnnual?.operatingIncome ?? null;
+  const annualEbitda = firstFinite(
+    latestAnnual?.ebitda,
+    isFiniteNumber(annualOperatingIncome) && isFiniteNumber(latestAnnual?.depreciationAndAmortization)
+      ? annualOperatingIncome + latestAnnual.depreciationAndAmortization
+      : null,
+  );
+  const annualNetDebt = isFiniteNumber(latestAnnual?.totalDebt) && isFiniteNumber(latestAnnual.cashAndEquivalents)
+    ? latestAnnual.totalDebt - latestAnnual.cashAndEquivalents
+    : null;
+  const useTtmLeverage = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(currentNetDebt) && isFiniteNumber(ebitda) && ebitda > 0);
+  const netDebt = currentNetDebt ?? annualNetDebt;
+  const leverageNetDebt = useTtmLeverage ? currentNetDebt : annualNetDebt;
+  const leverageEbitda = useTtmLeverage ? ebitda : annualEbitda;
+  const netDebtToEbitda = isFiniteNumber(leverageNetDebt) && isFiniteNumber(leverageEbitda) && leverageEbitda > 0 ? leverageNetDebt / leverageEbitda : null;
+  const useTtmInterestCoverage = Boolean(input.trailingTwelveMonths && isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.interestExpense) && latest.interestExpense !== 0);
+  const interestCoverageOperatingIncome = useTtmInterestCoverage ? operatingIncome : annualOperatingIncome;
+  const interestCoverageExpense = useTtmInterestCoverage ? latest?.interestExpense : latestAnnual?.interestExpense;
+  const interestCoverage = isFiniteNumber(interestCoverageOperatingIncome) && isFiniteNumber(interestCoverageExpense)
+    ? interestCoverageExpense === 0
+      ? interestCoverageOperatingIncome > 0 ? DEBT_FREE_INTEREST_COVERAGE_RATIO : null
+      : interestCoverageOperatingIncome / Math.abs(interestCoverageExpense)
+    : null;
+  const useTtmCashToDebt = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.cashAndEquivalents) && isFiniteNumber(latest?.totalDebt) && latest.totalDebt !== 0);
+  const cashToDebtPeriod = useTtmCashToDebt ? latest : latestAnnual;
+  const cashToDebt = safeDivide(cashToDebtPeriod?.cashAndEquivalents, cashToDebtPeriod?.totalDebt);
+  const useTtmCurrentRatio = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.currentAssets) && isFiniteNumber(latest?.currentLiabilities) && latest.currentLiabilities !== 0);
+  const currentRatioPeriod = useTtmCurrentRatio ? latest : latestAnnual;
+  const currentRatio = safeDivide(currentRatioPeriod?.currentAssets, currentRatioPeriod?.currentLiabilities);
+  const useTtmDebtToEquity = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest?.totalEquity) && latest.totalEquity > 0);
+  const debtToEquityPeriod = useTtmDebtToEquity ? latest : latestAnnual;
+  const debtToEquity = isFiniteNumber(debtToEquityPeriod?.totalDebt) && isFiniteNumber(debtToEquityPeriod?.totalEquity) && debtToEquityPeriod.totalEquity > 0
+    ? debtToEquityPeriod.totalDebt / debtToEquityPeriod.totalEquity
+    : null;
+  const useTtmEquityToAssets = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.totalEquity) && isFiniteNumber(latest?.totalAssets) && latest.totalAssets !== 0);
+  const equityToAssetsPeriod = useTtmEquityToAssets ? latest : latestAnnual;
+  const equityToAssets = safeDivide(equityToAssetsPeriod?.totalEquity, equityToAssetsPeriod?.totalAssets);
   const roic = isFiniteNumber(averageCapital) && averageCapital > 0 ? safeDivide(nopat, averageCapital) : null;
+  const priorTtmSimpleFcf = deriveSimpleFreeCashFlow(priorTtm);
+  const useTtmFcfGrowth = Boolean(useTtmCashFlow && priorTtm && isFiniteNumber(priorTtmSimpleFcf));
+  const fcfGrowthLatest = useTtmFcfGrowth ? latest : latestAnnual;
+  const fcfGrowthComparison = useTtmFcfGrowth ? priorTtm : previousAnnual;
+  const accrualUsesTtm = Boolean(useTtmCashFlow && returnUsesTtm);
+  const accrualLatest = accrualUsesTtm ? latest : latestAnnual;
+  const accrualComparison = accrualUsesTtm ? ttmReturnComparison : previousAnnual;
+  const accrualAverageAssets = average(accrualLatest?.totalAssets, accrualComparison?.totalAssets);
+  const accrualRatio = isFiniteNumber(accrualLatest?.netIncome) && isFiniteNumber(accrualLatest?.operatingCashFlow) && isFiniteNumber(accrualAverageAssets)
+    ? (accrualLatest.netIncome - accrualLatest.operatingCashFlow) / accrualAverageAssets
+    : null;
   const assumedWacc = input.dcfAssumptions?.discountRate;
 
   const growth = {
@@ -459,16 +572,45 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
     revenueCagr5y: cagrBetween(fiveYearPrior, latestAnnual, fiveYearPrior?.revenue, latestAnnual?.revenue),
     epsGrowthYoY: annualEpsYoYComparable ? calculateGrowth(latestAnnual?.epsDiluted, previousAnnual?.epsDiluted) : null,
     epsCagr3y: threeYearShareBasisComparable ? cagrBetween(threeYearPrior, latestAnnual, threeYearPrior?.epsDiluted, latestAnnual?.epsDiluted) : null,
-    freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(growthLatest), deriveSimpleFreeCashFlow(growthComparison)),
+    freeCashFlowGrowthYoY: calculateGrowth(deriveSimpleFreeCashFlow(fcfGrowthLatest), deriveSimpleFreeCashFlow(fcfGrowthComparison)),
     freeCashFlowCagr3y: cagrBetween(threeYearPrior, latestAnnual, deriveSimpleFreeCashFlow(threeYearPrior), deriveSimpleFreeCashFlow(latestAnnual)),
     freeCashFlowPerShareCagr3y: cagrBetween(threeYearPrior, latestAnnual, priorFcfPerShare, latestFcfPerShare),
     revenueGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
-    freeCashFlowGrowthBasis: input.trailingTwelveMonths && priorTtm ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
+    freeCashFlowGrowthBasis: useTtmFcfGrowth ? "TTM_YOY" as const : latestAnnual && previousAnnual ? "ANNUAL_YOY" as const : "UNAVAILABLE" as const,
   };
 
-  const valuation = blockMarketValuation
+  const derivedValuation = blockMarketValuation
     ? unavailableValuationMetrics()
     : deriveValuationMetrics(input, latest, simpleFcf, growth.epsGrowthYoY);
+  const reportedValuationFallback = providerReportedValuation(input);
+  const valuation = mergeValuationMetrics(derivedValuation, reportedValuationFallback);
+  const providerValuationProvenance = (
+    metric: keyof ValuationMetrics,
+    derivedNote?: string,
+    derivedInputs?: string[],
+  ): MetricProvenance => {
+    if (isFiniteNumber(derivedValuation[metric])) {
+      if (metric === "freeCashFlowYield") {
+        return derivedProvenance(
+          "StockBox deterministic formula",
+          cashFlowLatest?.periodEndDate,
+          ["marketCap", "simpleFreeCashFlow"],
+          useTtmCashFlow ? "Current market cap divided by complete TTM free cash flow." : "Current market cap divided by latest complete annual free cash flow because TTM cash-flow inputs were unavailable.",
+        );
+      }
+      return derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["marketCap", String(metric)]);
+    }
+    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
+      return {
+        source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
+        periodEnd: input.reportedValuation.asOfDate ?? undefined,
+        valueKind: derivedNote ? "derived" : "reported",
+        inputs: derivedNote ? derivedInputs : undefined,
+        note: derivedNote,
+      };
+    }
+    return derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, [String(metric)]);
+  };
   const metrics: FinancialMetrics = {
     latestPeriod: latest,
     previousPeriod: growthComparison,
@@ -477,27 +619,23 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       operatingMargin,
       ebitdaMargin: safeDivide(ebitda, revenue),
       netMargin: safeDivide(netIncome, revenue),
-      freeCashFlowMargin: safeDivide(simpleFcf, revenue),
-      operatingCashFlowMargin: safeDivide(latest?.operatingCashFlow, revenue),
+      freeCashFlowMargin: safeDivide(simpleFcf, cashFlowRevenue),
+      operatingCashFlowMargin: safeDivide(cashFlowOperatingCashFlow, cashFlowRevenue),
     },
     growth,
     ratios: {
-      currentRatio: safeDivide(latest?.currentAssets, latest?.currentLiabilities),
-      debtToEquity: isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest?.totalEquity) && latest.totalEquity > 0
-        ? latest.totalDebt / latest.totalEquity
-        : null,
+      currentRatio,
+      debtToEquity,
       netDebt,
-      netDebtToEbitda: isFiniteNumber(netDebt) && isFiniteNumber(ebitda) && ebitda > 0 ? netDebt / ebitda : null,
-      interestCoverage: isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.interestExpense) && latest.interestExpense !== 0
-        ? operatingIncome / Math.abs(latest.interestExpense)
-        : null,
-      returnOnEquity: isFiniteNumber(averageEquity) && averageEquity > 0 ? safeDivide(netIncome, averageEquity) : null,
-      returnOnAssets: isFiniteNumber(averageAssets) && averageAssets > 0 ? safeDivide(netIncome, averageAssets) : null,
+      netDebtToEbitda,
+      interestCoverage,
+      returnOnEquity: isFiniteNumber(averageEquity) && averageEquity > 0 ? safeDivide(returnNetIncome, averageEquity) : null,
+      returnOnAssets: isFiniteNumber(averageAssets) && averageAssets > 0 ? safeDivide(returnNetIncome, averageAssets) : null,
       returnOnInvestedCapital: roic,
       returnOnInvestedCapitalSpread: isFiniteNumber(roic) && isFiniteNumber(assumedWacc) ? roic - assumedWacc : null,
-      cashConversion: safeDivide(simpleFcf, netIncome),
-      cashToDebt: safeDivide(latest?.cashAndEquivalents, latest?.totalDebt),
-      equityToAssets: safeDivide(latest?.totalEquity, latest?.totalAssets),
+      cashConversion: safeDivide(simpleFcf, cashFlowNetIncome),
+      cashToDebt,
+      equityToAssets,
     },
     valuation,
     trends: {
@@ -522,11 +660,9 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       fcfe,
       normalizedTaxRate: tax.rate,
       taxRateSource: tax.source,
-      cfoToNetIncome: safeDivide(latest?.operatingCashFlow, netIncome),
-      freeCashFlowToNetIncome: safeDivide(simpleFcf, netIncome),
-      accrualRatio: isFiniteNumber(netIncome) && isFiniteNumber(latest?.operatingCashFlow) && isFiniteNumber(averageAssets)
-        ? (netIncome - latest.operatingCashFlow) / averageAssets
-        : null,
+      cfoToNetIncome: safeDivide(cashFlowOperatingCashFlow, cashFlowNetIncome),
+      freeCashFlowToNetIncome: safeDivide(simpleFcf, cashFlowNetIncome),
+      accrualRatio,
       stockBasedCompensationToRevenue: safeDivide(latest?.stockBasedCompensation, revenue),
       operatingMarginStability: stability(contiguousAnnual.map((period) => safeDivide(period.operatingIncome, period.revenue))),
       grossMarginStability: stability(contiguousAnnual.map((period) => safeDivide(period.grossProfit, period.revenue))),
@@ -539,12 +675,96 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
     },
     provenance: {
       ...(latest?.provenance ?? {}),
-      simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], "CFO - abs(capex)"),
-      fcff: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"]),
+      simpleFreeCashFlow: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["operatingCashFlow", "capitalExpenditures"], useTtmCashFlow ? "TTM CFO - abs(capex)." : "Annual fallback: FY CFO - abs(capex) because complete TTM cash-flow inputs were unavailable."),
+      fcff: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["operatingCashFlow", "interestExpense", "normalizedTaxRate", "capitalExpenditures"], useTtmCashFlow ? "TTM FCFF basis." : "Annual fallback because complete TTM cash-flow inputs were unavailable."),
+      freeCashFlowMargin: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["simpleFreeCashFlow", "revenue"], useTtmCashFlow ? "TTM cash-flow margin." : "Annual fallback because complete TTM cash-flow inputs were unavailable."),
+      operatingCashFlowMargin: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["operatingCashFlow", "revenue"], useTtmCashFlow ? "TTM CFO margin." : "Annual fallback because complete TTM cash-flow inputs were unavailable."),
+      cfoToNetIncome: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["operatingCashFlow", "netIncome"], useTtmCashFlow ? "TTM cash conversion." : "Annual fallback because complete TTM cash-flow inputs were unavailable."),
+      freeCashFlowToNetIncome: derivedProvenance("StockBox deterministic formula", cashFlowLatest?.periodEndDate, ["simpleFreeCashFlow", "netIncome"], useTtmCashFlow ? "TTM FCF conversion." : "Annual fallback because complete TTM cash-flow inputs were unavailable."),
       marketCap: usesReportedMarketCap
         ? { source: "Market data", provider: input.market?.provider, periodEnd: input.market?.marketCapAsOf ?? input.market?.priceDate ?? undefined, valueKind: "reported" }
         : { ...derivedProvenance("Market data", input.market?.priceDate ?? undefined, ["price", "sharesOutstanding"]), provider: input.market?.provider },
       priceTangibleBook: derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["marketCap", "tangibleCommonEquity"]),
+      priceEarnings: providerValuationProvenance("priceEarnings"),
+      priceSales: providerValuationProvenance("priceSales"),
+      priceBook: providerValuationProvenance("priceBook"),
+      evSales: providerValuationProvenance("evSales"),
+      evEbitda: providerValuationProvenance("evEbitda"),
+      peg: providerValuationProvenance("peg"),
+      earningsYield: providerValuationProvenance(
+        "earningsYield",
+        isFiniteNumber(reportedValuationFallback.earningsYield) && !isFiniteNumber(derivedValuation.earningsYield)
+          ? "Derived as 1 / provider-reported P/E."
+          : undefined,
+        ["providerReportedPriceEarnings"],
+      ),
+      freeCashFlowYield: providerValuationProvenance(
+        "freeCashFlowYield",
+        isFiniteNumber(reportedValuationFallback.freeCashFlowYield) && !isFiniteNumber(derivedValuation.freeCashFlowYield)
+          ? "Derived from same-currency provider-reported free cash flow and market cap."
+          : undefined,
+        ["providerReportedMarketCap", "providerReportedFreeCashFlow"],
+      ),
+      netDebtToEbitda: derivedProvenance(
+        "StockBox deterministic formula",
+        (useTtmLeverage ? latest : latestAnnual)?.periodEndDate,
+        ["totalDebt", "cashAndEquivalents", "ebitda"],
+        useTtmLeverage ? "TTM leverage ratio from complete same-period inputs." : "Annual fallback because complete same-period TTM leverage inputs were unavailable.",
+      ),
+      interestCoverage: derivedProvenance(
+        "StockBox deterministic formula",
+        (useTtmInterestCoverage ? latest : latestAnnual)?.periodEndDate,
+        ["operatingIncome", "interestExpense"],
+        useTtmInterestCoverage ? "TTM interest coverage from complete same-period inputs." : "Annual fallback because complete same-period TTM interest inputs were unavailable.",
+      ),
+      cashToDebt: derivedProvenance(
+        "StockBox deterministic formula",
+        cashToDebtPeriod?.periodEndDate,
+        ["cashAndEquivalents", "totalDebt"],
+        useTtmCashToDebt ? "Current TTM balance-sheet ratio." : "Annual fallback because complete current TTM balance inputs were unavailable.",
+      ),
+      currentRatio: derivedProvenance(
+        "StockBox deterministic formula",
+        currentRatioPeriod?.periodEndDate,
+        ["currentAssets", "currentLiabilities"],
+        useTtmCurrentRatio ? "Current TTM balance-sheet ratio." : "Annual fallback because complete current TTM balance inputs were unavailable.",
+      ),
+      returnOnEquity: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          returnLatest?.periodEndDate,
+          ["netIncome", "currentEquity", "priorComparableEquity"],
+          returnUsesTtm ? "TTM return using prior comparable TTM balance." : "Annual fallback because a comparable prior TTM balance was unavailable.",
+        ),
+        periodBasis: returnPeriodBasis,
+      },
+      returnOnAssets: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          returnLatest?.periodEndDate,
+          ["netIncome", "currentAssets", "priorComparableAssets"],
+          returnUsesTtm ? "TTM return using prior comparable TTM balance." : "Annual fallback because a comparable prior TTM balance was unavailable.",
+        ),
+        periodBasis: returnPeriodBasis,
+      },
+      returnOnInvestedCapital: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          returnLatest?.periodEndDate,
+          ["operatingIncome", "normalizedTaxRate", "currentInvestedCapital", "priorComparableInvestedCapital"],
+          returnUsesTtm ? "TTM return using prior comparable TTM balance." : "Annual fallback because a comparable prior TTM balance was unavailable.",
+        ),
+        periodBasis: returnPeriodBasis,
+      },
+      accrualRatio: {
+        ...derivedProvenance(
+          "StockBox deterministic formula",
+          accrualLatest?.periodEndDate,
+          ["netIncome", "operatingCashFlow", "currentAssets", "priorComparableAssets"],
+          accrualUsesTtm ? "TTM accrual ratio using prior comparable TTM balance." : "Annual fallback because complete comparable TTM cash-flow and balance inputs were unavailable.",
+        ),
+        periodBasis: accrualUsesTtm ? accrualLatest?.periodBasis : "FY",
+      },
       revenueGrowthYoY: {
         ...derivedProvenance(
           "StockBox deterministic formula",
@@ -557,7 +777,7 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       freeCashFlowGrowthYoY: {
         ...derivedProvenance(
           "StockBox deterministic formula",
-          growthLatest?.periodEndDate,
+          fcfGrowthLatest?.periodEndDate,
           ["latestSimpleFreeCashFlow", "priorComparableSimpleFreeCashFlow"],
           growth.freeCashFlowGrowthBasis === "TTM_YOY" ? "TTM versus prior comparable TTM" : "Annual YoY fallback",
         ),
@@ -630,9 +850,30 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       "high",
     );
   }
+  const marketCapMissingReason = currencyMismatch
+    ? "Market cap is not used because financial and market currencies differ; explicit FX conversion is required."
+    : currencyUnknown
+      ? "Market cap is not used because reporting or trading currency is unknown."
+      : marketCapCurrencyMismatch
+        ? "Market cap is not used because the reported market cap currency does not align with the verified financial and trading currency."
+        : staleMarketCap
+          ? "Market cap is not used because the reported market cap is stale or future-dated."
+          : staleMarketPrice
+            ? "Market cap is not derived because market price data is stale or future-dated."
+            : staleShares
+              ? "Market cap is not derived because current shares outstanding are stale or future-dated."
+              : materialShareBasisMismatch
+                ? "Market cap is not used because the listing share basis is not reconciled."
+                : "Market cap requires a reported value or both price and shares.";
   addMissingIfNull(missingData, revenue, "revenue", "Revenue is unavailable for the latest reliable period.", "high");
   addMissingIfNull(missingData, simpleFcf, "simpleFreeCashFlow", "CFO and capex are required for simple free cash flow.", "high");
-  addMissingIfNull(missingData, valuation.marketCap, "marketCap", "Market cap requires a reported value or both price and shares.");
+  addMissingIfNull(
+    missingData,
+    valuation.marketCap,
+    "marketCap",
+    marketCapMissingReason,
+    marketCapMissingReason.startsWith("Market cap requires") ? "medium" : "high",
+  );
   addMissingIfNull(missingData, valuation.enterpriseValue, "enterpriseValue", "EV requires market cap, reported debt and reported cash.");
   addMissingIfNull(missingData, growth.revenueGrowthYoY, "revenueGrowthYoY", "Two positive, comparable annual or TTM revenue periods are required.");
   if (input.trailingTwelveMonths && !returnBalanceComparison) {

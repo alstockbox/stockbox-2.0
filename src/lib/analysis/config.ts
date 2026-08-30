@@ -191,6 +191,17 @@ export const sectorWeightOverrides: Partial<Record<Sector, Partial<Record<ScoreD
     momentum: 0.03,
     risk: 0.07,
   },
+  realEstate: {
+    growth: 0.1,
+    profitability: 0.14,
+    financialHealth: 0.2,
+    valuation: 0.2,
+    cashFlow: 0.1,
+    earningsQuality: 0.08,
+    quality: 0.1,
+    momentum: 0.02,
+    risk: 0.08,
+  },
 };
 
 export function weightsForSector(sector: Sector | undefined): Record<ScoreDimensionKey, number> {

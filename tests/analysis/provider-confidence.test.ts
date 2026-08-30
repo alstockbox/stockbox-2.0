@@ -120,6 +120,29 @@ it("penalizes low-confidence archetype classification", () => {
   expect(low.confidence).toBeLessThan(high.confidence);
 });
 
+it("does not count non-positive growth endpoints as missing data coverage", () => {
+  const lossMaker = {
+    ...durableCompounderInput,
+    annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      epsDiluted: period.fiscalYear === 2021 ? -0.3 : period.epsDiluted,
+      operatingCashFlow: period.fiscalYear === 2021 ? -20 : period.operatingCashFlow,
+      capitalExpenditures: period.fiscalYear === 2021 ? -10 : period.capitalExpenditures,
+    })),
+  };
+
+  const score = computeScores(lossMaker, computeFinancialMetrics(lossMaker));
+  const growth = score.dimensions.growth;
+
+  expect(growth.contributors?.find((item) => item.label === "EPS CAGR 3Y")?.availability).toBe("unsuitable");
+  expect(growth.contributors?.find((item) => item.label === "FCF/share CAGR 3Y")?.availability).toBe("unsuitable");
+  expect(growth.missingData?.map((item) => item.field)).toEqual(expect.arrayContaining([
+    "EPS CAGR 3Y",
+    "FCF/share CAGR 3Y",
+  ]));
+  expect(growth.coverage).toBe(1);
+});
+
 it("penalizes missing specialized coverage for banks", () => {
   const missing = analyzeFinancials({
     ...durableCompounderInput,
@@ -132,7 +155,8 @@ it("penalizes missing specialized coverage for banks", () => {
     specialized: {
       kind: "bank",
       netInterestIncome: metric(80), netInterestMargin: metric(0.03), grossLoans: metric(1_000),
-      deposits: metric(1_100), depositGrowth: metric(0.05), fundingCost: metric(0.02),
+      deposits: metric(1_100), depositGrowth: metric(0.05), netInterestIncomeGrowth: metric(0.06),
+      grossLoanGrowth: metric(0.04), fundingCost: metric(0.02),
       cet1CapitalRatio: metric(0.14), tangibleCommonEquity: metric(180), tangibleBookValuePerShare: metric(18),
       nonPerformingLoans: metric(10), netChargeOffs: metric(3), loanLossProvisions: metric(5),
       efficiencyRatio: metric(0.5), returnOnAssets: metric(0.014), returnOnEquity: metric(0.16),

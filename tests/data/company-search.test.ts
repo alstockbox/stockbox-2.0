@@ -122,6 +122,32 @@ describe("company search catalog", () => {
     }));
   });
 
+  it("does not claim SEC Companyfacts provenance for fundamentals-only providers without a CIK", async () => {
+    mocks.fetchSecTickerUniverse.mockResolvedValue([]);
+    const yahooOnlyProvider: CompanySearchProvider = {
+      id: "yahoo-like",
+      capabilities: {
+        supportedCountries: ["global"], supportedExchanges: ["global"],
+        supportsFundamentals: true, supportsMarketData: true, supportsEstimates: false,
+      },
+      search: vi.fn().mockResolvedValue({
+        ok: true,
+        data: [{
+          ticker: "BANK", canonicalTicker: "BANK", name: "Global Bank Corp.", exchange: "NASDAQ",
+          providerCapabilities: { fundamentals: true, marketData: true, providerIds: ["yahoo-fundamentals"] },
+        }],
+        diagnostic: providerDiagnostic("yahoo-like", "search", "available"),
+      }),
+    };
+
+    const [company] = await searchCompanyCatalog("BANK", [yahooOnlyProvider]);
+
+    expect(company?.cik).toBeUndefined();
+    expect(company?.providerCapabilities?.fundamentals).toBe(true);
+    expect(company?.providerCapabilities?.providerIds).toEqual(expect.arrayContaining(["yahoo-fundamentals", "yahoo-like"]));
+    expect(company?.providerCapabilities?.providerIds).not.toContain("sec-companyfacts");
+  });
+
   it.each(["ABB", "Novo Nordisk", "Toyota", "ASML", "Nokia"])("keeps ADR and local listings distinct for %s", async (query) => {
     const results = await searchCompanyCatalog(query);
     const identities = new Map<string, string[]>();

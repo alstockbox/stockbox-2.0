@@ -151,6 +151,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
     annualPeriods,
     trailingTwelveMonths: fundamentals?.trailingTwelveMonths,
     priorTrailingTwelveMonths: fundamentals?.priorTrailingTwelveMonths,
+    reportedValuation: fundamentals?.reportedValuation,
     market: input.market ? {
       price: input.market.price,
       currency: input.market.currency || null,
@@ -206,15 +207,18 @@ function specializedMissingData(
   latest: FinancialPeriod | null,
   specialized?: SpecializedCompanyData,
 ): MissingDataItem[] {
+  const metricValue = (metric: { value?: number | null } | null | undefined) =>
+    isFiniteNumber(metric?.value) ? metric.value : null;
+
   if (archetype === "bank") {
     const bankValues = specialized?.kind === "bank" ? {
-      netInterestMargin: specialized.netInterestMargin.value,
-      cet1CapitalRatio: specialized.cet1CapitalRatio.value,
-      grossLoans: specialized.grossLoans.value,
-      deposits: specialized.deposits.value,
-      nonperformingLoans: specialized.nonPerformingLoans.value,
-      netChargeOffs: specialized.netChargeOffs.value,
-      tangibleCommonEquity: specialized.tangibleCommonEquity.value,
+      netInterestMargin: metricValue(specialized.netInterestMargin),
+      cet1CapitalRatio: metricValue(specialized.cet1CapitalRatio),
+      grossLoans: metricValue(specialized.grossLoans),
+      deposits: metricValue(specialized.deposits),
+      nonperformingLoans: metricValue(specialized.nonPerformingLoans),
+      netChargeOffs: metricValue(specialized.netChargeOffs),
+      tangibleCommonEquity: metricValue(specialized.tangibleCommonEquity),
     } : {};
     return [
       ["netInterestMargin", "Net interest margin (NIM)"],
@@ -237,8 +241,8 @@ function specializedMissingData(
   }
   if (archetype === "reit") {
     const missing: MissingDataItem[] = [];
-    const reportedFfo = specialized?.kind === "reit" ? specialized.fundsFromOperations.value : latest?.fundsFromOperations;
-    const reportedAffo = specialized?.kind === "reit" ? specialized.adjustedFundsFromOperations.value : latest?.adjustedFundsFromOperations;
+    const reportedFfo = specialized?.kind === "reit" ? metricValue(specialized.fundsFromOperations) : latest?.fundsFromOperations;
+    const reportedAffo = specialized?.kind === "reit" ? metricValue(specialized.adjustedFundsFromOperations) : latest?.adjustedFundsFromOperations;
     if (!isFiniteNumber(reportedFfo)) {
       missing.push({
         field: "fundsFromOperations",
@@ -325,6 +329,35 @@ function hasFinancialCurrencyConflict(input: FinancialAnalysisInput): boolean {
   ].filter((period): period is FinancialPeriod => Boolean(period)).some((period) =>
     (period.currencyConflict?.length ?? 0) > 1
   );
+}
+
+function missingSubjectKey(field: string): string {
+  const normalized = field
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\bNIM\b/gi, "net interest margin")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  const aliases: Record<string, string> = {
+    depositsgrossloans: "deposits",
+    loanlossprovisionsgrossloans: "loanlossprovisions",
+    netchargeoffsgrossloans: "netchargeoffs",
+    nonperformingloansgrossloans: "nonperformingloans",
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+function dedupeMissingData(items: MissingDataItem[]): MissingDataItem[] {
+  const metricSubjects = new Set(
+    items
+      .filter((item) => item.impact === "metric")
+      .map((item) => missingSubjectKey(item.field)),
+  );
+  const unique = new Map<string, MissingDataItem>();
+  for (const item of items) {
+    if (item.impact === "score" && metricSubjects.has(missingSubjectKey(item.field))) continue;
+    unique.set(`${item.field}:${item.impact}`, item);
+  }
+  return [...unique.values()];
 }
 
 export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnalysisResult {
@@ -469,8 +502,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     const severity = check.code === "provider_source_conflict" && !blockingSourceConflict ? "medium" as const : "high" as const;
     missing.push({ field: check.code, reason: check.message, impact: "score", severity });
   }
-  const uniqueMissing = new Map<string, MissingDataItem>();
-  for (const item of missing) uniqueMissing.set(`${item.field}:${item.impact}`, item);
+  const uniqueMissing = dedupeMissingData(missing);
   return {
     modelVersion: MODEL_VERSION,
     canonicalInputFingerprint: canonicalInputFingerprint(effectiveInput),
@@ -486,7 +518,7 @@ export function analyzeFinancials(input: FinancialAnalysisInput): FinancialAnaly
     dcf,
     scenarios,
     scenarioStatus,
-    missingData: [...uniqueMissing.values()],
+    missingData: uniqueMissing,
     dataCoverage: scores.dataCoverage,
     confidenceBreakdown: scores.confidenceBreakdown,
     diagnostics: {

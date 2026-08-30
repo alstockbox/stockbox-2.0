@@ -53,8 +53,12 @@ describe("analysis workbench selection state", () => {
     expect(selectionAfterQueryChange(nvda, "NVIDIA Corporation")).toBe(nvda);
   });
 
-  it("keeps unsupported listings in search without enabling live fundamentals", () => {
-    expect(supportsLiveFundamentals(company("INVE.B"))).toBe(false);
+  it("allows common-stock fundamentals attempts even when discovery coverage is stale", () => {
+    expect(supportsLiveFundamentals(company("INVE.B"))).toBe(true);
+    expect(supportsLiveFundamentals({
+      ticker: "ATCO B", canonicalTicker: "ATCO-B.ST", name: "Atlas Copco B", securityType: "Common Stock",
+      providerCapabilities: { fundamentals: false, marketData: true, providerIds: ["security-master"] },
+    })).toBe(true);
     expect(supportsLiveFundamentals(company("AAPL"))).toBe(true);
   });
 

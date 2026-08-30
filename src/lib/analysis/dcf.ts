@@ -25,6 +25,23 @@ import {
 } from "./metrics";
 
 const DEFAULT_FORECAST_YEARS = 5;
+const MAX_TTM_BALANCE_LAG_DAYS = 45;
+
+function hasTtmCapitalStructureAlignmentGap(input: FinancialAnalysisInput): boolean {
+  const ttmFlowEnd = input.trailingTwelveMonths?.periodEndDate;
+  const ttmBalanceEnd = input.trailingTwelveMonths?.balanceSheetDate;
+  if (!ttmFlowEnd || !ttmBalanceEnd) return false;
+  const balanceLagDays = (Date.parse(ttmFlowEnd) - Date.parse(ttmBalanceEnd)) / 86_400_000;
+  return !Number.isFinite(balanceLagDays) || balanceLagDays < 0 || balanceLagDays > MAX_TTM_BALANCE_LAG_DAYS;
+}
+
+function withoutTtmPeriods(input: FinancialAnalysisInput): FinancialAnalysisInput {
+  return {
+    ...input,
+    trailingTwelveMonths: undefined,
+    priorTrailingTwelveMonths: undefined,
+  };
+}
 
 function assumption(
   value: number | number[],
@@ -143,6 +160,10 @@ function routedMethod(archetype: ReturnType<typeof resolveFinancialArchetype>): 
       return { method: "Residual income / equity multiples", reason: "Specialized equity and regulatory-capital inputs are required; corporate FCFF is inappropriate." };
     case "reit":
       return { method: "AFFO / NAV", reason: "Provider-reported AFFO and property NAV inputs are required; corporate FCFF is inappropriate." };
+    case "property_company":
+      return { method: "NAV / property earnings", reason: "Property-company valuation requires property-level NAV, NOI or cap-rate inputs; corporate FCFF is inappropriate." };
+    case "asset_manager":
+      return { method: "AUM / fee-related earnings", reason: "Asset-manager valuation requires AUM, net flows or fee-related earnings inputs; corporate FCFF is inappropriate." };
     case "holding_company":
       return { method: "NAV / SOTP", reason: "Look-through holdings and holding-company net debt are required." };
     case "pre_revenue_biotech":
@@ -265,9 +286,12 @@ export function computeDcfRange(
   metrics: FinancialMetrics = computeFinancialMetrics(input),
 ): DcfRangeResult {
   const archetype = resolveFinancialArchetype(input);
+  const useAnnualDcfFallback = hasTtmCapitalStructureAlignmentGap(input);
+  const dcfInput = useAnnualDcfFallback ? withoutTtmPeriods(input) : input;
+  const dcfMetrics = useAnnualDcfFallback ? computeFinancialMetrics(dcfInput) : metrics;
   const marketQuoteCurrency = input.market?.currency ?? input.company.tradingCurrency;
   const currency = economicCurrencyCode(marketQuoteCurrency)
-    ?? economicCurrencyCode(metrics.latestPeriod?.currency ?? input.company.reportingCurrency ?? input.company.currency)
+    ?? economicCurrencyCode(dcfMetrics.latestPeriod?.currency ?? input.company.reportingCurrency ?? input.company.currency)
     ?? undefined;
   if (!supportsFcffDcf(archetype)) {
     const route = routedMethod(archetype);
@@ -275,7 +299,7 @@ export function computeDcfRange(
   }
 
   const missingData: MissingDataItem[] = [];
-  const currencyAlignment = valuationCurrencyAlignment(input, metrics.latestPeriod);
+  const currencyAlignment = valuationCurrencyAlignment(dcfInput, dcfMetrics.latestPeriod);
   if (currencyAlignment !== "aligned") {
     const reason = currencyAlignment === "mismatch"
       ? "Financial and market currencies differ; FX conversion is required before per-share FCFF DCF."
@@ -297,7 +321,7 @@ export function computeDcfRange(
       missingData,
     );
   }
-  if (hasStaleMarketPriceForValuation(input)) {
+  if (hasStaleMarketPriceForValuation(dcfInput)) {
     addMissingData(
       missingData,
       "marketPriceFreshness",
@@ -313,28 +337,7 @@ export function computeDcfRange(
       missingData,
     );
   }
-  const ttmFlowEnd = input.trailingTwelveMonths?.periodEndDate;
-  const ttmBalanceEnd = input.trailingTwelveMonths?.balanceSheetDate;
-  if (ttmFlowEnd && ttmBalanceEnd) {
-    const balanceLagDays = (Date.parse(ttmFlowEnd) - Date.parse(ttmBalanceEnd)) / 86_400_000;
-    if (!Number.isFinite(balanceLagDays) || balanceLagDays < 0 || balanceLagDays > 45) {
-      addMissingData(
-        missingData,
-        "balanceSheetAlignment",
-        "TTM capital-structure inputs must be dated within 45 days of the flow endpoint.",
-        "dcf",
-        "high",
-      );
-      return unavailable(
-        "unavailable",
-        "FCFF DCF",
-        "Balance-sheet facts are not aligned closely enough with the TTM flow endpoint for capital-structure valuation.",
-        currency,
-        missingData,
-      );
-    }
-  }
-  const shareBasisDifference = marketCapShareBasisDifference(input, metrics.latestPeriod);
+  const shareBasisDifference = marketCapShareBasisDifference(dcfInput, dcfMetrics.latestPeriod);
   if (isFiniteNumber(shareBasisDifference) && shareBasisDifference > 0.05) {
     addMissingData(
       missingData,
@@ -351,7 +354,7 @@ export function computeDcfRange(
       missingData,
     );
   }
-  const configuredForecastYears = input.dcfAssumptions?.forecastYears;
+  const configuredForecastYears = dcfInput.dcfAssumptions?.forecastYears;
   if (configuredForecastYears != null && (
     !Number.isInteger(configuredForecastYears)
     || configuredForecastYears < 3
@@ -367,7 +370,7 @@ export function computeDcfRange(
     return unavailable("unavailable", archetype === "cyclical" ? "Normalized FCFF DCF" : "FCFF DCF", "Custom forecast horizon is invalid.", currency, missingData);
   }
   const forecastYears = configuredForecastYears ?? DEFAULT_FORECAST_YEARS;
-  const customGrowthRates = input.dcfAssumptions?.fcfGrowthRates;
+  const customGrowthRates = dcfInput.dcfAssumptions?.fcfGrowthRates;
   if (customGrowthRates && (
     customGrowthRates.length === 0
     || customGrowthRates.length !== forecastYears
@@ -382,7 +385,7 @@ export function computeDcfRange(
     );
     return unavailable("unavailable", archetype === "cyclical" ? "Normalized FCFF DCF" : "FCFF DCF", "Custom FCF growth assumptions are invalid.", currency, missingData);
   }
-  const normalizedCycle = archetype === "cyclical" ? normalizedCyclicalFcff(input, metrics) : null;
+  const normalizedCycle = archetype === "cyclical" ? normalizedCyclicalFcff(dcfInput, dcfMetrics) : null;
   if (archetype === "cyclical" && !normalizedCycle) {
     addMissingData(
       missingData,
@@ -394,26 +397,26 @@ export function computeDcfRange(
   }
   const baseFcff = archetype === "cyclical"
     ? normalizedCycle?.value ?? null
-    : firstFinite(input.dcfAssumptions?.baseFreeCashFlow, metrics.cashFlow.fcff);
-  const shares = firstFinite(input.dcfAssumptions?.sharesOutstanding, currentSharesForDcf(input, metrics.latestPeriod));
-  const netDebt = firstFinite(input.dcfAssumptions?.netDebt, metrics.ratios.netDebt);
-  const configuredDiscountRate = input.dcfAssumptions?.discountRate;
+    : firstFinite(dcfInput.dcfAssumptions?.baseFreeCashFlow, dcfMetrics.cashFlow.fcff);
+  const shares = firstFinite(dcfInput.dcfAssumptions?.sharesOutstanding, currentSharesForDcf(dcfInput, dcfMetrics.latestPeriod));
+  const netDebt = firstFinite(dcfInput.dcfAssumptions?.netDebt, dcfMetrics.ratios.netDebt);
+  const configuredDiscountRate = dcfInput.dcfAssumptions?.discountRate;
   const hasConfiguredDiscountRate = isFiniteNumber(configuredDiscountRate);
-  const wacc = hasConfiguredDiscountRate ? null : deriveWacc(input, metrics);
+  const wacc = hasConfiguredDiscountRate ? null : deriveWacc(dcfInput, dcfMetrics);
   if (!isFiniteNumber(baseFcff) || baseFcff <= 0) addMissingData(missingData, "baseFcff", "Positive FCFF is required for an FCFF DCF.", "dcf", "high");
   if (!isFiniteNumber(shares) || shares <= 0) addMissingData(missingData, "sharesOutstanding", "Current shares are required for per-share value.", "dcf", "high");
   if (!isFiniteNumber(netDebt)) addMissingData(missingData, "netDebt", "Reported debt and cash are required; missing debt is not zero.", "dcf", "high");
   if (!hasConfiguredDiscountRate && !wacc) addMissingData(missingData, "wacc", "Market-value capital weights and reported debt are required when no explicit discount rate is configured.", "dcf", "high");
-  if (input.dcfAssumptions?.discountRate !== undefined && !isFiniteNumber(input.dcfAssumptions.discountRate)) {
+  if (dcfInput.dcfAssumptions?.discountRate !== undefined && !isFiniteNumber(dcfInput.dcfAssumptions.discountRate)) {
     addMissingData(missingData, "discountRate", "Custom discount rate must be finite.", "dcf", "high");
   }
-  if (input.dcfAssumptions?.terminalGrowthRate !== undefined && !isFiniteNumber(input.dcfAssumptions.terminalGrowthRate)) {
+  if (dcfInput.dcfAssumptions?.terminalGrowthRate !== undefined && !isFiniteNumber(dcfInput.dcfAssumptions.terminalGrowthRate)) {
     addMissingData(missingData, "terminalGrowthRate", "Custom terminal growth rate must be finite.", "dcf", "high");
   }
   if (
-    isFiniteNumber(input.dcfAssumptions?.discountRate)
-    && isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate)
-    && input.dcfAssumptions.discountRate <= input.dcfAssumptions.terminalGrowthRate
+    isFiniteNumber(dcfInput.dcfAssumptions?.discountRate)
+    && isFiniteNumber(dcfInput.dcfAssumptions?.terminalGrowthRate)
+    && dcfInput.dcfAssumptions.discountRate <= dcfInput.dcfAssumptions.terminalGrowthRate
   ) {
     addMissingData(missingData, "discountRate", "Custom discount rate must exceed terminal growth.", "dcf", "high");
   }
@@ -422,13 +425,16 @@ export function computeDcfRange(
   }
 
   const observedGrowth = firstFinite(
-    input.estimates?.nextYearFreeCashFlowGrowth,
-    metrics.growth.freeCashFlowCagr3y,
-    metrics.growth.revenueCagr3y,
-    metrics.growth.revenueGrowthYoY,
+    dcfInput.estimates?.nextYearFreeCashFlowGrowth,
+    dcfMetrics.growth.freeCashFlowCagr3y,
+    dcfMetrics.growth.revenueCagr3y,
+    dcfMetrics.growth.revenueGrowthYoY,
   );
   const assumptionNotes = [...(wacc?.notes ?? [])];
-  if (!wacc && !isFiniteNumber(input.dcfAssumptions?.baseFreeCashFlow) && metrics.cashFlow.taxRateSource === "fallback_assumption") {
+  if (useAnnualDcfFallback) {
+    assumptionNotes.push("Annual fallback: DCF excludes stale TTM capital-structure data and uses latest annual or explicitly configured FCFF and net-debt inputs.");
+  }
+  if (!wacc && !isFiniteNumber(dcfInput.dcfAssumptions?.baseFreeCashFlow) && dcfMetrics.cashFlow.taxRateSource === "fallback_assumption") {
     assumptionNotes.push("Fallback normalized tax rate: 21.0%.");
   }
   if (normalizedCycle) {
@@ -436,13 +442,13 @@ export function computeDcfRange(
   }
   const startGrowth = isFiniteNumber(observedGrowth) ? observedGrowth : 0.02;
   if (!isFiniteNumber(observedGrowth)) assumptionNotes.push("Fallback near-term growth: 2.0% because normalized or forward growth is unavailable.");
-  const maxGrowth = benchmarksForSector(input.company.sector).maxDcfGrowth;
+  const maxGrowth = benchmarksForSector(dcfInput.company.sector).maxDcfGrowth;
   const effectiveDiscountRate = hasConfiguredDiscountRate ? configuredDiscountRate : wacc?.wacc;
   if (!isFiniteNumber(effectiveDiscountRate)) {
     return unavailable("unavailable", archetype === "cyclical" ? "Normalized FCFF DCF" : "FCFF DCF", "A valid discount rate could not be established.", currency, missingData);
   }
-  const terminalGrowth = clamp(input.dcfAssumptions?.terminalGrowthRate ?? 0.025, 0, Math.min(0.03, effectiveDiscountRate - 0.015));
-  if (!isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate)) assumptionNotes.push("StockBox policy terminal growth: 2.5%, capped below WACC and 3.0%.");
+  const terminalGrowth = clamp(dcfInput.dcfAssumptions?.terminalGrowthRate ?? 0.025, 0, Math.min(0.03, effectiveDiscountRate - 0.015));
+  if (!isFiniteNumber(dcfInput.dcfAssumptions?.terminalGrowthRate)) assumptionNotes.push("StockBox policy terminal growth: 2.5%, capped below WACC and 3.0%.");
   const baseGrowth = clamp(startGrowth, -0.1, maxGrowth);
   const boundedGrowthRates = customGrowthRates?.slice(0, forecastYears).map((growth) => clamp(growth, -0.2, maxGrowth));
   const discountRate = clamp(effectiveDiscountRate, 0.06, 0.18);
@@ -468,15 +474,15 @@ export function computeDcfRange(
     fcfGrowthRates: growthFade(clamp(baseGrowth + 0.04, -0.05, maxGrowth), Math.min(0.03, terminalGrowth + 0.004), forecastYears),
   };
   const fcffTaxAssumptions: Record<string, ValuationAssumption> =
-    !wacc && !isFiniteNumber(input.dcfAssumptions?.baseFreeCashFlow) && isFiniteNumber(metrics.cashFlow.normalizedTaxRate)
+    !wacc && !isFiniteNumber(dcfInput.dcfAssumptions?.baseFreeCashFlow) && isFiniteNumber(dcfMetrics.cashFlow.normalizedTaxRate)
       ? {
           normalizedTaxRate: assumption(
-            metrics.cashFlow.normalizedTaxRate,
-            metrics.cashFlow.taxRateSource === "fallback_assumption"
+            dcfMetrics.cashFlow.normalizedTaxRate,
+            dcfMetrics.cashFlow.taxRateSource === "fallback_assumption"
               ? "StockBox configured fallback"
               : "Normalized from reported tax and pretax income",
-            metrics.latestPeriod?.periodEndDate ?? input.analysisDate ?? null,
-            metrics.cashFlow.taxRateSource === "fallback_assumption" ? "fallback" : "derived",
+            dcfMetrics.latestPeriod?.periodEndDate ?? input.analysisDate ?? null,
+            dcfMetrics.cashFlow.taxRateSource === "fallback_assumption" ? "fallback" : "derived",
           ),
         }
       : {};
@@ -487,55 +493,55 @@ export function computeDcfRange(
       baseFcff,
       normalizedCycle
         ? "StockBox median full-cycle FCFF margin"
-        : isFiniteNumber(input.dcfAssumptions?.baseFreeCashFlow)
+        : isFiniteNumber(dcfInput.dcfAssumptions?.baseFreeCashFlow)
           ? "Analysis configuration"
           : "Derived from reported cash flow, interest and capital expenditures",
-      normalizedCycle ? input.annualPeriods.at(-1)?.periodEndDate ?? null : metrics.latestPeriod?.periodEndDate ?? null,
-      normalizedCycle || !isFiniteNumber(input.dcfAssumptions?.baseFreeCashFlow) ? "derived" : "configured",
+      normalizedCycle ? dcfInput.annualPeriods.at(-1)?.periodEndDate ?? null : dcfMetrics.latestPeriod?.periodEndDate ?? null,
+      normalizedCycle || !isFiniteNumber(dcfInput.dcfAssumptions?.baseFreeCashFlow) ? "derived" : "configured",
     ),
     sharesOutstanding: assumption(
       shares,
-      isFiniteNumber(input.dcfAssumptions?.sharesOutstanding)
+      isFiniteNumber(dcfInput.dcfAssumptions?.sharesOutstanding)
         ? "Analysis configuration"
-        : isFiniteNumber(input.market?.sharesOutstanding)
-          ? input.market?.provider ?? "Market data provider"
+        : isFiniteNumber(dcfInput.market?.sharesOutstanding)
+          ? dcfInput.market?.provider ?? "Market data provider"
           : "Reported current shares outstanding",
-      input.market?.sharesOutstandingAsOf ?? metrics.latestPeriod?.periodEndDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.sharesOutstanding)
+      dcfInput.market?.sharesOutstandingAsOf ?? dcfMetrics.latestPeriod?.periodEndDate ?? null,
+      isFiniteNumber(dcfInput.dcfAssumptions?.sharesOutstanding)
         ? "configured"
-        : isFiniteNumber(input.market?.sharesOutstanding)
+        : isFiniteNumber(dcfInput.market?.sharesOutstanding)
           ? "market_sourced"
           : "reported",
     ),
     netDebt: assumption(
       netDebt,
-      isFiniteNumber(input.dcfAssumptions?.netDebt) ? "Analysis configuration" : "Derived from reported debt and cash",
-      metrics.latestPeriod?.periodEndDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.netDebt) ? "configured" : "derived",
+      isFiniteNumber(dcfInput.dcfAssumptions?.netDebt) ? "Analysis configuration" : "Derived from reported debt and cash",
+      dcfMetrics.latestPeriod?.periodEndDate ?? null,
+      isFiniteNumber(dcfInput.dcfAssumptions?.netDebt) ? "configured" : "derived",
     ),
     forecastYears: assumption(
       forecastYears,
-      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "Analysis configuration" : "StockBox versioned forecast policy",
+      isFiniteNumber(dcfInput.dcfAssumptions?.forecastYears) ? "Analysis configuration" : "StockBox versioned forecast policy",
       input.analysisDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.forecastYears) ? "configured" : "policy",
+      isFiniteNumber(dcfInput.dcfAssumptions?.forecastYears) ? "configured" : "policy",
     ),
     discountRate: assumption(
       discountRate,
-      isFiniteNumber(input.dcfAssumptions?.discountRate) ? "Analysis configuration" : "Derived WACC",
+      isFiniteNumber(dcfInput.dcfAssumptions?.discountRate) ? "Analysis configuration" : "Derived WACC",
       input.analysisDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.discountRate) ? "configured" : "derived",
+      isFiniteNumber(dcfInput.dcfAssumptions?.discountRate) ? "configured" : "derived",
     ),
     terminalGrowthRate: assumption(
       terminalGrowth,
-      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "Analysis configuration" : "StockBox versioned terminal-growth policy",
+      isFiniteNumber(dcfInput.dcfAssumptions?.terminalGrowthRate) ? "Analysis configuration" : "StockBox versioned terminal-growth policy",
       input.analysisDate ?? null,
-      isFiniteNumber(input.dcfAssumptions?.terminalGrowthRate) ? "configured" : "policy",
+      isFiniteNumber(dcfInput.dcfAssumptions?.terminalGrowthRate) ? "configured" : "policy",
     ),
     nearTermGrowth: assumption(
       baseGrowth,
       boundedGrowthRates
         ? "Analysis configuration"
-        : isFiniteNumber(input.estimates?.nextYearFreeCashFlowGrowth)
+        : isFiniteNumber(dcfInput.estimates?.nextYearFreeCashFlowGrowth)
           ? "Forward estimates provider"
           : isFiniteNumber(observedGrowth)
             ? "Derived from reported historical growth"
@@ -543,7 +549,7 @@ export function computeDcfRange(
       input.analysisDate ?? null,
       boundedGrowthRates
         ? "configured"
-        : isFiniteNumber(input.estimates?.nextYearFreeCashFlowGrowth)
+        : isFiniteNumber(dcfInput.estimates?.nextYearFreeCashFlowGrowth)
           ? "market_sourced"
           : isFiniteNumber(observedGrowth)
             ? "derived"
@@ -560,9 +566,9 @@ export function computeDcfRange(
   const currencyRequiresExplicitCountryRisk = !hasConfiguredDiscountRate
     && currency !== undefined
     && currency.toUpperCase() !== "USD"
-    && !isFiniteNumber(input.dcfAssumptions?.countryRiskPremium);
+    && !isFiniteNumber(dcfInput.dcfAssumptions?.countryRiskPremium);
   let confidence = clamp(
-    90 - quality.fallbackCount * 6 - (input.trailingTwelveMonths || normalizedCycle ? 0 : 10),
+    90 - quality.fallbackCount * 6 - (dcfInput.trailingTwelveMonths || normalizedCycle ? 0 : 10),
     20,
     92,
   );

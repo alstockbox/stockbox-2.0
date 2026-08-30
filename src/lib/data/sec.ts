@@ -10,7 +10,7 @@ import type {
   SpecializedMetric,
 } from "@/lib/analysis/types";
 import { getSecUserAgent } from "@/lib/env/server";
-import { commonCompanies } from "./common-companies";
+import { calculateGrowth, isFiniteNumber } from "@/lib/analysis/math";
 import { entityIdentityFor } from "./entity-identities";
 import { providerDiagnostic, type AdapterResult, type FundamentalsProvider, type ProviderCapabilities } from "./providers";
 import {
@@ -89,7 +89,7 @@ export async function fetchSecTickerUniverse(): Promise<CompanySearchResult[]> {
     "https://www.sec.gov/files/company_tickers.json",
     60 * 60 * 24,
   );
-  if (!data) return commonCompanies;
+  if (!data) return [];
   return Object.values(data).map((entry) => ({
     ticker: entry.ticker,
     name: entry.title,
@@ -333,6 +333,8 @@ const TTM_REQUIREMENT_PROFILES: Record<AnalysisArchetype, readonly TtmFlowKey[]>
   bank: ["revenue", "netIncome"],
   insurer: ["revenue", "netIncome"],
   reit: ["revenue", "netIncome"],
+  property_company: ["revenue", "netIncome"],
+  asset_manager: ["revenue", "netIncome"],
   utility: ["revenue", "netIncome"],
   pre_revenue_biotech: ["netIncome"],
   holding_company: ["revenue", "netIncome"],
@@ -474,6 +476,14 @@ function unavailableSpecializedMetric(definition: string): SpecializedMetric {
   return { value: null, dataAsOf: null, definition };
 }
 
+type SecMetricFact = {
+  val: number;
+  end: string;
+  unit: string;
+  concept: string;
+  provenance: MetricProvenance;
+};
+
 function specializedMetric(
   fact: ResolvedSecFact | null | undefined,
   definition: string,
@@ -485,6 +495,271 @@ function specializedMetric(
     provenance: secFactProvenance(fact),
     definition,
   } : unavailableSpecializedMetric(definition);
+}
+
+function derivedSpecializedMetric(
+  value: number | null,
+  dataAsOf: string | null,
+  unit: string | undefined,
+  definition: string,
+  inputs: string[],
+  note: string,
+): SpecializedMetric {
+  if (!isFiniteNumber(value) || !dataAsOf) return unavailableSpecializedMetric(definition);
+  return {
+    value,
+    unit,
+    dataAsOf,
+    provenance: {
+      source: "StockBox SEC resolver",
+      provider: "sec",
+      periodEnd: dataAsOf,
+      inputs,
+      valueKind: "derived",
+      note,
+    },
+    definition,
+  };
+}
+
+function secMetricFact(fact: ResolvedSecFact): SecMetricFact {
+  return {
+    val: fact.val,
+    end: fact.end,
+    unit: fact.unit,
+    concept: fact.concept,
+    provenance: secFactProvenance(fact),
+  };
+}
+
+function latestResolved(map: Map<string, ResolvedSecFact>): ResolvedSecFact | undefined {
+  return [...map.values()].at(-1);
+}
+
+function latestAnnualFact(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact | undefined {
+  return latestResolved(resolveAnnualFacts(facts, spec));
+}
+
+function latestDurationFact(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact | null {
+  return resolveTtmFact(facts, spec) ?? latestAnnualFact(facts, spec) ?? null;
+}
+
+function latestInstantFact(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact | undefined {
+  return latestResolved(resolveInstantFacts(facts, spec));
+}
+
+function sameSecUnit(items: Array<{ unit?: string | null } | null | undefined>): string | null {
+  const units = [...new Set(items
+    .map((item) => item?.unit?.trim().toUpperCase())
+    .filter((unit): unit is string => Boolean(unit)))];
+  return units.length === 1 ? units[0] : null;
+}
+
+function annualGrowthSpecializedMetric(
+  facts: SecCompanyFacts,
+  spec: ConceptSpec,
+  definition: string,
+): SpecializedMetric {
+  const annual = [...resolveAnnualFacts(facts, spec).values()];
+  if (annual.length < 2) return unavailableSpecializedMetric(definition);
+  const [prior, current] = annual.slice(-2);
+  if (!sameSecUnit([prior, current])) return unavailableSpecializedMetric(definition);
+  return derivedSpecializedMetric(
+    calculateGrowth(current.val, prior.val),
+    current.end,
+    "ratio",
+    definition,
+    [prior.concept, current.concept],
+    `Derived as latest reported annual ${current.concept} divided by the prior comparable annual value minus one.`,
+  );
+}
+
+function sameDurationPeriod(left: ResolvedSecFact, right: ResolvedSecFact): boolean {
+  if (left.end !== right.end || left.unit !== right.unit) return false;
+  if (left.periodBasis || right.periodBasis) return left.periodBasis === right.periodBasis;
+  return left.start === right.start;
+}
+
+function durationSeries(facts: SecCompanyFacts, spec: ConceptSpec): ResolvedSecFact[] {
+  const annual = [...resolveAnnualFacts(facts, spec).values()];
+  const ttm = resolveTtmFacts(facts, spec);
+  return [...annual, ...ttm].sort((left, right) =>
+    right.end.localeCompare(left.end)
+    || Number(Boolean(right.periodBasis)) - Number(Boolean(left.periodBasis))
+  );
+}
+
+function samePeriodDurationPair(
+  facts: SecCompanyFacts,
+  leftSpec: ConceptSpec,
+  rightSpec: ConceptSpec,
+): [ResolvedSecFact, ResolvedSecFact] | null {
+  const rightFacts = durationSeries(facts, rightSpec);
+  for (const left of durationSeries(facts, leftSpec)) {
+    const right = rightFacts.find((candidate) => sameDurationPeriod(left, candidate));
+    if (right) return [left, right];
+  }
+  return null;
+}
+
+function samePeriodDurationTriple(
+  facts: SecCompanyFacts,
+  firstSpec: ConceptSpec,
+  secondSpec: ConceptSpec,
+  thirdSpec: ConceptSpec,
+): [ResolvedSecFact, ResolvedSecFact, ResolvedSecFact] | null {
+  const seconds = durationSeries(facts, secondSpec);
+  const thirds = durationSeries(facts, thirdSpec);
+  for (const first of durationSeries(facts, firstSpec)) {
+    const second = seconds.find((candidate) => sameDurationPeriod(first, candidate));
+    const third = thirds.find((candidate) => sameDurationPeriod(first, candidate));
+    if (second && third && sameDurationPeriod(second, third)) return [first, second, third];
+  }
+  return null;
+}
+
+function netChargeOffsSpecializedMetric(facts: SecCompanyFacts): SpecializedMetric {
+  const definition = "Reported net charge-offs from SEC loan-loss allowance disclosures.";
+  const explicit = latestDurationFact(facts, SEC_CONCEPTS.netChargeOffs);
+  if (explicit) return specializedMetric(explicit, definition);
+
+  const pair = samePeriodDurationPair(facts, SEC_CONCEPTS.grossChargeOffs, SEC_CONCEPTS.chargeOffRecoveries);
+  if (!pair) return unavailableSpecializedMetric(definition);
+  const [writeOffs, recoveries] = pair;
+  return derivedSpecializedMetric(
+    writeOffs.val - recoveries.val,
+    writeOffs.end,
+    writeOffs.unit,
+    definition,
+    [writeOffs.concept, recoveries.concept],
+    "Derived as reported financing-receivable write-offs minus same-period recoveries.",
+  );
+}
+
+function nonPerformingLoansSpecializedMetric(facts: SecCompanyFacts): SpecializedMetric {
+  const definition = "Reported nonaccrual/nonperforming financing receivables from SEC asset-quality disclosures.";
+  const nonaccrual = latestInstantFact(facts, SEC_CONCEPTS.nonPerformingLoans);
+  if (!nonaccrual) return unavailableSpecializedMetric(definition);
+  const pastDue = factAt(resolveInstantFacts(facts, SEC_CONCEPTS.pastDueLoansStillAccruing), nonaccrual.end);
+  if (!pastDue || !sameSecUnit([nonaccrual, pastDue])) return specializedMetric(nonaccrual, definition);
+  return derivedSpecializedMetric(
+    nonaccrual.val + pastDue.val,
+    nonaccrual.end,
+    nonaccrual.unit,
+    definition,
+    [nonaccrual.concept, pastDue.concept],
+    "Derived as reported nonaccrual financing receivables plus same-date loans 90 days past due and still accruing.",
+  );
+}
+
+function tangibleCommonEquityFactAt(maps: FactMaps, end: string): SecMetricFact | null {
+  const equity = factAt(maps.equity, end);
+  const goodwill = factAt(maps.goodwill, end);
+  const intangibles = factAt(maps.intangibleAssetsExcludingGoodwill, end);
+  if (!equity || !goodwill || !intangibles || !sameSecUnit([equity, goodwill, intangibles])) return null;
+  const value = equity.val - goodwill.val - intangibles.val;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return {
+    val: value,
+    end,
+    unit: equity.unit,
+    concept: "tangibleCommonEquity",
+    provenance: {
+      source: "StockBox SEC resolver",
+      provider: "sec",
+      periodEnd: end,
+      unit: equity.unit,
+      inputs: [equity.concept, goodwill.concept, intangibles.concept],
+      valueKind: "derived",
+      note: "Tangible common equity derived as reported stockholders' equity minus same-date goodwill and intangible assets excluding goodwill.",
+    },
+  };
+}
+
+function latestTangibleCommonEquityFact(maps: FactMaps): SecMetricFact | null {
+  return [...maps.equity.keys()].sort().reverse()
+    .flatMap((end) => {
+      const fact = tangibleCommonEquityFactAt(maps, end);
+      return fact ? [fact] : [];
+    })
+    .at(0) ?? null;
+}
+
+function specializedMetricFromFact(fact: SecMetricFact | null, definition: string): SpecializedMetric {
+  return fact ? {
+    value: fact.val,
+    unit: fact.unit,
+    dataAsOf: fact.end,
+    provenance: fact.provenance,
+    definition,
+  } : unavailableSpecializedMetric(definition);
+}
+
+function tangibleBookValuePerShareSpecializedMetric(maps: FactMaps): SpecializedMetric {
+  const definition = "Tangible book value per share derived from SEC tangible common equity and same-date common shares.";
+  const tangibleCommonEquity = latestTangibleCommonEquityFact(maps);
+  if (!tangibleCommonEquity) return unavailableSpecializedMetric(definition);
+  const shares = sharesForPeriod(maps, tangibleCommonEquity.end);
+  if (!shares || shares.end !== tangibleCommonEquity.end || shares.val <= 0) return unavailableSpecializedMetric(definition);
+  return derivedSpecializedMetric(
+    tangibleCommonEquity.val / shares.val,
+    tangibleCommonEquity.end,
+    `${tangibleCommonEquity.unit}/share`,
+    definition,
+    [...(tangibleCommonEquity.provenance.inputs ?? [tangibleCommonEquity.concept]), shares.concept],
+    "Derived only when SEC reports same-date tangible common equity components and common shares outstanding.",
+  );
+}
+
+function returnOnAverageAnnualFact(
+  facts: SecCompanyFacts,
+  balanceFactAt: (end: string) => SecMetricFact | null,
+  definition: string,
+  balanceLabel: string,
+): SpecializedMetric {
+  const incomeFacts = [...resolveAnnualFacts(facts, SEC_CONCEPTS.netIncome).values()];
+  if (incomeFacts.length < 1) return unavailableSpecializedMetric(definition);
+  const currentIncome = incomeFacts.at(-1);
+  if (!currentIncome) return unavailableSpecializedMetric(definition);
+  const annualEnds = incomeFacts.map((fact) => fact.end).filter((end) => end <= currentIncome.end).sort();
+  const currentEndIndex = annualEnds.indexOf(currentIncome.end);
+  if (currentEndIndex <= 0) return unavailableSpecializedMetric(definition);
+  const priorEnd = annualEnds[currentEndIndex - 1];
+  const currentBalance = balanceFactAt(currentIncome.end);
+  const priorBalance = balanceFactAt(priorEnd);
+  if (!currentBalance || !priorBalance || !sameSecUnit([currentIncome, currentBalance, priorBalance])) {
+    return unavailableSpecializedMetric(definition);
+  }
+  const averageBalance = (currentBalance.val + priorBalance.val) / 2;
+  return derivedSpecializedMetric(
+    averageBalance > 0 ? currentIncome.val / averageBalance : null,
+    currentIncome.end,
+    "ratio",
+    definition,
+    [currentIncome.concept, priorBalance.concept, currentBalance.concept],
+    `Derived from annual net income divided by average reported ${balanceLabel}.`,
+  );
+}
+
+function efficiencyRatioSpecializedMetric(facts: SecCompanyFacts): SpecializedMetric {
+  const definition = "Efficiency ratio from SEC-reported noninterest expense divided by net interest income plus noninterest income.";
+  const triple = samePeriodDurationTriple(
+    facts,
+    SEC_CONCEPTS.nonInterestExpense,
+    SEC_CONCEPTS.netInterestIncome,
+    SEC_CONCEPTS.nonInterestIncome,
+  );
+  if (!triple) return unavailableSpecializedMetric(definition);
+  const [nonInterestExpense, netInterestIncome, nonInterestIncome] = triple;
+  const denominator = netInterestIncome.val + nonInterestIncome.val;
+  return derivedSpecializedMetric(
+    denominator > 0 ? Math.abs(nonInterestExpense.val) / denominator : null,
+    nonInterestExpense.end,
+    "ratio",
+    definition,
+    [nonInterestExpense.concept, netInterestIncome.concept, nonInterestIncome.concept],
+    "Derived only from same-period SEC bank income-statement facts.",
+  );
 }
 
 export function resolveSecSpecializedData(
@@ -508,10 +783,13 @@ export function resolveSecSpecializedData(
   }
   if (archetype !== "bank") return undefined;
 
-  const netInterestIncome = resolveTtmFact(facts, SEC_CONCEPTS.netInterestIncome)
-    ?? [...resolveAnnualFacts(facts, SEC_CONCEPTS.netInterestIncome).values()].at(-1);
-  const grossLoans = [...resolveInstantFacts(facts, SEC_CONCEPTS.grossLoans).values()].at(-1);
-  const deposits = [...resolveInstantFacts(facts, SEC_CONCEPTS.deposits).values()].at(-1);
+  const instantMaps = resolveMaps(facts, true, archetype);
+  const annualMaps = resolveMaps(facts, false, archetype);
+  const netInterestIncome = latestDurationFact(facts, SEC_CONCEPTS.netInterestIncome);
+  const loanLossProvisions = latestDurationFact(facts, SEC_CONCEPTS.loanLossProvisions);
+  const grossLoans = latestResolved(instantMaps.grossLoans);
+  const deposits = latestResolved(instantMaps.deposits);
+  const tangibleCommonEquity = latestTangibleCommonEquityFact(instantMaps);
   const missing = unavailableSpecializedMetric;
   return {
     kind: "bank",
@@ -519,18 +797,41 @@ export function resolveSecSpecializedData(
     netInterestMargin: missing("Reported net interest margin; not inferred from period-end assets."),
     grossLoans: specializedMetric(grossLoans, "Reported loans and leases receivable."),
     deposits: specializedMetric(deposits, "Reported customer deposits."),
-    depositGrowth: missing("Deposit growth requires comparable reported deposit balances."),
+    depositGrowth: annualGrowthSpecializedMetric(facts, SEC_CONCEPTS.deposits, "Deposit growth from comparable reported annual deposit balances."),
+    netInterestIncomeGrowth: annualGrowthSpecializedMetric(facts, SEC_CONCEPTS.netInterestIncome, "Net interest income growth from comparable reported annual periods."),
+    grossLoanGrowth: annualGrowthSpecializedMetric(facts, SEC_CONCEPTS.grossLoans, "Gross loan growth from comparable reported annual loan balances."),
     fundingCost: missing("Reported funding cost."),
     cet1CapitalRatio: missing("Reported common equity tier 1 capital ratio."),
-    tangibleCommonEquity: missing("Reported tangible common equity."),
-    tangibleBookValuePerShare: missing("Reported tangible book value per share."),
-    nonPerformingLoans: missing("Reported nonperforming loans."),
-    netChargeOffs: missing("Reported net charge-offs."),
-    loanLossProvisions: missing("Reported provision for credit losses."),
-    efficiencyRatio: missing("Reported efficiency ratio."),
-    returnOnAssets: missing("Reported return on average assets."),
-    returnOnEquity: missing("Reported return on average equity."),
-    returnOnTangibleCommonEquity: missing("Reported return on tangible common equity."),
+    tangibleCommonEquity: specializedMetricFromFact(tangibleCommonEquity, "Tangible common equity derived from SEC reported equity, goodwill and intangible assets."),
+    tangibleBookValuePerShare: tangibleBookValuePerShareSpecializedMetric(instantMaps),
+    nonPerformingLoans: nonPerformingLoansSpecializedMetric(facts),
+    netChargeOffs: netChargeOffsSpecializedMetric(facts),
+    loanLossProvisions: specializedMetric(loanLossProvisions, "Reported provision for credit losses."),
+    efficiencyRatio: efficiencyRatioSpecializedMetric(facts),
+    returnOnAssets: returnOnAverageAnnualFact(
+      facts,
+      (end) => {
+        const fact = factAt(annualMaps.assets, end);
+        return fact ? secMetricFact(fact) : null;
+      },
+      "Return on average assets from annual net income and average reported assets.",
+      "assets",
+    ),
+    returnOnEquity: returnOnAverageAnnualFact(
+      facts,
+      (end) => {
+        const fact = factAt(annualMaps.equity, end);
+        return fact ? secMetricFact(fact) : null;
+      },
+      "Return on average common equity from annual net income and average reported common equity.",
+      "common equity",
+    ),
+    returnOnTangibleCommonEquity: returnOnAverageAnnualFact(
+      facts,
+      (end) => tangibleCommonEquityFactAt(annualMaps, end),
+      "Return on average tangible common equity from annual net income and average reported tangible common equity.",
+      "tangible common equity",
+    ),
   };
 }
 

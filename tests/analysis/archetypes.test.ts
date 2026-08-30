@@ -66,6 +66,46 @@ describe("archetype-specific analysis", () => {
     ]));
   });
 
+  it("uses a property-company model for non-REIT real-estate operators", () => {
+    const result = asArchetype("property_company", {
+      company: { sector: "realEstate", industry: "Real Estate Services" },
+      market: { ...durableCompounderInput.market, priceDate: "2026-08-24", marketCapAsOf: "2026-08-24" },
+      analysisDate: "2026-08-25T00:00:00.000Z",
+    });
+
+    expect(result.dcf.status).toBe("inappropriate");
+    expect(result.dcf.method).toBe("NAV / property earnings");
+    expect(result.scores.stockBoxScore).toEqual(expect.any(Number));
+    expect(result.recommendation.rating).not.toBe("No Rating");
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual([
+      "P / Book",
+      "EV / EBITDA",
+      "EV / Sales",
+    ]);
+    expect(result.scores.dimensions.quality.contributors?.map((item) => item.label)).not.toContain("ROIC");
+    expect(result.missingData.map((item) => item.field)).not.toContain("Archetype-specific valuation model");
+  });
+
+  it("uses an asset-manager model for fee-based financial operators", () => {
+    const result = asArchetype("asset_manager", {
+      company: { sector: "financials", industry: "Asset Management" },
+      market: { ...durableCompounderInput.market, priceDate: "2026-08-24", marketCapAsOf: "2026-08-24" },
+      analysisDate: "2026-08-25T00:00:00.000Z",
+    });
+
+    expect(result.dcf.status).toBe("inappropriate");
+    expect(result.dcf.method).toBe("AUM / fee-related earnings");
+    expect(result.scores.stockBoxScore).toEqual(expect.any(Number));
+    expect(result.recommendation.rating).not.toBe("No Rating");
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual([
+      "P / E",
+      "EV / EBITDA",
+      "P / Book",
+    ]);
+    expect(result.scores.dimensions.quality.contributors?.map((item) => item.label)).not.toContain("ROIC");
+    expect(result.missingData.map((item) => item.field)).not.toContain("Archetype-specific valuation model");
+  });
+
   it("lets verified REIT FFO/AFFO metrics contribute when specialized coverage exists", () => {
     const result = asArchetype("reit", {
       company: { sector: "realEstate" },
@@ -117,9 +157,14 @@ describe("archetype-specific analysis", () => {
     expect(["Buy", "Strong Buy"]).not.toContain(result.recommendation.rating);
   });
 
-  it("requires through-cycle coverage for a cyclical company", () => {
+  it("uses a transparent 3Y fallback when Yahoo-style cyclical history is too short for 5Y CAGR", () => {
     const result = asArchetype("cyclical", { company: { sector: "energy" } });
-    expect(result.scores.dimensions.growth.contributors?.map((item) => item.label)).toEqual(["Revenue CAGR 5Y", "FCF stability"]);
+    const growth = result.scores.dimensions.growth;
+    expect(growth.contributors?.map((item) => item.label)).toEqual(["Revenue CAGR 5Y", "Revenue CAGR 3Y fallback", "FCF stability"]);
+    expect(growth.contributors?.find((item) => item.label === "Revenue CAGR 5Y")?.availability).toBe("missing");
+    expect(growth.contributors?.find((item) => item.label === "Revenue CAGR 3Y fallback")?.availability).toBe("available");
+    expect(growth.coverage).toBeCloseTo(0.7, 8);
+    expect(growth.score).not.toBeNull();
     expect(result.dcf.method).toBe("Normalized FCFF DCF");
   });
 
@@ -142,12 +187,19 @@ describe("archetype-specific analysis", () => {
     expect(result.scores.dimensions.financialHealth.contributors?.some((item) => item.label === "Cash runway (years)")).toBe(true);
   });
 
-  it("requires NAV/SOTP for a holding company", () => {
+  it("uses holding-company economics and requires real NAV/SOTP evidence for a rating", () => {
     const result = asArchetype("holding_company", { company: { sector: "financials" } });
     expect(result.dcf.method).toBe("NAV / SOTP");
     expect(result.scores.stockBoxScore).toBeNull();
     expect(result.recommendation.rating).toBe("No Rating");
-    expect(result.scores.dimensions.profitability.score).toBeNull();
+    expect(result.scores.dimensions.growth.contributors?.map((item) => item.label)).toEqual(["NAV / share growth"]);
+    expect(result.scores.dimensions.financialHealth.contributors?.map((item) => item.label)).toEqual(["Net debt / equity", "Cash / debt", "Equity / assets"]);
+    expect(result.scores.dimensions.financialHealth.score).not.toBeNull();
+    expect(result.scores.dimensions.profitability.plannedWeight).toBe(0);
+    expect(result.scores.dimensions.cashFlow.plannedWeight).toBe(0);
+    expect(result.scores.dimensions.earningsQuality.plannedWeight).toBe(0);
+    expect(result.scores.dimensions.quality.contributors?.map((item) => item.label)).toEqual(["NAV / share compounding", "Equity / assets", "Share dilution"]);
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["NAV discount / premium"]);
   });
 
   it("allows a utility FCFF route while retaining utility thresholds", () => {
@@ -237,6 +289,29 @@ describe("archetype coverage fairness", () => {
     expect(result.recommendation.rating).toBe("No Rating");
   });
 
+  it("keeps partial bank specialist objects as missing data instead of crashing", () => {
+    const result = asArchetype("bank", {
+      company: { sector: "financials" },
+      specialized: {
+        kind: "bank",
+        netInterestIncome: specializedMetric(80),
+        netInterestMargin: specializedMetric(0.032),
+        grossLoans: specializedMetric(1_000),
+        deposits: specializedMetric(1_150),
+        depositGrowth: specializedMetric(0.06),
+      } as never,
+    });
+
+    expect(result.scores.specializedCoverage?.overall).toBeGreaterThan(0);
+    expect(result.scores.specializedCoverage?.overall).toBeLessThan(1);
+    expect(result.scores.specializedCoverage?.missing).toEqual(expect.arrayContaining([
+      "netInterestIncomeGrowth",
+      "grossLoanGrowth",
+      "cet1CapitalRatio",
+    ]));
+    expect(result.scores.dimensions.growth.coverage).toBeCloseTo(0.4, 5);
+  });
+
   it("raises bank specialized coverage only for actual reported regulatory and operating metrics", () => {
     const result = asArchetype("bank", {
       company: { sector: "financials" },
@@ -247,6 +322,8 @@ describe("archetype coverage fairness", () => {
         grossLoans: specializedMetric(1_000),
         deposits: specializedMetric(1_150),
         depositGrowth: specializedMetric(0.06),
+        netInterestIncomeGrowth: specializedMetric(0.05),
+        grossLoanGrowth: specializedMetric(0.04),
         fundingCost: specializedMetric(0.018),
         cet1CapitalRatio: specializedMetric(0.14),
         tangibleCommonEquity: specializedMetric(180),
@@ -264,6 +341,34 @@ describe("archetype coverage fairness", () => {
     expect(result.scores.specializedCoverage?.overall).toBe(1);
     expect(result.scores.dimensions.financialHealth.coverage).toBe(1);
     expect(result.scores.dimensions.profitability.coverage).toBe(1);
+  });
+
+  it("does not count unused bank fields as required specialist coverage", () => {
+    const result = asArchetype("bank", { company: { sector: "financials" } });
+
+    expect(result.scores.specializedCoverage?.required).not.toContain("fundingCost");
+    expect(result.scores.specializedCoverage?.missing).not.toContain("fundingCost");
+  });
+
+  it("does not duplicate direct bank specialist gaps in the top-level missing-data summary", () => {
+    const result = asArchetype("bank", { company: { sector: "financials" } });
+    const topLevelFields = result.missingData.map((item) => item.field);
+
+    expect(topLevelFields).toEqual(expect.arrayContaining([
+      "netInterestMargin",
+      "cet1CapitalRatio",
+      "grossLoans",
+      "nonperformingLoans",
+      "netChargeOffs",
+    ]));
+    expect(topLevelFields).not.toContain("Net interest margin");
+    expect(topLevelFields).not.toContain("CET1 capital ratio");
+    expect(topLevelFields).not.toContain("Nonperforming loans / gross loans");
+    expect(topLevelFields).not.toContain("Net charge-offs / gross loans");
+    expect(result.scores.dimensions.profitability.missingData?.map((item) => item.field)).toContain("Net interest margin");
+    expect(result.scores.dimensions.financialHealth.missingData?.map((item) => item.field)).toContain("CET1 capital ratio");
+    expect(result.scores.dimensions.financialHealth.missingData?.map((item) => item.field)).toContain("Nonperforming loans / gross loans");
+    expect(result.scores.dimensions.financialHealth.missingData?.map((item) => item.field)).toContain("Net charge-offs / gross loans");
   });
 
   it("models insurer coverage independently from bank metrics", () => {
@@ -370,6 +475,98 @@ describe("archetype coverage fairness", () => {
     expect(result.recommendation.rating).toBe("No Rating");
   });
 
+  it("does not reuse operating-company score dimensions for unresolved financial specialists", () => {
+    const result = asArchetype("unknown", {
+      company: {
+        sector: "financials",
+        industry: "Capital Markets",
+        classificationDiagnostics: {
+          reason: "Industry description identifies a capital-markets business; a specialized capital-markets model is required before corporate methodology can be used.",
+          source: "description",
+          confidence: 0.8,
+          ambiguous: false,
+          candidates: ["unknown"],
+        },
+      },
+    });
+    const labels = Object.values(result.scores.dimensions).flatMap((dimension) =>
+      dimension.contributors?.map((item) => item.label) ?? []
+    );
+
+    expect(labels).not.toEqual(expect.arrayContaining([
+      "Gross margin",
+      "Operating margin",
+      "ROIC",
+      "Net debt / EBITDA",
+      "EV / EBITDA",
+      "FCF / net income",
+    ]));
+    expect(labels).toEqual(expect.arrayContaining([
+      "Archetype-specific growth model",
+      "Archetype-specific profitability model",
+      "Archetype-specific valuation model",
+      "Beta",
+    ]));
+    expect(result.missingData.map((item) => item.field)).toEqual(expect.arrayContaining([
+      "Archetype-specific growth model",
+      "Archetype-specific profitability model",
+      "Archetype-specific valuation model",
+    ]));
+  });
+
+  it("diagnoses unresolved archetype contributors as missing specialist model coverage", () => {
+    const result = asArchetype("unknown", {
+      company: {
+        sector: "financials",
+        industry: "Capital Markets",
+        classificationDiagnostics: {
+          reason: "Industry description identifies a capital-markets business; a specialized capital-markets model is required before corporate methodology can be used.",
+          source: "description",
+          confidence: 0.8,
+          ambiguous: false,
+          candidates: ["unknown"],
+        },
+      },
+    });
+
+    expect(result.scores.dimensions.valuation.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Archetype-specific valuation model",
+        reason: expect.stringContaining("specialized capital-markets model"),
+      }),
+    ]));
+  });
+
+  it("diagnoses bank ratio contributors by missing specialized inputs", () => {
+    const result = asArchetype("bank", { company: { sector: "financials" } });
+
+    expect(result.scores.dimensions.profitability.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Efficiency ratio",
+        reason: expect.stringContaining("net interest income"),
+      }),
+    ]));
+    expect(result.scores.dimensions.earningsQuality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Loan-loss provisions / gross loans",
+        reason: expect.stringContaining("loan-loss provisions"),
+      }),
+    ]));
+  });
+
+  it("diagnoses non-P&C insurer earnings quality as missing specialist reserve data", () => {
+    const result = asArchetype("insurer", {
+      company: { sector: "financials", industry: "Life Insurance" },
+    });
+
+    expect(result.scores.dimensions.earningsQuality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Specialized insurance earnings quality",
+        reason: expect.stringContaining("specialist reserve or policy data"),
+      }),
+    ]));
+  });
+
   it("does not count fully inapplicable dimensions against overall coverage", () => {
     const result = asArchetype("bank", { company: { sector: "financials" } });
     const applicable = Object.values(result.scores.dimensions).filter((dimension) => (dimension.plannedWeight ?? 0) > 0);
@@ -377,6 +574,389 @@ describe("archetype coverage fairness", () => {
     const expectedCoverage = applicable.reduce((sum, dimension) => sum + (dimension.coverage ?? 0) * dimension.weight, 0) / applicableWeight;
     expect(result.scores.dimensions.cashFlow.plannedWeight).toBe(0);
     expect(result.scores.dataCoverage).toBeCloseTo(expectedCoverage, 10);
+  });
+
+  it("keeps unsuitable contributors out of global missing-data diagnostics", () => {
+    const bank = asArchetype("bank", { company: { sector: "financials" } });
+    const insurer = asArchetype("insurer", { company: { sector: "financials", industry: "Life Insurance" } });
+    const holdingCompany = asArchetype("holding_company", { company: { sector: "financials" } });
+
+    expect(bank.scores.dimensions.cashFlow.contributors?.find((item) => item.label === "Corporate FCF")?.availability).toBe("unsuitable");
+    expect(insurer.scores.dimensions.cashFlow.contributors?.find((item) => item.label === "Corporate FCF")?.availability).toBe("unsuitable");
+    expect(holdingCompany.scores.dimensions.profitability.contributors?.find((item) => item.label === "Operating-company profitability")?.availability).toBe("unsuitable");
+    expect(holdingCompany.scores.dimensions.cashFlow.contributors?.find((item) => item.label === "Corporate free cash flow")?.availability).toBe("unsuitable");
+
+    expect(bank.missingData.map((item) => item.field)).not.toContain("Corporate FCF");
+    expect(insurer.missingData.map((item) => item.field)).not.toContain("Corporate FCF");
+    expect(holdingCompany.missingData.map((item) => item.field)).not.toEqual(expect.arrayContaining([
+      "Operating-company profitability",
+      "Corporate free cash flow",
+      "Operating accruals",
+    ]));
+  });
+
+  it("diagnoses non-positive CAGR endpoints separately from missing source data", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => ({
+      ...period,
+      epsDiluted: index === 0 ? -0.2 : index === 3 ? 0.5 : period.epsDiluted,
+      operatingCashFlow: index === 0 ? -10 : index === 3 ? 320 : period.operatingCashFlow,
+      capitalExpenditures: index === 0 ? -20 : period.capitalExpenditures,
+    }));
+    const result = asArchetype("standard", { annualPeriods });
+    const growthMissing = result.scores.dimensions.growth.missingData ?? [];
+
+    expect(growthMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "EPS CAGR 3Y",
+        reason: expect.stringContaining("non-positive"),
+      }),
+      expect.objectContaining({
+        field: "FCF/share CAGR 3Y",
+        reason: expect.stringContaining("non-positive"),
+      }),
+    ]));
+  });
+
+  it("diagnoses leverage and interest coverage gaps by failed input condition", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => ({
+      ...period,
+      ebitda: index === 3 ? -20 : period.ebitda,
+      interestExpense: index === 3 ? null : period.interestExpense,
+    }));
+    const result = asArchetype("standard", { annualPeriods });
+    const healthMissing = result.scores.dimensions.financialHealth.missingData ?? [];
+
+    expect(healthMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Net debt / EBITDA",
+        reason: expect.stringContaining("EBITDA is non-positive"),
+      }),
+      expect.objectContaining({
+        field: "Interest coverage",
+        reason: expect.stringContaining("Interest expense is missing"),
+      }),
+    ]));
+  });
+
+  it("scores positive operating income with reported zero interest expense as strong coverage", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => ({
+      ...period,
+      interestExpense: index === 3 ? 0 : period.interestExpense,
+    }));
+    const result = asArchetype("standard", { annualPeriods, trailingTwelveMonths: undefined });
+    const health = result.scores.dimensions.financialHealth;
+    const risk = result.scores.dimensions.risk;
+
+    expect(result.metrics.ratios.interestCoverage).toBeGreaterThanOrEqual(8);
+    expect(health.contributors?.find((item) => item.label === "Interest coverage")).toMatchObject({
+      availability: "available",
+      score: 100,
+    });
+    expect(risk.contributors?.find((item) => item.label === "Interest coverage")).toMatchObject({
+      availability: "available",
+      score: 100,
+    });
+    expect(result.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "Interest coverage" }),
+    ]));
+  });
+
+  it("diagnoses non-positive prior FCF separately from missing annual FCF growth data", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => ({
+      ...period,
+      operatingCashFlow: index === 2 ? -10 : index === 3 ? 320 : period.operatingCashFlow,
+      capitalExpenditures: index === 2 ? -20 : period.capitalExpenditures,
+    }));
+    const result = asArchetype("standard", { annualPeriods });
+    const cashFlowMissing = result.scores.dimensions.cashFlow.missingData ?? [];
+
+    expect(cashFlowMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "FCF growth annual YoY",
+        reason: expect.stringContaining("prior-year FCF is non-positive"),
+      }),
+    ]));
+  });
+
+  it("diagnoses valuation multiple gaps by failed input condition", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === 3 ? {
+      ...period,
+      ebitda: -20,
+      netIncome: -15,
+      netIncomeCommonStockholders: -15,
+    } : period);
+    const result = asArchetype("standard", {
+      annualPeriods,
+      company: { reportingCurrency: "USD", tradingCurrency: "USD" },
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-08-24",
+        marketCapAsOf: "2026-08-24",
+        marketCapCurrency: "USD",
+        sharesOutstandingAsOf: "2026-08-24",
+      },
+    });
+    const valuationMissing = result.scores.dimensions.valuation.missingData ?? [];
+
+    expect(valuationMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "P/E",
+        reason: expect.stringContaining("common earnings are non-positive"),
+      }),
+      expect.objectContaining({
+        field: "EV / EBITDA",
+        reason: expect.stringContaining("EBITDA is non-positive"),
+      }),
+    ]));
+  });
+
+  it("diagnoses ROIC gaps by missing return-period operating income", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === 3 ? {
+      ...period,
+      operatingIncome: null,
+    } : period);
+    const result = asArchetype("standard", { annualPeriods });
+    const profitabilityMissing = result.scores.dimensions.profitability.missingData ?? [];
+
+    expect(profitabilityMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "ROIC",
+        reason: expect.stringContaining("operating income"),
+      }),
+    ]));
+  });
+
+  it("diagnoses revenue-based margin contributors by missing revenue", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === 3 ? {
+      ...period,
+      revenue: null,
+    } : period);
+    const result = asArchetype("standard", { annualPeriods });
+    const profitabilityMissing = result.scores.dimensions.profitability.missingData ?? [];
+
+    expect(profitabilityMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Gross margin",
+        reason: expect.stringContaining("reported revenue"),
+      }),
+      expect.objectContaining({
+        field: "Operating margin",
+        reason: expect.stringContaining("reported revenue"),
+      }),
+      expect.objectContaining({
+        field: "Net margin",
+        reason: expect.stringContaining("reported revenue"),
+      }),
+    ]));
+  });
+
+  it("diagnoses FCF yield by missing simple free-cash-flow inputs", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === 3 ? {
+      ...period,
+      operatingCashFlow: null,
+      capitalExpenditures: null,
+      freeCashFlow: null,
+    } : period);
+    const result = asArchetype("standard", {
+      annualPeriods,
+      company: { reportingCurrency: "USD", tradingCurrency: "USD" },
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-08-24",
+        marketCapAsOf: "2026-08-24",
+        marketCapCurrency: "USD",
+        sharesOutstandingAsOf: "2026-08-24",
+      },
+    });
+    const valuationMissing = result.scores.dimensions.valuation.missingData ?? [];
+
+    expect(valuationMissing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "FCF yield",
+        reason: expect.stringContaining("operating cash flow and capex"),
+      }),
+    ]));
+  });
+
+  it("diagnoses revenue CAGR and stability gaps by insufficient annual history", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.slice(-2);
+    const result = asArchetype("standard", { annualPeriods });
+
+    expect(result.scores.dimensions.growth.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Revenue CAGR 3Y",
+        reason: expect.stringContaining("three-year-prior"),
+      }),
+    ]));
+    expect(result.scores.dimensions.quality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Gross margin stability",
+        reason: expect.stringContaining("three contiguous annual periods"),
+      }),
+    ]));
+  });
+
+  it("diagnoses share dilution gaps by missing comparable share counts", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index >= 2 ? {
+      ...period,
+      sharesDiluted: null,
+    } : period);
+    const result = asArchetype("standard", { annualPeriods });
+
+    expect(result.scores.dimensions.quality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Share dilution",
+        reason: expect.stringContaining("diluted share counts"),
+      }),
+    ]));
+  });
+
+  it("diagnoses accrual and ROA gaps by missing balance-sheet inputs", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      totalAssets: null,
+    }));
+    const result = asArchetype("standard", { annualPeriods });
+
+    expect(result.scores.dimensions.earningsQuality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Accrual ratio",
+        reason: expect.stringContaining("assets"),
+      }),
+    ]));
+    expect(result.scores.dimensions.quality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "ROA",
+        reason: expect.stringContaining("assets"),
+      }),
+    ]));
+  });
+
+  it("diagnoses market-context gaps by missing market history", () => {
+    const result = asArchetype("standard", { market: undefined });
+
+    expect(result.scores.dimensions.momentum.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Price performance 1Y",
+        reason: expect.stringContaining("price history"),
+      }),
+    ]));
+    expect(result.scores.dimensions.risk.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Beta",
+        reason: expect.stringContaining("benchmark"),
+      }),
+    ]));
+  });
+
+  it("diagnoses holding-company NAV gaps as missing look-through NAV data", () => {
+    const result = asArchetype("holding_company", { company: { sector: "financials" } });
+
+    expect(result.scores.dimensions.growth.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "NAV / share growth",
+        reason: expect.stringContaining("look-through NAV"),
+      }),
+    ]));
+    expect(result.scores.dimensions.valuation.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "NAV discount / premium",
+        reason: expect.stringContaining("look-through NAV"),
+      }),
+    ]));
+  });
+
+  it("diagnoses cyclical five-year CAGR gaps by missing comparable history", () => {
+    const result = asArchetype("cyclical", { company: { sector: "energy" } });
+
+    expect(result.scores.dimensions.growth.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Revenue CAGR 5Y",
+        reason: expect.stringContaining("five-year-prior"),
+      }),
+    ]));
+  });
+
+  it("diagnoses bank book-value, balance-sheet and specialist-growth gaps", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      totalAssets: null,
+      totalEquity: null,
+    }));
+    const result = asArchetype("bank", {
+      company: { sector: "financials" },
+      annualPeriods,
+      market: undefined,
+      specialized: { kind: "bank" } as never,
+    });
+
+    expect(result.scores.dimensions.financialHealth.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Equity / assets",
+        reason: expect.stringContaining("reported assets"),
+      }),
+    ]));
+    expect(result.scores.dimensions.valuation.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "P / Book",
+        reason: expect.stringContaining("book equity"),
+      }),
+    ]));
+    expect(result.scores.dimensions.growth.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Deposit growth",
+        reason: expect.stringContaining("specialized bank data"),
+      }),
+    ]));
+    expect(result.scores.dimensions.quality.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "Return on tangible common equity",
+        reason: expect.stringContaining("tangible common equity"),
+      }),
+    ]));
+  });
+
+  it("diagnoses insurer book-value multiples by missing specialist valuation inputs", () => {
+    const missingMarket = asArchetype("insurer", {
+      company: { sector: "financials", industry: "Life Insurance" },
+      market: undefined,
+      specialized: { kind: "insurer" } as never,
+    });
+    const missingBookValues = asArchetype("insurer", {
+      company: { sector: "financials", industry: "Life Insurance", reportingCurrency: "USD", tradingCurrency: "USD" },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period) => ({
+        ...period,
+        totalEquity: null,
+        tangibleBookValue: null,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        marketCapAsOf: "2026-08-24",
+        marketCapCurrency: "USD",
+        priceDate: "2026-08-24",
+      },
+      specialized: { kind: "insurer" } as never,
+    });
+
+    expect(missingBookValues.scores.dimensions.valuation.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "P / Tangible Book",
+        reason: expect.stringContaining("tangible book"),
+      }),
+      expect.objectContaining({
+        field: "P / Book",
+        reason: expect.stringContaining("book value"),
+      }),
+    ]));
+    expect(missingMarket.scores.dimensions.valuation.missingData).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "P / E",
+        reason: expect.stringContaining("market cap"),
+      }),
+    ]));
   });
 });
 

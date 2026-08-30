@@ -57,6 +57,79 @@ describe("canonical reconciliation safety", () => {
     expect(checks.find((check) => check.code === "eps_net_income")?.status).toBe("pass");
   });
 
+  it("distinguishes EPS sign conflicts from same-direction EPS magnitude mismatches", () => {
+    const signConflictInput = {
+      ...durableCompounderInput,
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => index === durableCompounderInput.annualPeriods.length - 1 ? {
+        ...period,
+        epsDiluted: -1,
+        sharesDiluted: 100,
+        netIncome: 120,
+        dilutedNetIncomeAvailableToCommon: 120,
+      } : period),
+    };
+    const magnitudeInput = {
+      ...durableCompounderInput,
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => index === durableCompounderInput.annualPeriods.length - 1 ? {
+        ...period,
+        epsDiluted: 1,
+        sharesDiluted: 100,
+        netIncome: 140,
+        dilutedNetIncomeAvailableToCommon: 140,
+      } : period),
+    };
+
+    expect(reconcileFinancialData(signConflictInput, computeFinancialMetrics(signConflictInput)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "eps_net_income",
+          status: "warning",
+          message: expect.stringContaining("opposite signs"),
+        }),
+      ]));
+    expect(reconcileFinancialData(magnitudeInput, computeFinancialMetrics(magnitudeInput)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "eps_net_income",
+          status: "warning",
+          message: expect.stringContaining("same-direction magnitude mismatch"),
+        }),
+      ]));
+  });
+
+  it("labels EPS reconciliation warnings with the financial period basis", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === durableCompounderInput.annualPeriods.length - 1 ? {
+      ...period,
+      epsDiluted: 2,
+      sharesDiluted: 50,
+      netIncome: 100,
+      dilutedNetIncomeAvailableToCommon: 100,
+    } : period);
+    const input = {
+      ...durableCompounderInput,
+      annualPeriods,
+      trailingTwelveMonths: {
+        ...annualPeriods.at(-1)!,
+        form: "TTM" as const,
+        periodBasis: "TTM_REPORTED" as const,
+        periodEndDate: "2026-06-30",
+        epsDiluted: 10,
+        sharesDiluted: 50,
+        netIncome: 100,
+        dilutedNetIncomeAvailableToCommon: 100,
+      },
+    };
+
+    expect(reconcileFinancialData(input, computeFinancialMetrics(input)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "eps_net_income",
+          status: "warning",
+          message: expect.stringContaining("TTM"),
+        }),
+      ]));
+  });
+
   it("reports stale market cap and current-share inputs explicitly", () => {
     const input = {
       ...durableCompounderInput,
@@ -98,6 +171,44 @@ describe("canonical reconciliation safety", () => {
     expect(checks.find((check) => check.code === "market_cap_freshness")?.status).toBe("pass");
   });
 
+  it("does not warn on market-cap reconciliation when provider observations are from different dates", () => {
+    const input = {
+      ...durableCompounderInput,
+      analysisDate: "2026-08-29T00:00:00.000Z",
+      company: {
+        ...durableCompounderInput.company,
+        reportingCurrency: "USD",
+        tradingCurrency: "USD",
+      },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => ({
+        ...period,
+        periodEndDate: `${2022 + index}-12-31`,
+        balanceSheetDate: `${2022 + index}-12-31`,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        price: 110,
+        priceDate: "2026-08-28",
+        currency: "USD",
+        marketCap: 10_000,
+        marketCapAsOf: "2026-08-27",
+        marketCapCurrency: "USD",
+        sharesOutstanding: 100,
+        sharesOutstandingAsOf: "2026-06-30",
+        enterpriseValue: null,
+      },
+    };
+    const metrics = computeFinancialMetrics(input);
+    const checks = reconcileFinancialData(input, metrics);
+    const marketCapCheck = checks.find((check) => check.code === "market_cap");
+
+    expect(metrics.valuation.marketCap).toBe(10_000);
+    expect(marketCapCheck).toEqual(expect.objectContaining({
+      status: "unavailable",
+      message: expect.stringContaining("different observation dates"),
+    }));
+  });
+
   it("treats unknown reporting currency as a reconciliation warning", () => {
     const input = {
       ...durableCompounderInput,
@@ -129,6 +240,40 @@ describe("canonical reconciliation safety", () => {
     const checks = reconcileFinancialData(input, computeFinancialMetrics(input));
 
     expect(checks.find((check) => check.code === "return_metric_balance_alignment")?.status).toBe("unavailable");
+  });
+
+  it("marks TTM return balance alignment unavailable when return metrics use annual fallback", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      periodEndDate: `${period.fiscalYear}-12-31`,
+      balanceSheetDate: `${period.fiscalYear}-12-31`,
+    }));
+    const input = {
+      ...durableCompounderInput,
+      annualPeriods,
+      trailingTwelveMonths: {
+        ...annualPeriods.at(-1)!,
+        form: "TTM" as const,
+        periodBasis: "TTM_REPORTED" as const,
+        periodEndDate: "2025-06-30",
+        balanceSheetDate: "2025-03-31",
+      },
+      priorTrailingTwelveMonths: {
+        ...annualPeriods.at(-2)!,
+        form: "TTM" as const,
+        periodBasis: "TTM_REPORTED" as const,
+        periodEndDate: "2024-06-30",
+        balanceSheetDate: "2024-03-31",
+      },
+    };
+    const metrics = computeFinancialMetrics(input);
+    const checks = reconcileFinancialData(input, metrics);
+
+    expect(metrics.provenance.returnOnAssets?.periodBasis).toBe("FY");
+    expect(checks.find((check) => check.code === "return_metric_balance_alignment")).toEqual(expect.objectContaining({
+      status: "unavailable",
+      message: expect.stringContaining("annual fallback"),
+    }));
   });
 
   it("surfaces provider conflicts and ambiguous archetype classification", () => {
@@ -181,6 +326,7 @@ describe("archetype-aware financial red flags", () => {
       kind: "bank",
       netInterestIncome: specializedMetric(10), netInterestMargin: specializedMetric(0.01),
       grossLoans: specializedMetric(100), deposits: specializedMetric(70), depositGrowth: specializedMetric(-0.1),
+      netInterestIncomeGrowth: specializedMetric(-0.08), grossLoanGrowth: specializedMetric(-0.05),
       fundingCost: specializedMetric(0.05), cet1CapitalRatio: specializedMetric(0.06),
       tangibleCommonEquity: specializedMetric(8), tangibleBookValuePerShare: specializedMetric(1),
       nonPerformingLoans: specializedMetric(8), netChargeOffs: specializedMetric(3),

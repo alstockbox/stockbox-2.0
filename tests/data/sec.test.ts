@@ -51,6 +51,13 @@ describe("SEC provider requests", () => {
     );
   });
 
+  it("does not report curated fallback companies as the live SEC ticker universe when SEC contact is missing", async () => {
+    mocks.getSecUserAgent.mockReturnValue(null);
+
+    await expect(fetchSecTickerUniverse()).resolves.toEqual([]);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps the company search API working with the resolved SEC contact", async () => {
     const response = await searchCompaniesRoute(
       new Request("http://localhost/api/companies/search?q=apple")

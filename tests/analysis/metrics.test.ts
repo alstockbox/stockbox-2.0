@@ -117,6 +117,16 @@ describe("computeFinancialMetrics", () => {
         impact: "metric",
         severity: "high",
       }),
+      expect.objectContaining({
+        field: "marketCap",
+        reason: expect.stringMatching(/currenc/i),
+      }),
+    ]));
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "marketCap",
+        reason: "Market cap requires a reported value or both price and shares.",
+      }),
     ]));
   });
 
@@ -210,7 +220,47 @@ describe("computeFinancialMetrics", () => {
     });
     expect(metrics.missingData).toEqual(expect.arrayContaining([
       expect.objectContaining({ field: "shareBasisAlignment", severity: "high" }),
+      expect.objectContaining({ field: "marketCap", reason: expect.stringContaining("share basis") }),
     ]));
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "marketCap",
+        reason: "Market cap requires a reported value or both price and shares.",
+      }),
+    ]));
+  });
+
+  it("does not flag share-basis mismatch when market cap and quote price are from different trading dates", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-29T00:00:00.000Z",
+      company: {
+        ...durableCompounderInput.company,
+        reportingCurrency: "USD",
+        tradingCurrency: "USD",
+      },
+      annualPeriods: durableCompounderInput.annualPeriods.map((period, index) => ({
+        ...period,
+        periodEndDate: `${2022 + index}-12-31`,
+        balanceSheetDate: `${2022 + index}-12-31`,
+      })),
+      market: {
+        ...durableCompounderInput.market,
+        price: 110,
+        priceDate: "2026-08-28",
+        currency: "USD",
+        marketCap: 10_000,
+        marketCapAsOf: "2026-08-27",
+        marketCapCurrency: "USD",
+        enterpriseValue: null,
+        sharesOutstanding: 100,
+        sharesOutstandingAsOf: "2026-08-28",
+      },
+    });
+
+    expect(metrics.valuation.marketCap).toBe(10_000);
+    expect(metrics.valuation.enterpriseValue).toBe(10_040);
+    expect(metrics.missingData.map((item) => item.field)).not.toContain("shareBasisAlignment");
   });
 
   it("uses actual fiscal-year distance for three-year CAGR when an intermediate year is missing", () => {
@@ -437,6 +487,13 @@ describe("computeFinancialMetrics", () => {
     expect(metrics.valuation.marketCap).toBeNull();
     expect(metrics.missingData).toEqual(expect.arrayContaining([
       expect.objectContaining({ field: "marketCapCurrency", severity: "high" }),
+      expect.objectContaining({ field: "marketCap", reason: expect.stringContaining("market cap currency") }),
+    ]));
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        field: "marketCap",
+        reason: "Market cap requires a reported value or both price and shares.",
+      }),
     ]));
   });
 
@@ -488,7 +545,17 @@ describe("computeFinancialMetrics", () => {
     );
   });
 
-  it("uses explicit annual growth fallback but no mismatched annual balance for TTM returns", () => {
+  it("uses prior reported TTM balances for returns without requiring YTD construction metadata", () => {
+    const current = { ...durableCompounderInput.annualPeriods.at(-1)!, form: "TTM", periodBasis: "TTM_REPORTED" as const, periodEndDate: "2025-06-30", balanceSheetDate: "2025-06-30" };
+    const prior = { ...durableCompounderInput.annualPeriods.at(-2)!, form: "TTM", periodBasis: "TTM_REPORTED" as const, periodEndDate: "2024-06-30", balanceSheetDate: "2024-06-30" };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, trailingTwelveMonths: current, priorTrailingTwelveMonths: prior });
+    expect(metrics.ratios.returnOnAssets).toBeCloseTo((current.netIncome as number) / (((current.totalAssets as number) + (prior.totalAssets as number)) / 2), 5);
+    expect(metrics.ratios.returnOnEquity).not.toBeNull();
+    expect(metrics.ratios.returnOnInvestedCapital).not.toBeNull();
+    expect(metrics.growth.revenueGrowthBasis).toBe("TTM_YOY");
+  });
+
+  it("uses a fully annual return fallback instead of mixing TTM flows with annual balances", () => {
     const trailingTwelveMonths = {
       ...durableCompounderInput.annualPeriods.at(-1)!,
       form: "TTM",
@@ -508,8 +575,108 @@ describe("computeFinancialMetrics", () => {
 
     expect(metrics.growth.revenueGrowthBasis).toBe("ANNUAL_YOY");
     expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(0.2, 5);
-    expect(metrics.ratios.returnOnEquity).toBeNull();
-    expect(metrics.ratios.returnOnAssets).toBeNull();
-    expect(metrics.ratios.returnOnInvestedCapital).toBeNull();
+    const annualOnly = computeFinancialMetrics(durableCompounderInput);
+    expect(metrics.ratios.returnOnEquity).toBeCloseTo(annualOnly.ratios.returnOnEquity!, 5);
+    expect(metrics.ratios.returnOnAssets).toBeCloseTo(annualOnly.ratios.returnOnAssets!, 5);
+    expect(metrics.ratios.returnOnInvestedCapital).toBeCloseTo(annualOnly.ratios.returnOnInvestedCapital!, 5);
+    expect(metrics.cashFlow.accrualRatio).toBeCloseTo(annualOnly.cashFlow.accrualRatio!, 5);
+    expect(metrics.provenance.returnOnAssets?.note).toContain("Annual fallback");
+  });
+
+  it("uses fully annual financial-health fallbacks instead of mixing incomplete TTM balance data with TTM flows", () => {
+    const trailingTwelveMonths = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      totalDebt: null,
+      cashAndEquivalents: null,
+      currentAssets: null,
+      currentLiabilities: null,
+      interestExpense: null,
+    };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, trailingTwelveMonths });
+    const annualOnly = computeFinancialMetrics(durableCompounderInput);
+
+    expect(metrics.ratios.netDebtToEbitda).toBeCloseTo(annualOnly.ratios.netDebtToEbitda!, 5);
+    expect(metrics.ratios.interestCoverage).toBeCloseTo(annualOnly.ratios.interestCoverage!, 5);
+    expect(metrics.ratios.cashToDebt).toBeCloseTo(annualOnly.ratios.cashToDebt!, 5);
+    expect(metrics.ratios.currentRatio).toBeCloseTo(annualOnly.ratios.currentRatio!, 5);
+    expect(metrics.provenance.netDebtToEbitda?.note).toContain("Annual fallback");
+    expect(metrics.provenance.interestCoverage?.note).toContain("Annual fallback");
+  });
+
+  it("uses annual balance-sensitive fallbacks when TTM balance facts lag the flow endpoint", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period) => ({
+      ...period,
+      periodEndDate: `${period.fiscalYear}-12-31`,
+      balanceSheetDate: `${period.fiscalYear}-12-31`,
+    }));
+    const currentTtm = {
+      ...annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-03-31",
+      netIncome: 500,
+      operatingIncome: 450,
+      ebitda: 600,
+      cashAndEquivalents: 25,
+      totalDebt: 900,
+      totalEquity: 1_200,
+      totalAssets: 2_000,
+      currentAssets: 800,
+      currentLiabilities: 700,
+      interestExpense: -45,
+    };
+    const priorTtm = {
+      ...annualPeriods.at(-2)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2024-06-30",
+      balanceSheetDate: "2024-03-31",
+      netIncome: 300,
+      operatingIncome: 270,
+      totalEquity: 800,
+      totalAssets: 1_600,
+      totalDebt: 700,
+      cashAndEquivalents: 20,
+    };
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      annualPeriods,
+      trailingTwelveMonths: currentTtm,
+      priorTrailingTwelveMonths: priorTtm,
+    });
+    const annualOnly = computeFinancialMetrics({ ...durableCompounderInput, annualPeriods });
+
+    expect(metrics.ratios.netDebtToEbitda).toBeCloseTo(annualOnly.ratios.netDebtToEbitda!, 5);
+    expect(metrics.ratios.cashToDebt).toBeCloseTo(annualOnly.ratios.cashToDebt!, 5);
+    expect(metrics.ratios.currentRatio).toBeCloseTo(annualOnly.ratios.currentRatio!, 5);
+    expect(metrics.ratios.returnOnEquity).toBeCloseTo(annualOnly.ratios.returnOnEquity!, 5);
+    expect(metrics.ratios.returnOnAssets).toBeCloseTo(annualOnly.ratios.returnOnAssets!, 5);
+    expect(metrics.ratios.returnOnInvestedCapital).toBeCloseTo(annualOnly.ratios.returnOnInvestedCapital!, 5);
+    expect(metrics.provenance.netDebtToEbitda?.periodEnd).toBe("2024-12-31");
+    expect(metrics.provenance.returnOnAssets?.periodEnd).toBe("2024-12-31");
+    expect(metrics.provenance.returnOnAssets?.note).toContain("Annual fallback");
+  });
+
+  it("uses a fully annual cash-flow basis when TTM CFO or capex is unavailable", () => {
+    const trailingTwelveMonths = {
+      ...durableCompounderInput.annualPeriods.at(-1)!, form: "TTM", periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2025-06-30", balanceSheetDate: "2025-06-30", operatingCashFlow: null, capitalExpenditures: null,
+    };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, trailingTwelveMonths });
+    const annualOnly = computeFinancialMetrics(durableCompounderInput);
+    expect(metrics.cashFlow.simpleFreeCashFlow).toBeCloseTo(annualOnly.cashFlow.simpleFreeCashFlow!, 5);
+    expect(metrics.margins.freeCashFlowMargin).toBeCloseTo(annualOnly.margins.freeCashFlowMargin!, 5);
+    expect(metrics.margins.operatingCashFlowMargin).toBeCloseTo(annualOnly.margins.operatingCashFlowMargin!, 5);
+    expect(metrics.cashFlow.cfoToNetIncome).toBeCloseTo(annualOnly.cashFlow.cfoToNetIncome!, 5);
+    expect(metrics.cashFlow.freeCashFlowToNetIncome).toBeCloseTo(annualOnly.cashFlow.freeCashFlowToNetIncome!, 5);
+    expect(metrics.cashFlow.accrualRatio).toBeCloseTo(annualOnly.cashFlow.accrualRatio!, 5);
+    expect(metrics.growth.freeCashFlowGrowthYoY).toBeCloseTo(annualOnly.growth.freeCashFlowGrowthYoY!, 5);
+    expect(metrics.growth.freeCashFlowGrowthBasis).toBe("ANNUAL_YOY");
+    expect(metrics.provenance.simpleFreeCashFlow?.periodEnd).toBeUndefined();
   });
 });

@@ -121,7 +121,7 @@ function enrich(
   const rawFundamentalsSupported = company.providerCapabilities?.fundamentals
     ?? (provider.capabilities.supportsFundamentals && Boolean(cik));
   const fundamentalsSupported = type === "Common Stock" && rawFundamentalsSupported;
-  if (fundamentalsSupported) providerIds.add("sec-companyfacts");
+  if (fundamentalsSupported && cik) providerIds.add("sec-companyfacts");
   return {
     ...company,
     ticker: company.ticker.toUpperCase(),

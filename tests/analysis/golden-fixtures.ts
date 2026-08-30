@@ -213,6 +213,8 @@ export const goldenAnalysisFixtures: GoldenAnalysisFixture[] = [
       grossLoans: metric(2_000),
       deposits: metric(2_250),
       depositGrowth: metric(0.06, "ratio"),
+      netInterestIncomeGrowth: metric(0.05, "ratio"),
+      grossLoanGrowth: metric(0.04, "ratio"),
       fundingCost: metric(0.018, "ratio"),
       cet1CapitalRatio: metric(0.135, "ratio"),
       tangibleCommonEquity: metric(420),

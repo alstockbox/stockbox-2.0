@@ -40,6 +40,8 @@ export type AnalysisArchetype =
   | "bank"
   | "insurer"
   | "reit"
+  | "property_company"
+  | "asset_manager"
   | "utility"
   | "cyclical"
   | "pre_revenue_biotech"
@@ -187,6 +189,7 @@ export type AnnualFinancials = {
   epsDiluted: number | null;
   operatingCashFlow: number | null;
   capex: number | null;
+  freeCashFlow?: number | null;
   assets: number | null;
   liabilities: number | null;
   cash: number | null;
@@ -211,6 +214,24 @@ export type AnnualFinancials = {
   provenance?: Record<string, MetricProvenance>;
 };
 
+export type ProviderReportedValuation = {
+  provider: string;
+  asOfDate?: string | null;
+  priceEarnings?: number | null;
+  priceSales?: number | null;
+  priceBook?: number | null;
+  evSales?: number | null;
+  evEbitda?: number | null;
+  peg?: number | null;
+  marketCap?: number | null;
+  marketCapCurrency?: string | null;
+  enterpriseValue?: number | null;
+  enterpriseValueCurrency?: string | null;
+  freeCashFlow?: number | null;
+  freeCashFlowCurrency?: string | null;
+  freeCashFlowDate?: string | null;
+};
+
 export type CompanyFundamentals = {
   ticker: string;
   name: string;
@@ -233,6 +254,7 @@ export type CompanyFundamentals = {
   reportedMarketCapCurrency?: string | null;
   reportedSharesOutstanding?: number | null;
   reportedSharesDate?: string | null;
+  reportedValuation?: ProviderReportedValuation;
   reportingCurrency?: string | null;
   sourceConflicts?: ProviderSourceConflict[];
 };
@@ -300,6 +322,7 @@ export type ScoreContributor = {
   weight: number;
   impact: "positive" | "negative" | "neutral";
   availability?: "available" | "missing" | "unsuitable";
+  missingReason?: string;
   source?: string;
   period?: string;
 };
@@ -529,6 +552,7 @@ export type FinancialAnalysisInput = {
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
   market?: FinancialMarketSnapshot;
+  reportedValuation?: ProviderReportedValuation;
   estimates?: ForwardEstimates;
   dcfAssumptions?: DcfInputAssumptions;
   analysisDate?: string;
@@ -836,6 +860,8 @@ export type BankSpecializedMetrics = {
   grossLoans: SpecializedMetric;
   deposits: SpecializedMetric;
   depositGrowth: SpecializedMetric;
+  netInterestIncomeGrowth: SpecializedMetric;
+  grossLoanGrowth: SpecializedMetric;
   fundingCost: SpecializedMetric;
   cet1CapitalRatio: SpecializedMetric;
   tangibleCommonEquity: SpecializedMetric;

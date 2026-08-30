@@ -60,15 +60,22 @@ function companySymbol(company: CompanySearchResult): string {
   return normalizeBatchSymbol(company.canonicalTicker ?? company.ticker);
 }
 
+function exactBatchSymbols(company: CompanySearchResult): string[] {
+  const symbols = new Set<string>();
+  const canonical = company.canonicalTicker ? normalizeBatchSymbol(company.canonicalTicker) : null;
+  const ticker = normalizeBatchSymbol(company.ticker);
+  if (canonical) symbols.add(canonical);
+  if (!canonical || canonical === ticker || !canonical.includes(".")) symbols.add(ticker);
+  return [...symbols];
+}
+
 export function findExactBatchCompany(
   symbol: string,
   results: CompanySearchResult[],
 ): CompanySearchResult | null {
   const normalizedSymbol = normalizeBatchSymbol(symbol);
   const exact = results.filter((company) =>
-    [company.ticker, company.canonicalTicker]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => normalizeBatchSymbol(value) === normalizedSymbol),
+    exactBatchSymbols(company).some((value) => value === normalizedSymbol),
   );
 
   return exact.sort((left, right) => {

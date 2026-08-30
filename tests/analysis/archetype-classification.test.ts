@@ -64,9 +64,9 @@ describe("global operating-sector classification", () => {
 });
 
 describe("specialized financial-services classification", () => {
-  it("recognizes asset management as a confidently unsupported specialist model", () => {
+  it("recognizes asset management as a supported asset-manager specialist model", () => {
     const result = classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Global Asset Manager" });
-    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "unknown" }));
+    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "asset_manager" }));
     expect(result.classificationDiagnostics).toEqual(expect.objectContaining({
       ambiguous: false,
       confidence: expect.any(Number),
@@ -79,6 +79,19 @@ describe("specialized financial-services classification", () => {
     expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "unknown" }));
     expect(result.classificationDiagnostics).toEqual(expect.objectContaining({ ambiguous: false }));
     expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it.each([
+    "Credit Services Financial Services",
+    "Shell Companies Financial Services",
+    "Financial Conglomerates Financial Services",
+  ])("recognizes %s as a confidently unsupported specialist financial model", (sicDescription) => {
+    const result = classifyCompany({ sicDescription, name: "Specialized Financial Company" });
+
+    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "unknown" }));
+    expect(result.classificationDiagnostics).toEqual(expect.objectContaining({ ambiguous: false }));
+    expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.75);
+    expect(result.classificationDiagnostics.reason).toMatch(/specialized/i);
   });
 });
 
@@ -129,19 +142,19 @@ describe("non-REIT real estate classification", () => {
     "Real Estate Services Real Estate",
     "Residential Real Estate Development",
     "Property Management Real Estate",
-  ])("keeps broad real-estate operating businesses out of the generic corporate archetype: %s", (sicDescription) => {
+  ])("classifies broad real-estate operating businesses as property companies: %s", (sicDescription) => {
     expect(classifyCompany({ sicDescription, name: "Property Group" })).toEqual(expect.objectContaining({
       sector: "realEstate",
-      analysisArchetype: "unknown",
+      analysisArchetype: "property_company",
     }));
   });
 });
 
 describe("real estate archetype resolution", () => {
-  it("does not treat a broad real-estate sector as REIT evidence", () => {
-    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Development" })).toBe("unknown");
-    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Services" })).toBe("unknown");
-    expect(resolveArchetype({ sector: "realEstate", industry: "Property Management" })).toBe("unknown");
+  it("resolves broad real-estate operators as property companies instead of REITs", () => {
+    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Development" })).toBe("property_company");
+    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Services" })).toBe("property_company");
+    expect(resolveArchetype({ sector: "realEstate", industry: "Property Management" })).toBe("property_company");
   });
 
   it("resolves a real-estate company as REIT only when REIT evidence is present", () => {
@@ -192,5 +205,166 @@ describe("insurance underwriting classification", () => {
     { sicDescription: "Reinsurance Carrier", name: "Global Reinsurance Group" },
   ])("keeps genuine insurance risk carriers on insurer methodology: $sicDescription", (input) => {
     expect(classifyCompany(input).analysisArchetype).toBe("insurer");
+  });
+});
+
+describe("company-name archetype recovery", () => {
+  it.each([
+    ["Nordic Fastigheter AB", "realEstate", "property_company"],
+    ["Nordic Pharma AB", "healthcare", "standard"],
+    ["Nordic Medtech AB", "healthcare", "standard"],
+    ["Genetic Analysis AS", "healthcare", "standard"],
+    ["Nordic Games AB", "communication", "standard"],
+    ["Nordic Silver AB", "materials", "cyclical"],
+    ["Nordic Minerals AB", "materials", "cyclical"],
+    ["Africa Resources AB", "materials", "cyclical"],
+    ["BW Energy Limited", "energy", "cyclical"],
+    ["Crown Energy AB", "energy", "cyclical"],
+    ["Interoil Exploration and Production ASA", "energy", "cyclical"],
+    ["Level Bio AB", "healthcare", "standard"],
+    ["Argo Defence Group AB", "industrials", "standard"],
+    ["Lohilo Foods AB", "consumer", "standard"],
+    ["Polymer Factory Sweden AB", "materials", "cyclical"],
+    ["JonDeTech Sensors AB", "technology", "standard"],
+    ["Nord Insuretech Group AB", "financials", "standard"],
+  ] as const)("recovers %s from a clear issuer-name business signal", (name, sector, archetype) => {
+    expect(classifyCompany({ name })).toEqual(expect.objectContaining({
+      sector,
+      analysisArchetype: archetype,
+    }));
+  });
+
+  it("does not let materials name recovery override a clearer gaming business signal", () => {
+    expect(classifyCompany({ name: "Gold Town Games AB" })).toEqual(expect.objectContaining({
+      sector: "communication",
+      analysisArchetype: "standard",
+    }));
+  });
+
+  it.each([
+    { sicDescription: "Engineering & Construction Industrials", name: "Bravida Holding AB (publ)", sector: "industrials", archetype: "standard" },
+    { sicDescription: "Medical Devices Healthcare", name: "Bonesupport Holding AB (publ)", sector: "healthcare", archetype: "standard" },
+    { sicDescription: "Specialty Business Services Industrials", name: "Coor Service Management Holding AB", sector: "industrials", archetype: "standard" },
+    { sicDescription: "Industrial Machinery Manufacturing", name: "Nederman Holding AB (publ)", sector: "industrials", archetype: "standard" },
+  ] as const)("does not treat a legal holding suffix as NAV evidence for operating companies: $name", ({ sicDescription, name, sector, archetype }) => {
+    expect(classifyCompany({ sicDescription, name })).toEqual(expect.objectContaining({
+      sector,
+      analysisArchetype: archetype,
+    }));
+  });
+
+  it("does not infer a holding-company model from a bare legal holding suffix without investment evidence", () => {
+    expect(classifyCompany({ name: "Bravida Holding AB (publ)" }).analysisArchetype).not.toBe("holding_company");
+  });
+});
+
+describe("investment holding-company refinement", () => {
+  const investmentFinancials = (operating = false): FinancialAnalysisInput => ({
+    company: { sector: "financials", industry: "Asset Management", analysisArchetype: "unknown", name: operating ? "Global Asset Manager" : "Diversified Investment Group" },
+    annualPeriods: [2024, 2025].map((fiscalYear, index) => ({
+      fiscalYear,
+      periodEndDate: `${fiscalYear}-12-31`,
+      revenue: 200 + index * 20,
+      netIncome: operating ? 35 + index * 5 : 150 + index * 15,
+      grossProfit: operating ? 140 + index * 10 : null,
+      operatingIncome: operating ? 60 + index * 5 : null,
+      operatingCashFlow: operating ? 70 + index * 5 : null,
+      totalAssets: 1_000 + index * 100,
+      totalEquity: operating ? 400 + index * 20 : 850 + index * 80,
+    })),
+  });
+
+  it("infers a holding-company model from repeated investment-company financial structure", () => {
+    expect(resolveFinancialArchetype(investmentFinancials(false))).toBe("holding_company");
+  });
+
+  it("does not misclassify an operating asset manager as a holding company", () => {
+    expect(resolveFinancialArchetype(investmentFinancials(true))).toBe("asset_manager");
+  });
+
+  it("lets holding-company financial structure override a broad asset-management label", () => {
+    const input = investmentFinancials(false);
+
+    expect(resolveFinancialArchetype({
+      ...input,
+      company: {
+        ...input.company,
+        analysisArchetype: "asset_manager",
+      },
+    })).toBe("holding_company");
+  });
+
+  it("treats equity-heavy investment gains as holding-company evidence even when operating fields are present", () => {
+    const input = investmentFinancials(false);
+
+    expect(resolveFinancialArchetype({
+      ...input,
+      company: {
+        ...input.company,
+        analysisArchetype: "asset_manager",
+      },
+      annualPeriods: input.annualPeriods.map((period, index) => ({
+        ...period,
+        revenue: 120 + index * 10,
+        grossProfit: 115 + index * 9,
+        operatingIncome: 95 + index * 8,
+        netIncome: 190 + index * 20,
+        operatingCashFlow: 35 + index * 4,
+        totalAssets: 1_000 + index * 120,
+        totalEquity: 860 + index * 100,
+      })),
+    })).toBe("holding_company");
+  });
+
+  it("recognizes explicit investment-company wording without treating asset management as equivalent", () => {
+    expect(classifyCompany({ sicDescription: "Investment Company Financial Services", name: "Diversified Investments" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Investment AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Holding AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Ventures AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Equity AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Capital AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Invest Growth AB" }).analysisArchetype).toBe("holding_company");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Global Asset Manager" }).analysisArchetype).toBe("asset_manager");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Global Capital Management AB" }).analysisArchetype).toBe("asset_manager");
+  });
+
+  it("keeps corporate-finance and brokerage names on unresolved capital-markets methodology", () => {
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Corporate Finance AB" }).analysisArchetype).toBe("unknown");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Fondkommission AB" }).analysisArchetype).toBe("unknown");
+    expect(classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Nordic Treasury AB" }).analysisArchetype).toBe("unknown");
+  });
+
+  it("does not upgrade a confident capital-markets specialist stop to asset manager from financial statement shape alone", () => {
+    const input = investmentFinancials(true);
+
+    expect(resolveFinancialArchetype({
+      ...input,
+      company: {
+        ...input.company,
+        name: "Nordic Corporate Finance AB",
+        analysisArchetype: "unknown",
+        classificationDiagnostics: {
+          reason: "Industry description identifies a capital-markets business; a specialized capital-markets model is required before corporate methodology can be used.",
+          source: "description",
+          confidence: 0.8,
+          ambiguous: false,
+          candidates: ["unknown"],
+        },
+      },
+    })).toBe("unknown");
+  });
+
+  it.each([
+    { sicDescription: "Business Development Company Financial Services", name: "Goldman Sachs BDC, Inc." },
+    { sicDescription: "Credit Services Financial Services", name: "Sixth Street Specialty Lending, Inc." },
+    { sic: "6726", sicDescription: "Unit Investment Trusts, Face-Amount Certificate Offices, and Closed-End Management Investment Offices", name: "Specialty Finance BDC" },
+  ])("routes BDC and specialty-lending financials to NAV-style holding methodology: $name", (input) => {
+    const result = classifyCompany(input);
+
+    expect(result).toEqual(expect.objectContaining({
+      sector: "financials",
+      analysisArchetype: "holding_company",
+    }));
+    expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.8);
   });
 });
