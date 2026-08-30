@@ -209,7 +209,7 @@ export async function getBatchQaResults(batchId: string, rerunKey: string) {
   if (!supabase) return { ok: false as const, error: "Supabase admin client is not configured." };
   const { data, error } = await supabase
     .from("analysis_batch_qa_results")
-    .select("*")
+    .select("batch_id,rerun_key,model_version,score_policy_version,benchmark_version,canonical_input_fingerprint,provider_versions,analysis_timestamp,canonical_entity,analysis_archetype,data_coverage,confidence,score,rating,qa_flags")
     .eq("batch_id", batchId)
     .eq("rerun_key", rerunKey)
     .order("canonical_entity", { ascending: true });
@@ -259,7 +259,7 @@ export async function getAnalysis(id: string, userId: string) {
   const supabase = createAdminClient();
   if (!supabase) return null;
 
-  const { data } = await supabase.from("analyses").select("*").eq("id", id).eq("user_id", userId).single();
+  const { data } = await supabase.from("analyses").select("report").eq("id", id).eq("user_id", userId).single();
   return data;
 }
 

@@ -29,6 +29,16 @@ export type AffiliateDashboardData = {
     createdAt: string;
     paidAt: string | null;
   }>;
+  giveawayCampaigns: Array<{
+    id: string;
+    label: string;
+    planKey: string;
+    durationMonths: number;
+    claimExpiresAt: string | null;
+    status: string;
+    createdAt: string;
+    codes: Array<{ code: string; status: string; redeemedAt: string | null }>;
+  }>;
 };
 export async function getAffiliateDashboardData(userId: string): Promise<AffiliateDashboardData | null> {
   const supabase = createAdminClient();
@@ -43,7 +53,7 @@ export async function getAffiliateDashboardData(userId: string): Promise<Affilia
   ]);
   if (!affiliate) return null;
 
-  const [clickResult, referralResult, commissionResult, payoutResult] = await Promise.all([
+  const [clickResult, referralResult, commissionResult, payoutResult, giveawayResult] = await Promise.all([
     supabase.from("affiliate_clicks").select("id", { count: "exact", head: true }).eq("affiliate_id", affiliate.id),
     supabase.from("referrals").select("referred_id,status,created_at").eq("affiliate_id", affiliate.id),
     supabase.from("affiliate_commissions")
@@ -55,8 +65,27 @@ export async function getAffiliateDashboardData(userId: string): Promise<Affilia
       .eq("affiliate_id", affiliate.id)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase.from("affiliate_giveaway_campaigns")
+      .select("id,label,plan_key,duration_months,claim_expires_at,status,created_at")
+      .eq("affiliate_id", affiliate.id)
+      .order("created_at", { ascending: false })
+      .limit(50),
   ]);
   const commissions = commissionResult.data ?? [];
+  const giveawayCampaignRows = giveawayResult.data ?? [];
+  const giveawayCampaignIds = giveawayCampaignRows.map((row) => row.id);
+  const giveawayCodeResult = giveawayCampaignIds.length
+    ? await supabase.from("affiliate_giveaway_codes")
+        .select("campaign_id,code,status,redeemed_at")
+        .in("campaign_id", giveawayCampaignIds)
+        .order("created_at", { ascending: true })
+    : { data: [] as Array<{ campaign_id: string; code: string; status: string; redeemed_at: string | null }> };
+  const giveawayCodesByCampaign = new Map<string, Array<{ code: string; status: string; redeemedAt: string | null }>>();
+  for (const row of giveawayCodeResult.data ?? []) {
+    const current = giveawayCodesByCampaign.get(row.campaign_id) ?? [];
+    current.push({ code: row.code, status: row.status, redeemedAt: row.redeemed_at });
+    giveawayCodesByCampaign.set(row.campaign_id, current);
+  }
   const customerIds = [...new Set(commissions.map((row) => row.referred_user_id).filter((value): value is string => Boolean(value)))];
   const customerEmailById = new Map<string, string | null>();
   if (customerIds.length) {
@@ -105,6 +134,16 @@ export async function getAffiliateDashboardData(userId: string): Promise<Affilia
       status: row.status,
       createdAt: row.created_at,
       paidAt: row.paid_at,
+    })),
+    giveawayCampaigns: giveawayCampaignRows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      planKey: row.plan_key,
+      durationMonths: row.duration_months,
+      claimExpiresAt: row.claim_expires_at,
+      status: row.status,
+      createdAt: row.created_at,
+      codes: giveawayCodesByCampaign.get(row.id) ?? [],
     })),
   };
 }

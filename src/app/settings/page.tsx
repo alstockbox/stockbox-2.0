@@ -5,11 +5,14 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { LanguageSwitcher } from "@/components/app-shell/language-switcher";
 import { requireUser } from "@/lib/auth/session";
 import { getLocale } from "@/lib/i18n/server";
+import { redeemGiveawayCodeAction } from "./giveaway-actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
-export default async function SettingsPage() {
-  const [user, locale] = await Promise.all([requireUser(), getLocale()]);
+type PageProps = { searchParams: Promise<{ giveaway?: string; plan?: string }> };
+
+export default async function SettingsPage({ searchParams }: PageProps) {
+  const [user, locale, params] = await Promise.all([requireUser(), getLocale(), searchParams]);
   const items = [
     { href: "/settings/profile", title: "Profile", copy: "Research preferences and account defaults.", icon: UserRound },
     { href: "/settings/billing", title: "Billing", copy: "Plan, subscription and payment management.", icon: CreditCard },
@@ -34,6 +37,17 @@ export default async function SettingsPage() {
           </Link>
         ))}
       </div>
+      <Card className="mt-6">
+        <h2 className="font-semibold text-[#f4efe5]">Redeem giveaway code</h2>
+        <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">Won a StockBox competition? Redeem the one-time code here. It adds temporary access without changing your existing subscription.</p>
+        {params.giveaway === "success" ? <p className="mt-3 text-sm text-emerald-200">Giveaway activated{params.plan ? `: ${params.plan === "premium" ? "Pro" : params.plan}` : ""}.</p> : null}
+        {params.giveaway === "invalid" ? <p role="alert" className="mt-3 text-sm text-red-200">That giveaway code is invalid, expired, revoked or already used.</p> : null}
+        {params.giveaway === "unavailable" ? <p role="alert" className="mt-3 text-sm text-amber-200">Giveaway redemption is temporarily unavailable.</p> : null}
+        <form action={redeemGiveawayCodeAction} className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input name="code" required autoComplete="off" placeholder="SBG-..." className="h-10 flex-1 rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-white placeholder:text-[#6f7b8c]" />
+          <button type="submit" className="h-10 rounded-md border border-[#e1cb95]/35 bg-[#e1cb95]/10 px-4 text-sm font-semibold text-[#f4e5b8] hover:bg-[#e1cb95]/15">Redeem code</button>
+        </form>
+      </Card>
       <div className="mt-6 text-sm text-[#9aa7b8]">
         Need help? <Link href="/contact" className="text-[#e1cb95] hover:text-white">Contact StockBox</Link>.
       </div>

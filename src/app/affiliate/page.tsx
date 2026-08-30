@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, BadgeCheck, Banknote, MousePointerClick, UsersRound } from "lucide-react";
 import { ConnectPayoutButton } from "@/components/affiliate/connect-payout-button";
+import { GiveawayCopyControls } from "@/components/affiliate/giveaway-copy-controls";
 import { Card, Container, Section } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/session";
 import { getAffiliateDashboardData } from "@/lib/affiliate/service";
@@ -119,6 +120,35 @@ export default async function AffiliatePage({ searchParams }: PageProps) {
             ) : null}
           </Card>
         </div>
+
+        <section className="mt-9">
+          <h2 className="text-xl font-semibold text-[#f4efe5]">Giveaway campaigns</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">StockBox admin creates these prizes. Your codes are read-only: share each available code with one competition winner.</p>
+          <div className="mt-4 space-y-4">
+            {data.giveawayCampaigns.map((campaign) => {
+              const planName = campaign.planKey === "premium" ? "Pro" : campaign.planKey.charAt(0).toUpperCase() + campaign.planKey.slice(1);
+              return (
+                <Card key={campaign.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><p className="font-semibold text-[#f4efe5]">{campaign.label}</p><p className="mt-1 text-xs text-[#9aa7b8]">{planName} · {campaign.durationMonths} months free access · {campaign.claimExpiresAt ? `claim by ${date(campaign.claimExpiresAt)}` : "no redemption deadline"}</p></div>
+                    <span className="text-xs uppercase tracking-wide text-[#e1cb95]">{campaign.status}</span>
+                  </div>
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {campaign.codes.map((item) => (
+                      <div key={item.code} className="rounded-md border border-white/10 bg-[#07111f] px-3 py-2">
+                        <code className="select-all text-sm text-[#f4e5b8]">{item.code}</code>
+                        <p className="mt-1 text-[11px] capitalize text-[#7f8b9b]">{item.status}</p>
+                        <GiveawayCopyControls code={item.code} href={`/redeem/${encodeURIComponent(item.code)}`} />
+                        <a href={`/redeem/${encodeURIComponent(item.code)}`} className="mt-2 inline-block text-xs text-[#e1cb95] hover:underline">Open giveaway link</a>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              );
+            })}
+            {!data.giveawayCampaigns.length ? <p className="rounded-lg border border-white/10 bg-[#0d1c2e]/70 px-4 py-4 text-sm text-[#9aa7b8]">No giveaway campaigns assigned yet.</p> : null}
+          </div>
+        </section>
 
         <section className="mt-9">
           <div className="flex items-end justify-between gap-3">

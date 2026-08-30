@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
-import { commerciallyActivePlans, type PlanKey } from "@/lib/billing/plans";
+import { commerciallyActivePlans, findPlan, type PlanKey } from "@/lib/billing/plans";
 import {
   getPricingAction,
   type BillingViewerState,
@@ -24,9 +24,9 @@ import { getP0Copy } from "@/lib/i18n/p0-copy";
 export const metadata: Metadata = { title: "Pricing", description: "StockBox subscription plans and research limits." };
 
 function pricingActionLabel(action: PricingAction, plan: PlanKey, copy: ReturnType<typeof getP0Copy>["pricing"]) {
-  if (action.kind === "signup") return plan === "free" ? copy.startFree : copy.getBasic;
-  if (action.kind === "checkout") return copy.upgradeBasic;
-  if (action.kind === "portal") return action.current ? copy.manageSubscription : copy.resolveBilling;
+  if (action.kind === "signup") return plan === "free" ? copy.startFree : `${copy.getPlanPrefix} ${findPlan(plan)?.name ?? plan}`;
+  if (action.kind === "checkout") return `${copy.upgradeToPrefix} ${findPlan(plan)?.name ?? plan}`;
+  if (action.kind === "portal") return action.current ? copy.manageSubscription : `${copy.changeToPrefix} ${findPlan(plan)?.name ?? plan}`;
   if (action.kind === "current") return copy.currentPlan;
   if (action.kind === "disabled") return copy.subscriptionsUnavailable;
   return "";
@@ -61,7 +61,7 @@ function PlanAction({
     );
   }
   if (action.kind === "checkout") {
-    return <CheckoutButton plan="basic" enabled={checkoutEnabled} label={label} pendingLabel={billingCopy.openingCheckout} fallbackError={billingCopy.checkoutError} />;
+    return <CheckoutButton plan={plan} enabled={checkoutEnabled} label={label} pendingLabel={billingCopy.openingCheckout} fallbackError={billingCopy.checkoutError} />;
   }
   if (action.kind === "portal") {
     return <PortalButton enabled={portalEnabled} label={label} pendingLabel={billingCopy.openingBilling} fallbackError={billingCopy.billingError} />;
@@ -108,14 +108,14 @@ export default async function PricingPage() {
           <h1 className="serif mt-2 text-4xl font-semibold text-[#f4efe5]">{copy.title}</h1>
           <p className="mt-4 text-base leading-7 text-[#9aa7b8]">{copy.copy}</p>
         </div>
-        <div className="mt-10 grid max-w-3xl gap-4 md:grid-cols-2">
+        <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {commerciallyActivePlans.map((plan) => {
             const action = getPricingAction(plan.key, viewer);
             return (
-              <article key={plan.key} className="rounded-lg border border-white/10 bg-[#0d1c2e]/75 p-5">
+              <article key={plan.key} className={`rounded-lg border p-5 ${plan.highlight ? "border-[#e1cb95]/60 bg-[#14243a] shadow-lg shadow-black/20" : "border-white/10 bg-[#0d1c2e]/75"}`}>
                 <div className="flex min-h-8 items-start justify-between gap-2">
                   <h2 className="text-lg font-semibold text-[#f4efe5]">{plan.name}</h2>
-                  {action.current ? <Badge>{copy.currentPlan}</Badge> : null}
+                  {plan.highlight ? <Badge>Most Popular</Badge> : action.current ? <Badge>{copy.currentPlan}</Badge> : null}
                 </div>
                 <p className="number mt-5 text-3xl font-semibold text-[#f4efe5]">
                   {plan.launchOffer?.monthlyPriceSek ?? plan.monthlyPriceSek} kr
@@ -128,7 +128,7 @@ export default async function PricingPage() {
                   <p className="text-xs text-[#9aa7b8]">{copy.perMonth}</p>
                 )}
                 <ul className="mt-5 min-h-44 space-y-3 text-sm text-[#c9d2df]">
-                  <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.monthlyAnalyses} {copy.analysesMonth}</li>
+                  <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.key === "free" ? copy.freeIntroAnalyses : `${plan.entitlements.monthlyAnalyses} ${copy.analysesMonth}`}</li>
                   <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.deepAnalyses} {copy.deepReports}</li>
                   <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.watchlistItems} {copy.watchlistCompanies}</li>
                   {plan.entitlements.batchRows ? <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />{plan.entitlements.batchRows} {copy.batchRows}</li> : null}

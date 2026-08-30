@@ -17,16 +17,18 @@ type AuthFormProps = {
   passwordHint?: string;
   workingLabel?: string;
   locale?: Locale;
+  nextPath?: string;
 };
 
 const initialState: AuthActionState = { ok: false, message: "" };
 
-export function AuthForm({ action, submitLabel, password = true, email = true, emailLabel = "Email", passwordLabel = "Password", passwordMode = "current", passwordHint, workingLabel = "Working...", locale = "en" }: AuthFormProps) {
+export function AuthForm({ action, submitLabel, password = true, email = true, emailLabel = "Email", passwordLabel = "Password", passwordMode = "current", passwordHint, workingLabel = "Working...", locale = "en", nextPath }: AuthFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
 
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="locale" value={locale} />
+      {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
       {email ? (
         <label className="block text-sm font-medium text-[#d6deea]">
           {emailLabel}

@@ -27,9 +27,22 @@ const feedbackUpdateSchema = z.object({
 const contactUpdateSchema = z.object({
   contactId: z.string().uuid(), status: z.enum(["new", "in_progress", "resolved", "spam"]),
 });
+const giveawayCampaignSchema = z.object({
+  affiliateId: z.string().uuid(),
+  label: z.string().trim().min(1).max(120),
+  planKey: z.enum(["basic", "standard", "premium", "elite"]),
+  quantity: z.coerce.number().int().min(1).max(100),
+  durationMonths: z.coerce.number().int().min(1).max(24),
+  claimDays: z.preprocess(
+    (value) => value === null || value === "" ? undefined : value,
+    z.coerce.number().int().min(1).max(3650).optional()
+  ),
+});
+const giveawayRevokeSchema = z.object({ campaignId: z.string().uuid() });
 
 function ambassadorState(ok: boolean, message: string): AdminAmbassadorState { return { ok, message }; }
 function generatedCode(name: string) { return buildAffiliateCode(name, randomBytes(3).toString("hex")); }
+function giveawayCode() { return `SBG-${randomBytes(8).toString("hex").toUpperCase()}`; }
 
 const integerField = (max: number) => z.string()
   .regex(/^\d+$/)
@@ -220,4 +233,51 @@ export async function updateContactMessageAction(formData: FormData) {
     .eq("id", parsed.data.contactId);
   if (error) throw new Error("Contact message could not be updated.");
   revalidatePath("/admin");
+}
+
+export async function createAffiliateGiveawayCampaignAction(formData: FormData) {
+  const admin = await requireAdmin();
+  const parsed = giveawayCampaignSchema.safeParse({
+    affiliateId: formData.get("affiliateId"),
+    label: formData.get("label"),
+    planKey: formData.get("planKey"),
+    quantity: formData.get("quantity"),
+    durationMonths: formData.get("durationMonths"),
+    claimDays: formData.get("claimDays"),
+  });
+  if (!parsed.success) throw new Error("Invalid giveaway campaign settings.");
+  const supabase = createAdminClient();
+  if (!supabase) throw new Error("Admin database access is not configured.");
+
+  const codes = Array.from({ length: parsed.data.quantity }, () => giveawayCode());
+  const claimExpiresAt = parsed.data.claimDays
+    ? new Date(Date.now() + parsed.data.claimDays * 86_400_000).toISOString()
+    : null;
+  const { error } = await supabase.rpc("create_affiliate_giveaway_campaign", {
+    p_actor_id: admin.id,
+    p_affiliate_id: parsed.data.affiliateId,
+    p_label: parsed.data.label,
+    p_plan_key: parsed.data.planKey,
+    p_duration_months: parsed.data.durationMonths,
+    p_claim_expires_at: claimExpiresAt,
+    p_codes: codes,
+  });
+  if (error) throw new Error("Giveaway campaign could not be created.");
+  revalidatePath("/admin");
+  revalidatePath("/affiliate");
+}
+
+export async function revokeAffiliateGiveawayCampaignAction(formData: FormData) {
+  const admin = await requireAdmin();
+  const parsed = giveawayRevokeSchema.safeParse({ campaignId: formData.get("campaignId") });
+  if (!parsed.success) throw new Error("Invalid giveaway campaign.");
+  const supabase = createAdminClient();
+  if (!supabase) throw new Error("Admin database access is not configured.");
+  const { error } = await supabase.rpc("revoke_affiliate_giveaway_campaign", {
+    p_actor_id: admin.id,
+    p_campaign_id: parsed.data.campaignId,
+  });
+  if (error) throw new Error("Giveaway campaign could not be revoked.");
+  revalidatePath("/admin");
+  revalidatePath("/affiliate");
 }

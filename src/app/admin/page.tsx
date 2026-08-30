@@ -6,7 +6,7 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth/session";
 import { adminEmails, getServerEnv, isFinancialProviderConfigured, isStripeConfigured, isSupabaseConfigured } from "@/lib/env/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { setAffiliateAmbassadorAccessAction, updateContactMessageAction, updateFeedbackAction } from "./actions";
+import { createAffiliateGiveawayCampaignAction, revokeAffiliateGiveawayCampaignAction, setAffiliateAmbassadorAccessAction, updateContactMessageAction, updateFeedbackAction } from "./actions";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -14,7 +14,9 @@ type ProviderHealthRow = { provider: string; operation: string; ok: boolean; lat
 type ErrorLogRow = { id: number; service: string; sanitized_error: string; created_at: string };
 type RuntimeHealth = { provider: string; operation: string; calls: number; successes: number; latencyTotal: number; latencySamples: number; lastIssue: string | null };
 type AmbassadorEntitlementRow = { user_id: string; monthly_analyses: number; deep_analyses: number; batch_rows: number; watchlist_items: number; portfolios: number };
-type AffiliateRow = { user_id: string | null; code: string; status: string; commission_basis_points: number };
+type AffiliateRow = { id: string; user_id: string | null; display_name: string | null; code: string; status: string; commission_basis_points: number };
+type GiveawayCampaignRow = { id: string; affiliate_id: string; label: string; plan_key: string; quantity: number; duration_months: number; claim_expires_at: string | null; status: string; created_at: string };
+type GiveawayCodeRow = { campaign_id: string; status: string };
 type WithdrawalRow = { id: string; user_id: string; stripe_subscription_id: string; plan_key: string; status: string; submitted_at: string };
 
 export default async function AdminPage() {
@@ -36,7 +38,7 @@ export default async function AdminPage() {
     supabase.from("ambassador_entitlements")
       .select("user_id,monthly_analyses,deep_analyses,batch_rows,watchlist_items,portfolios"),
     supabase.from("affiliates")
-      .select("user_id,code,status,commission_basis_points"),
+      .select("id,user_id,display_name,code,status,commission_basis_points"),
   ]) : [{ data: [] }, { data: [] }];
   const ambassadorEntitlements = new Map(
     ((ambassadorEntitlementResult.data ?? []) as AmbassadorEntitlementRow[])
@@ -53,6 +55,23 @@ export default async function AdminPage() {
   ]) : [{ data: [] }, { data: [] }];
   const feedback = feedbackResult.data ?? [];
   const contactMessages = contactResult.data ?? [];
+  const [giveawayCampaignResult, giveawayCodeResult] = supabase ? await Promise.all([
+    supabase.from("affiliate_giveaway_campaigns")
+      .select("id,affiliate_id,label,plan_key,quantity,duration_months,claim_expires_at,status,created_at")
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase.from("affiliate_giveaway_codes").select("campaign_id,status"),
+  ]) : [{ data: [] }, { data: [] }];
+  const giveawayCampaigns = (giveawayCampaignResult.data ?? []) as GiveawayCampaignRow[];
+  const giveawayCodeRows = (giveawayCodeResult.data ?? []) as GiveawayCodeRow[];
+  const giveawayCounts = new Map<string, { available: number; redeemed: number; revoked: number }>();
+  for (const row of giveawayCodeRows) {
+    const current = giveawayCounts.get(row.campaign_id) ?? { available: 0, redeemed: 0, revoked: 0 };
+    if (row.status === "available") current.available += 1;
+    if (row.status === "redeemed") current.redeemed += 1;
+    if (row.status === "revoked") current.revoked += 1;
+    giveawayCounts.set(row.campaign_id, current);
+  }
   const [providerHealthResult, errorLogResult, withdrawalResult] = supabase ? await Promise.all([
     supabase.from("provider_health")
       .select("provider,operation,ok,latency_ms,status_code,error_class,created_at")
@@ -148,6 +167,51 @@ export default async function AdminPage() {
           <h2 className="serif mt-2 text-2xl font-semibold">Add ambassador</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">Create the login, choose commission and monthly analysis allowance, then send the temporary credentials to the ambassador.</p>
           <AmbassadorCreateForm />
+        </section>
+
+        <section className="mt-10">
+          <p className="text-sm font-semibold text-[#e1cb95]">Affiliate promotions</p>
+          <h2 className="serif mt-2 text-2xl font-semibold">Giveaway campaigns</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">Create one-time codes that ambassadors can use for competitions. Winners receive temporary StockBox access without a Stripe subscription or affiliate commission.</p>
+          <form action={createAffiliateGiveawayCampaignAction} className="mt-5 grid gap-3 rounded-lg border border-white/10 bg-[#0d1c2e]/70 p-4 md:grid-cols-2 lg:grid-cols-6">
+            <label className="text-xs text-[#9aa7b8] lg:col-span-2">Ambassador
+              <select name="affiliateId" required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white">
+                <option value="">Select ambassador</option>
+                {((affiliateResult.data ?? []) as AffiliateRow[]).filter((item) => item.status === "active").map((item) => (
+                  <option key={item.id} value={item.id}>{item.display_name ?? item.code} ({item.code})</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-[#9aa7b8]">Plan
+              <select name="planKey" defaultValue="standard" className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white">
+                <option value="basic">Basic</option><option value="standard">Standard</option><option value="premium">Pro</option><option value="elite">Elite</option>
+              </select>
+            </label>
+            <label className="text-xs text-[#9aa7b8]">Winners
+              <input name="quantity" type="number" min="1" max="100" defaultValue="5" required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white" />
+            </label>
+            <label className="text-xs text-[#9aa7b8]">Free access months
+              <input name="durationMonths" type="number" min="1" max="24" defaultValue="12" required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white" />
+            </label>
+            <label className="text-xs text-[#9aa7b8]">Redemption deadline (days, optional)
+              <input name="claimDays" type="number" min="1" max="3650" placeholder="No deadline" className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white" />
+            </label>
+            <label className="text-xs text-[#9aa7b8] md:col-span-2 lg:col-span-5">Campaign label
+              <input name="label" maxLength={120} placeholder="September competition" required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white" />
+            </label>
+            <button type="submit" className="self-end rounded-md border border-[#e1cb95]/35 bg-[#e1cb95]/10 px-4 py-2 text-sm font-semibold text-[#f4e5b8] hover:bg-[#e1cb95]/15">Create giveaway</button>
+          </form>
+          <div className="mt-4 space-y-3">
+            {giveawayCampaigns.map((campaign) => {
+              const counts = giveawayCounts.get(campaign.id) ?? { available: 0, redeemed: 0, revoked: 0 };
+              const planName = campaign.plan_key === "premium" ? "Pro" : campaign.plan_key.charAt(0).toUpperCase() + campaign.plan_key.slice(1);
+              return <Card key={campaign.id} className="flex flex-wrap items-center justify-between gap-4">
+                <div><p className="font-semibold text-[#f4efe5]">{campaign.label}</p><p className="mt-1 text-xs text-[#9aa7b8]">{planName} · {campaign.duration_months} days · {counts.redeemed}/{campaign.quantity} redeemed · {counts.available} available · {campaign.claim_expires_at ? `claim by ${new Date(campaign.claim_expires_at).toLocaleDateString("sv-SE")}` : "no redemption deadline"}</p></div>
+                <div className="flex items-center gap-3"><span className="text-xs uppercase text-[#9aa7b8]">{campaign.status}</span>{campaign.status === "active" ? <form action={revokeAffiliateGiveawayCampaignAction}><input type="hidden" name="campaignId" value={campaign.id} /><button className="rounded-md border border-red-300/20 px-3 py-2 text-xs text-red-200 hover:bg-red-400/10">Revoke unused codes</button></form> : null}</div>
+              </Card>;
+            })}
+            {!giveawayCampaigns.length ? <p className="rounded-lg border border-white/10 bg-[#0d1c2e]/70 px-4 py-4 text-sm text-[#9aa7b8]">No giveaway campaigns yet.</p> : null}
+          </div>
         </section>
 
         <section className="mt-10">

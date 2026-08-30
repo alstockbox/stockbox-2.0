@@ -29,6 +29,8 @@ const envSchema = z.object({
   CRON_SECRET: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_BASIC_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_COUPON_BASIC_LAUNCH: z.string().optional().or(z.literal("")),
+  STRIPE_COUPON_STANDARD_LAUNCH: z.string().optional().or(z.literal("")),
+  STRIPE_COUPON_PREMIUM_LAUNCH: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_STANDARD_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_PREMIUM_MONTHLY: z.string().optional().or(z.literal("")),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional().or(z.literal("")),

@@ -47,7 +47,12 @@ vi.mock("@/lib/env/server", async () => {
       NEXT_PUBLIC_APP_URL: "https://stockbox.test",
       STRIPE_RESTRICTED_KEY: "rk_test",
       STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
-      STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch"
+      STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch",
+      STRIPE_PRICE_STANDARD_MONTHLY: "price_standard",
+      STRIPE_COUPON_STANDARD_LAUNCH: "coupon_standard",
+      STRIPE_PRICE_PREMIUM_MONTHLY: "price_pro",
+      STRIPE_COUPON_PREMIUM_LAUNCH: "coupon_pro",
+      STRIPE_PRICE_ELITE_MONTHLY: "price_elite"
     }))
   };
 });
@@ -117,6 +122,7 @@ describe("Basic checkout flow", () => {
     expect(mocks.createSession).toHaveBeenCalledWith({
       mode: "subscription",
       line_items: [{ price: "price_basic", quantity: 1 }],
+      automatic_tax: { enabled: true },
       success_url: "https://stockbox.test/settings/billing?checkout=success",
       cancel_url: "https://stockbox.test/pricing?checkout=cancelled",
       customer_email: "user@example.com",
@@ -189,6 +195,46 @@ describe("Basic checkout flow", () => {
     expect(params.discounts).toBeUndefined();
     expect(params.metadata).toMatchObject({ offer: "none" });
     expect(params.subscription_data?.metadata).toMatchObject({ offer: "none" });
+  });
+
+  it("still offers Standard launch after only Basic launch was redeemed", async () => {
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "basic", status: "canceled", stripeCustomerId: "cus_historical",
+      stripeSubscriptionId: "sub_historical", currentPeriodEnd: null,
+      cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: "2026-08-01T00:00:00.000Z",
+      launchOfferRedeemedPlans: ["basic"], createdAt: "2026-08-01T00:00:00.000Z"
+    } });
+    const request = new Request("http://localhost/api/stripe/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "standard" })
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
+    expect(params.metadata).toMatchObject({ offer: "standard_launch_3_months" });
+  });
+
+  it("opens Standard checkout with the Standard launch offer", async () => {
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "free", status: "active", stripeCustomerId: null, stripeSubscriptionId: null,
+      currentPeriodEnd: null, cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: null, createdAt: null
+    } });
+    const request = new Request("http://localhost/api/stripe/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "standard" })
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.line_items).toEqual([{ price: "price_standard", quantity: 1 }]);
+    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
+    expect(params.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
+    expect(params.subscription_data?.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
   });
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {

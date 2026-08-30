@@ -60,27 +60,19 @@ async function syncSubscription(
   const userId = subscription.metadata.userId;
 
   if (!userId) {
-    console.error("[billing] Stripe subscription is missing metadata.userId.", {
-      subscriptionId: subscription.id,
-      userId: null
-    });
+    console.error("[billing] Stripe subscription is missing metadata.userId.");
     throw new Error("Stripe subscription is missing its StockBox user ID.");
   }
 
   if (!plan) {
     console.error("[billing] Stripe subscription price does not map to a StockBox plan.", {
-      subscriptionId: subscription.id,
-      userId,
-      stripePriceId: priceId ?? null
+      pricePresent: Boolean(priceId)
     });
     throw new Error("Stripe subscription price is unknown.");
   }
   const supabase = createAdminClient();
   if (!supabase) {
-    console.error("[billing] Supabase admin client is unavailable for subscription sync.", {
-      subscriptionId: subscription.id,
-      userId
-    });
+    console.error("[billing] Supabase admin client is unavailable for subscription sync.");
     throw new Error("Supabase admin client is unavailable.");
   }
 
@@ -99,7 +91,7 @@ async function syncSubscription(
   const cancelAt = subscription.cancel_at
     ? new Date(subscription.cancel_at * 1000).toISOString()
     : null;
-  const launchOfferRedeemed = subscription.metadata.offer === "basic_launch_3_months";
+  const launchOfferRedeemed = Boolean(subscription.metadata.offer && subscription.metadata.offer !== "none");
 
   const { data, error } = await supabase.rpc("sync_subscription_from_stripe", {
     p_user_id: userId,
@@ -120,8 +112,6 @@ async function syncSubscription(
 
   if (error) {
     console.error("[billing] Supabase subscription sync failed.", {
-      subscriptionId: subscription.id,
-      userId,
       supabaseErrorCode: error.code,
       supabaseErrorMessage: sanitizeSupabaseErrorMessage(error.message)
     });

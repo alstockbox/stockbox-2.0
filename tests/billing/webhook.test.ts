@@ -174,8 +174,6 @@ describe("Stripe subscription webhook", () => {
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Supabase subscription sync failed.",
       expect.objectContaining({
-        subscriptionId: "sub_basic",
-        userId: "user_1",
         supabaseErrorCode: "23505",
         supabaseErrorMessage: "Conflict [redacted] [redacted] [redacted]"
       })
@@ -190,8 +188,7 @@ describe("Stripe subscription webhook", () => {
     expect(response.status).toBe(500);
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
-      "[billing] Stripe subscription is missing metadata.userId.",
-      { subscriptionId: "sub_basic", userId: null }
+      "[billing] Stripe subscription is missing metadata.userId."
     );
     consoleError.mockRestore();
   });
@@ -207,11 +204,7 @@ describe("Stripe subscription webhook", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "[billing] Stripe subscription price does not map to a StockBox plan.",
-      {
-        subscriptionId: "sub_basic",
-        userId: "user_1",
-        stripePriceId: "price_unknown"
-      }
+      { pricePresent: true }
     );
     consoleError.mockRestore();
   });
@@ -223,8 +216,7 @@ describe("Stripe subscription webhook", () => {
     expect(response.status).toBe(500);
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
-      "[billing] Supabase admin client is unavailable for subscription sync.",
-      { subscriptionId: "sub_basic", userId: "user_1" }
+      "[billing] Supabase admin client is unavailable for subscription sync."
     );
     consoleError.mockRestore();
   });

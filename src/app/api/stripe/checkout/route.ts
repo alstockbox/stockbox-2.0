@@ -11,7 +11,7 @@ import {
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import {
   getUserSubscription,
-  isCurrentBasicSubscription,
+  isCurrentPaidSubscription,
   reusableStripeCustomerId
 } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
@@ -50,10 +50,10 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isCurrentBasicSubscription(subscriptionLookup.subscription)) {
+  if (isCurrentPaidSubscription(subscriptionLookup.subscription)) {
     return Response.json(
       {
-        error: "Basic is already active for this account.",
+        error: "A paid subscription is already active for this account.",
         redirectUrl: "/settings/billing"
       },
       { status: 409 }
@@ -71,8 +71,16 @@ export async function POST(request: Request) {
   const stripe = getStripe();
   const env = getServerEnv();
   const priceId = plan.stripeEnv ? env[plan.stripeEnv] : null;
+  const redeemedLaunchPlans = subscriptionLookup.subscription?.launchOfferRedeemedPlans ?? [];
+  const legacyBasicLaunchRedeemed = Boolean(
+    plan.key === "basic" &&
+    subscriptionLookup.subscription?.launchOfferRedeemedAt &&
+    redeemedLaunchPlans.length === 0
+  );
   const launchOfferAvailable = Boolean(
-    plan.launchOffer && !subscriptionLookup.subscription?.launchOfferRedeemedAt
+    plan.launchOffer &&
+    !redeemedLaunchPlans.includes(plan.key) &&
+    !legacyBasicLaunchRedeemed
   );
   const couponId = launchOfferAvailable && plan.launchOffer
     ? env[plan.launchOffer.stripeCouponEnv]
@@ -87,11 +95,14 @@ export async function POST(request: Request) {
   }
 
   const stripeCustomerId = reusableStripeCustomerId(subscriptionLookup.subscription);
-  const offer = launchOfferAvailable ? "basic_launch_3_months" : "none";
+  const offer = launchOfferAvailable && plan.launchOffer
+    ? `${plan.key}_launch_${plan.launchOffer.durationMonths}_months`
+    : "none";
 
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
+    automatic_tax: { enabled: true },
     success_url: `${env.NEXT_PUBLIC_APP_URL}/settings/billing?checkout=success`,
     cancel_url: `${env.NEXT_PUBLIC_APP_URL}/pricing?checkout=cancelled`,
     ...(stripeCustomerId
