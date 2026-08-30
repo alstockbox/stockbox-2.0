@@ -16,6 +16,7 @@ import {
   type ProviderCapabilities,
   type ProviderFailureReason,
 } from "./providers";
+import { coordinatedYahooFetch } from "./yahoo-request";
 
 const PROVIDER_ID = "yahoo-fundamentals";
 const TIMESERIES_BASE = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries";
@@ -49,13 +50,13 @@ const FLOW_FIELDS = [
   "NetIncomeCommonStockholders", "DilutedNIAvailtoComStockholders", "DilutedEPS",
   "OperatingCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
   "TaxProvision", "CashDividendsPaid", "StockBasedCompensation", "ResearchAndDevelopment",
-  "DilutedAverageShares",
+  "FreeCashFlow", "DepreciationAndAmortization", "DilutedAverageShares",
 ] as const;
 
 const BALANCE_FIELDS = [
   "TotalAssets", "TotalLiabilitiesNetMinorityInterest", "StockholdersEquity", "MinorityInterest",
   "TotalEquityGrossMinorityInterest", "CashAndCashEquivalents", "TotalDebt", "CurrentAssets", "CurrentLiabilities",
-  "OrdinarySharesNumber",
+  "AccountsReceivable", "Inventory", "CurrentDebt", "LongTermDebt", "OrdinarySharesNumber",
 ] as const;
 
 const MONETARY_FLOW_FIELDS = FLOW_FIELDS.filter((field) => field !== "DilutedAverageShares");
@@ -250,9 +251,11 @@ function buildPeriod(
     epsDiluted: flow("DilutedEPS", "epsDiluted"),
     operatingCashFlow: flow("OperatingCashFlow", "operatingCashFlow"),
     capitalExpenditures: normalizedCapex(capexFact),
+    freeCashFlow: flow("FreeCashFlow", "freeCashFlow"),
     interestExpense: flow("InterestExpense", "interestExpense"),
     pretaxIncome: flow("PretaxIncome", "pretaxIncome"),
     incomeTaxExpense: flow("TaxProvision", "incomeTaxExpense"),
+    depreciationAndAmortization: flow("DepreciationAndAmortization", "depreciationAndAmortization"),
     dividendsPaid: dividendFact ? Math.abs(dividendFact.value) : null,
     stockBasedCompensation: flow("StockBasedCompensation", "stockBasedCompensation"),
     researchAndDevelopment: flow("ResearchAndDevelopment", "researchAndDevelopment"),
@@ -265,6 +268,10 @@ function buildPeriod(
     totalDebt: balance("TotalDebt", "totalDebt"),
     currentAssets: balance("CurrentAssets", "currentAssets"),
     currentLiabilities: balance("CurrentLiabilities", "currentLiabilities"),
+    accountsReceivable: balance("AccountsReceivable", "accountsReceivable"),
+    inventory: balance("Inventory", "inventory"),
+    shortTermDebt: balance("CurrentDebt", "shortTermDebt"),
+    longTermDebt: balance("LongTermDebt", "longTermDebt"),
     currentSharesOutstanding: balance("OrdinarySharesNumber", "currentSharesOutstanding"),
     provenance: metricProvenance,
   };
@@ -286,12 +293,26 @@ function latestAtOrBefore(values: YahooValue[], concepts: string[], date: string
     .at(-1) ?? null;
 }
 
+function trailingDates(values: YahooValue[]): string[] {
+  const anchors = new Set(["trailingTotalRevenue", "trailingNetIncome", "trailingOperatingCashFlow"]);
+  return [...new Set(values
+    .filter((item) => anchors.has(item.concept) && item.periodType === "TTM")
+    .map((item) => item.asOfDate))]
+    .sort();
+}
+
 function trailingDate(values: YahooValue[]): string | null {
-  for (const concept of ["trailingTotalRevenue", "trailingNetIncome", "trailingOperatingCashFlow"]) {
-    const fact = latest(values, concept, "TTM");
-    if (fact) return fact.asOfDate;
-  }
-  return null;
+  return trailingDates(values).at(-1) ?? null;
+}
+
+function priorComparableTrailingDate(values: YahooValue[], currentDate: string): string | null {
+  const currentTime = Date.parse(currentDate);
+  return [...trailingDates(values)]
+    .reverse()
+    .find((date) => {
+      const gap = (currentTime - Date.parse(date)) / 86_400_000;
+      return Number.isFinite(gap) && gap >= 330 && gap <= 400;
+    }) ?? null;
 }
 
 function balanceDateFor(values: YahooValue[], flowDate: string): string | null {
@@ -299,15 +320,52 @@ function balanceDateFor(values: YahooValue[], flowDate: string): string | null {
     ?? latestAtOrBefore(values, ["annualTotalAssets", "annualStockholdersEquity", "annualCashAndCashEquivalents"], flowDate)?.asOfDate
     ?? null;
 }
-function classifyYahooMetadata(metadata: YahooMetadata) {
-  const description = [metadata.industry, metadata.sector].filter(Boolean).join(" ");
-  const classified = classifyCompany({ sicDescription: description, name: metadata.name });
+
+function balancePrefixForDate(values: YahooValue[], balanceDate: string): "quarterly" | "annual" {
+  return values.some((item) => item.asOfDate === balanceDate && item.concept.startsWith("quarterly"))
+    ? "quarterly"
+    : "annual";
+}
+
+function priorComparableBalanceDate(values: YahooValue[], currentBalanceDate: string): string | null {
+  const currentTime = Date.parse(currentBalanceDate);
+  const anchors = new Set([
+    "quarterlyTotalAssets", "quarterlyStockholdersEquity", "quarterlyCashAndCashEquivalents",
+    "annualTotalAssets", "annualStockholdersEquity", "annualCashAndCashEquivalents",
+  ]);
+  return [...new Set(values
+    .filter((item) => anchors.has(item.concept) && item.asOfDate < currentBalanceDate)
+    .map((item) => item.asOfDate))]
+    .flatMap((date) => {
+      const gap = (currentTime - Date.parse(date)) / 86_400_000;
+      return Number.isFinite(gap) && gap >= 330 && gap <= 400 ? [{ date, gap }] : [];
+    })
+    .sort((left, right) => Math.abs(left.gap - 365.2425) - Math.abs(right.gap - 365.2425))[0]?.date ?? null;
+}
+
+function buildBalanceSheetPeriod(
+  values: YahooValue[],
+  balanceDate: string,
+): FinancialPeriod {
+  const period = buildPeriod(values, "annual", balanceDate, balancePrefixForDate(values, balanceDate), balanceDate);
+  return { ...period, form: "BALANCE_SHEET", periodBasis: undefined };
+}
+function classifyYahooMetadata(
+  metadata: YahooMetadata,
+  fallbackName?: string | null,
+  fallbackSectorHint?: string | null,
+  fallbackIndustryHint?: string | null,
+) {
+  const effectiveSector = metadata.sector ?? fallbackSectorHint ?? null;
+  const effectiveIndustry = metadata.industry ?? fallbackIndustryHint ?? null;
+  const description = [effectiveIndustry, effectiveSector].filter(Boolean).join(" ");
+  const classified = classifyCompany({ sicDescription: description, name: metadata.name ?? fallbackName });
   const confidentUnsupportedSpecialist = classified.analysisArchetype === "unknown"
     && !classified.classificationDiagnostics.ambiguous
     && classified.classificationDiagnostics.confidence >= 0.6;
   if (classified.analysisArchetype !== "unknown" || confidentUnsupportedSpecialist) return classified;
 
-  const sector = (metadata.sector ?? "").toLowerCase();
+  const sector = (effectiveSector ?? "").toLowerCase();
   const fallback = (
     resolvedSector: Sector,
     analysisArchetype: AnalysisArchetype,
@@ -316,7 +374,7 @@ function classifyYahooMetadata(metadata: YahooMetadata) {
     industry: metadata.industry,
     analysisArchetype,
     classificationDiagnostics: {
-      reason: `Yahoo sector metadata (${metadata.sector ?? "unavailable"}) supplied the fallback classification.`,
+      reason: `${metadata.sector ? "Yahoo" : fallbackSectorHint ? "Listed-security" : "Unavailable"} sector metadata (${effectiveSector ?? "unavailable"}) supplied the fallback classification.`,
       source: "fallback" as const,
       confidence: analysisArchetype === "unknown" ? 0.3 : 0.55,
       ambiguous: analysisArchetype === "unknown",
@@ -337,7 +395,7 @@ function classifyYahooMetadata(metadata: YahooMetadata) {
 }
 async function fetchJson(url: URL): Promise<AdapterResult<JsonObject>> {
   try {
-    const response = await fetch(url, {
+    const response = await coordinatedYahooFetch(url, {
       headers: { accept: "application/json", "user-agent": "Mozilla/5.0 StockBox/1.0" },
       next: { revalidate: 60 * 30 },
     });
@@ -356,11 +414,23 @@ async function fetchJson(url: URL): Promise<AdapterResult<JsonObject>> {
   }
 }
 
+async function fetchJsonWithYahooHostFailover(url: URL): Promise<AdapterResult<JsonObject>> {
+  const primary = await fetchJson(url);
+  const alternateHost = url.hostname === "query1.finance.yahoo.com"
+    ? "query2.finance.yahoo.com"
+    : url.hostname === "query2.finance.yahoo.com" ? "query1.finance.yahoo.com" : null;
+  if (primary.ok || !alternateHost || !["rate_limited", "html_response", "upstream_error"].includes(primary.reason)) return primary;
+  const fallbackUrl = new URL(url);
+  fallbackUrl.hostname = alternateHost;
+  return fetchJson(fallbackUrl);
+}
+
 async function fetchMetadata(symbol: string): Promise<YahooMetadata> {
   const url = new URL(SEARCH_BASE);
   url.searchParams.set("q", symbol);
   url.searchParams.set("quotesCount", "5");
-  url.searchParams.set("newsCount", "0");  const response = await fetchJson(url);
+  url.searchParams.set("newsCount", "0");
+  const response = await fetchJsonWithYahooHostFailover(url);
   if (!response.ok) return { sector: null, industry: null, name: null };
   const quotes = Array.isArray(response.data.quotes) ? response.data.quotes : [];
   const quote = quotes.map(object).find((item) => stringValue(item?.symbol)?.toUpperCase() === symbol.toUpperCase()) ?? null;
@@ -394,7 +464,7 @@ export const yahooCompanySearchProvider: CompanySearchProvider = {
     url.searchParams.set("q", query);
     url.searchParams.set("quotesCount", "20");
     url.searchParams.set("newsCount", "0");
-    const response = await fetchJson(url);
+    const response = await fetchJsonWithYahooHostFailover(url);
     if (!response.ok) return {
       ...response,
       diagnostic: providerDiagnostic("Yahoo Finance search", "search", "unavailable", response.reason),
@@ -438,7 +508,7 @@ async function fetchTimeseries(symbol: string): Promise<AdapterResult<YahooValue
   url.searchParams.set("type", REQUEST_TYPES.join(","));
   url.searchParams.set("period1", "1262304000");
   url.searchParams.set("period2", stableYahooPeriod2());
-  const response = await fetchJson(url);
+  const response = await fetchJsonWithYahooHostFailover(url);
   if (!response.ok) return response;
   const values = parseSeries(response.data);
   if (!values.length) return failure("empty_response", "Yahoo Finance returned no usable fundamentals facts for this security.");
@@ -497,13 +567,21 @@ export async function fetchYahooFundamentalsResult(
   const annualPeriods = dates.map((date) => buildPeriod(values, "annual", date, "annual", date));
   const currentTrailingDate = trailingDate(values);
   const balanceDate = currentTrailingDate ? balanceDateFor(values, currentTrailingDate) : null;
-  const balancePrefix = balanceDate && values.some((item) => item.asOfDate === balanceDate && item.concept.startsWith("quarterly"))
-    ? "quarterly" as const
-    : "annual" as const;
+  const balancePrefix = balanceDate ? balancePrefixForDate(values, balanceDate) : "annual";
   const trailingTwelveMonths = currentTrailingDate && balanceDate
     ? buildPeriod(values, "trailing", currentTrailingDate, balancePrefix, balanceDate)
     : undefined;
-  const classification = classifyYahooMetadata(metadata);
+  const priorTrailingDate = currentTrailingDate ? priorComparableTrailingDate(values, currentTrailingDate) : null;
+  const priorBalanceDate = priorTrailingDate ? balanceDateFor(values, priorTrailingDate) : null;
+  const priorBalancePrefix = priorBalanceDate ? balancePrefixForDate(values, priorBalanceDate) : "annual";
+  const priorTrailingTwelveMonths = priorTrailingDate && priorBalanceDate
+    ? buildPeriod(values, "trailing", priorTrailingDate, priorBalancePrefix, priorBalanceDate)
+    : undefined;
+  const priorComparableBalanceDateValue = balanceDate ? priorComparableBalanceDate(values, balanceDate) : null;
+  const priorComparableBalanceSheet = priorComparableBalanceDateValue
+    ? buildBalanceSheetPeriod(values, priorComparableBalanceDateValue)
+    : undefined;
+  const classification = classifyYahooMetadata(metadata, company.name, company.sectorHint, company.industryHint);
   const marketCapFact = latest(values, "trailingMarketCap", "TTM");
   const sharesFact = latest(values, "quarterlyOrdinarySharesNumber", "3M")
     ?? latest(values, "annualOrdinarySharesNumber", "12M");
@@ -527,6 +605,8 @@ export async function fetchYahooFundamentalsResult(
       annual: annualPeriods.map(toLegacy),
       annualPeriods,
       trailingTwelveMonths,
+      priorTrailingTwelveMonths,
+      priorComparableBalanceSheet,
       reportedMarketCap: marketCapFact?.value ?? null,
       reportedMarketCapDate: marketCapFact?.asOfDate ?? null,
       reportedMarketCapCurrency: marketCapFact?.currencyCode ?? null,

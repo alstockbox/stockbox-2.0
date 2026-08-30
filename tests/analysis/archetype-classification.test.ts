@@ -66,7 +66,7 @@ describe("global operating-sector classification", () => {
 describe("specialized financial-services classification", () => {
   it("recognizes asset management as a confidently unsupported specialist model", () => {
     const result = classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Global Asset Manager" });
-    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "unknown" }));
+    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "investment_entity" }));
     expect(result.classificationDiagnostics).toEqual(expect.objectContaining({
       ambiguous: false,
       confidence: expect.any(Number),
@@ -74,12 +74,22 @@ describe("specialized financial-services classification", () => {
     expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.75);
   });
 
+  it("routes an investment-company name to the holding-company model even when Yahoo calls the industry Asset Management", () => {
+    const result = classifyCompany({ sicDescription: "Asset Management Financial Services", name: "Investor AB" });
+    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "holding_company" }));
+  });
+
   it("recognizes capital-markets groups as confidently unsupported specialist financials", () => {
     const result = classifyCompany({ sicDescription: "Capital Markets Financial Services", name: "Global Capital Markets Group" });
-    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "unknown" }));
+    expect(result).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "financial_intermediary" }));
     expect(result.classificationDiagnostics).toEqual(expect.objectContaining({ ambiguous: false }));
     expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.75);
   });
+
+  it.each(["Credit Services Financial Services", "Mortgage Finance Financial Services"])("routes specialist lending/intermediation industries to a financial-intermediary model: %s", (sicDescription) => {
+    expect(classifyCompany({ sicDescription, name: "Financial Group" })).toEqual(expect.objectContaining({ sector: "financials", analysisArchetype: "financial_intermediary" }));
+  });
+
 });
 
 describe("bank industry wording", () => {
@@ -132,16 +142,16 @@ describe("non-REIT real estate classification", () => {
   ])("keeps broad real-estate operating businesses out of the generic corporate archetype: %s", (sicDescription) => {
     expect(classifyCompany({ sicDescription, name: "Property Group" })).toEqual(expect.objectContaining({
       sector: "realEstate",
-      analysisArchetype: "unknown",
+      analysisArchetype: "property_company",
     }));
   });
 });
 
 describe("real estate archetype resolution", () => {
   it("does not treat a broad real-estate sector as REIT evidence", () => {
-    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Development" })).toBe("unknown");
-    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Services" })).toBe("unknown");
-    expect(resolveArchetype({ sector: "realEstate", industry: "Property Management" })).toBe("unknown");
+    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Development" })).toBe("property_company");
+    expect(resolveArchetype({ sector: "realEstate", industry: "Real Estate Services" })).toBe("property_company");
+    expect(resolveArchetype({ sector: "realEstate", industry: "Property Management" })).toBe("property_company");
   });
 
   it("resolves a real-estate company as REIT only when REIT evidence is present", () => {

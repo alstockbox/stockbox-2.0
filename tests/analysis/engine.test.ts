@@ -415,6 +415,30 @@ describe("analyzeFinancials", () => {
 });
 
 
+describe("canonical provider period mapping", () => {
+  it("preserves the provider-reported prior comparable balance sheet", () => {
+    const priorComparableBalanceSheet = {
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      currency: "SEK",
+      totalAssets: 100,
+      totalEquity: 60,
+    };
+    const canonical = toFinancialAnalysisInput({
+      company: { ticker: "TEST.ST", name: "Test AB", country: "SE", currency: "SEK" },
+      fundamentals: {
+        ticker: "TEST.ST", name: "Test AB", sector: "industrials", industry: "Industrials", annual: [],
+        priorComparableBalanceSheet,
+      },
+      market: null,
+      analysisType: "deep",
+      investmentProfile: "balanced",
+    });
+
+    expect(canonical.priorComparableBalanceSheet).toEqual(priorComparableBalanceSheet);
+  });
+});
+
 describe("identity and confidence safety", () => {
   it("does not assign perfect issuer identity confidence to an unresolved listing identity", () => {
     const canonical = toFinancialAnalysisInput({

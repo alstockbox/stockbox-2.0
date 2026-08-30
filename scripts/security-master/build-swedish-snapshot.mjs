@@ -185,6 +185,8 @@ function toSecurity(source) {
     mic: config.mic,
     venue: source.venue,
     marketSegment: source.marketSegment,
+    sectorHint: assertString(source.sectorHint) || undefined,
+    industryHint: assertString(source.industryHint) || undefined,
     country: "SE",
     currency: "SEK",
     securityType: type,
@@ -225,6 +227,7 @@ async function fetchNasdaqSecurities() {
         issuerName: issuerNameFromSecurityName(assertString(row.issuerFullName || row.name || row.fullName || row.symbol)),
         isin: assertString(row.isin),
         nativeId: assertString(row.orderbookId),
+        sectorHint: assertString(row.sector),
         sourceUrl: `${NASDAQ_BASE}?category=${config.venue === "NASDAQ_STOCKHOLM_MAIN" ? "MAIN_MARKET" : "FIRST_NORTH"}&market=STO&segment=${config.segmentCode}`,
       }));
     }

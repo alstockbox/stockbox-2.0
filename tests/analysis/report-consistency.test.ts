@@ -15,6 +15,7 @@ function legacyInput(analysisType: AnalysisInput["analysisType"]): AnalysisInput
       volume: 1000,
       yearHigh: 35,
       yearLow: 20,
+      marketCap: 3_000,
       performance: { "3M": 0.1, "1Y": 0.38 },
     },
     fundamentals: {
@@ -54,6 +55,9 @@ describe("report depth consistency", () => {
     const deep = buildAnalysis(legacyInput("deep"));
     const research = buildAnalysis(legacyInput("research"));
     expect(summary.metrics).toEqual(numbers.metrics);
+    expect(numbers.metrics.priceEarnings).toBe(numbers.engine?.metrics.valuation.priceEarnings);
+    expect(numbers.metrics.priceSales).toBe(numbers.engine?.metrics.valuation.priceSales);
+    expect(numbers.metrics.evEbitda).toBe(numbers.engine?.metrics.valuation.evEbitda);
     expect(numbers.metrics).toEqual(deep.metrics);
     expect(summary.score.score).toBe(numbers.score.score);
     expect(numbers.score.score).toBe(deep.score.score);

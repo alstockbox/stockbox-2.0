@@ -213,6 +213,51 @@ describe("computeFinancialMetrics", () => {
     ]));
   });
 
+  it("does not flag share-basis mismatch when market cap and quote price are from different dates", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-30T00:00:00.000Z",
+      company: {
+        ...durableCompounderInput.company,
+        reportingCurrency: "USD",
+        tradingCurrency: "USD",
+      },
+      market: {
+        ...durableCompounderInput.market,
+        price: 30,
+        priceDate: "2026-08-30",
+        currency: "USD",
+        marketCap: 6000,
+        marketCapAsOf: "2026-08-27",
+        marketCapCurrency: "USD",
+        sharesOutstanding: 102,
+        sharesOutstandingAsOf: "2026-06-30",
+        enterpriseValue: 6100,
+      },
+    });
+
+    expect(metrics.valuation.marketCap).toBe(6000);
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "shareBasisAlignment" }),
+    ]));
+  });
+  it("does not compare current market cap with an older share-count observation", () => {
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      analysisDate: "2026-08-30T00:00:00.000Z",
+      company: { ...durableCompounderInput.company, reportingCurrency: "USD", tradingCurrency: "USD" },
+      market: {
+        ...durableCompounderInput.market, price: 30, priceDate: "2026-08-30", currency: "USD",
+        marketCap: 6000, marketCapAsOf: "2026-08-30", marketCapCurrency: "USD",
+        sharesOutstanding: 102, sharesOutstandingAsOf: "2026-06-30", enterpriseValue: 6100,
+      },
+    });
+    expect(metrics.valuation.marketCap).toBe(6000);
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "shareBasisAlignment" }),
+    ]));
+  });
+
   it("uses actual fiscal-year distance for three-year CAGR when an intermediate year is missing", () => {
     const annualPeriods = [
       { fiscalYear: 2020, periodEndDate: "2020-12-31", currency: "USD", revenue: 80 },
@@ -488,6 +533,118 @@ describe("computeFinancialMetrics", () => {
     );
   });
 
+  it("uses prior provider-reported TTM balances for TTM return metrics without constructed-YTD metadata", () => {
+    const current = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2026-06-30",
+      balanceSheetDate: "2026-06-30",
+      revenue: 1_300,
+      operatingIncome: 330,
+      netIncome: 250,
+      operatingCashFlow: 290,
+      capitalExpenditures: 25,
+      totalAssets: 1_500,
+      totalEquity: 700,
+      totalDebt: 240,
+      cashAndEquivalents: 190,
+    };
+    const prior = {
+      ...current,
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      revenue: 1_150,
+      operatingIncome: 285,
+      netIncome: 215,
+      operatingCashFlow: 250,
+      totalAssets: 1_300,
+      totalEquity: 610,
+      totalDebt: 225,
+      cashAndEquivalents: 165,
+    };
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      trailingTwelveMonths: current,
+      priorTrailingTwelveMonths: prior,
+    });
+
+    expect(metrics.growth.revenueGrowthBasis).toBe("TTM_YOY");
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(1_300 / 1_150 - 1, 5);
+    expect(metrics.ratios.returnOnAssets).toBeCloseTo(250 / ((1_500 + 1_300) / 2), 5);
+    expect(metrics.ratios.returnOnEquity).toBeCloseTo(250 / ((700 + 610) / 2), 5);
+    expect(metrics.ratios.returnOnInvestedCapital).not.toBeNull();
+    expect(metrics.cashFlow.accrualRatio).not.toBeNull();
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "returnMetricAverageBalances" }),
+    ]));
+  });
+
+  it("uses a provider-reported prior balance sheet for TTM return denominators without changing annual growth fallback", () => {
+    const current = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2026-06-30",
+      balanceSheetDate: "2026-06-30",
+      revenue: 1_300,
+      operatingIncome: 330,
+      netIncome: 250,
+      operatingCashFlow: 290,
+      capitalExpenditures: 25,
+      totalAssets: 1_500,
+      totalEquity: 700,
+      totalDebt: 240,
+      cashAndEquivalents: 190,
+    };
+    const priorBalanceSheet = {
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      currency: "USD",
+      totalAssets: 1_300,
+      totalEquity: 610,
+      totalDebt: 225,
+      cashAndEquivalents: 165,
+    };
+    const metrics = computeFinancialMetrics({
+      ...durableCompounderInput,
+      trailingTwelveMonths: current,
+      priorTrailingTwelveMonths: undefined,
+      priorComparableBalanceSheet: priorBalanceSheet,
+    });
+
+    expect(metrics.growth.revenueGrowthBasis).toBe("ANNUAL_YOY");
+    expect(metrics.growth.revenueGrowthYoY).toBeCloseTo(0.2, 5);
+    expect(metrics.ratios.returnOnAssets).toBeCloseTo(250 / ((1_500 + 1_300) / 2), 5);
+    expect(metrics.ratios.returnOnEquity).toBeCloseTo(250 / ((700 + 610) / 2), 5);
+    expect(metrics.ratios.returnOnInvestedCapital).not.toBeNull();
+    expect(metrics.cashFlow.accrualRatio).not.toBeNull();
+    expect(metrics.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "returnMetricAverageBalances" }),
+    ]));
+  });
+
+  it("uses same-period annual operating income and interest expense when TTM interest expense is unavailable", () => {
+    const trailingTwelveMonths = {
+      ...durableCompounderInput.annualPeriods.at(-1)!,
+      form: "TTM",
+      periodBasis: "TTM_REPORTED" as const,
+      periodEndDate: "2026-06-30",
+      balanceSheetDate: "2026-06-30",
+      operatingIncome: 500,
+      interestExpense: null,
+    };
+    const metrics = computeFinancialMetrics({ ...durableCompounderInput, trailingTwelveMonths });
+    const latestAnnual = durableCompounderInput.annualPeriods.at(-1)!;
+
+    expect(latestAnnual.operatingIncome).not.toBeNull();
+    expect(latestAnnual.interestExpense).not.toBeNull();
+    expect(metrics.ratios.interestCoverage).toBeCloseTo(
+      latestAnnual.operatingIncome! / Math.abs(latestAnnual.interestExpense!),
+      5,
+    );
+    expect(metrics.ratios.interestCoverage).not.toBeCloseTo(500 / Math.abs(latestAnnual.interestExpense!), 5);
+  });
   it("uses explicit annual growth fallback but no mismatched annual balance for TTM returns", () => {
     const trailingTwelveMonths = {
       ...durableCompounderInput.annualPeriods.at(-1)!,

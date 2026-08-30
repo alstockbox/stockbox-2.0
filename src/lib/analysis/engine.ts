@@ -151,6 +151,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
     annualPeriods,
     trailingTwelveMonths: fundamentals?.trailingTwelveMonths,
     priorTrailingTwelveMonths: fundamentals?.priorTrailingTwelveMonths,
+    priorComparableBalanceSheet: fundamentals?.priorComparableBalanceSheet,
     market: input.market ? {
       price: input.market.price,
       currency: input.market.currency || null,
@@ -295,6 +296,7 @@ function hasFutureFinancialData(input: FinancialAnalysisInput): boolean {
   return [
     input.trailingTwelveMonths,
     input.priorTrailingTwelveMonths,
+    input.priorComparableBalanceSheet,
     ...input.annualPeriods,
   ].filter((period): period is FinancialPeriod => Boolean(period)).some((period) =>
     dateIsTooFarInFuture(period.periodEndDate, analysisDate)
@@ -309,7 +311,7 @@ function normalizedCurrency(value: string | null | undefined): string | null {
 
 function financialCurrencyCodes(input: FinancialAnalysisInput): string[] {
   const currencies = new Set<string>();
-  for (const period of [input.trailingTwelveMonths, input.priorTrailingTwelveMonths, ...input.annualPeriods]) {
+  for (const period of [input.trailingTwelveMonths, input.priorTrailingTwelveMonths, input.priorComparableBalanceSheet, ...input.annualPeriods]) {
     if (!period) continue;
     const currency = normalizedCurrency(period.currency ?? input.company.reportingCurrency ?? input.company.currency);
     if (currency) currencies.add(currency);
@@ -321,6 +323,7 @@ function hasFinancialCurrencyConflict(input: FinancialAnalysisInput): boolean {
   return [
     input.trailingTwelveMonths,
     input.priorTrailingTwelveMonths,
+    input.priorComparableBalanceSheet,
     ...input.annualPeriods,
   ].filter((period): period is FinancialPeriod => Boolean(period)).some((period) =>
     (period.currencyConflict?.length ?? 0) > 1
@@ -517,6 +520,17 @@ function legacyMetrics(result: FinancialAnalysisResult, input: FinancialAnalysis
       : null,
     netDebt: m.ratios.netDebt,
     interestCoverage: m.ratios.interestCoverage,
+    currentRatio: m.ratios.currentRatio,
+    netDebtToEbitda: m.ratios.netDebtToEbitda,
+    returnOnEquity: m.ratios.returnOnEquity,
+    returnOnAssets: m.ratios.returnOnAssets,
+    returnOnInvestedCapital: m.ratios.returnOnInvestedCapital,
+    priceEarnings: m.valuation.priceEarnings,
+    priceSales: m.valuation.priceSales,
+    priceBook: m.valuation.priceBook,
+    evEbitda: m.valuation.evEbitda,
+    evSales: m.valuation.evSales,
+    peg: m.valuation.peg,
     earningsYield: m.valuation.earningsYield,
     fcfYield: m.valuation.freeCashFlowYield,
     priceMomentum1y: input.market?.pricePerformance?.oneYear ?? null,

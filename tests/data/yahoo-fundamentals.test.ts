@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompanySearchResult } from "../../src/lib/analysis/types";
 import { fetchYahooFundamentalsResult, yahooCompanySearchProvider, yahooSymbolForCompany } from "../../src/lib/data/yahoo-fundamentals";
+import { resetYahooMarketProviderStateForTests, yahooMarketDataProvider } from "../../src/lib/data/yahoo-market";
 
 const company: CompanySearchResult = {
   ticker: "VOLV-B.ST",
@@ -162,6 +163,68 @@ describe("Yahoo global fundamentals adapter", () => {
     }));
   });
 
+  it("uses the known company name for classification when Yahoo metadata is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const payload = String(input).includes("fundamentals-timeseries") ? timeseriesPayload : { quotes: [] };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const result = await fetchYahooFundamentalsResult({ ...company, name: "Eurobattery Minerals" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.analysisArchetype).toBe("cyclical");
+  });
+
+  it("uses a listed-security sector hint when Yahoo sector metadata is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const payload = String(input).includes("fundamentals-timeseries") ? timeseriesPayload : { quotes: [] };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const result = await fetchYahooFundamentalsResult({ ...company, name: "Mavshack", sectorHint: "Consumer Discretionary" } as typeof company & { sectorHint: string });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual(expect.objectContaining({ sector: "consumer", analysisArchetype: "standard" }));
+  });
+
+  it("fails over Yahoo metadata search to query2 when query1 is rate limited", async () => {
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("query1.finance.yahoo.com/v1/finance/search")) {
+        return new Response("Too Many Requests", { status: 429, headers: { "Content-Type": "text/plain" } });
+      }
+      const payload = url.includes("fundamentals-timeseries") ? timeseriesPayload : metadataPayload;
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    expect(requested.some((url) => url.includes("query2.finance.yahoo.com/v1/finance/search"))).toBe(true);
+  });
+
+  it("fails over Yahoo fundamentals timeseries from query2 to query1 when query2 is rate limited", async () => {
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input); requested.push(url);
+      if (url.includes("fundamentals-timeseries") && url.includes("query2.finance.yahoo.com")) return new Response("rate limited", { status: 429, headers: { "Content-Type": "text/plain" } });
+      const payload = url.includes("fundamentals-timeseries") ? timeseriesPayload : metadataPayload;
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    expect(requested.some((url) => url.includes("query1.finance.yahoo.com") && url.includes("fundamentals-timeseries"))).toBe(true);
+  });
+
+  it("serializes Yahoo fundamentals and chart transport across providers", async () => {
+    const chartPayload = { chart: { result: [{ meta: { currency: "SEK", regularMarketPrice: 100 }, timestamp: [1_735_689_600, 1_735_776_000], indicators: { quote: [{ close: [99, 100], volume: [1000, 1000] }], adjclose: [{ adjclose: [99, 100] }] } }], error: null } };
+    let active = 0; let maxActive = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      active += 1; maxActive = Math.max(maxActive, active); await new Promise((resolve) => setTimeout(resolve, 10)); active -= 1;
+      const url = String(input); const payload = url.includes("fundamentals-timeseries") ? timeseriesPayload : url.includes("/v1/finance/search") ? metadataPayload : chartPayload;
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    resetYahooMarketProviderStateForTests();
+    const [fundamentals, market] = await Promise.all([fetchYahooFundamentalsResult(company), yahooMarketDataProvider.fetchMarketData({ ticker: "TEST.ST", name: "Test" })]);
+    expect(fundamentals.ok).toBe(true); expect(market.ok).toBe(true); expect(maxActive).toBe(1);
+  });
+
   it("uses one stable Yahoo timeseries cache key throughout the same UTC day", async () => {
     vi.useFakeTimers();
     const requested: string[] = [];
@@ -185,9 +248,9 @@ describe("Yahoo global fundamentals adapter", () => {
   });
 
   it.each([
-    ["Financial Services", "Asset Management", "unknown", 0.75],
-    ["Real Estate", "Real Estate Services", "unknown", 0.7],
-  ] as const)("preserves a confident unsupported specialist classification instead of replacing it with a generic sector fallback: %s / %s", async (sector, industry, archetype, minimumConfidence) => {
+    ["Financial Services", "Asset Management", "investment_entity", 0.75],
+    ["Real Estate", "Real Estate Services", "property_company", 0.7],
+  ] as const)("preserves a specialist classification instead of replacing it with a generic sector fallback: %s / %s", async (sector, industry, archetype, minimumConfidence) => {
     const specialistMetadata = {
       quotes: [{ symbol: "VOLV-B.ST", sector, industry, longname: "Specialist Company" }],
     };
@@ -238,6 +301,120 @@ describe("Yahoo global fundamentals adapter", () => {
       periodEnd: "2026-06-30",
       unit: "SEK",
       valueKind: "reported",
+    }));
+  });
+
+  it("builds a prior provider-reported TTM period with the matching prior balance sheet", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    const priorTrailing = (value: number): Row => ({ ...trailing(value), asOfDate: "2025-06-30" });
+    const priorQuarter = (value: number): Row => ({ ...quarter(value), asOfDate: "2025-06-30" });
+    const addPrior = (type: string, row: Row) => {
+      const item = payload.timeseries.result.find((result) => result.meta.type[0] === type);
+      if (item) (item[type as keyof typeof item] as Row[]).unshift(row);
+    };
+    addPrior("trailingTotalRevenue", priorTrailing(450_000));
+    addPrior("trailingGrossProfit", priorTrailing(110_000));
+    addPrior("trailingOperatingIncome", priorTrailing(45_000));
+    addPrior("trailingNetIncome", priorTrailing(31_000));
+    addPrior("trailingOperatingCashFlow", priorTrailing(44_000));
+    addPrior("trailingCapitalExpenditure", priorTrailing(-23_000));
+    addPrior("quarterlyTotalAssets", priorQuarter(630_000));
+    addPrior("quarterlyTotalLiabilitiesNetMinorityInterest", priorQuarter(460_000));
+    addPrior("quarterlyStockholdersEquity", priorQuarter(170_000));
+    addPrior("quarterlyCashAndCashEquivalents", priorQuarter(55_000));
+    addPrior("quarterlyTotalDebt", priorQuarter(235_000));
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.priorTrailingTwelveMonths).toEqual(expect.objectContaining({
+      periodBasis: "TTM_REPORTED",
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      revenue: 450_000,
+      operatingIncome: 45_000,
+      netIncome: 31_000,
+      totalAssets: 630_000,
+      totalEquity: 170_000,
+      totalDebt: 235_000,
+      cashAndEquivalents: 55_000,
+    }));
+  });
+
+  it("captures a prior comparable quarterly balance sheet even when Yahoo exposes only one TTM flow period", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    const priorQuarter = (value: number): Row => ({ ...quarter(value), asOfDate: "2025-06-30" });
+    for (const [type, value] of [
+      ["quarterlyTotalAssets", 630_000],
+      ["quarterlyTotalLiabilitiesNetMinorityInterest", 460_000],
+      ["quarterlyStockholdersEquity", 170_000],
+      ["quarterlyCashAndCashEquivalents", 55_000],
+      ["quarterlyTotalDebt", 235_000],
+    ] as const) {
+      const item = payload.timeseries.result.find((result) => result.meta.type[0] === type);
+      if (item) (item[type as keyof typeof item] as Row[]).unshift(priorQuarter(value));
+    }
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.priorTrailingTwelveMonths).toBeUndefined();
+    expect(result.data.priorComparableBalanceSheet).toEqual(expect.objectContaining({
+      periodEndDate: "2025-06-30",
+      balanceSheetDate: "2025-06-30",
+      currency: "SEK",
+      totalAssets: 630_000,
+      totalLiabilities: 460_000,
+      totalEquity: 170_000,
+      totalDebt: 235_000,
+      cashAndEquivalents: 55_000,
+    }));
+  });
+
+  it("maps richer Yahoo cash-flow and balance-sheet concepts without inventing values", async () => {
+    const payload = structuredClone(timeseriesPayload);
+    payload.timeseries.result.push(
+      series("annualFreeCashFlow", [annual("2024-12-31", 24_000), annual("2025-12-31", 19_000)]),
+      series("trailingFreeCashFlow", [trailing(23_500)]),
+      series("annualDepreciationAndAmortization", [annual("2024-12-31", 10_000), annual("2025-12-31", 11_500)]),
+      series("trailingDepreciationAndAmortization", [trailing(12_000)]),
+      series("annualAccountsReceivable", [annual("2024-12-31", 80_000), annual("2025-12-31", 84_000)]),
+      series("quarterlyAccountsReceivable", [quarter(88_000)]),
+      series("annualInventory", [annual("2024-12-31", 70_000), annual("2025-12-31", 74_000)]),
+      series("quarterlyInventory", [quarter(77_000)]),
+      series("annualCurrentDebt", [annual("2024-12-31", 30_000), annual("2025-12-31", 35_000)]),
+      series("quarterlyCurrentDebt", [quarter(37_000)]),
+      series("annualLongTermDebt", [annual("2024-12-31", 200_000), annual("2025-12-31", 212_000)]),
+      series("quarterlyLongTermDebt", [quarter(223_000)]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? payload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.trailingTwelveMonths).toEqual(expect.objectContaining({
+      freeCashFlow: 23_500,
+      depreciationAndAmortization: 12_000,
+      accountsReceivable: 88_000,
+      inventory: 77_000,
+      shortTermDebt: 37_000,
+      longTermDebt: 223_000,
+    }));
+    expect(result.data.annualPeriods?.at(-1)).toEqual(expect.objectContaining({
+      freeCashFlow: 19_000,
+      depreciationAndAmortization: 11_500,
+      accountsReceivable: 84_000,
+      inventory: 74_000,
+      shortTermDebt: 35_000,
+      longTermDebt: 212_000,
     }));
   });
 

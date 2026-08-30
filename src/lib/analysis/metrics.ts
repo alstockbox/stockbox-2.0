@@ -102,12 +102,11 @@ function comparableBalancePeriods(current: FinancialPeriod | null, prior: Financ
 
 function comparableTtmPeriods(current: FinancialPeriod | null, prior: FinancialPeriod | null): boolean {
   if (!current?.periodEndDate || !prior?.periodEndDate || !current.periodBasis || current.periodBasis !== prior.periodBasis) return false;
-  if (!isFiniteNumber(current.currentYtdDurationDays) || !isFiniteNumber(prior.currentYtdDurationDays)) return false;
   const endGap = (Date.parse(current.periodEndDate) - Date.parse(prior.periodEndDate)) / 86_400_000;
-  return Number.isFinite(endGap)
-    && endGap >= 330
-    && endGap <= 400
-    && Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
+  if (!Number.isFinite(endGap) || endGap < 330 || endGap > 400) return false;
+  if (current.periodBasis === "TTM_REPORTED") return true;
+  if (!isFiniteNumber(current.currentYtdDurationDays) || !isFiniteNumber(prior.currentYtdDurationDays)) return false;
+  return Math.abs(current.currentYtdDurationDays - prior.currentYtdDurationDays) <= 15;
 }
 
 function periodSpanYears(older: FinancialPeriod | null, newer: FinancialPeriod | null): number | null {
@@ -262,6 +261,15 @@ export function marketCapShareBasisDifference(
     DATA_FRESHNESS_THRESHOLDS_DAYS.marketCap,
   );
   if (marketCapStatus.status !== "current") return null;
+  const marketCapDate = input.market?.marketCapAsOf ?? input.market?.priceDate;
+  const priceDate = input.market?.priceDate;
+  if (!marketCapDate || !priceDate) return null;
+  const observationGapDays = Math.abs(Date.parse(marketCapDate) - Date.parse(priceDate)) / 86_400_000;
+  if (!Number.isFinite(observationGapDays) || observationGapDays > 1) return null;
+  const sharesDate = input.market?.sharesOutstandingAsOf;
+  if (!sharesDate) return null;
+  const shareObservationGapDays = Math.abs(Date.parse(sharesDate) - Date.parse(marketCapDate)) / 86_400_000;
+  if (!Number.isFinite(shareObservationGapDays) || shareObservationGapDays > 7) return null;
   const marketCap = input.market?.marketCap;
   const shares = currentSharesForValuation(input, latest);
   const economicPrice = quotePriceToEconomic(input.market?.price, input.market?.currency ?? input.company.tradingCurrency);
@@ -379,7 +387,11 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const growthLatest = priorTtm ? latest : latestAnnual;
   const trendComparison = input.trailingTwelveMonths ? priorTtm : previousAnnual;
   const returnBalanceComparison = input.trailingTwelveMonths
-    ? comparableBalancePeriods(latest, priorTtm) ? priorTtm : null
+    ? comparableBalancePeriods(latest, priorTtm)
+      ? priorTtm
+      : comparableBalancePeriods(latest, input.priorComparableBalanceSheet ?? null)
+        ? input.priorComparableBalanceSheet ?? null
+        : null
     : previousAnnual;
   const missingData: MissingDataItem[] = [];
   if (!latest) addMissingData(missingData, "annualPeriods", "No reliable financial period is available.", "metric", "high");
@@ -450,6 +462,9 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
   const netDebt = isFiniteNumber(latest?.totalDebt) && isFiniteNumber(latest.cashAndEquivalents)
     ? latest.totalDebt - latest.cashAndEquivalents
     : null;
+  const interestCoveragePeriod = isFiniteNumber(latest?.interestExpense) ? latest : latestAnnual;
+  const interestCoverageOperatingIncome = interestCoveragePeriod?.operatingIncome;
+  const interestCoverageExpense = interestCoveragePeriod?.interestExpense;
   const roic = isFiniteNumber(averageCapital) && averageCapital > 0 ? safeDivide(nopat, averageCapital) : null;
   const assumedWacc = input.dcfAssumptions?.discountRate;
 
@@ -488,8 +503,8 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
         : null,
       netDebt,
       netDebtToEbitda: isFiniteNumber(netDebt) && isFiniteNumber(ebitda) && ebitda > 0 ? netDebt / ebitda : null,
-      interestCoverage: isFiniteNumber(operatingIncome) && isFiniteNumber(latest?.interestExpense) && latest.interestExpense !== 0
-        ? operatingIncome / Math.abs(latest.interestExpense)
+      interestCoverage: isFiniteNumber(interestCoverageOperatingIncome) && isFiniteNumber(interestCoverageExpense) && interestCoverageExpense !== 0
+        ? interestCoverageOperatingIncome / Math.abs(interestCoverageExpense)
         : null,
       returnOnEquity: isFiniteNumber(averageEquity) && averageEquity > 0 ? safeDivide(netIncome, averageEquity) : null,
       returnOnAssets: isFiniteNumber(averageAssets) && averageAssets > 0 ? safeDivide(netIncome, averageAssets) : null,

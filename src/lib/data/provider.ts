@@ -383,6 +383,7 @@ function mergeFundamentals(
     annualPeriods: annual.periods,
     trailingTwelveMonths: trailingTwelveMonths ?? secondary.trailingTwelveMonths,
     priorTrailingTwelveMonths: primary.priorTrailingTwelveMonths ?? secondary.priorTrailingTwelveMonths,
+    priorComparableBalanceSheet: primary.priorComparableBalanceSheet ?? secondary.priorComparableBalanceSheet,
     reportedMarketCap: primary.reportedMarketCap ?? secondary.reportedMarketCap,
     reportedMarketCapDate: primary.reportedMarketCapDate ?? secondary.reportedMarketCapDate,
     reportedMarketCapCurrency: primary.reportedMarketCapCurrency ?? secondary.reportedMarketCapCurrency,

@@ -143,6 +143,12 @@ function routedMethod(archetype: ReturnType<typeof resolveFinancialArchetype>): 
       return { method: "Residual income / equity multiples", reason: "Specialized equity and regulatory-capital inputs are required; corporate FCFF is inappropriate." };
     case "reit":
       return { method: "AFFO / NAV", reason: "Provider-reported AFFO and property NAV inputs are required; corporate FCFF is inappropriate." };
+    case "property_company":
+      return { method: "Book-value / earnings multiples", reason: "Property-company valuation uses book value and earnings multiples; corporate FCFF is inappropriate without property-level NOI and cap-rate inputs." };
+    case "investment_entity":
+      return { method: "Equity multiples / AUM context", reason: "Investment entities require AUM, fee economics or look-through asset data for directional valuation; corporate FCFF is inappropriate." };
+    case "financial_intermediary":
+      return { method: "Equity multiples / credit-quality context", reason: "Financial intermediaries require credit-quality, funding or capital-markets specialist inputs for directional valuation; corporate FCFF is inappropriate." };
     case "holding_company":
       return { method: "NAV / SOTP", reason: "Look-through holdings and holding-company net debt are required." };
     case "pre_revenue_biotech":

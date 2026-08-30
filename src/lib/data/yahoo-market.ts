@@ -6,9 +6,11 @@ import {
   type ProviderCapabilities,
   type ProviderFailureReason,
 } from "./providers";
+import { coordinatedYahooFetch, resetYahooRequestCoordinatorForTests } from "./yahoo-request";
 
 const PROVIDER_ID = "yahoo-chart";
-const BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
+const BASE_URLS = ["https://query1.finance.yahoo.com/v8/finance/chart", "https://query2.finance.yahoo.com/v8/finance/chart"] as const;
+let preferredBaseUrl: string = BASE_URLS[0];
 const MAX_PRICE = 1_000_000_000;
 const TARGET_TOLERANCE_DAYS = 7;
 const MIN_BETA_OBSERVATIONS = 52;
@@ -26,6 +28,9 @@ export const YAHOO_MARKET_CAPABILITIES: ProviderCapabilities = {
 
 type JsonObject = Record<string, unknown>;
 type PriceRow = { date: string; close: number; volume: number | null };
+const BENCHMARK_CACHE_MS = 15 * 60 * 1000;
+const RATE_LIMIT_RETRY_ROUNDS = 3;
+const benchmarkChartCache = new Map<string, { expiresAt: number; result: Promise<AdapterResult<JsonObject>> }>();
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
@@ -191,39 +196,60 @@ function firstChartResult(payload: JsonObject): JsonObject | null {
   return object(results[0]);
 }
 async function requestChart(symbol: string): Promise<AdapterResult<JsonObject>> {
-  const url = new URL(`${BASE_URL}/${encodeURIComponent(symbol)}`);
-  url.searchParams.set("range", "2y");
-  url.searchParams.set("interval", "1d");
-  url.searchParams.set("events", "div,splits");
-  url.searchParams.set("includeAdjustedClose", "true");
-
-  try {
-    const response = await fetch(url, {
-      headers: { accept: "application/json" },
-      next: { revalidate: 60 * 15 },
-    });
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (contentType.includes("text/html")) {
-      return failure("html_response", "Yahoo Finance returned HTML instead of market data.");
+  let lastFailure: AdapterResult<JsonObject> | null = null;
+  for (let round = 0; round < RATE_LIMIT_RETRY_ROUNDS; round += 1) {
+    const orderedBaseUrls = [preferredBaseUrl, ...BASE_URLS.filter((baseUrl) => baseUrl !== preferredBaseUrl)];
+    let exhaustedByRateLimit = false;
+    for (const [index, baseUrl] of orderedBaseUrls.entries()) {
+      const url = new URL(`${baseUrl}/${encodeURIComponent(symbol)}`);
+      url.searchParams.set("range", "2y"); url.searchParams.set("interval", "1d");
+      url.searchParams.set("events", "div,splits"); url.searchParams.set("includeAdjustedClose", "true");
+      try {
+        const response = await coordinatedYahooFetch(url, { headers: { accept: "application/json" }, next: { revalidate: 60 * 15 } });
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+        if (!response.ok) {
+          const reason: ProviderFailureReason = response.status === 429 ? "rate_limited" : response.status === 404 ? "not_found" : "upstream_error";
+          const failed = failure<JsonObject>(reason, `Yahoo Finance chart request failed with HTTP ${response.status}.`);
+          lastFailure = failed;
+          if (index < orderedBaseUrls.length - 1 && (response.status === 429 || response.status >= 500)) continue;
+          if (response.status === 429 && round < RATE_LIMIT_RETRY_ROUNDS - 1) { exhaustedByRateLimit = true; break; }
+          return failed;
+        }
+        if (contentType.includes("text/html")) {
+          const failed = failure<JsonObject>("html_response", "Yahoo Finance returned HTML instead of market data.");
+          if (index < orderedBaseUrls.length - 1) { lastFailure = failed; continue; }
+          return failed;
+        }
+        if (!contentType.includes("json")) return failure("unexpected_content_type", "Yahoo Finance returned an unexpected fundamentals content type.");
+        const payload = object(await response.json()); if (!payload) return failure("empty_response", "Yahoo Finance returned an empty response.");
+        const message = yahooError(payload); if (message) return failure(/not found/i.test(message) ? "not_found" : "upstream_error", `Yahoo Finance rejected the symbol: ${message}`);
+        preferredBaseUrl = baseUrl;
+        return { ok: true, data: payload, diagnostic: providerDiagnostic("Yahoo Finance chart", "market_data", "available") };
+      } catch (error) {
+        const failed = failure<JsonObject>(error instanceof SyntaxError ? "empty_response" : "upstream_error", "Yahoo Finance chart data could not be reached or parsed.");
+        if (index < orderedBaseUrls.length - 1) { lastFailure = failed; continue; }
+        return failed;
+      }
     }
-    if (!response.ok) {
-      return failure(response.status === 429 ? "rate_limited" : response.status === 404 ? "not_found" : "upstream_error", `Yahoo Finance chart request failed with HTTP ${response.status}.`);
-    }
-    if (!contentType.includes("json")) {
-      return failure("unexpected_content_type", "Yahoo Finance returned an unexpected content type.");
-    }
-    const payload = object(await response.json());
-    if (!payload) return failure("empty_response", "Yahoo Finance returned an empty response.");
-    const message = yahooError(payload);
-    if (message) return failure(/not found/i.test(message) ? "not_found" : "upstream_error", `Yahoo Finance rejected the symbol: ${message}`);
-    return {
-      ok: true,
-      data: payload,
-      diagnostic: providerDiagnostic("Yahoo Finance chart", "market_data", "available"),
-    };
-  } catch (error) {
-    return failure(error instanceof SyntaxError ? "empty_response" : "upstream_error", "Yahoo Finance chart data could not be reached or parsed.");
+    if (!exhaustedByRateLimit) break;
   }
+  return lastFailure ?? failure("upstream_error", "Yahoo Finance chart data could not be reached.");
+}
+
+async function requestBenchmarkChart(symbol: string): Promise<AdapterResult<JsonObject>> {
+  const cached = benchmarkChartCache.get(symbol);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+  const result = requestChart(symbol);
+  benchmarkChartCache.set(symbol, { expiresAt: Date.now() + BENCHMARK_CACHE_MS, result });
+  const resolved = await result;
+  if (!resolved.ok) benchmarkChartCache.delete(symbol);
+  return resolved;
+}
+
+export function resetYahooMarketProviderStateForTests(): void {
+  preferredBaseUrl = BASE_URLS[0];
+  benchmarkChartCache.clear();
+  resetYahooRequestCoordinatorForTests();
 }
 
 function performance(rows: PriceRow[]): MarketSnapshot["performance"] {
@@ -270,7 +296,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
       return failure("future_date", "Yahoo Finance returned a future-dated market observation.");
     }
 
-    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
+    const benchmarkResponse = benchmarkSymbol ? await requestBenchmarkChart(benchmarkSymbol) : null;
     const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
     const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
     const yearRows = lastYearRows(history);

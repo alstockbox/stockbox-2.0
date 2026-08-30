@@ -16,7 +16,11 @@ function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<k
     grossMargin: copy.metricLabels.grossMargin, operatingMargin: copy.metricLabels.operatingMargin, netMargin: copy.metricLabels.netMargin,
     fcf: copy.metricLabels.fcf, fcfMargin: copy.metricLabels.fcfMargin, cashConversion: copy.metricLabels.cashConversion,
     debtToEquity: copy.metricLabels.debtToEquity, debtToAssets: copy.metricLabels.debtToAssets, netDebt: copy.metricLabels.netDebt,
-    interestCoverage: copy.metricLabels.interestCoverage, earningsYield: copy.metricLabels.earningsYield, fcfYield: copy.metricLabels.fcfYield,
+    interestCoverage: copy.metricLabels.interestCoverage, currentRatio: copy.metricLabels.currentRatio, netDebtToEbitda: copy.metricLabels.netDebtToEbitda,
+    returnOnEquity: copy.metricLabels.returnOnEquity, returnOnAssets: copy.metricLabels.returnOnAssets, returnOnInvestedCapital: copy.metricLabels.returnOnInvestedCapital,
+    priceEarnings: copy.metricLabels.priceEarnings, priceSales: copy.metricLabels.priceSales, priceBook: copy.metricLabels.priceBook,
+    evEbitda: copy.metricLabels.evEbitda, evSales: copy.metricLabels.evSales, peg: copy.metricLabels.peg,
+    earningsYield: copy.metricLabels.earningsYield, fcfYield: copy.metricLabels.fcfYield,
     priceMomentum1y: copy.metricLabels.priceMomentum1y, priceMomentum3m: copy.metricLabels.priceMomentum3m,
   };
 }
@@ -37,7 +41,10 @@ function formatMetric(key: keyof Metrics, value: number | null, unavailable: str
       "fcfYield",
       "priceMomentum1y",
       "priceMomentum3m",
-      "debtToAssets"
+      "debtToAssets",
+      "returnOnEquity",
+      "returnOnAssets",
+      "returnOnInvestedCapital"
     ].includes(key)
   ) {
     return formatPercent(value);

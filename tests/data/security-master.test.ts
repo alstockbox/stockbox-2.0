@@ -29,6 +29,9 @@ describe("listed security master", () => {
       venue: "NASDAQ_STOCKHOLM_MAIN",
       analysisCapability: expect.objectContaining({ fundamentals: "unavailable", marketData: "available" }),
     }));
+    expect(securities.find((security) => security.ticker === "MAV")).toEqual(expect.objectContaining({
+      sectorHint: "Consumer Discretionary",
+    }));
     expect(securities.find((security) => security.ticker === "VISC")).toEqual(expect.objectContaining({
       isin: "SE0021148160",
       venue: "NASDAQ_STOCKHOLM_MAIN",

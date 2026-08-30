@@ -40,10 +40,13 @@ export type AnalysisArchetype =
   | "bank"
   | "insurer"
   | "reit"
+  | "property_company"
   | "utility"
   | "cyclical"
   | "pre_revenue_biotech"
   | "holding_company"
+  | "investment_entity"
+  | "financial_intermediary"
   | "unknown";
 
 export type InsurerSubtype = "property_casualty" | "life" | "reinsurance" | "mixed" | "unknown";
@@ -115,6 +118,8 @@ export type CompanySearchResult = {
   exchange?: string;
   mic?: string;
   marketSegment?: string;
+  sectorHint?: string;
+  industryHint?: string;
   country?: string;
   currency?: string;
   entityId?: string;
@@ -226,6 +231,7 @@ export type CompanyFundamentals = {
   annualPeriods?: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
+  priorComparableBalanceSheet?: FinancialPeriod;
   specialized?: SpecializedCompanyData;
   diagnostics?: AnalysisDiagnostics;
   reportedMarketCap?: number | null;
@@ -261,6 +267,17 @@ export type Metrics = {
   debtToAssets: number | null;
   netDebt: number | null;
   interestCoverage: number | null;
+  currentRatio: number | null;
+  netDebtToEbitda: number | null;
+  returnOnEquity: number | null;
+  returnOnAssets: number | null;
+  returnOnInvestedCapital: number | null;
+  priceEarnings: number | null;
+  priceSales: number | null;
+  priceBook: number | null;
+  evEbitda: number | null;
+  evSales: number | null;
+  peg: number | null;
   earningsYield: number | null;
   fcfYield: number | null;
   priceMomentum1y: number | null;
@@ -299,7 +316,7 @@ export type ScoreContributor = {
   score: number | null;
   weight: number;
   impact: "positive" | "negative" | "neutral";
-  availability?: "available" | "missing" | "unsuitable";
+  availability?: "available" | "missing" | "unsuitable" | "not_meaningful";
   source?: string;
   period?: string;
 };
@@ -528,6 +545,7 @@ export type FinancialAnalysisInput = {
   annualPeriods: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
+  priorComparableBalanceSheet?: FinancialPeriod;
   market?: FinancialMarketSnapshot;
   estimates?: ForwardEstimates;
   dcfAssumptions?: DcfInputAssumptions;

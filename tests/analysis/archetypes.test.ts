@@ -66,6 +66,15 @@ describe("archetype-specific analysis", () => {
     ]));
   });
 
+  it("uses a property-company model instead of industrial FCF and ROIC for non-REIT real estate", () => {
+    const result = asArchetype("property_company" as AnalysisArchetype, { company: { sector: "realEstate", industry: "Real Estate—Diversified" } });
+    expect(result.dcf.status).toBe("inappropriate");
+    expect(result.dcf.method).toContain("Book");
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["P / Book", "P / E", "Earnings yield"]);
+    expect(result.scores.dimensions.profitability.contributors?.some((item) => item.label === "ROIC")).toBe(false);
+    expect(result.scores.dimensions.cashFlow.contributors?.some((item) => item.label === "Simple FCF margin")).toBe(false);
+  });
+
   it("lets verified REIT FFO/AFFO metrics contribute when specialized coverage exists", () => {
     const result = asArchetype("reit", {
       company: { sector: "realEstate" },
@@ -106,6 +115,7 @@ describe("archetype-specific analysis", () => {
       grossProfit: 75 * 1.4 ** index,
       operatingIncome: -40,
       netIncome: -50,
+      epsDiluted: -1 + index * 0.1,
       operatingCashFlow: -25,
       capitalExpenditures: 10,
       stockBasedCompensation: 30,
@@ -113,8 +123,30 @@ describe("archetype-specific analysis", () => {
     }));
     const result = asArchetype("software_growth", { annualPeriods });
     expect(result.metrics.valuation.priceEarnings).toBeNull();
+    const peContributor = result.scores.dimensions.valuation.contributors?.find((item) => item.label === "P/E");
+    expect(peContributor?.availability).toBe("not_meaningful");
+    const epsCagr = result.scores.dimensions.growth.contributors?.find((item) => item.label === "EPS CAGR 3Y");
+    const fcfPerShareCagr = result.scores.dimensions.growth.contributors?.find((item) => item.label === "FCF/share CAGR 3Y");
+    expect(epsCagr?.availability).toBe("not_meaningful");
+    expect(fcfPerShareCagr?.availability).toBe("not_meaningful");
+    expect(result.scores.dimensions.valuation.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "P/E" }),
+    ]));
+    expect(result.scores.dimensions.growth.missingData).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "EPS CAGR 3Y" }),
+      expect.objectContaining({ field: "FCF/share CAGR 3Y" }),
+    ]));
     expect(result.dcf.status).toBe("unavailable");
     expect(["Buy", "Strong Buy"]).not.toContain(result.recommendation.rating);
+  });
+
+  it("uses an investment-entity model without industrial FCF or ROIC", () => {
+    const result = asArchetype("investment_entity" as AnalysisArchetype, { company: { sector: "financials", industry: "Asset Management" } });
+    expect(result.dcf.status).toBe("inappropriate");
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["P / Book", "P / E", "Earnings yield"]);
+    expect(result.scores.dimensions.profitability.contributors?.some((item) => item.label === "ROIC")).toBe(false);
+    expect(result.scores.dimensions.cashFlow.plannedWeight).toBe(0);
+    expect(result.recommendation.rating).toBe("No Rating");
   });
 
   it("requires through-cycle coverage for a cyclical company", () => {
@@ -142,12 +174,26 @@ describe("archetype-specific analysis", () => {
     expect(result.scores.dimensions.financialHealth.contributors?.some((item) => item.label === "Cash runway (years)")).toBe(true);
   });
 
-  it("requires NAV/SOTP for a holding company", () => {
+  it("requires NAV/SOTP for a holding company without leaking industrial metrics", () => {
     const result = asArchetype("holding_company", { company: { sector: "financials" } });
     expect(result.dcf.method).toBe("NAV / SOTP");
+    expect(result.dcf.status).toBe("inappropriate");
     expect(result.scores.stockBoxScore).toBeNull();
     expect(result.recommendation.rating).toBe("No Rating");
-    expect(result.scores.dimensions.profitability.score).toBeNull();
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["NAV / SOTP"]);
+    expect(result.scores.dimensions.profitability.contributors?.some((item) => item.label === "ROIC")).toBe(false);
+    expect(result.scores.dimensions.cashFlow.plannedWeight).toBe(0);
+    expect(result.scores.dimensions.earningsQuality.plannedWeight).toBe(0);
+  });
+
+  it("uses a financial-intermediary model without industrial FCF or ROIC", () => {
+    const result = asArchetype("financial_intermediary" as AnalysisArchetype, { company: { sector: "financials" } });
+    expect(result.dcf.status).toBe("inappropriate");
+    expect(result.dcf.method).toContain("Equity");
+    expect(result.scores.dimensions.cashFlow.plannedWeight).toBe(0);
+    expect(result.scores.dimensions.quality.contributors?.some((item) => item.label === "ROIC")).toBe(false);
+    expect(result.scores.dimensions.valuation.contributors?.map((item) => item.label)).toEqual(["P / Book", "P / E", "Earnings yield"]);
+    expect(result.recommendation.rating).toBe("No Rating");
   });
 
   it("allows a utility FCFF route while retaining utility thresholds", () => {

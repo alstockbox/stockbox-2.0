@@ -241,7 +241,10 @@ describe("archetype-aware flag purity", () => {
     grossMargin: 0.6, operatingMargin: 0.3, netMargin: 0.2,
     fcf: 120, fcfMargin: 0.2, cashConversion: 1.1,
     debtToEquity: 0.2, debtToAssets: 0.15, netDebt: 50,
-    interestCoverage: 12, earningsYield: 0.05, fcfYield: 0.06,
+    interestCoverage: 12, currentRatio: 2, netDebtToEbitda: 0.5,
+    returnOnEquity: 0.18, returnOnAssets: 0.12, returnOnInvestedCapital: 0.16,
+    priceEarnings: 20, priceSales: 4, priceBook: 3, evEbitda: 14, evSales: 4, peg: 1.5,
+    earningsYield: 0.05, fcfYield: 0.06,
     priceMomentum1y: 0.1, priceMomentum3m: 0.05,
   };
 

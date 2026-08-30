@@ -31,6 +31,7 @@ export function classifyCompany(input: {
 } {
   const sic = (input.sic ?? "").replace(/\D/g, "");
   const description = (input.sicDescription ?? "").trim();
+  const nameText = (input.name ?? "").trim().toLowerCase();
   const text = `${description} ${input.name ?? ""}`.toLowerCase();
 
   const classified = (
@@ -78,8 +79,8 @@ export function classifyCompany(input: {
   if (/\breal estate\b|property development|property management/.test(text)) {
     return classified(
       "realEstate",
-      "unknown",
-      "Industry description identifies a non-REIT real-estate business; a specialized property-company model is required before corporate methodology can be used.",
+      "property_company",
+      "Industry description identifies a non-REIT property operating company; StockBox uses a property-specific balance-sheet and earnings framework.",
       "description",
       0.78,
     );
@@ -121,8 +122,8 @@ export function classifyCompany(input: {
     const source = startsWithAny(sic, SOFTWARE_SICS) ? "sic" : "description";
     return classified("technology", "software_growth", `${source === "sic" ? "SIC" : "Industry description"} identifies a software business.`, source, source === "sic" ? 0.93 : 0.82);
   }
-  if (/holding compan/.test(text)) {
-    return classified("financials", "holding_company", "Industry description identifies an investment holding company.", "description", 0.82);
+  if (/holding compan/.test(text) || /\b(?:investor|investment|invest|ventures?)\b/.test(nameText)) {
+    return classified("financials", "holding_company", "Company name or industry description identifies an investment holding or venture-investment company.", "description", 0.84);
   }
   if (/electronic gaming|gaming\s*(?:&|and)\s*multimedia|interactive media|video games?/.test(text)) {
     return classified("communication", "standard", "Industry description identifies an interactive gaming or multimedia business.", "description", 0.82);
@@ -148,11 +149,11 @@ export function classifyCompany(input: {
   if (/financial data|stock exchanges?|securities exchanges?|market infrastructure/.test(text)) {
     return classified("financials", "standard", "Industry description identifies financial-market infrastructure or data services rather than a balance-sheet financial institution.", "description", 0.8);
   }
-  if (/capital markets/.test(text)) {
-    return classified("financials", "unknown", "Industry description identifies a capital-markets business; a specialized capital-markets model is required before corporate methodology can be used.", "description", 0.8);
+  if (/capital markets|credit services|mortgage finance/.test(text)) {
+    return classified("financials", "financial_intermediary", "Industry description identifies a lending or capital-markets intermediary; StockBox uses a conservative equity and balance-sheet framework without corporate FCFF.", "description", 0.8);
   }
   if (/asset management|investment management|investment advisers?/.test(text)) {
-    return classified("financials", "unknown", "Industry description identifies an asset-management business; a specialized asset-manager model is required before corporate methodology can be used.", "description", 0.8);
+    return classified("financials", "investment_entity", "Industry description identifies an investment-management or investment-entity business; StockBox uses a conservative equity and balance-sheet framework without corporate FCFF.", "description", 0.8);
   }
   if (/financial services|finance compan|broker/.test(text)) {
     return classified("financials", "unknown", "Financial-services wording is not specific enough to select a bank, insurer, asset-manager, or holding-company model.", "description", 0.35);
@@ -172,7 +173,7 @@ export function resolveArchetype(input: {
   if (input.analysisArchetype) return input.analysisArchetype;
   if (input.sector === "financials") return "unknown";
   if (input.sector === "realEstate") {
-    return /\breit\b|real estate investment trusts?/i.test(input.industry ?? "") ? "reit" : "unknown";
+    return /\breit\b|real estate investment trusts?/i.test(input.industry ?? "") ? "reit" : "property_company";
   }
   if (input.sector === "utilities") return "utility";
   if (input.sector === "energy" || input.sector === "materials") return "cyclical";
@@ -224,7 +225,7 @@ export function resolveFinancialArchetype(input: FinancialAnalysisInput): Analys
 }
 
 export function supportsFcffDcf(archetype: AnalysisArchetype): boolean {
-  return !["bank", "insurer", "reit", "pre_revenue_biotech", "holding_company", "unknown"].includes(
+  return !["bank", "insurer", "reit", "property_company", "pre_revenue_biotech", "holding_company", "investment_entity", "financial_intermediary", "unknown"].includes(
     archetype,
   );
 }
