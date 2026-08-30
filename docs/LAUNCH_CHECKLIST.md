@@ -34,7 +34,6 @@ Current production code target: `5c8a4dd` — Analysis Engine v2.7 integrated on
 
 - [ ] Replace/approve the explicit draft Privacy notice with final controller/business identity, contact, lawful bases, retention, transfers and data-subject procedure language.
 - [ ] Replace/approve the explicit draft Terms with final commercial identity, pricing/VAT/refund/trial treatment, governing law/support and disclaimer language.
-- [ ] Enable Supabase leaked-password protection if the plan supports it; review password policy and re-run Security Advisor.
 - [ ] Verify Supabase Auth Site URL and redirect allow-list use `https://www.getstockbox.app` and required callback/reset URLs.
 - [ ] Run a real production signup -> email confirmation -> onboarding -> login -> logout flow.
 - [ ] Run a real forgot-password -> email -> callback -> password update -> login flow.
@@ -51,6 +50,8 @@ Current production code target: `5c8a4dd` — Analysis Engine v2.7 integrated on
 - [ ] Run the complete final HTTPS/customer-journey smoke after all items above are green.
 
 ## Scope freeze for v1
+
+Supabase leaked-password protection is a non-blocking post-launch security enhancement until the Supabase plan is upgraded.
 
 Comparisons, screener, news, Stock of the Day, automated portfolio monitoring, advanced portfolio analytics, AI research/assistant, transcripts, advanced sentiment, funds/crypto and Stock Battle remain deferred unless launch marketing explicitly promises them.
 

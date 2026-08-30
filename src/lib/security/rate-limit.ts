@@ -27,6 +27,7 @@ export const RATE_LIMITS = {
   authAction: { limit: 10, windowMs: 10 * 60 * 1000 },
   analysis: { limit: 80, windowMs: 10 * 60 * 1000 },
   adminAnalysis: { limit: 400, windowMs: 10 * 60 * 1000 },
+  support: { limit: 8, windowMs: 10 * 60 * 1000 },
   batchResolve: { limit: 30, windowMs: 10 * 60 * 1000 },
   companySearch: { limit: 60, windowMs: 60 * 1000 },
   share: { limit: 30, windowMs: 10 * 60 * 1000 },
@@ -135,8 +136,15 @@ export async function checkDistributedRateLimit(
     if (!result) throw new Error("distributed limiter returned invalid data");
     return result;
   } catch {
-    console.error("Distributed rate limiter unavailable; using process-local fallback.");
-    return checkRateLimit(key, policy, now);
+    console.error("Distributed rate limiter unavailable; failing closed until the shared limiter recovers.");
+    const retryWindowMs = Math.min(policy.windowMs, 30_000);
+    return {
+      allowed: false,
+      limit: policy.limit,
+      remaining: 0,
+      resetAt: now + retryWindowMs,
+      retryAfterSeconds: Math.max(1, Math.ceil(retryWindowMs / 1000)),
+    };
   }
 }
 

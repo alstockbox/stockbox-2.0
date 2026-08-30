@@ -1,11 +1,13 @@
 "use server";
 
 import { createHash } from "node:crypto";
+import type { Route } from "next";
 import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getServerEnv, isSupabaseConfigured } from "@/lib/env/server";
+import { safeInternalPath } from "@/lib/auth/redirects";
 import { checkDistributedRateLimit, rateLimitKeyFromHeaders, RATE_LIMITS } from "@/lib/security/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -75,6 +77,7 @@ export async function signInAction(
 ): Promise<AuthActionState> {
   const copy = authActionCopy(formData);
   if (!isSupabaseConfigured()) return disabledState(copy);
+  const next = safeInternalPath(formData.get("next")?.toString() ?? null);
 
   const email = emailSchema.safeParse(formData.get("email"));
   const password = passwordSchema.safeParse(formData.get("password"));
@@ -97,7 +100,7 @@ export async function signInAction(
   if (error) return { ok: false, message: copy.signInError };
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect(next as Route);
 }
 
 export async function signUpAction(
@@ -106,6 +109,7 @@ export async function signUpAction(
 ): Promise<AuthActionState> {
   const copy = authActionCopy(formData);
   if (!isSupabaseConfigured()) return disabledState(copy);
+  const next = safeInternalPath(formData.get("next")?.toString() ?? null, "/onboarding");
 
   const email = emailSchema.safeParse(formData.get("email"));
   const password = newPasswordSchema.safeParse(formData.get("password"));
@@ -128,7 +132,7 @@ export async function signUpAction(
     email: email.data,
     password: password.data,
     options: {
-      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback?next=/onboarding`
+      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback?next=${encodeURIComponent(next)}`
     }
   });
 
@@ -143,10 +147,16 @@ export async function signUpAction(
       try {
         const admin = createAdminClient();
         if (admin) {
-          await admin.rpc("attribute_affiliate_signup", {
-            p_code: referralCode,
-            p_referred_user_id: data.user.id,
-          });
+          await Promise.allSettled([
+            admin.rpc("attribute_affiliate_signup", {
+              p_code: referralCode,
+              p_referred_user_id: data.user.id,
+            }),
+            admin.rpc("record_affiliate_referral", {
+              p_code: referralCode,
+              p_referred_id: data.user.id,
+            }),
+          ]);
         }
       } catch {
         // Attribution must never block account creation.

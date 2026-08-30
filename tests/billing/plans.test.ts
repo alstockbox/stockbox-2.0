@@ -1,42 +1,31 @@
-import { describe, expect, it } from "vitest";
-import {
-  commerciallyActivePlans,
-  findPlan,
-  isPlanPurchasable,
-  plans
-} from "../../src/lib/billing/plans";
+﻿import { describe, expect, it } from "vitest";
+import { commerciallyActivePlans, findPlan, isPlanPurchasable, plans } from "../../src/lib/billing/plans";
 
 describe("billing plan catalog", () => {
-  it("exposes only Free and Basic as commercially active", () => {
-    expect(commerciallyActivePlans.map((plan) => plan.key)).toEqual(["free", "basic"]);
+  it("exposes the approved five-tier commercial ladder", () => {
+    expect(commerciallyActivePlans.map((plan) => plan.key)).toEqual(["free", "basic", "standard", "premium", "elite"]);
+    expect(commerciallyActivePlans.map((plan) => plan.name)).toEqual(["Free", "Basic", "Standard", "Pro", "Elite"]);
   });
 
-  it("keeps future plans unpriced and unavailable", () => {
-    for (const key of ["standard", "premium", "elite"] as const) {
-      const plan = findPlan(key);
-      expect(plan?.commercialStatus).toBe("inactive");
-      expect(plan?.monthlyPriceSek).toBeNull();
-      expect(plan && isPlanPurchasable(plan)).toBe(false);
-    }
+  it.each([
+    ["basic", 69, 10], ["standard", 119, 35], ["premium", 179, 90], ["elite", 399, 350]
+  ] as const)("makes %s purchasable at the approved regular price", (key, price, analyses) => {
+    const plan = findPlan(key)!;
+    expect(plan.monthlyPriceSek).toBe(price);
+    expect(plan.entitlements.monthlyAnalyses).toBe(analyses);
+    expect(isPlanPurchasable(plan)).toBe(true);
   });
 
-  it("models the approved Basic launch offer", () => {
-    const basic = findPlan("basic");
-    expect(basic?.monthlyPriceSek).toBe(79);
-    expect(basic?.launchOffer).toMatchObject({
-      monthlyPriceSek: 49,
-      durationMonths: 3,
-      thenMonthlyPriceSek: 79,
-      stripeCouponEnv: "STRIPE_COUPON_BASIC_LAUNCH"
-    });
-    expect(basic && isPlanPurchasable(basic)).toBe(true);
+  it("models all approved launch offers", () => {
+    expect(findPlan("basic")?.launchOffer).toMatchObject({ monthlyPriceSek: 49, durationMonths: 3, thenMonthlyPriceSek: 69 });
+    expect(findPlan("standard")?.launchOffer).toMatchObject({ monthlyPriceSek: 79, durationMonths: 3, thenMonthlyPriceSek: 119 });
+    expect(findPlan("premium")?.launchOffer).toMatchObject({ monthlyPriceSek: 159, durationMonths: 3, thenMonthlyPriceSek: 179 });
+    expect(findPlan("elite")?.launchOffer).toBeUndefined();
   });
 
-  it("does not assign prices to inactive plans", () => {
-    expect(
-      plans
-        .filter((plan) => plan.commercialStatus === "inactive")
-        .every((plan) => plan.monthlyPriceSek === null)
-    ).toBe(true);
+  it("keeps Free recurring quota at three analyses and Standard highlighted", () => {
+    expect(findPlan("free")?.entitlements.monthlyAnalyses).toBe(3);
+    expect(findPlan("standard")?.highlight).toBe(true);
+    expect(plans.filter((plan) => plan.highlight).map((plan) => plan.key)).toEqual(["standard"]);
   });
 });

@@ -40,14 +40,16 @@ describe("distributed rate limiting", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it("keeps local defense-in-depth when the distributed RPC fails", async () => {
+  it("fails closed when the configured distributed RPC fails", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "rpc unavailable" } });
     mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
     const key = "share:user:rpc-failure";
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect((await checkDistributedRateLimit(key, policy, 2_000)).allowed).toBe(true);
-    expect((await checkDistributedRateLimit(key, policy, 2_001)).allowed).toBe(false);
+    const result = await checkDistributedRateLimit(key, policy, 2_000);
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(0);
+    expect(result.retryAfterSeconds).toBeGreaterThan(0);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });

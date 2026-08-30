@@ -50,11 +50,14 @@ vi.mock("@/lib/env/server", async () => {
 
 import { POST } from "../../src/app/api/stripe/checkout/route";
 
-function checkoutRequest(locale: "en" | "sv" = "en") {
+function checkoutRequest(
+  plan: "basic" | "standard" | "premium" | "elite" = "basic",
+  locale: "en" | "sv" = "en",
+) {
   return new Request("http://localhost/api/stripe/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan: "basic", locale })
+    body: JSON.stringify({ plan, locale })
   });
 }
 
@@ -73,6 +76,11 @@ describe("Basic checkout flow", () => {
       STRIPE_RESTRICTED_KEY: "rk_test",
       STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
       STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch",
+      STRIPE_PRICE_STANDARD_MONTHLY: "price_standard",
+      STRIPE_COUPON_STANDARD_LAUNCH: "coupon_standard",
+      STRIPE_PRICE_PREMIUM_MONTHLY: "price_pro",
+      STRIPE_COUPON_PREMIUM_LAUNCH: "coupon_pro",
+      STRIPE_PRICE_ELITE_MONTHLY: "price_elite",
       LEGAL_VAT_MODE: "small_business_exempt"
     });
     mocks.getBillingReadiness.mockReturnValue({
@@ -81,6 +89,8 @@ describe("Basic checkout flow", () => {
       restrictedKeyPresent: true,
       basicPricePresent: true,
       launchCouponPresent: true,
+      paidCatalogReady: true,
+      legalCommerceReady: true,
       missingVariables: []
     });
     mocks.getStripe.mockReturnValue({ checkout: { sessions: { create: mocks.createSession } } });
@@ -125,7 +135,7 @@ describe("Basic checkout flow", () => {
       submit_type: "subscribe",
       custom_text: {
         submit: {
-          message: "You are starting a monthly subscription. Introductory price SEK 49/month for 3 months, then SEK 79/month until cancelled. By clicking Subscribe you incur a payment obligation."
+          message: "You are starting a monthly subscription. Introductory price SEK 49/month for 3 months, then SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation."
         }
       },
       success_url: "https://stockbox.test/settings/billing?checkout=success",
@@ -160,7 +170,7 @@ describe("Basic checkout flow", () => {
         currentPeriodEnd: null, createdAt: null
       }
     });
-    const response = await POST(checkoutRequest("sv"));
+    const response = await POST(checkoutRequest("basic", "sv"));
 
     expect(response.status).toBe(200);
     expect(mocks.createSession.mock.calls[0]?.[0]).toMatchObject({
@@ -168,7 +178,7 @@ describe("Basic checkout flow", () => {
       submit_type: "subscribe",
       custom_text: {
         submit: {
-          message: "Du startar ett m\u00e5nadsabonnemang. Introduktionspris 49 kr/m\u00e5n i 3 m\u00e5nader, d\u00e4refter 79 kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig."
+          message: "Du startar ett m\u00e5nadsabonnemang. Introduktionspris 49 kr/m\u00e5n i 3 m\u00e5nader, d\u00e4refter 69 kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig."
         }
       }
     });
@@ -179,6 +189,11 @@ describe("Basic checkout flow", () => {
       STRIPE_RESTRICTED_KEY: "rk_test",
       STRIPE_PRICE_BASIC_MONTHLY: "price_basic",
       STRIPE_COUPON_BASIC_LAUNCH: "coupon_launch",
+      STRIPE_PRICE_STANDARD_MONTHLY: "price_standard",
+      STRIPE_COUPON_STANDARD_LAUNCH: "coupon_standard",
+      STRIPE_PRICE_PREMIUM_MONTHLY: "price_pro",
+      STRIPE_COUPON_PREMIUM_LAUNCH: "coupon_pro",
+      STRIPE_PRICE_ELITE_MONTHLY: "price_elite",
       LEGAL_VAT_MODE: "vat_registered",
       LEGAL_VAT_NUMBER: "SE000000000001"
     });
@@ -252,9 +267,49 @@ describe("Basic checkout flow", () => {
     expect(params.subscription_data?.metadata).toMatchObject({ offer: "none" });
     expect(params.locale).toBe("en");
     expect(params.custom_text?.submit?.message).toBe(
-      "You are starting a monthly subscription at SEK 79/month until cancelled. By clicking Subscribe you incur a payment obligation."
+      "You are starting a monthly subscription at SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation."
     );
     expect(params.custom_text?.submit?.message).not.toContain("49");
+  });
+
+  it("still offers Standard launch after only Basic launch was redeemed", async () => {
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "basic", status: "canceled", stripeCustomerId: "cus_historical",
+      stripeSubscriptionId: "sub_historical", currentPeriodEnd: null,
+      cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: "2026-08-01T00:00:00.000Z",
+      launchOfferRedeemedPlans: ["basic"], createdAt: "2026-08-01T00:00:00.000Z"
+    } });
+    const request = new Request("http://localhost/api/stripe/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "standard" })
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
+    expect(params.metadata).toMatchObject({ offer: "standard_launch_3_months" });
+  });
+
+  it("opens Standard checkout with the Standard launch offer", async () => {
+    mocks.getUserSubscription.mockResolvedValue({ ok: true, subscription: {
+      planKey: "free", status: "active", stripeCustomerId: null, stripeSubscriptionId: null,
+      currentPeriodEnd: null, cancelAtPeriodEnd: false, cancelAt: null,
+      launchOfferRedeemedAt: null, createdAt: null
+    } });
+    const request = new Request("http://localhost/api/stripe/checkout", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "standard" })
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const params = mocks.createSession.mock.calls[0]?.[0];
+    expect(params.line_items).toEqual([{ price: "price_standard", quantity: 1 }]);
+    expect(params.discounts).toEqual([{ coupon: "coupon_standard" }]);
+    expect(params.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
+    expect(params.subscription_data?.metadata).toMatchObject({ plan: "standard", offer: "standard_launch_3_months" });
   });
 
   it("logs safe restricted-key diagnostics when Stripe rejects Checkout", async () => {
@@ -296,6 +351,8 @@ describe("Basic checkout flow", () => {
       restrictedKeyPresent: true,
       basicPricePresent: true,
       launchCouponPresent: false,
+      paidCatalogReady: false,
+      legalCommerceReady: true,
       missingVariables: ["STRIPE_COUPON_BASIC_LAUNCH"]
     });
     mocks.getUserSubscription.mockResolvedValue({

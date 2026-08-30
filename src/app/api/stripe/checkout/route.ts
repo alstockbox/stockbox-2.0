@@ -11,7 +11,7 @@ import {
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import {
   getUserSubscription,
-  isCurrentBasicSubscription,
+  isCurrentPaidSubscription,
   reusableStripeCustomerId
 } from "@/lib/billing/subscriptions";
 import { getServerEnv } from "@/lib/env/server";
@@ -51,10 +51,10 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isCurrentBasicSubscription(subscriptionLookup.subscription)) {
+  if (isCurrentPaidSubscription(subscriptionLookup.subscription)) {
     return Response.json(
       {
-        error: "Basic is already active for this account.",
+        error: "A paid subscription is already active for this account.",
         redirectUrl: "/settings/billing"
       },
       { status: 409 }
@@ -72,8 +72,16 @@ export async function POST(request: Request) {
   const stripe = getStripe();
   const env = getServerEnv();
   const priceId = plan.stripeEnv ? env[plan.stripeEnv] : null;
+  const redeemedLaunchPlans = subscriptionLookup.subscription?.launchOfferRedeemedPlans ?? [];
+  const legacyBasicLaunchRedeemed = Boolean(
+    plan.key === "basic" &&
+    subscriptionLookup.subscription?.launchOfferRedeemedAt &&
+    redeemedLaunchPlans.length === 0
+  );
   const launchOfferAvailable = Boolean(
-    plan.launchOffer && !subscriptionLookup.subscription?.launchOfferRedeemedAt
+    plan.launchOffer &&
+    !redeemedLaunchPlans.includes(plan.key) &&
+    !legacyBasicLaunchRedeemed
   );
   const couponId = launchOfferAvailable && plan.launchOffer
     ? env[plan.launchOffer.stripeCouponEnv]
@@ -88,7 +96,9 @@ export async function POST(request: Request) {
   }
 
   const stripeCustomerId = reusableStripeCustomerId(subscriptionLookup.subscription);
-  const offer = launchOfferAvailable ? "basic_launch_3_months" : "none";
+  const offer = launchOfferAvailable && plan.launchOffer
+    ? `${plan.key}_launch_${plan.launchOffer.durationMonths}_months`
+    : "none";
   const checkoutDisclosure = launchOfferAvailable && plan.launchOffer
     ? body.data.locale === "sv"
       ? `Du startar ett m\u00e5nadsabonnemang. Introduktionspris ${plan.launchOffer.monthlyPriceSek} kr/m\u00e5n i ${plan.launchOffer.durationMonths} m\u00e5nader, d\u00e4refter ${plan.launchOffer.thenMonthlyPriceSek} kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig.`

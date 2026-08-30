@@ -4,7 +4,10 @@ export type StripePriceEnv =
   | "STRIPE_PRICE_STANDARD_MONTHLY"
   | "STRIPE_PRICE_PREMIUM_MONTHLY"
   | "STRIPE_PRICE_ELITE_MONTHLY";
-export type StripeCouponEnv = "STRIPE_COUPON_BASIC_LAUNCH";
+export type StripeCouponEnv =
+  | "STRIPE_COUPON_BASIC_LAUNCH"
+  | "STRIPE_COUPON_STANDARD_LAUNCH"
+  | "STRIPE_COUPON_PREMIUM_LAUNCH";
 export type CommercialStatus = "active" | "inactive";
 
 export type Entitlements = {
@@ -40,89 +43,102 @@ export const plans: Plan[] = [
     commercialStatus: "active",
     monthlyPriceSek: 0,
     entitlements: {
-      monthlyAnalyses: 5,
+      monthlyAnalyses: 3,
       deepAnalyses: 1,
       watchlistItems: 5,
       batchRows: 0,
       portfolios: 1,
       aiAssistant: false,
-      hourlyAlerts: false
-    }
+      hourlyAlerts: false,
+    },
   },
   {
     key: "basic",
     name: "Basic",
     commercialStatus: "active",
-    monthlyPriceSek: 79,
+    monthlyPriceSek: 69,
     stripeEnv: "STRIPE_PRICE_BASIC_MONTHLY",
     launchOffer: {
       monthlyPriceSek: 49,
       durationMonths: 3,
-      thenMonthlyPriceSek: 79,
-      stripeCouponEnv: "STRIPE_COUPON_BASIC_LAUNCH"
+      thenMonthlyPriceSek: 69,
+      stripeCouponEnv: "STRIPE_COUPON_BASIC_LAUNCH",
     },
     entitlements: {
-      monthlyAnalyses: 30,
-      deepAnalyses: 8,
+      monthlyAnalyses: 10,
+      deepAnalyses: 3,
       watchlistItems: 20,
       batchRows: 10,
       portfolios: 2,
       aiAssistant: false,
-      hourlyAlerts: false
-    }
+      hourlyAlerts: false,
+    },
   },
   {
     key: "standard",
     name: "Standard",
-    commercialStatus: "inactive",
-    monthlyPriceSek: null,
+    commercialStatus: "active",
+    monthlyPriceSek: 119,
     stripeEnv: "STRIPE_PRICE_STANDARD_MONTHLY",
+    launchOffer: {
+      monthlyPriceSek: 79,
+      durationMonths: 3,
+      thenMonthlyPriceSek: 119,
+      stripeCouponEnv: "STRIPE_COUPON_STANDARD_LAUNCH",
+    },
     entitlements: {
-      monthlyAnalyses: 100,
-      deepAnalyses: 30,
+      monthlyAnalyses: 35,
+      deepAnalyses: 12,
       watchlistItems: 75,
-      batchRows: 50,
+      batchRows: 25,
       portfolios: 5,
       aiAssistant: true,
-      hourlyAlerts: true
-    }
+      hourlyAlerts: true,
+    },
+    highlight: true,
   },
   {
     key: "premium",
-    name: "Premium",
-    commercialStatus: "inactive",
-    monthlyPriceSek: null,
+    name: "Pro",
+    commercialStatus: "active",
+    monthlyPriceSek: 179,
     stripeEnv: "STRIPE_PRICE_PREMIUM_MONTHLY",
+    launchOffer: {
+      monthlyPriceSek: 159,
+      durationMonths: 3,
+      thenMonthlyPriceSek: 179,
+      stripeCouponEnv: "STRIPE_COUPON_PREMIUM_LAUNCH",
+    },
     entitlements: {
-      monthlyAnalyses: 300,
-      deepAnalyses: 120,
+      monthlyAnalyses: 90,
+      deepAnalyses: 35,
       watchlistItems: 250,
-      batchRows: 250,
+      batchRows: 50,
       portfolios: 15,
       aiAssistant: true,
-      hourlyAlerts: true
-    }
+      hourlyAlerts: true,
+    },
   },
   {
     key: "elite",
     name: "Elite",
-    commercialStatus: "inactive",
-    monthlyPriceSek: null,
+    commercialStatus: "active",
+    monthlyPriceSek: 399,
     stripeEnv: "STRIPE_PRICE_ELITE_MONTHLY",
     entitlements: {
-      monthlyAnalyses: 1000,
-      deepAnalyses: 400,
+      monthlyAnalyses: 350,
+      deepAnalyses: 150,
       watchlistItems: 1000,
-      batchRows: 1000,
+      batchRows: 50,
       portfolios: 50,
       aiAssistant: true,
-      hourlyAlerts: true
-    }
-  }
+      hourlyAlerts: true,
+    },
+  },
 ];
 
 export const commerciallyActivePlans = plans.filter(
-  (plan) => plan.commercialStatus === "active" && plan.monthlyPriceSek !== null
+  (plan) => plan.commercialStatus === "active" && plan.monthlyPriceSek !== null,
 );
 
 export function findPlan(key: string): Plan | null {
@@ -130,12 +146,7 @@ export function findPlan(key: string): Plan | null {
 }
 
 export function isPlanPurchasable(plan: Plan): boolean {
-  return (
-    plan.commercialStatus === "active" &&
-    plan.key !== "free" &&
-    plan.monthlyPriceSek !== null &&
-    Boolean(plan.stripeEnv)
-  );
+  return plan.commercialStatus === "active" && plan.key !== "free" && plan.monthlyPriceSek !== null && Boolean(plan.stripeEnv);
 }
 
 export function getPlan(key: PlanKey) {
@@ -144,8 +155,5 @@ export function getPlan(key: PlanKey) {
 
 export function getPlanByStripePrice(priceId: string | null | undefined, env = process.env): Plan | null {
   if (!priceId) return null;
-  return (
-    plans.find((plan) => plan.stripeEnv && env[plan.stripeEnv] && env[plan.stripeEnv] === priceId) ??
-    null
-  );
+  return plans.find((plan) => plan.stripeEnv && env[plan.stripeEnv] && env[plan.stripeEnv] === priceId) ?? null;
 }

@@ -5,7 +5,7 @@ import { getP0Copy } from "../../src/lib/i18n/p0-copy";
 
 describe("pricing consumer-rights copy", () => {
   it("localizes the withdrawal link label without component object-identity logic", () => {
-    expect(getP0Copy("sv").pricing.withdrawalFunction).toBe("Ångra avtal");
+    expect(getP0Copy("sv").pricing.withdrawalFunction).toBe("\u00c5ngra avtal");
     expect(getP0Copy("en").pricing.withdrawalFunction).toBe("Withdrawal function");
   });
 
@@ -16,9 +16,9 @@ describe("pricing consumer-rights copy", () => {
     expect(getP0Copy("en").pricing.privacy).toBe("Privacy");
   });
 
-  it("states the recurring Basic subscription behavior in both locales", () => {
+  it("states recurring paid-plan subscription behavior in both locales", () => {
     expect(getP0Copy("sv").pricing.renewalNotice).toContain("förnyas månadsvis");
-    expect(getP0Copy("en").pricing.renewalNotice).toContain("renews monthly");
+    expect(getP0Copy("en").pricing.renewalNotice).toContain("renew monthly");
   });
 
   it("keeps terms and privacy links beside the pre-purchase subscription disclosure", () => {
@@ -28,7 +28,7 @@ describe("pricing consumer-rights copy", () => {
   });
 
   it("localizes the billing-page withdrawal link", () => {
-    expect(getP0Copy("sv").billing.withdrawContract).toBe("Ångra avtal");
+    expect(getP0Copy("sv").billing.withdrawContract).toBe("\u00c5ngra avtal");
     expect(getP0Copy("en").billing.withdrawContract).toBe("Withdraw from a contract");
   });
 });

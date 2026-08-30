@@ -26,7 +26,7 @@ Current production analysis engine: `stockbox-analysis-engine-v2.7.0`.
 | Affiliate / ambassador | Built for current v1 scope | Referral attribution, dashboard/workspace logic, ambassador role and configurable entitlements are present; final production role/UX smoke remains. |
 | Analytics and errors | Built, production payload inspection pending | Allowlisted PostHog events, sanitized provider/API errors and database error handling exist. Inspect real production payloads before paid traffic. |
 | Strong Buy email | Built, provider E2E pending | Delivery reservation/retry/dedup logic exists; real provider delivery remains a launch gate if the feature is enabled at launch. |
-| Security | Strong technical baseline, two external gates remain | CSP/HSTS/security headers, RLS, validation, webhook signatures, distributed rate limiting and sanitized errors are in place. Supabase leaked-password protection and browser/WAF QA remain open. |
+| Security | Strong technical baseline; browser/WAF QA remains | CSP/HSTS/security headers, RLS, validation, webhook signatures, distributed rate limiting and sanitized errors are in place. Supabase leaked-password protection is unavailable on the current free plan and is deferred as a non-blocking paid-plan enhancement. |
 | Deployment / domain | Live | Vercel production is live, apex redirects to `www`, provider health returns 200 and production DNS is cut over. |
 | Legal / commercial | BLOCKED | Privacy and Terms remain explicit drafts and must be finalized before intentional paid public traffic. |
 

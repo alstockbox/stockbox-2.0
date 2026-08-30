@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+﻿import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,7 +57,7 @@ describe("Stripe webhook ordering", () => {
   });
   it("keeps the legacy webhook RPC signature as a rollout-safe compatibility wrapper", () => {
     const latest = readFileSync(
-      join(process.cwd(), "supabase/migrations/20260828130000_subscription_lifecycle_and_launch_offer.sql"),
+      join(process.cwd(), "supabase/migrations/20260828123428_subscription_lifecycle_and_launch_offer.sql"),
       "utf8"
     ).replace(/\s+/g, " ").toLowerCase();
     expect(latest).not.toContain("drop function if exists public.sync_subscription_from_stripe");
