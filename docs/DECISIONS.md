@@ -22,8 +22,8 @@ Use Checkout Sessions and the Customer Portal to reduce payment scope. The app o
 
 ## ADR-006: Feature flags fail closed
 
-News, batch execution, AI assistant, referrals, affiliates, and Stock Battle default off. Their schema or entitlement shape may exist without exposing incomplete workflows.
+News, AI assistant and Stock Battle remain fail-closed/deferred. Batch, referrals and affiliate workflows are release features and must pass their own authorization, entitlement and production-smoke gates.
 
 ## ADR-007: Pricing is configuration
 
-Plan limits and commercial status live in one typed catalog and in the plans table. Free and Basic are active. Basic is 79 SEK/month with a 49 SEK/month launch offer for the first three months. Standard, Premium, and Elite remain unpriced and inactive until explicitly approved.
+Plan limits and commercial status live in one typed catalog and in the plans table. Free, Basic, Standard, Pro (`premium`) and Elite are active. Paid launch pricing is 49→69, 79→119 and 159→179 SEK/month for Basic, Standard and Pro respectively; Elite is 399 SEK/month without launch pricing. A user can redeem one StockBox launch offer total. Active affiliates have a 20% minimum commission excluding VAT/tax and referred customers receive 10% off regular pricing when no better StockBox promotion applies; promotions do not stack.

@@ -11,13 +11,31 @@ const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfa
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app"),
-  title: { default: "StockBox | Source-backed stock analysis", template: "%s | StockBox" },
-  description: "Analyze stocks with source-backed fundamentals, valuation, growth, financial health, quality and risk. Missing financial data is never fabricated.",
+  title: {
+    default: "StockBox | Source-backed stock analysis",
+    template: "%s | StockBox",
+  },
+  description:
+    "StockBox turns filings, market data, scoring logic and research workflows into source-backed equity analysis with visible coverage and confidence.",
+  icons: {
+    icon: "/images/stockbox-logo.png",
+    shortcut: "/images/stockbox-logo.png",
+    apple: "/images/stockbox-logo.png",
+  },
   openGraph: {
     title: "StockBox | Source-backed stock analysis",
-    description: "Structured equity research with visible sources, versioned calculations, coverage and confidence.",
+    description:
+      "Understand any stock faster with visible sources, deterministic calculations and honest missing-data handling.",
     type: "website",
     siteName: "StockBox",
+    images: [
+      {
+        url: "/images/stockbox-logo.png",
+        width: 1254,
+        height: 1254,
+        alt: "StockBox official emblem",
+      },
+    ],
   },
 };
 
@@ -29,7 +47,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": "Organization", "@id": `${baseUrl}/#organization`, name: "StockBox", url: baseUrl },
+      { "@type": "Organization", "@id": `${baseUrl}/#organization`, name: "StockBox", url: baseUrl, logo: `${baseUrl}/images/stockbox-logo.png` },
       { "@type": "WebSite", "@id": `${baseUrl}/#website`, name: "StockBox", url: baseUrl, publisher: { "@id": `${baseUrl}/#organization` } },
       {
         "@type": "SoftwareApplication",

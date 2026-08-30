@@ -1,6 +1,6 @@
 # StockBox 2.0 Feature Matrix
 
-Current date: August 28, 2026. Release deadline: August 31, 2026.
+Current date: August 30, 2026. Release deadline: August 31, 2026.
 Current production analysis engine: `stockbox-analysis-engine-v2.7.0`.
 
 ## P0
@@ -21,22 +21,22 @@ Current production analysis engine: `stockbox-analysis-engine-v2.7.0`.
 | Watchlist and portfolio core | Built | Private CRUD, canonical tickers/currencies and plan entitlements are implemented. Automated monitoring and advanced analytics remain deferred. |
 | Batch analysis | Built, final production UI QA pending | Validation, plan limits, idempotency, failure continuation/retry support and QA persistence exist. Final real browser/customer verification remains. |
 | Usage limits | Built, final customer E2E pending | Monthly/deep/batch/watchlist/portfolio entitlements are centralized. Admin has unlimited analysis behavior; ambassadors support custom entitlements. |
-| Stripe subscriptions | Built and production configured, customer E2E pending | Checkout, portal, signed webhook, ordering/idempotency, launch offer and cancellation-state handling are implemented. Free + Basic are commercially active; paid customer lifecycle still requires a final real run. |
+| Stripe subscriptions | Built and production configured, customer E2E pending | Checkout, portal, signed webhook, ordering/idempotency, one-time global launch offer, affiliate discount and cancellation-state handling are implemented. Free, Basic, Standard, Pro and Elite are commercially active; paid customer lifecycle still requires a final real run. |
 | Admin operations | Built for current v1 operations | Server-authorized analysis diagnostics, roles, affiliate/ambassador workspace and custom ambassador entitlements are implemented. Nonessential broader admin tooling can remain post-launch. |
-| Affiliate / ambassador | Built for current v1 scope | Referral attribution, dashboard/workspace logic, ambassador role and configurable entitlements are present; final production role/UX smoke remains. |
+| Affiliate / ambassador | Built for current v1 scope | Referral attribution, dashboard/workspace logic, ambassador role, 20% minimum active commission, 10% customer discount on regular pricing, giveaways and configurable entitlements are present; promotions do not stack and final production role/UX smoke remains. |
 | Analytics and errors | Built, production payload inspection pending | Allowlisted PostHog events, sanitized provider/API errors and database error handling exist. Inspect real production payloads before paid traffic. |
 | Strong Buy email | Built, provider E2E pending | Delivery reservation/retry/dedup logic exists; real provider delivery remains a launch gate if the feature is enabled at launch. |
 | Security | Strong technical baseline; browser/WAF QA remains | CSP/HSTS/security headers, RLS, validation, webhook signatures, distributed rate limiting and sanitized errors are in place. Supabase leaked-password protection is unavailable on the current free plan and is deferred as a non-blocking paid-plan enhancement. |
 | Deployment / domain | Live | Vercel production is live, apex redirects to `www`, provider health returns 200 and production DNS is cut over. |
-| Legal / commercial | BLOCKED | Privacy and Terms remain explicit drafts and must be finalized before intentional paid public traffic. |
+| Legal / commercial | Code-hardened, production identity/config verification pending | Terms and Privacy are publishable templates driven by verified seller/VAT configuration; paid checkout fails closed until identity, VAT and withdrawal-receipt email delivery are configured. |
 
 ## Commercial plan surface at launch
 
-Only **Free** and **Basic** are currently active in application code. Basic is 79 SEK/month with a launch price of 49 SEK/month for the first 3 months. Standard, Premium and Elite remain inactive and should not be presented as purchasable until intentionally enabled and end-to-end tested.
+**Free:** 5 analyses in the first 30 days, then 3/month. **Basic:** 49 SEK/month for 3 months, then 69 (10 analyses). **Standard:** 79 for 3 months, then 119 (35 analyses). **Pro:** 159 for 3 months, then 179 (90 analyses). **Elite:** 399/month (350 analyses). A customer may redeem only one StockBox launch offer across paid plans.
 
 ## P1 - defer until after stable v1
 
-Comparisons, screener, news ingestion, Stock of the Day, analysis-change monitoring, enhanced portfolio analytics, social cards and AI research/assistant.
+Screener, news ingestion, Stock of the Day, analysis-change monitoring, enhanced portfolio analytics, social cards and AI research/assistant. Company/report comparison is now part of v1.
 
 ## P2 - defer
 
@@ -50,4 +50,4 @@ A deferred feature is not a release blocker if it is not linked, sold or promise
 
 `TECHNICAL CORE: NEAR RELEASE-READY.`
 
-`PAID PUBLIC LAUNCH: BLOCKED` by legal finalization plus the remaining production Auth, billing, browser/device, abuse/telemetry and post-v2.7 real-report verification gates documented in `LAUNCH_CHECKLIST.md` and `OWNER_ACTIONS.md`.
+`PAID PUBLIC LAUNCH: NO-GO UNTIL FINAL GATES` — exact-commit code verification, production migrations/config, Auth/billing/withdrawal E2E, browser/device smoke, telemetry inspection and post-v2.7 real-report QA must still pass.

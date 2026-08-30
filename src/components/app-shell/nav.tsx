@@ -1,6 +1,16 @@
 import Link from "next/link";
-import { BarChart3, Bell, BriefcaseBusiness, Gauge, History, LayoutDashboard, Settings, ShieldCheck, UsersRound } from "lucide-react";
-import { StockBoxMark } from "@/components/brand/stockbox-mark";
+import {
+  BarChart3,
+  Bell,
+  BriefcaseBusiness,
+  Gauge,
+  History,
+  LayoutDashboard,
+  Settings,
+  ShieldCheck,
+  UsersRound,
+} from "lucide-react";
+import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
@@ -28,9 +38,9 @@ const appNavItems = [
 ] as const;
 function Brand() {
   return (
-    <Link href="/" className="group flex shrink-0 items-center gap-2.5" aria-label="StockBox home">
-      <StockBoxMark />
-      <span className="serif text-xl font-semibold tracking-tight text-[#f4efe5] group-hover:text-white sm:text-2xl">StockBox</span>
+    <Link href="/" className="group flex shrink-0 items-center gap-3 pr-2" aria-label="StockBox home">
+      <StockBoxLogo size={44} alt="" priority className="h-10 w-10 sm:h-11 sm:w-11" />
+      <span className="serif text-2xl font-semibold tracking-tight text-[#f4efe5] group-hover:text-white">StockBox</span>
     </Link>
   );
 }
@@ -44,7 +54,7 @@ export async function AppNav() {
     : { settings: "Settings", profile: "Profile", billing: "Billing", security: "Security", feedback: "Give feedback", contact: "Contact", menu: "Menu" };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#07111f]/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-[#07111f]/94 backdrop-blur">
       <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <Brand />
 

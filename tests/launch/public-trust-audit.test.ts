@@ -32,10 +32,11 @@ describe("public launch trust layer", () => {
     expect(nav).toContain("md:hidden");
   });
 
-  it("uses a real brand mark rather than the SB placeholder", () => {
-    expect(nav).toContain("<StockBoxMark");
+  it("uses the official logo rather than the SB placeholder", () => {
+    expect(nav).toContain("<StockBoxLogo");
     expect(nav).not.toContain(">SB</span>");
-    expect(existsSync(join(root, "src/components/brand/stockbox-mark.tsx"))).toBe(true);
+    expect(existsSync(join(root, "src/components/brand/stockbox-logo.tsx"))).toBe(true);
+    expect(existsSync(join(root, "public/images/stockbox-logo.png"))).toBe(true);
   });
 
   it("ships the trust pages required by the public site", () => {
