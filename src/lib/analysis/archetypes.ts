@@ -42,6 +42,10 @@ function startsWithAny(sic: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => sic.startsWith(prefix));
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function classifyCompany(input: {
   sic?: string | null;
   sicDescription?: string | null;
@@ -243,15 +247,14 @@ function hasInvestmentHoldingFinancialSignature(input: FinancialAnalysisInput): 
   const periods = [...input.annualPeriods].filter((period) => period.fiscalYear !== undefined || period.periodEndDate).slice(-3);
   if (periods.length < 2) return false;
   const holdingLike = periods.filter((period) => {
-    const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-    if (!finite(period.netIncome) || !finite(period.totalAssets) || !finite(period.totalEquity) || period.totalAssets <= 0) return false;
-    const nonOperatingStatement = !finite(period.grossProfit) && !finite(period.operatingIncome) && !finite(period.operatingCashFlow);
+    if (!isFiniteNumber(period.netIncome) || !isFiniteNumber(period.totalAssets) || !isFiniteNumber(period.totalEquity) || period.totalAssets <= 0) return false;
+    const nonOperatingStatement = !isFiniteNumber(period.grossProfit) && !isFiniteNumber(period.operatingIncome) && !isFiniteNumber(period.operatingCashFlow);
     const equityHeavy = period.totalEquity / period.totalAssets >= 0.5;
     const stronglyEquityHeavy = period.totalEquity / period.totalAssets >= 0.65;
-    const investmentIncomeDominant = !finite(period.revenue) || Math.abs(period.netIncome) >= Math.max(Math.abs(period.revenue), 1) * 0.35;
-    const reportedInvestmentGainsDominant = finite(period.revenue)
+    const investmentIncomeDominant = !isFiniteNumber(period.revenue) || Math.abs(period.netIncome) >= Math.max(Math.abs(period.revenue), 1) * 0.35;
+    const reportedInvestmentGainsDominant = isFiniteNumber(period.revenue)
       && Math.abs(period.netIncome) >= Math.max(Math.abs(period.revenue), 1) * 0.75
-      && (!finite(period.operatingCashFlow) || Math.abs(period.operatingCashFlow) <= Math.abs(period.netIncome) * 0.5);
+      && (!isFiniteNumber(period.operatingCashFlow) || Math.abs(period.operatingCashFlow) <= Math.abs(period.netIncome) * 0.5);
     return (nonOperatingStatement && equityHeavy && investmentIncomeDominant)
       || (stronglyEquityHeavy && reportedInvestmentGainsDominant);
   });
@@ -264,12 +267,43 @@ function hasOperatingAssetManagerFinancialSignature(input: FinancialAnalysisInpu
   const periods = [...input.annualPeriods].filter((period) => period.fiscalYear !== undefined || period.periodEndDate).slice(-3);
   if (periods.length < 2) return false;
   const operatingLike = periods.filter((period) => {
-    const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-    return finite(period.revenue)
+    return isFiniteNumber(period.revenue)
       && period.revenue > 0
-      && finite(period.operatingIncome)
-      && finite(period.grossProfit)
-      && finite(period.operatingCashFlow);
+      && isFiniteNumber(period.operatingIncome)
+      && isFiniteNumber(period.grossProfit)
+      && isFiniteNumber(period.operatingCashFlow);
+  });
+  return operatingLike.length >= 2;
+}
+
+function hasConventionalOperatingFinancialSignature(input: FinancialAnalysisInput): boolean {
+  const diagnostics = input.company.classificationDiagnostics;
+  if (diagnostics?.source !== "fallback" || diagnostics.ambiguous || diagnostics.confidence > 0.35) return false;
+  if (input.company.sector === "financials" || input.company.sector === "realEstate") return false;
+
+  const companyText = `${input.company.industry ?? ""} ${input.company.name ?? ""}`.toLowerCase();
+  if (
+    CAPITAL_MARKETS_PATTERN.test(companyText)
+    || TREASURY_FINANCE_PATTERN.test(companyText)
+    || /asset management|investment management|investment advisers?|investment holding|holding compan|investment compan(?:y|ies)|diversified investments?|\bbusiness development compan(?:y|ies)\b|\bbdc\b|\bspecialty lending\b|financial services|finance compan|credit services|consumer finance|loan servicing|receivables management|debt collection|shell compan(?:y|ies)|blank check|special purpose acquisition|\bspac\b|\bbanks?\b|banking|insurance|reinsurance|reinsurer|\breit\b|real estate investment trust|biotechnology|biological products|development stage|pre-revenue/.test(companyText)
+  ) {
+    return false;
+  }
+
+  const periods = [...input.annualPeriods].filter((period) => period.fiscalYear !== undefined || period.periodEndDate).slice(-3);
+  if (periods.length < 2) return false;
+
+  const operatingLike = periods.filter((period) => {
+    const hasOperatingStatement = isFiniteNumber(period.grossProfit)
+      || isFiniteNumber(period.operatingIncome)
+      || isFiniteNumber(period.operatingCashFlow)
+      || isFiniteNumber(period.ebitda);
+    return isFiniteNumber(period.revenue)
+      && period.revenue > 0
+      && hasOperatingStatement
+      && isFiniteNumber(period.totalAssets)
+      && period.totalAssets > 0
+      && isFiniteNumber(period.totalEquity);
   });
   return operatingLike.length >= 2;
 }
@@ -289,6 +323,7 @@ export function resolveFinancialArchetype(input: FinancialAnalysisInput): Analys
   if ((base === "unknown" || base === "asset_manager") && hasInvestmentHoldingFinancialSignature(input)) return "holding_company";
   if (base === "unknown" && hasConfidentUnresolvedSpecialistStop(input)) return base;
   if (base === "unknown" && hasOperatingAssetManagerFinancialSignature(input)) return "asset_manager";
+  if (base === "unknown" && hasConventionalOperatingFinancialSignature(input)) return "standard";
   if (base !== "standard") return base;
 
   const sic = (input.company.sic ?? "").replace(/\D/g, "");

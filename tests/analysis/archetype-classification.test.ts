@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyCompany, resolveArchetype, resolveFinancialArchetype } from "../../src/lib/analysis/archetypes";
-import type { FinancialAnalysisInput, FinancialPeriod } from "../../src/lib/analysis/types";
+import type { ArchetypeClassificationDiagnostics, FinancialAnalysisInput, FinancialPeriod } from "../../src/lib/analysis/types";
 
 describe("company archetype classification", () => {
   it("classifies passenger-vehicle manufacturers as consumer cyclicals rather than industrials", () => {
@@ -366,5 +366,56 @@ describe("investment holding-company refinement", () => {
       analysisArchetype: "holding_company",
     }));
     expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+});
+
+describe("operating-company financial fallback", () => {
+  const fallbackDiagnostics: ArchetypeClassificationDiagnostics = {
+    reason: "Available SIC and industry evidence is insufficient for a reliable archetype.",
+    source: "fallback",
+    confidence: 0.2,
+    ambiguous: false,
+    candidates: ["unknown"],
+  };
+
+  const operatingFinancials = (): FinancialAnalysisInput => ({
+    company: {
+      ticker: "OPCO",
+      name: "Operating Company AB",
+      sector: "other",
+      industry: undefined,
+      analysisArchetype: "unknown",
+      classificationDiagnostics: fallbackDiagnostics,
+    },
+    annualPeriods: [2023, 2024].map((fiscalYear, index) => ({
+      fiscalYear,
+      periodEndDate: `${fiscalYear}-12-31`,
+      revenue: 100 + index * 15,
+      grossProfit: 55 + index * 8,
+      operatingIncome: 12 + index * 2,
+      netIncome: 8 + index * 2,
+      operatingCashFlow: 14 + index * 2,
+      totalAssets: 160 + index * 10,
+      totalEquity: 75 + index * 6,
+    })),
+  });
+
+  it("uses the standard model when low-confidence fallback metadata has repeated operating-company statements", () => {
+    expect(resolveFinancialArchetype(operatingFinancials())).toBe("standard");
+  });
+
+  it("keeps sparse fallback financial statements unresolved", () => {
+    const input = operatingFinancials();
+
+    expect(resolveFinancialArchetype({
+      ...input,
+      annualPeriods: input.annualPeriods.map((period) => ({
+        fiscalYear: period.fiscalYear,
+        periodEndDate: period.periodEndDate,
+        netIncome: period.netIncome,
+        totalAssets: period.totalAssets,
+        totalEquity: period.totalEquity,
+      })),
+    })).toBe("unknown");
   });
 });

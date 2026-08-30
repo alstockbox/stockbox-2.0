@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { NextResponse } from "next/server";
-import { buildAffiliateConnectAccountParams, isAffiliateConnectReady, shouldReplaceAffiliateConnectAccount } from "@/lib/affiliate/connect";
+import { buildAffiliateConnectAccountParams, isAffiliateConnectEnabled, isAffiliateConnectReady, shouldReplaceAffiliateConnectAccount } from "@/lib/affiliate/connect";
 import { requireUser } from "@/lib/auth/session";
 import { getSafeStripeErrorDiagnostic, getStripe } from "@/lib/billing/stripe";
 import { getServerEnv } from "@/lib/env/server";
@@ -52,6 +52,10 @@ async function accountLink(accountId: string) {
 }
 
 export async function POST() {
+  if (!isAffiliateConnectEnabled()) {
+    return Response.json({ error: "Affiliate payout setup is temporarily unavailable." }, { status: 503 });
+  }
+
   const context = await requireAmbassadorContext();
   if (!context) return Response.json({ error: "Affiliate payout setup is unavailable." }, { status: 403 });
 
@@ -84,8 +88,12 @@ export async function POST() {
 }
 
 export async function GET(request: Request) {
-  const context = await requireAmbassadorContext();
   const appUrl = getServerEnv().NEXT_PUBLIC_APP_URL;
+  if (!isAffiliateConnectEnabled()) {
+    return NextResponse.redirect(`${appUrl}/affiliate?connect=unavailable`);
+  }
+
+  const context = await requireAmbassadorContext();
   if (!context) return NextResponse.redirect(`${appUrl}/affiliate?connect=unavailable`);
 
   const mode = new URL(request.url).searchParams.get("mode");

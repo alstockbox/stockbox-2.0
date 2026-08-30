@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildAffiliateConnectAccountParams,
+  isAffiliateConnectEnabled,
   isAffiliateConnectReady,
   shouldReplaceAffiliateConnectAccount,
 } from "@/lib/affiliate/connect";
@@ -10,6 +11,12 @@ import {
 const route = readFileSync(join(process.cwd(), "src/app/api/affiliate/connect/route.ts"), "utf8");
 
 describe("Stripe Connect affiliate onboarding", () => {
+  it("keeps Connect onboarding fail-closed unless explicitly enabled", () => {
+    expect(isAffiliateConnectEnabled("")).toBe(false);
+    expect(isAffiliateConnectEnabled("false")).toBe(false);
+    expect(isAffiliateConnectEnabled(" TRUE ")).toBe(true);
+  });
+
   it("uses Stripe-hosted Express onboarding with transfers capability", () => {
     const params = buildAffiliateConnectAccountParams({
       userId: "user-1", affiliateId: "affiliate-1", email: "affiliate@example.com",
@@ -43,5 +50,6 @@ describe("Stripe Connect affiliate onboarding", () => {
     expect(route).toContain("payout_enabled");
     expect(route).toContain("stripe_connect_account_id");
     expect(route).toContain("shouldReplaceAffiliateConnectAccount");
+    expect(route).toContain("isAffiliateConnectEnabled");
   });
 });

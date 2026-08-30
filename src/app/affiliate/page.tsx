@@ -1,10 +1,11 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, BadgeCheck, Banknote, MousePointerClick, UsersRound } from "lucide-react";
 import { ConnectPayoutButton } from "@/components/affiliate/connect-payout-button";
 import { GiveawayCopyControls } from "@/components/affiliate/giveaway-copy-controls";
 import { Card, Container, Section } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/session";
+import { isAffiliateConnectEnabled } from "@/lib/affiliate/connect";
 import { getAffiliateDashboardData } from "@/lib/affiliate/service";
 
 export const metadata: Metadata = { title: "Affiliate dashboard" };
@@ -49,6 +50,7 @@ export default async function AffiliatePage({ searchParams }: PageProps) {
   }
 
   const metrics = data.metrics;
+  const connectOnboardingEnabled = isAffiliateConnectEnabled();
   const cards = [
     { label: "Clicks", value: metrics.clicks.toLocaleString("sv-SE"), icon: MousePointerClick },
     { label: "Paying customers", value: metrics.payingCustomers.toLocaleString("sv-SE"), icon: UsersRound },
@@ -107,15 +109,23 @@ export default async function AffiliatePage({ searchParams }: PageProps) {
             </div>
           </Card>          <Card>
             <p className="text-xs uppercase tracking-[0.14em] text-[#7f8b9b]">Payout status</p>
-            <p className="mt-3 text-lg font-semibold text-[#f4efe5]">{data.payoutEnabled ? "Automatic payouts enabled" : "Payout setup required"}</p>
+            <p className="mt-3 text-lg font-semibold text-[#f4efe5]">
+              {data.payoutEnabled
+                ? "Automatic payouts enabled"
+                : connectOnboardingEnabled
+                  ? "Payout setup required"
+                  : "Commission tracking active"}
+            </p>
             <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">
               {data.payoutEnabled
                 ? "Eligible commissions are queued after the hold period and paid through the connected payout account."
-                : "Connect a payout account before automatic transfers can be enabled."}
+                : connectOnboardingEnabled
+                  ? "Connect a payout account before automatic transfers can be enabled."
+                  : "Referral tracking and commissions remain active. Payout account onboarding is temporarily unavailable."}
             </p>
             <p className="mt-4 text-xs text-[#7f8b9b]">Paid to date</p>
             <p className="number mt-1 text-2xl font-semibold text-[#f4efe5]">{money(metrics.paidCents)}</p>
-            {!previewTargetId ? (
+            {connectOnboardingEnabled && !previewTargetId ? (
               <ConnectPayoutButton connected={Boolean(data.connectAccountId)} />
             ) : null}
           </Card>

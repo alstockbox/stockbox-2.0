@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Container, Section } from "@/components/ui/card";
+import { findPlan } from "@/lib/billing/plans";
 import { getLocale } from "@/lib/i18n/server";
 import { getLegalCommerceReadiness, legalVatDescription } from "@/lib/legal/commerce";
 
@@ -11,6 +12,10 @@ export default async function TermsPage() {
   const sv = locale === "sv";
   const legal = getLegalCommerceReadiness();
   const seller = legal.seller;
+  const basic = findPlan("basic");
+  if (!basic?.launchOffer || basic.monthlyPriceSek === null) {
+    throw new Error("Basic billing plan is not configured for legal disclosure.");
+  }
 
   const heading = "text-lg font-semibold text-[#f4efe5]";
   const paragraph = "mt-2";
@@ -56,8 +61,8 @@ export default async function TermsPage() {
           <section>
             <h2 className={heading}>{sv ? "Pris och abonnemang" : "Price and subscription"}</h2>
             <p className={paragraph}>{sv
-              ? "Basic kostar 49 kr per månad under de första tre månaderna när lanseringserbjudandet gäller och därefter 79 kr per månad. Abonnemanget förnyas månadsvis tills det sägs upp. Det bindande totalpriset visas i Stripe Checkout innan betalning."
-              : "Basic costs SEK 49 per month for the first three months when the launch offer applies and SEK 79 per month thereafter. The subscription renews monthly until cancelled. The binding total price is shown in Stripe Checkout before payment."}</p>
+              ? `Basic kostar ${basic.launchOffer.monthlyPriceSek} kr per månad under de första ${basic.launchOffer.durationMonths} månaderna när lanseringserbjudandet gäller och därefter ${basic.launchOffer.thenMonthlyPriceSek} kr per månad. Abonnemanget förnyas månadsvis tills det sägs upp. Det bindande totalpriset visas i Stripe Checkout innan betalning.`
+              : `Basic costs SEK ${basic.launchOffer.monthlyPriceSek} per month for the first ${basic.launchOffer.durationMonths} months when the launch offer applies and SEK ${basic.launchOffer.thenMonthlyPriceSek} per month thereafter. The subscription renews monthly until cancelled. The binding total price is shown in Stripe Checkout before payment.`}</p>
             <p className={paragraph}>{legalVatDescription(seller, sv ? "sv" : "en")}</p>
             <p className={paragraph}>{sv
               ? "Betalningar behandlas av Stripe. Du kan stoppa framtida förnyelser via Betalning/Billing. En uppsägning påverkar normalt inte redan betald åtkomst fram till periodens slut, om inte tvingande lag eller en giltig ånger-/reklamationsbegäran kräver annat."

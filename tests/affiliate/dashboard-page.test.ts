@@ -21,4 +21,10 @@ describe("affiliate dashboard page", () => {
     expect(page).toContain("Your affiliate link");
     expect(page).toContain("Payout history");
   });
+
+  it("does not expose broken Connect onboarding when the launch gate is off", () => {
+    expect(page).toContain("connectOnboardingEnabled");
+    expect(page).toContain("Referral tracking and commissions remain active.");
+    expect(page).toContain("connectOnboardingEnabled && !previewTargetId");
+  });
 });

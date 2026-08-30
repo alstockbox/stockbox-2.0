@@ -1,5 +1,11 @@
 import type Stripe from "stripe";
 
+export function isAffiliateConnectEnabled(
+  value: string | undefined = process.env.AFFILIATE_CONNECT_ENABLED
+) {
+  return value?.trim().toLowerCase() === "true";
+}
+
 export function buildAffiliateConnectAccountParams(input: {
   userId: string;
   affiliateId: string;

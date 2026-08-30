@@ -475,6 +475,36 @@ describe("archetype coverage fairness", () => {
     expect(result.recommendation.rating).toBe("No Rating");
   });
 
+  it("scores fallback-unclassified companies when repeated statements prove a conventional operating business", () => {
+    const result = asArchetype("unknown", {
+      analysisDate: "2026-08-25T00:00:00.000Z",
+      company: {
+        sector: "other",
+        industry: undefined,
+        classificationDiagnostics: {
+          reason: "Available SIC and industry evidence is insufficient for a reliable archetype.",
+          source: "fallback",
+          confidence: 0.2,
+          ambiguous: false,
+          candidates: ["unknown"],
+        },
+      },
+      market: {
+        ...durableCompounderInput.market,
+        currency: "USD",
+        priceDate: "2026-08-24",
+        marketCapAsOf: "2026-08-24",
+        sharesOutstandingAsOf: "2026-08-24",
+      },
+    });
+
+    expect(result.analysisArchetype).toBe("standard");
+    expect(result.scores.analysisArchetype).toBe("standard");
+    expect(result.scores.stockBoxScore).toEqual(expect.any(Number));
+    expect(result.recommendation.rating).not.toBe("No Rating");
+    expect(result.missingData.map((item) => item.field)).not.toContain("Archetype-specific valuation model");
+  });
+
   it("does not reuse operating-company score dimensions for unresolved financial specialists", () => {
     const result = asArchetype("unknown", {
       company: {
