@@ -53,8 +53,8 @@ describe("analysis workbench selection state", () => {
     expect(selectionAfterQueryChange(nvda, "NVIDIA Corporation")).toBe(nvda);
   });
 
-  it("keeps unsupported listings in search without enabling live fundamentals", () => {
-    expect(supportsLiveFundamentals(company("INVE.B"))).toBe(false);
+  it("allows common-stock listings to attempt global fundamentals even when discovery metadata has no fundamentals flag", () => {
+    expect(supportsLiveFundamentals(company("INVE.B"))).toBe(true);
     expect(supportsLiveFundamentals(company("AAPL"))).toBe(true);
   });
 

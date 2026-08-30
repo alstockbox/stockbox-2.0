@@ -4,7 +4,7 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { analyzeCompany, searchCompanies } from "@/lib/data/provider";
-import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
+import { canAttemptConfiguredFundamentals } from "@/lib/data/security-classification";
 import {
   completeAnalysisReservation,
   getAnalysisReplay,
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
   }
   const canonicalCompany = resolution.company;
 
-  if (!supportsLiveFundamentalsSecurity(canonicalCompany)) {
+  if (!canAttemptConfiguredFundamentals(canonicalCompany)) {
     return Response.json(
       { error: "Live fundamentals are not available for this security." },
       { status: 422 }
