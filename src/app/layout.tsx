@@ -26,10 +26,23 @@ export const metadata: Metadata = {
   },
   description:
     "StockBox turns filings, market data, scoring logic, and research workflows into a clear equity analysis workspace.",
+  icons: {
+    icon: "/images/stockbox-logo.png",
+    shortcut: "/images/stockbox-logo.png",
+    apple: "/images/stockbox-logo.png",
+  },
   openGraph: {
     title: "StockBox",
     description: "Understand any stock faster.",
-    type: "website"
+    type: "website",
+    images: [
+      {
+        url: "/images/stockbox-logo.png",
+        width: 1254,
+        height: 1254,
+        alt: "StockBox official emblem",
+      },
+    ],
   }
 };
 

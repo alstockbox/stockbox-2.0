@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, FileText, ShieldAlert } from "lucide-react";
 import type { AnalysisReport, Flag, Metrics, UiMode } from "@/lib/analysis/types";
 import { formatCompactCurrency, formatNumber, formatPercent } from "@/lib/utils/format";
+import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Meter } from "@/components/ui/meter";
@@ -97,8 +98,17 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
   const adminDiagnostics = adminQaSections(report.adminQa);
   return (
     <div className="space-y-5" data-report-print>
-      <div className="flex justify-end print:hidden">
-        <ReportExportActions label={copy.exportPdf} hint={copy.exportPdfHint} />
+      <div data-report-brand className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-white/10 bg-[#081421] px-4 py-3 print:border-0 print:bg-transparent print:px-0 print:py-0">
+        <div className="flex items-center gap-3">
+          <StockBoxLogo size={72} alt="StockBox" className="h-14 w-14 print:h-12 print:w-12" />
+          <div>
+            <p className="serif text-xl font-semibold text-[#f4efe5]">StockBox</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-[#e1cb95]">{report.ticker} · {report.analysisType}</p>
+          </div>
+        </div>
+        <div className="print:hidden">
+          <ReportExportActions label={copy.exportPdf} hint={copy.exportPdfHint} />
+        </div>
       </div>
       {report.dataStatus === "stale" ? (
         <Card className="border-red-300/30 bg-red-950/20 p-4">

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   UsersRound,
 } from "lucide-react";
+import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
@@ -33,7 +34,7 @@ export async function AppNav() {
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#07111f]/94 backdrop-blur">
       <div className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <Link href="/" className="group flex shrink-0 items-center gap-3 pr-2" aria-label="StockBox home">
-          <span className="grid h-9 w-9 place-items-center rounded-lg border border-[#e1cb95]/35 bg-[#e1cb95]/10 font-semibold text-[#f4e5b8]">SB</span>
+          <StockBoxLogo size={44} alt="" priority className="h-10 w-10 sm:h-11 sm:w-11" />
           <span className="serif text-2xl font-semibold tracking-tight text-[#f4efe5] group-hover:text-white">StockBox</span>
         </Link>
 

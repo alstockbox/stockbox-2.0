@@ -88,6 +88,15 @@ textarea:focus-visible {
     color: #111827 !important;
   }
 
+  body > header,
+  body > footer {
+    display: none !important;
+  }
+
+  [data-report-brand] {
+    background: transparent !important;
+  }
+
   [data-report-print] {
     color: #111827 !important;
   }
