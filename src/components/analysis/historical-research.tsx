@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type {
   AnalysisReport,
+  HistoricalCoverageItem,
   HistoricalFinancialPoint,
   HistoricalValuationPoint,
   HistoricalValuationWindowStats,
@@ -144,6 +145,8 @@ function extraCopyFor(locale: Locale) {
     paymentFrequency: "Betalningsfrekvens", latestPayment: "Senaste betalning", increaseStreak: "Höjningssvit", dividendSafety: "Utdelningssäkerhet", coverage: "Täckning",
     monthly: "Månadsvis", quarterly: "Kvartalsvis", semiannual: "Halvårsvis", annual: "Årlig", irregular: "Oregelbunden", none: "Ingen", unknown: "Okänd",
     covered: "Täckt", stretched: "Ansträngd", notCovered: "Ej täckt", insufficient: "Otillräckligt underlag", events: "event",
+    historicalCoverage: "Historisk täckning", financialsCoverage: "Finansiell historik", priceCoverage: "Prishistorik", valuationCoverage: "Värderingshistorik", dividendCoverage: "Utdelningshistorik",
+    coverageSeparate: "Täckning är separat från modellens konfidens", fullCoverage: "Full täckning", partialCoverage: "Otillräcklig historik", unavailableCoverage: "Saknas", notApplicableCoverage: "Ej tillämpligt", nmNegativeEarnings: "N/M — negativt resultat", observations: "observationer",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -168,6 +171,8 @@ function extraCopyFor(locale: Locale) {
     paymentFrequency: "Payment frequency", latestPayment: "Latest payment", increaseStreak: "Increase streak", dividendSafety: "Dividend safety", coverage: "Coverage",
     monthly: "Monthly", quarterly: "Quarterly", semiannual: "Semiannual", annual: "Annual", irregular: "Irregular", none: "None", unknown: "Unknown",
     covered: "Covered", stretched: "Stretched", notCovered: "Not covered", insufficient: "Insufficient data", events: "events",
+    historicalCoverage: "Historical coverage", financialsCoverage: "Financials", priceCoverage: "Price history", valuationCoverage: "Valuation history", dividendCoverage: "Dividend history",
+    coverageSeparate: "Coverage is separate from model confidence", fullCoverage: "Full coverage", partialCoverage: "Insufficient history", unavailableCoverage: "Unavailable", notApplicableCoverage: "Not applicable", nmNegativeEarnings: "N/M — negative earnings", observations: "observations",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -266,6 +271,53 @@ function PriceContextCard({ report, locale }: { report: AnalysisReport; locale: 
   );
 }
 
+function HistoricalCoverageCard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const coverage = report.historical?.coverage;
+  if (!coverage) return null;
+  const copy = copyFor(locale);
+  const extra = extraCopyFor(locale);
+  const statusLabel = (item: HistoricalCoverageItem) => item.status === "full"
+    ? extra.fullCoverage
+    : item.status === "partial"
+      ? extra.partialCoverage
+      : item.status === "not_applicable"
+        ? extra.notApplicableCoverage
+        : extra.unavailableCoverage;
+  const yearsLabel = (item: HistoricalCoverageItem) =>
+    formatNumber(item.availableYears, locale, copy.unavailable, 1) + "/" + item.requestedYears + " " + extra.years;
+  const rows: Array<{ key: string; label: string; item: HistoricalCoverageItem; suffix?: string }> = [
+    { key: "financials", label: extra.financialsCoverage, item: coverage.financials },
+    { key: "price", label: extra.priceCoverage, item: coverage.price },
+    { key: "valuation", label: extra.valuationCoverage, item: coverage.valuation },
+    {
+      key: "dividend",
+      label: extra.dividendCoverage,
+      item: coverage.dividend,
+      suffix: coverage.dividend.eventCoverageYears === undefined
+        ? undefined
+        : " · " + formatNumber(coverage.dividend.eventCoverageYears, locale, copy.unavailable, 1) + " " + extra.years + " " + extra.events,
+    },
+  ];
+  return (
+    <Card className="border-[#b99b5f]/20 bg-[#b99b5f]/[0.025]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-[#f4efe5]">{extra.historicalCoverage}</h2>
+        <Badge>{coverage.methodVersion}</Badge>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{extra.coverageSeparate}.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {rows.map(({ key, label, item, suffix }) => (
+          <div key={key} className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs text-[#9aa7b8]">{label}</p>
+            <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{yearsLabel(item)}{suffix ?? ""}</p>
+            <p className="mt-1 text-xs text-[#9aa7b8]">{statusLabel(item)} · {item.observationCount} {extra.observations}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function HistoricalSnapshot({ report, locale }: { report: AnalysisReport; locale: Locale }) {
   const historical = report.historical;
   if (!historical) return null;
@@ -287,12 +339,15 @@ function HistoricalSnapshot({ report, locale }: { report: AnalysisReport; locale
     valuationWindowValue(window, (value) => value.priceEarningsMedian, (value) => multiple(value), extra.insufficientHistory);
   const windowYield = (window: HistoricalValuationWindowStats | undefined) =>
     valuationWindowValue(window, (value) => value.dividendYieldAverage, (value) => percent(value), extra.insufficientHistory);
+  const currentPe = valuation?.currentPriceEarningsStatus === "not_meaningful"
+    ? extra.nmNegativeEarnings
+    : multiple(valuation?.currentPriceEarnings);
 
   const rows = [
     {
       key: "pe", label: "P/E",
       values: [
-        multiple(valuation?.currentPriceEarnings),
+        currentPe,
         windowPe(valuation?.oneYear),
         windowPe(valuation?.threeYear),
         windowPe(valuation?.fiveYear),
@@ -509,7 +564,7 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
             <Badge>{valuation.methodVersion}</Badge>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Stat label={extra.currentPe} value={formatNumber(valuation.currentPriceEarnings, locale, copy.unavailable, 1)} />
+            <Stat label={extra.currentPe} value={valuation.currentPriceEarningsStatus === "not_meaningful" ? extra.nmNegativeEarnings : formatNumber(valuation.currentPriceEarnings, locale, copy.unavailable, 1)} />
             <Stat label={referenceLabel} value={formatNumber(valuation.referencePriceEarningsMedian, locale, copy.unavailable, 1)} />
             <Stat label={extra.peVsHistory} value={formatPercent(valuation.currentPeVsReferenceMedian, locale, copy.unavailable)} />
             <Stat label={extra.tenYearPeMedian} value={valuation.tenYear.sufficientHistory ? formatNumber(valuation.tenYear.priceEarningsMedian, locale, copy.unavailable, 1) : extra.insufficientHistory} />
@@ -704,6 +759,7 @@ export function HistoricalResearchView({
   return (
     <div className="space-y-5">
       {showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}
+      {mode === "simple" ? <HistoricalCoverageCard report={report} locale={locale} /> : null}
       {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
       {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />

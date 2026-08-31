@@ -199,10 +199,16 @@ export function buildHistoricalValuationContext(input: {
   const maximum = maxStats(series);
   const comparison = fiveYear.sufficientHistory ? fiveYear : maximum;
   const currentPriceEarnings = positive(input.currentPriceEarnings) ? input.currentPriceEarnings : null;
+  const currentPriceEarningsStatus: HistoricalValuationContext["currentPriceEarningsStatus"] = currentPriceEarnings !== null
+    ? "available"
+    : series.at(-1)?.priceEarningsStatus === "not_meaningful"
+      ? "not_meaningful"
+      : "unavailable";
   const referenceMedian = positive(comparison.priceEarningsMedian) ? comparison.priceEarningsMedian : null;
   return {
     methodVersion: HISTORICAL_VALUATION_METHOD_VERSION,
     currentPriceEarnings,
+    currentPriceEarningsStatus,
     currentDividendYield,
     currentTrailingDividendsPerShare: currentDividend.amount,
     currentDividendPaymentCount: currentDividend.paymentCount,

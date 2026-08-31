@@ -1,11 +1,13 @@
 import type {
   DividendResearchContext,
   FinancialPeriod,
+  HistoricalCoverageContext,
   HistoricalFinancialPoint,
   HistoricalPriceContext,
   HistoricalPriceWindowStats,
   HistoricalResearchData,
   HistoricalTtmEpsPoint,
+  HistoricalValuationContext,
   MarketDividendEvent,
   MarketPricePoint,
 } from "./types";
@@ -21,6 +23,8 @@ import {
 const MAX_REFERENCE_PRICE_LAG_DAYS = 45;
 const MAX_PRICE_POINTS = 121;
 export const DIVIDEND_CONTEXT_METHOD_VERSION = "dividend-context-v1";
+export const HISTORICAL_COVERAGE_METHOD_VERSION = "historical-coverage-v1";
+const HISTORICAL_COVERAGE_REQUESTED_YEARS = 10 as const;
 
 function positive(value: number | null | undefined): number | null {
   return isFiniteNumber(value) && value > 0 ? value : null;
@@ -384,6 +388,75 @@ function buildDividendResearchContext(
   };
 }
 
+function buildHistoricalCoverageContext(
+  points: HistoricalFinancialPoint[],
+  priceContext: HistoricalPriceContext,
+  valuationContext: HistoricalValuationContext,
+  dividendContext: DividendResearchContext,
+): HistoricalCoverageContext {
+  const financialObservationCount = new Set(points.map((point) => point.fiscalYear)).size;
+  const financialAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, financialObservationCount);
+  const financialStatus = financialObservationCount === 0
+    ? "unavailable" as const
+    : financialAvailableYears >= HISTORICAL_COVERAGE_REQUESTED_YEARS
+      ? "full" as const
+      : "partial" as const;
+
+  const priceObservationCount = priceContext.maximum.observationCount;
+  const priceAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, Math.max(0, priceContext.maximum.spanYears));
+  const priceStatus = priceObservationCount === 0
+    ? "unavailable" as const
+    : priceContext.tenYear.sufficientHistory
+      ? "full" as const
+      : "partial" as const;
+
+  const valuationObservationCount = valuationContext.maximum.observationCount;
+  const valuationAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, Math.max(0, valuationContext.maximum.spanYears));
+  const valuationStatus = valuationObservationCount === 0
+    ? "unavailable" as const
+    : valuationContext.tenYear.sufficientHistory
+      ? "full" as const
+      : "partial" as const;
+
+  const dividendAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, dividendContext.annualHistoryYears);
+  const dividendStatus = dividendContext.status === "nonpayer"
+    ? "not_applicable" as const
+    : dividendContext.annualHistoryYears === 0 && dividendContext.eventCoverageYears === 0
+      ? "unavailable" as const
+      : dividendAvailableYears >= HISTORICAL_COVERAGE_REQUESTED_YEARS && dividendContext.eventCoverageYears >= 9.5
+        ? "full" as const
+        : "partial" as const;
+
+  return {
+    methodVersion: HISTORICAL_COVERAGE_METHOD_VERSION,
+    financials: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: financialAvailableYears,
+      observationCount: financialObservationCount,
+      status: financialStatus,
+    },
+    price: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: priceAvailableYears,
+      observationCount: priceObservationCount,
+      status: priceStatus,
+    },
+    valuation: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: valuationAvailableYears,
+      observationCount: valuationObservationCount,
+      status: valuationStatus,
+    },
+    dividend: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: dividendAvailableYears,
+      observationCount: dividendContext.annualHistoryYears,
+      status: dividendStatus,
+      eventCoverageYears: dividendContext.eventCoverageYears,
+    },
+  };
+}
+
 function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   let increased = 0;
   let unchanged = 0;
@@ -440,12 +513,14 @@ export function buildHistoricalResearchData(
     prices: sortedPrices,
     dividendEvents: options.dividendEvents,
   });
+  const coverage = buildHistoricalCoverageContext(points, priceContext, valuationContext, dividendContext);
 
   return {
     financials: points.slice(-10),
     price: sortedPrices,
     priceContext,
     dividendContext,
+    coverage,
     valuation,
     valuationContext,
     valuationMethodVersion: HISTORICAL_VALUATION_METHOD_VERSION,

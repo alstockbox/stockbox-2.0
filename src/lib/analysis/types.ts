@@ -486,6 +486,7 @@ export type HistoricalValuationWindowStats = {
 export type HistoricalValuationContext = {
   methodVersion: string;
   currentPriceEarnings: number | null;
+  currentPriceEarningsStatus?: "available" | "not_meaningful" | "unavailable";
   currentDividendYield: number | null;
   currentTrailingDividendsPerShare: number | null;
   currentDividendPaymentCount: number;
@@ -577,11 +578,29 @@ export type DividendResearchContext = {
   eventCoverageYears: number;
 };
 
+export type HistoricalCoverageStatus = "full" | "partial" | "unavailable" | "not_applicable";
+
+export type HistoricalCoverageItem = {
+  requestedYears: 10;
+  availableYears: number;
+  observationCount: number;
+  status: HistoricalCoverageStatus;
+};
+
+export type HistoricalCoverageContext = {
+  methodVersion: string;
+  financials: HistoricalCoverageItem;
+  price: HistoricalCoverageItem;
+  valuation: HistoricalCoverageItem;
+  dividend: HistoricalCoverageItem & { eventCoverageYears?: number };
+};
+
 export type HistoricalResearchData = {
   financials: HistoricalFinancialPoint[];
   price: MarketPricePoint[];
   priceContext?: HistoricalPriceContext;
   dividendContext?: DividendResearchContext;
+  coverage?: HistoricalCoverageContext;
   valuation?: HistoricalValuationPoint[];
   valuationContext?: HistoricalValuationContext;
   valuationMethodVersion?: string;
