@@ -15,15 +15,15 @@ function point(year: number, overrides: Partial<HistoricalFinancialPoint> = {}):
     interestCoverage: 8, sharesOutstanding: 10, shareGrowth: 0.01,
     dividendsPaid: 5, dividendPerShare: 0.5, dividendGrowth: 0.05,
     payoutRatio: 0.25, freeCashFlowPayoutRatio: 0.28,
-    referencePrice: 25, priceEarnings: 12.5, dividendYield: 0.02,
+    referencePrice: 25, priceEarnings: null, dividendYield: null,
     ...overrides,
   };
 }
 function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
   const financials = [
     point(2024),
-    point(2025, { eps: -1, priceEarnings: null, payoutRatio: null }),
-    point(2026, { dividendPerShare: 0.55, dividendYield: 0.022 }),
+    point(2025, { eps: -1, payoutRatio: null }),
+    point(2026, { dividendPerShare: 0.55 }),
   ];
   return {
     investmentProfile: profile,
@@ -34,6 +34,24 @@ function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
         { date: "2024-12-31", close: 20 },
         { date: "2025-12-31", close: 22 },
         { date: "2026-08-31", close: 25 },
+      ],
+      valuationMethodVersion: "historical-valuation-v2",
+      valuation: [
+        {
+          date: "2024-12-31", priceDate: "2024-12-31", referencePrice: 20, ttmEps: 2,
+          priceEarnings: 10, priceEarningsStatus: "available",
+          trailingDividendsPerShare: 0.5, dividendPaymentCount: 4, dividendYield: 0.025,
+        },
+        {
+          date: "2025-12-31", priceDate: "2025-12-31", referencePrice: 22, ttmEps: -1,
+          priceEarnings: null, priceEarningsStatus: "not_meaningful",
+          trailingDividendsPerShare: 0.5, dividendPaymentCount: 4, dividendYield: 0.5 / 22,
+        },
+        {
+          date: "2026-08-31", priceDate: "2026-08-31", referencePrice: 25, ttmEps: 2.2,
+          priceEarnings: 25 / 2.2, priceEarningsStatus: "available",
+          trailingDividendsPerShare: 0.55, dividendPaymentCount: 4, dividendYield: 0.022,
+        },
       ],
       revenueCagr3y: 0.1, revenueCagr5y: 0.09, revenueCagr10y: 0.08,
       epsCagr3y: 0.08, epsCagr5y: 0.07, epsCagr10y: 0.06,
