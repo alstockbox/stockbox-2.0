@@ -20,7 +20,7 @@ async function resolveMetadata(report: AnalysisReport, supplied?: CompanySearchR
   }
 }
 
-function toPublicCompanySnapshot(snapshot: CompanyMetricSnapshot): PublicCompanyMetricSnapshot {
+export function toPublicCompanySnapshot(snapshot: CompanyMetricSnapshot): PublicCompanyMetricSnapshot {
   return {
     ticker: snapshot.ticker,
     companyName: snapshot.companyName,
