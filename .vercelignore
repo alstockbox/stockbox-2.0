@@ -1,0 +1,8 @@
+.stockbox-diagnostics/
+.next/
+node_modules/
+coverage/
+*.log
+.env*
+.vercel/
+tests/tmp-live-*.test.ts

@@ -1,15 +1,16 @@
 import type { AnalysisReport } from "@/lib/analysis/types";
+import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getServerEnv } from "@/lib/env/server";
 import { logApplicationError, markAdminAlertSent, releaseAdminAlert, reserveAdminAlert } from "@/lib/db/repositories";
 
-export async function sendStrongBuyAlert(report: AnalysisReport, adminUrl: string) {
+export async function sendStrongResearchAlert(report: AnalysisReport, adminUrl: string) {
   const env = getServerEnv();
-  if (report.recommendation !== "Strong Buy" || env.EMAIL_PROVIDER !== "resend") return;
+  if (researchViewForReport(report) !== "Strong" || env.EMAIL_PROVIDER !== "resend") return;
 
   if (!env.RESEND_API_KEY || !env.ADMIN_ALERT_EMAIL || !env.FROM_EMAIL) {
     await logApplicationError({
       service: "admin-alerts",
-      message: "Strong Buy alert skipped because email environment variables are incomplete.",
+      message: "Strong research-view alert skipped because email environment variables are incomplete.",
       context: { ticker: report.ticker, analysisId: report.id }
     });
     return;
@@ -27,15 +28,15 @@ export async function sendStrongBuyAlert(report: AnalysisReport, adminUrl: strin
     body: JSON.stringify({
       from: env.FROM_EMAIL,
       to: env.ADMIN_ALERT_EMAIL,
-      subject: `StockBox Strong Buy: ${report.ticker}`,
-      html: `<p><strong>${report.companyName}</strong> generated a Strong Buy model assessment.</p><p>Score: ${report.score.score} / Confidence: ${report.score.confidence}%</p><p>${report.oneSentence}</p><p><a href="${adminUrl}">Open admin report</a></p>`
+      subject: `StockBox strong research view: ${report.ticker}`,
+      html: `<p><strong>${report.companyName}</strong> generated a strong StockBox research view.</p><p>Score: ${report.score.score} / Confidence: ${report.score.confidence}%</p><p>${report.oneSentence}</p><p><a href="${adminUrl}">Open admin report</a></p>`
     })
   });
 
   if (!response.ok) {
     await logApplicationError({
       service: "admin-alerts",
-      message: "Resend rejected Strong Buy alert.",
+      message: "Resend rejected strong research-view alert.",
       context: { ticker: report.ticker, status: response.status }
     });
     await releaseAdminAlert(report.id);
@@ -45,3 +46,5 @@ export async function sendStrongBuyAlert(report: AnalysisReport, adminUrl: strin
   const payload = (await response.json().catch(() => null)) as { id?: string } | null;
   await markAdminAlertSent(report.id, payload?.id);
 }
+
+export const sendStrongBuyAlert = sendStrongResearchAlert;
