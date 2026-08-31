@@ -83,15 +83,15 @@ export async function AppNav() {
             ))}
           </nav>
         ) : (
-          <nav className="ml-4 hidden flex-1 items-center gap-0.5 2xl:flex" aria-label="Workspace">
+          <nav className="ml-4 hidden flex-1 items-center gap-0.5 xl:flex" aria-label="Workspace">
             {appNavItems.filter((item) => item.enabled).map((item) => (
-              <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+              <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2 py-2 text-xs text-[#c9d2df] hover:bg-white/8 hover:text-white 2xl:px-2.5 2xl:text-sm">
                 <item.icon className="h-4 w-4" aria-hidden="true" />
                 {copy[item.labelKey]}
               </Link>
             ))}
             {investorNavItems.map((item) => (
-              <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+              <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2 py-2 text-xs text-[#c9d2df] hover:bg-white/8 hover:text-white 2xl:px-2.5 2xl:text-sm">
                 <item.icon className="h-4 w-4" aria-hidden="true" />
                 {locale === "sv" ? item.sv : item.en}
               </Link>
@@ -99,7 +99,7 @@ export async function AppNav() {
           </nav>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <details className={user ? "relative 2xl:hidden" : "relative lg:hidden"}>
+          <details className={user ? "relative xl:hidden" : "relative lg:hidden"}>
             <summary className="cursor-pointer list-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-[#f4efe5]">
               {accountLabels.menu}
             </summary>
