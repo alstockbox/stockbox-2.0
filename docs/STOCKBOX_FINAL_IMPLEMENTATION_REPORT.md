@@ -5,10 +5,10 @@ Prepared: 2026-08-31
 Scope: the existing StockBox application and its real analysis, data, comparison, export, runtime, security, profile and historical-research surfaces.
 
 ## 1. Overall status
-- Production readiness: High for the implemented repository scope. The release branch builds, passes the full automated regression suite, typecheck, lint, production-runtime smoke, security-header/auth-route smoke and live public-market-provider smoke. External production-secret flows still require post-deploy owner verification.
-- P0 completion: Complete for the repository/provider capabilities available in this build. The release-blocking historical methodology, Simple Mode, coverage, profile differentiation, comparison semantics, low-P/E context, chart gaps and export-parity issues identified during the audit were implemented and regression-tested.
+- Production readiness: High for the implemented repository scope. The release branch builds, passes the full automated regression suite, typecheck, lint, production-runtime smoke, security-header/auth-route smoke and live public-market-provider smoke. The Defensive profile database constraint is applied and verified in `stockbox-production`. A fresh Vercel preview is temporarily blocked by Hobby-plan deployment rate limiting, and Supabase Auth still reports Leaked Password Protection as disabled.
+- P0 completion: Complete for the repository/provider capabilities available in this build. The release-blocking historical methodology, Simple Mode, coverage, profile differentiation, comparison semantics, low-P/E context, chart gaps, export parity and Defensive persistence issues identified during the audit were implemented and regression-tested.
 - P1 completion: Partial. Core historical dashboards, multi-period context, dividend context, payout/FCF/ROIC history, comparison and export foundations are present, but some richer historical/specialized features remain provider- or scope-limited.
-- Known blockers: No known repository-level P0 blocker remains after the final hardening pass. Remaining limitations are provider/licensing/live-environment constraints documented below and must not be represented as available data when they are not available.
+- Known blockers: No known repository-level P0 code blocker remains after the final hardening pass. External launch limitations are the Vercel deployment-rate limit, Supabase Auth leaked-password protection setting, provider/licensing constraints and live payment-flow verification documented below.
 
 ## 2. What was implemented
 - Replaced annual fiscal-year EPS-based historical P/E behavior with a versioned TTM historical valuation pipeline (`historical-valuation-v2`).
@@ -22,7 +22,7 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Added current/52-week and 1Y/3Y/5Y/10Y/MAX price context with insufficient-history semantics instead of relabeling shorter history as 10Y.
 - Added structured dividend context: TTM DPS, current yield, payment count/frequency, latest payment, increase streak, safety, annual-history years and dividend-event coverage years.
 - Added Defensive as a first-class investment profile and preserved compatibility with existing saved/profile values.
-- Added a Supabase migration for the Defensive investment-profile value.
+- Added and applied a Supabase migration for the Defensive investment-profile value.
 - Made profile selection visible in the normal analysis flow rather than hiding the critical behavior behind Advanced Settings.
 - Added config-driven profile presentation and score-dimension ordering so Dividend, Growth, Value, Quality and Defensive visibly emphasize different evidence.
 - Made comparison profile-aware without creating a new opaque comparison score.
@@ -59,9 +59,11 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Kept financial calculation logic in the analysis layer rather than moving financial math into React components.
 
 ## 5. Database changes
-- Added `supabase/migrations/20260831213000_add_defensive_investment_profile.sql` to permit/persist the Defensive investment-profile value.
+- Added `supabase/migrations/20260831215457_add_defensive_investment_profile.sql` to permit/persist the Defensive investment-profile value.
+- Applied the matching `add_defensive_investment_profile` migration to Supabase project `stockbox-production`; Supabase recorded migration version `20260831215457`.
+- Verified the live `profiles_investment_profile_check` constraint contains `long_term`, `short_term`, `growth`, `value`, `quality`, `dividend`, `defensive` and `balanced`.
 - No duplicate historical-financial warehouse schema was introduced in this hardening branch. Existing report/history architecture continues to carry the normalized analysis payload.
-- The migration must be applied in the production Supabase project before Defensive is treated as fully deployed.
+- Supabase security advisor after the DDL change reported an Auth WARN that Leaked Password Protection is disabled. RLS-without-policy findings are INFO-level and restrictive-by-default; they were not automatically loosened.
 
 ## 6. Frontend changes
 - Simple Mode now has a materially clearer investor decision hierarchy.
@@ -134,7 +136,8 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Analyst estimate revisions/catalysts: only usable when a verified estimates provider supplies comparable revision history. Missing revisions remain unavailable and are not inferred by the LLM.
 - Cross-currency comparison normalization: current comparison warns when currencies are not directly comparable and avoids false winner logic. A full FX-normalized historical comparison requires an authoritative timestamped FX series and is P1/P2 work.
 - Commercial provider licensing/redistribution rights cannot be established by application code. The owner must ensure every production provider’s terms permit the intended commercial use, caching and redistribution/display pattern.
-- Production Supabase/Stripe end-to-end writes require production credentials and live external accounts. Anonymous CI cannot safely create real paid subscriptions or mutate the live database. These flows remain owner/live-environment verification items rather than being faked in tests.
+- Live Stripe end-to-end purchase/webhook/customer-portal verification requires an intentional real transaction and live account state. Automated CI does not create a real charge merely to make a release report look complete.
+- Vercel preview deployment is temporarily capacity-blocked: the connected Hobby team is currently returning `Deployment rate limited — retry in 24 hours.` A fresh preview cannot be produced until quota resets or build capacity is increased.
 
 ## 10. Tests run
 - Targeted historical valuation P0 tests: positive/negative/non-meaningful P/E behavior, TTM basis, no-look-ahead pricing, window coverage and valuation context.
@@ -155,11 +158,14 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Production runtime smoke: built app started with `next start`; public routes, protected routes, auth redirects, provider-health endpoint, sample-report state and required security headers passed.
 - Live market-data smoke: AAPL/MSFT/NVDA/SPY all resolved successfully via Yahoo on 2026-08-31.
 - Dependency install audit during provider smoke reported 0 npm vulnerabilities at install time.
+- Production Supabase migration list verified the Defensive migration is recorded as version `20260831215457`.
+- Production constraint query verified `defensive` is accepted by `profiles_investment_profile_check`.
+- Supabase security and performance advisors were run after the production DDL change; no migration-specific DDL failure was reported.
 
 ## 11. Regression status (auth/payments/quotas/affiliate/admin/batch/portfolio/PDF/history)
 - Auth/login/signup/reset/account code paths: no intentional behavioral rewrite in this hardening branch; full regression suite passed and runtime unauthenticated redirects passed.
 - Protected settings/admin/affiliate routes: runtime smoke confirmed unauthenticated protection/redirect behavior.
-- Payments/subscriptions/cancel/renew/upgrades: no intentional payment-state redesign in this hardening branch; existing automated regression suite passed. Live Stripe transaction/webhook verification is still an owner post-deploy action because CI does not use live credentials.
+- Payments/subscriptions/cancel/renew/upgrades: no intentional payment-state redesign in this hardening branch; existing automated regression suite passed. Live Stripe transaction/webhook verification is still an owner launch check because creating a real charge is intentionally not automated without a real purchase action.
 - Usage/quotas: preserved; regression suite passed.
 - Affiliate/admin/RBAC: preserved; regression suite passed; runtime unauthenticated admin/affiliate protection passed.
 - Batch analysis: preserved; route smoke passed and regression suite passed.
@@ -181,9 +187,10 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 
 ## 13. Manual owner actions (only true owner manual steps)
 - Review and merge the release-hardening PR after checking the final diff.
-- Apply the Supabase migration `20260831213000_add_defensive_investment_profile.sql` to the production database before relying on Defensive persistence in production.
+- In Supabase Auth settings, enable Leaked Password Protection; the current production security advisor reports it disabled. Remediation: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
 - Confirm production environment variables/secrets for Supabase, Stripe and any optional paid data providers are present in the deployment environment.
-- Perform one real production Stripe purchase, customer-portal/cancellation flow and webhook delivery check using the intended live configuration; verify usage entitlement changes once.
+- Vercel is currently rate-limiting new deployments on the connected Hobby team; deploy after quota becomes available or increase Vercel build capacity.
+- Perform one intentional real production Stripe purchase, customer-portal/cancellation flow and webhook delivery check using the intended live configuration; verify usage entitlement changes once.
 - Perform one authenticated production analysis, save/history check, comparison, PDF/print and CSV export after deployment.
 - Verify production provider licensing/redistribution/caching terms for the commercial launch configuration.
 - Watch provider-health/error telemetry immediately after release and keep missing/partial data visible rather than substituting fabricated values.
