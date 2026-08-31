@@ -10,7 +10,7 @@ Static benchmarks: `stockbox-static-benchmarks-v1`
 
 The analysis API resolves the requested listing and issuer on the server. Browser-supplied CIK, entity ID, canonical ticker, country, currency and provider metadata are not authoritative. A CIK, issuer or listing mismatch, an ambiguous result, or an unsupported security class stops analysis before provider access. Duplicate provider representations of the same bare U.S. ticker may merge only when both are clearly U.S. listings and no stable security identifier or CIK conflicts. ADRs, preferred securities, ETFs, funds, and unsupported composite/unit securities remain discovery-only for common-stock fundamentals. Global listing-class inference explicitly distinguishes supported common shares from preferred classes and known exchange-specific unit/certificate structures, including Brazilian preferred classes, Mexican composite units/certificates, the tested German/Xetra class-3 preference-share convention, and explicitly catalogued non-common participation certificates such as Roche ROP.
 
-For CIK-backed common stocks, SEC Companyfacts and Yahoo fundamentals may be requested together. SEC reported facts retain priority for the same metric and period. A secondary provider may fill a missing metric only after issuer, period, currency and metric compatibility checks. Material disagreements are recorded as source conflicts and high-severity conflicts block scoring and recommendation. Provider diagnostics preserve attempts, selected capabilities, fallback use and failures.
+For CIK-backed common stocks, SEC Companyfacts and Yahoo fundamentals may be requested together. SEC reported facts retain priority for the same metric and period. A secondary provider may fill a missing metric only after issuer, period, currency and metric compatibility checks. Material disagreements are recorded as source conflicts and high-severity conflicts block scoring and the current research-view conclusion. Provider diagnostics preserve attempts, selected capabilities, fallback use and failures.
 
 ## Data and calculations
 
@@ -32,21 +32,23 @@ Unavailable contributors do not become zero-valued facts. Planned coverage is re
 
 ## Archetypes and special companies
 
-Classification records its reason, source, confidence, ambiguity and candidates. The supported archetypes are standard, software growth, bank, insurer, REIT, utility, cyclical, pre-revenue biotech, holding company and unknown. Passenger-vehicle manufacturers are classified as consumer/cyclical, while heavy machinery and industrial transport-equipment manufacturers remain industrial/cyclical. Airlines, marine/ocean shipping and railroads use cyclical methodology; freight/logistics services remain standard. Interactive gaming/multimedia is separated from generic electronic-equipment technology wording. Broad non-REIT real-estate, asset-management and capital-markets evidence remains `unknown` until specialized methodology exists; these companies must not fall through to generic corporate FCFF. Unknown companies receive no canonical score or directional rating.
+Classification records its reason, source, confidence, ambiguity and candidates. The supported archetypes are standard, software growth, bank, insurer, REIT, utility, cyclical, pre-revenue biotech, holding company and unknown. Passenger-vehicle manufacturers are classified as consumer/cyclical, while heavy machinery and industrial transport-equipment manufacturers remain industrial/cyclical. Airlines, marine/ocean shipping and railroads use cyclical methodology; freight/logistics services remain standard. Interactive gaming/multimedia is separated from generic electronic-equipment technology wording. Broad non-REIT real-estate, asset-management and capital-markets evidence remains `unknown` until specialized methodology exists; these companies must not fall through to generic corporate FCFF. Unknown companies receive no canonical score or current research-view conclusion.
 
-Banks use separate profitability, capital adequacy, asset quality, funding and equity-valuation inputs. Insurers use underwriting, book value, return, capital and reserve inputs. REITs use trustworthy provider-reported or fully supported derived FFO, company-defined AFFO, property metrics, REIT leverage and FFO valuation. GAAP net income is not relabelled FFO, and generic free cash flow is not relabelled AFFO. Missing specialist coverage produces No Rating.
+Banks use separate profitability, capital adequacy, asset quality, funding and equity-valuation inputs. Insurers use underwriting, book value, return, capital and reserve inputs. REITs use trustworthy provider-reported or fully supported derived FFO, company-defined AFFO, property metrics, REIT leverage and FFO valuation. GAAP net income is not relabelled FFO, and generic free cash flow is not relabelled AFFO. Missing specialist coverage produces an insufficient-data research view.
 
 Corporate FCFF is inappropriate for banks, insurers and REITs. Cyclical DCF requires at least four contiguous comparable annual periods and uses a multi-period normalized FCFF margin scaled to current annual revenue. Insufficient cycle history makes DCF unavailable.
 
-## Recommendation gates
+## Overall research view
 
-- Strong Buy: personalized/general score at least 84, confidence at least 72, no critical or high red flags, and meaningful positive valuation support.
-- Buy: score at least 68, confidence at least 55, no critical red flag.
-- Strong Sell: score at most 24, confidence at least 70, meaningful downside support, plus a critical flag or at least two high flags.
-- Sell: score at most 40 and confidence at least 55.
-- Otherwise: Hold.
+The customer-facing conclusion is neutral research classification rather than BUY/HOLD/SELL advice. StockBox maps the personalized score when available, otherwise the canonical score, into these presentation bands:
 
-Confidence below 40 results in No Rating. Unknown methodology, future or mixed-currency financials, high source conflicts, and insufficient specialist coverage also fail closed. Directional Buy/Sell ratings require either an available directionally supported FCFF DCF with at least 45 confidence, sufficiently covered archetype-specific valuation for banks, insurers and REITs, or—only when DCF is unavailable—a high-coverage static benchmark valuation for a standard operating archetype with at least 70 model confidence, fresh market inputs, full currency alignment, sufficient valuation inputs and no severe source-conflict penalty. Benchmark fallback can support regular Buy/Sell only; Strong Buy/Sell still requires stronger directional valuation evidence. Hold is not used to disguise unsupported methodology.
+- Strong: score at least 75.
+- Solid: score at least 60 and below 75.
+- Mixed: score at least 42 and below 60.
+- Weak: score below 42.
+- Insufficient data: no finite score, confidence below 40, or weighted data coverage below 0.55.
+
+The research view does not override missing-data, freshness, currency, archetype, specialist-coverage or source-conflict gates. Confidence measures trust in the method and underlying data, not whether a company is attractive. A legacy directional-rating field remains in the persisted report schema for historical compatibility and regression/calibration. Where surfaced to customers it is labeled Model rating and is presented as research output, not investment advice. Customer-facing alerts and analytics use the neutral overall Research view instead.
 
 Confidence measures method and data trust, not company quality. It incorporates coverage, financial and market freshness, source quality, reconciliation, valuation inputs and assumptions, entity confidence, currency state, archetype confidence, specialist coverage and source conflicts. Overall confidence is capped at 35 when the archetype is unresolved, at 45 when a bank/insurer/REIT has less than 30% specialist coverage, and at 60 while specialist coverage remains below 70%. A failed provider attempt does not lower core source quality when a complete fallback succeeds; fallback use remains visible in QA.
 
@@ -62,7 +64,7 @@ The live report displays the engine's per-share Bear/Base/Bull range only when d
 
 The result stores model, score-policy and benchmark versions plus a SHA-256 fingerprint of the sorted canonical input and those versions. `analysisDate` is injectable for deterministic reruns. Sources distinguish `dataAsOf` from `accessedAt` and include provider capability and adapter version. Research is attached once after the canonical result and source list exist, and signal evidence is capability- or metric-provenance-specific.
 
-Batch QA persists score, rating, versions and fingerprint. Rerun comparison reports added/removed/matched entities, signed and absolute score changes, score availability, No Rating transitions, coverage, confidence, archetype, rating and flag changes. It does not imply benchmark calibration has already been completed.
+Batch QA persists score, coverage, confidence, versions and fingerprint. Rerun comparison reports added/removed/matched entities, signed and absolute score changes, score availability, research-view transitions, coverage, confidence, archetype and flag changes. The legacy directional field remains available for historical regression compatibility and consistent Model rating display across canonical report/export surfaces. This does not imply benchmark calibration has already been completed.
 
 ## Limitations
 

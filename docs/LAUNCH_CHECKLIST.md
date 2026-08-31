@@ -48,7 +48,7 @@ Current release candidate: later than the 28 August `5c8a4dd` verification point
 - [ ] Submit a real withdrawal request and verify persistence, admin visibility and receipt email delivery.
 - [ ] Verify cancellation, resubscribe and failed-payment lifecycle with a normal non-admin customer.
 - [ ] Verify PostHog production payloads contain only allowlisted non-sensitive event properties.
-- [ ] Verify Strong Buy email delivery, retry and dedup behavior through the configured email provider.
+- [ ] Verify Strong research-view admin-alert delivery, retry and dedup behavior through the configured email provider.
 - [ ] Run mobile/tablet/desktop browser QA, keyboard/focus/contrast QA and browser-console review.
 - [ ] Verify Print / Save PDF layout on representative Summary/Numbers/Deep reports.
 - [ ] Verify Batch progress, continuation on failure, retry-only-failures, History persistence, Compare (up to three saved reports) and admin/customer authorization in production UI.

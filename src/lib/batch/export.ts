@@ -64,7 +64,7 @@ export async function renderAnalysisPdf(report: AnalysisReport) {
   line(writer, `${report.companyName} (${report.ticker})`, { size: 17, bold: true });
   line(writer, `Analyzed: ${formatAnalysisTimestamp(report.generatedAt, "en")}`);
   line(writer, `Analysis type: ${report.analysisType} | Profile: ${report.investmentProfile} | Engine: ${report.modelVersion ?? "Not available"}`);
-  line(writer, `Research view: ${researchViewForReport(report)} | Score: ${report.score.score === null ? "Not available" : Math.round(report.score.score)}/100 | Confidence: ${Math.round(report.score.confidence)}% | Coverage: ${report.dataCoverage === undefined ? "Not available" : `${Math.round(report.dataCoverage * 100)}%`}`);
+  line(writer, `Model rating: ${report.recommendation} | Research view: ${researchViewForReport(report)} | Score: ${report.score.score === null ? "Not available" : Math.round(report.score.score)}/100 | Confidence: ${Math.round(report.score.confidence)}% | Coverage: ${report.dataCoverage === undefined ? "Not available" : `${Math.round(report.dataCoverage * 100)}%`}`);
   heading(writer, "Summary"); line(writer, neutralCopy.oneSentence); line(writer, neutralCopy.summary);
   heading(writer, "Research dimensions");
   for (const d of report.score.dimensions) line(writer, `${d.label}: ${value(d.score)}/100${d.coverage === undefined ? "" : ` | coverage ${Math.round(d.coverage * 100)}%`} - ${d.rationale}`);
@@ -103,8 +103,8 @@ export async function buildBatchZip(reports: AnalysisReport[]) {
   const folder = zip.folder("Analyses");
   if (!folder) throw new Error("ZIP folder creation failed");
   for (const report of reports) folder.file(safeAnalysisFilename(report), await renderAnalysisPdf(report));
-  const header = ["Ticker", "Company", "Analyzed", "Type", "Score", "Confidence", "Research View", "Coverage", "Analysis ID"];
-  const rows = reports.map((r) => [r.ticker, r.companyName, r.generatedAt, r.analysisType, r.score.score === null ? null : Math.round(r.score.score), Math.round(r.score.confidence), researchViewForReport(r), r.dataCoverage, r.id]);
+  const header = ["Ticker", "Company", "Analyzed", "Type", "Score", "Confidence", "Model Rating", "Research View", "Coverage", "Analysis ID"];
+  const rows = reports.map((r) => [r.ticker, r.companyName, r.generatedAt, r.analysisType, r.score.score === null ? null : Math.round(r.score.score), Math.round(r.score.confidence), r.recommendation, researchViewForReport(r), r.dataCoverage, r.id]);
   zip.file("Batch_Data.csv", [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n"));
   zip.file("metadata.json", JSON.stringify({ exportedAt: new Date().toISOString(), reportCount: reports.length, reports: reports.map((r) => ({ analysisId: r.id, ticker: r.ticker, company: r.companyName, generatedAt: r.generatedAt, engineVersion: r.modelVersion, analysisType: r.analysisType })) }, null, 2));
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });

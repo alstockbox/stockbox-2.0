@@ -20,7 +20,7 @@ describe("analytics privacy boundary", () => {
 
   it("hashes user identity and drops raw or sensitive properties", () => {
     captureServerEvent("analysis_completed", {
-      userId: "user-123", ticker: "AAPL", score: 88, recommendation: "Buy",
+      userId: "user-123", ticker: "AAPL", score: 88, researchView: "Strong", recommendation: "Buy",
       email: "person@example.com", token: "secret-token", reportBody: "private report",
       analysisId: "analysis-123",
     });
@@ -30,7 +30,9 @@ describe("analytics privacy boundary", () => {
     const payload = JSON.parse(String(init.body));
     expect(payload.properties.distinct_id).toMatch(/^sb_[a-f0-9]{64}$/);
     expect(payload.properties.distinct_id).not.toContain("user-123");
-    expect(payload.properties).toMatchObject({ ticker: "AAPL", score: 88, recommendation: "Buy" });    expect(payload.properties).not.toHaveProperty("userId");
+    expect(payload.properties).toMatchObject({ ticker: "AAPL", score: 88, researchView: "Strong" });
+    expect(payload.properties).not.toHaveProperty("recommendation");
+    expect(payload.properties).not.toHaveProperty("userId");
     expect(payload.properties).not.toHaveProperty("email");
     expect(payload.properties).not.toHaveProperty("token");
     expect(payload.properties).not.toHaveProperty("reportBody");

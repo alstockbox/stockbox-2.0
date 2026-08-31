@@ -22,6 +22,8 @@ describe("consent-gated browser analytics", () => {
     expect(component).toContain("connect.facebook.net/en_US/fbevents.js");
     expect(component).toContain("Reject analytics");
     expect(component).toContain("Accept analytics");
+    expect(component).toContain("Om du samtycker kan StockBox använda");
+    expect(component).toContain("Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte");
     expect(read("src/app/layout.tsx")).toContain("<BrowserAnalytics");
     const config = read("next.config.ts");
     expect(config).toContain("https://www.googletagmanager.com");

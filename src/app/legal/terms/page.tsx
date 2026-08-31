@@ -115,8 +115,8 @@ export default async function TermsPage() {
           <section>
             <h2 className={heading}>{sv ? "Analysrisk och datakällor" : "Research risk and data sources"}</h2>
             <p className={paragraph}>{sv
-              ? "Analyser kan innehålla fel, fördröjningar, saknade datapunkter och modellantaganden. Historiska resultat och modellbetyg garanterar inte framtida utveckling. Du ansvarar för egna investeringsbeslut och bör kontrollera väsentliga uppgifter mot primärkällor."
-              : "Analyses can contain errors, delays, missing data and model assumptions. Historical results and model ratings do not guarantee future performance. You remain responsible for investment decisions and should verify material information against primary sources."}</p>
+              ? "Analyser kan innehålla fel, fördröjningar, saknade datapunkter och modellantaganden. Historiska resultat och StockBox researchvyer garanterar inte framtida utveckling. Du ansvarar för egna investeringsbeslut och bör kontrollera väsentliga uppgifter mot primärkällor."
+              : "Analyses can contain errors, delays, missing data and model assumptions. Historical results and StockBox research views do not guarantee future performance. You remain responsible for investment decisions and should verify material information against primary sources."}</p>
           </section>
 
           <section>

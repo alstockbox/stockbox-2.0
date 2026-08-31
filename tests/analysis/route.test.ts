@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   releaseAnalysisReservation: vi.fn(),
   reserveAnalysisEntitlement: vi.fn(),
   searchCompanies: vi.fn(),
-  sendStrongBuyAlert: vi.fn()
+  sendStrongResearchAlert: vi.fn()
 }));
 
 vi.mock("@/lib/analytics/events", () => ({
@@ -39,9 +39,10 @@ vi.mock("@/lib/env/server", () => ({
   getServerEnv: vi.fn(() => ({ NEXT_PUBLIC_APP_URL: "https://stockbox.test" })),
   isSupabaseConfigured: vi.fn(() => false)
 }));
-vi.mock("@/lib/notifications/admin-alerts", () => ({
-  sendStrongBuyAlert: mocks.sendStrongBuyAlert
-}));
+vi.mock("@/lib/notifications/admin-alerts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/notifications/admin-alerts")>();
+  return { ...actual, sendStrongResearchAlert: mocks.sendStrongResearchAlert };
+});
 
 import { POST } from "../../src/app/api/analysis/route";
 
@@ -140,7 +141,8 @@ function report(analysisType: AnalysisType): AnalysisReport {
     companyName: "Box Systems",
     analysisType,
     investmentProfile: "balanced",
-    score: { score: 88 },
+    score: { score: 88, confidence: 85 },
+    dataCoverage: 0.9,
     recommendation: "Buy",
     adminQa: {
       providerFailures: [], fallbacks: [], missingDataReasons: [], classificationDiagnostics: null,
@@ -264,7 +266,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
     mocks.recordUsageEvent.mockResolvedValue(undefined);
     mocks.releaseAnalysisReservation.mockResolvedValue(undefined);
     mocks.completeAnalysisReservation.mockResolvedValue(undefined);
-    mocks.sendStrongBuyAlert.mockResolvedValue(undefined);
+    mocks.sendStrongResearchAlert.mockResolvedValue(undefined);
   });
 
   it("denies anonymous malformed analysis requests before validation details are exposed", async () => {
@@ -578,7 +580,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.analyzeCompany).not.toHaveBeenCalled();
     expect(mocks.persistAnalysis).not.toHaveBeenCalled();
     expect(mocks.recordUsageEvent).not.toHaveBeenCalled();
-    expect(mocks.sendStrongBuyAlert).not.toHaveBeenCalled();
+    expect(mocks.sendStrongResearchAlert).not.toHaveBeenCalled();
   });
 
   it("rejects reuse of an idempotency key for a different canonical request", async () => {
@@ -608,7 +610,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
     });
     expect(mocks.completeAnalysisReservation).not.toHaveBeenCalled();
     expect(mocks.recordUsageEvent).not.toHaveBeenCalledWith(expect.objectContaining({ event: "analysis_completed" }));
-    expect(mocks.sendStrongBuyAlert).not.toHaveBeenCalled();
+    expect(mocks.sendStrongResearchAlert).not.toHaveBeenCalled();
   });
 
   it("allows a signed-in user within quota and completes the reservation", async () => {
@@ -815,7 +817,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
       "analysis_completed",
       expect.anything()
     );
-    expect(mocks.sendStrongBuyAlert).not.toHaveBeenCalled();
+    expect(mocks.sendStrongResearchAlert).not.toHaveBeenCalled();
   });
 
   it("releases the quota reservation when persistence throws unexpectedly", async () => {
@@ -857,7 +859,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
       sources: [],
       warnings: []
     });
-    mocks.sendStrongBuyAlert.mockRejectedValue(new Error("email provider timeout"));
+    mocks.sendStrongResearchAlert.mockRejectedValue(new Error("email provider timeout"));
 
     const response = await POST(analysisRequest());
     const payload = await response.json();
@@ -879,7 +881,7 @@ describe("analysis API authentication and entitlement enforcement", () => {
       metadata: {
         ticker: "BOX",
         score: 88,
-        recommendation: "Strong Buy"
+        researchView: "Strong"
       }
     });
     expect(mocks.logApplicationError).toHaveBeenCalledWith({

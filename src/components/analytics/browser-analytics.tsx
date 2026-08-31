@@ -78,7 +78,7 @@ export function BrowserAnalytics({
           <p className="text-sm font-semibold text-[#f4efe5]">{locale === "sv" ? "Valfri produktanalys" : "Optional product analytics"}</p>
           <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">
             {locale === "sv"
-              ? "Om du samtycker kan StockBox anv?nda Google Analytics 4 och/eller Meta Pixel n?r de ?r konfigurerade. N?dv?ndiga konto-, betalnings- och s?kerhetsfunktioner p?verkas inte om du nekar."
+              ? "Om du samtycker kan StockBox använda Google Analytics 4 och/eller Meta Pixel när de är konfigurerade. Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte om du nekar."
               : "If you consent, StockBox may use Google Analytics 4 and/or Meta Pixel when configured. Essential account, billing and security functions are unaffected if you reject analytics."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -86,7 +86,7 @@ export function BrowserAnalytics({
               {locale === "sv" ? "Neka analyscookies" : REJECT_LABEL}
             </button>
             <button type="button" onClick={() => storeConsent("accepted")} className="min-h-11 rounded-md bg-[#b99b5f] px-4 text-sm font-semibold text-[#07111f] hover:bg-[#d0b579]">
-              {locale === "sv" ? "Godk?nn analyscookies" : ACCEPT_LABEL}
+              {locale === "sv" ? "Godkänn analyscookies" : ACCEPT_LABEL}
             </button>
           </div>
         </div>

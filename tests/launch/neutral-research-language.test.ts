@@ -7,16 +7,17 @@ const customerSurfaces = [
   "src/app/page.tsx", "src/components/analysis/report-view.tsx", "src/app/history/page.tsx",
   "src/app/dashboard/page.tsx", "src/app/analyze/page.tsx", "src/app/compare/page.tsx",
   "src/components/analysis/comparison-picker.tsx", "src/components/batch/batch-workbench.tsx",
-  "src/lib/batch/export.ts", "src/lib/i18n/marketing-copy.ts",
+  "src/lib/batch/export.ts", "src/lib/i18n/marketing-copy.ts", "src/app/docs/methodology/page.tsx",
+  "src/app/legal/terms/page.tsx",
 ];
 
 describe("neutral customer research language", () => {
-  it("does not render direct buy/hold/sell labels on customer surfaces", () => {
+  it("does not expose legacy directional ratings on customer surfaces", () => {
     for (const path of customerSurfaces) {
       const source = read(path);
-      expect(source, path).not.toMatch(/>\s*(?:Strong Buy|Buy|Hold|Sell|Strong Sell)\s*</);
-      // Canonical model ratings may be displayed, but only with neutral product language.
-      if (/\b(?:report|analysis|item)(?:\?\.)?\.recommendation|row\.report\?\.recommendation/.test(source)) {
+      expect(source, path).not.toMatch(/>\s*(?:Strong Buy|Buy|Hold|Sell|Strong Sell|No Rating)\s*</);
+      // Canonical report rating may be shown, but only behind neutral research labeling.
+      if (/(?:report|analysis|item)(?:\?\.)?\.recommendation|row\.report\?\.recommendation/.test(source)) {
         expect(source, path).toMatch(/Model rating|Modellbedömning|copy\.recommendation|Research view|Researchvy/);
       }
     }

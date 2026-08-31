@@ -16,8 +16,8 @@ describe("analytics privacy boundary", () => {
   it("keeps only event-specific non-sensitive properties", () => {
     const safe = sanitizeAnalyticsProperties("analysis_completed", {
       userId: "raw-user", analysisId: "raw-analysis", subscriptionId: "sub_raw",
-      ticker: "AAPL", score: 81, recommendation: "Buy", email: "person@example.com",
+      ticker: "AAPL", score: 81, researchView: "Strong", recommendation: "Buy", email: "person@example.com",
     });
-    expect(safe).toEqual({ ticker: "AAPL", score: 81, recommendation: "Buy" });
+    expect(safe).toEqual({ ticker: "AAPL", score: 81, researchView: "Strong" });
   });
 });

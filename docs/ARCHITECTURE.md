@@ -12,7 +12,7 @@
 
 ## Analysis flow
 
-`Company search → validated authenticated API request → entitlement reservation → SEC and configured market-provider chain in parallel → raw provider types → deterministic metrics → weighted scores → flags and constrained recommendation → scenarios/DCF → persisted report → source-visible UI`
+`Company search → validated authenticated API request → entitlement reservation → SEC and configured market-provider chain in parallel → raw provider types → deterministic metrics → weighted scores → flags and confidence/coverage gates → neutral research view → scenarios/DCF → persisted report → source-visible UI`
 
 Provider failure never falls back to fabricated values. Partial results carry warnings; fully missing results fail visibly.
 

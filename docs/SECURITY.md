@@ -36,7 +36,7 @@ StockBox handles user accounts, paid subscriptions, usage credits, financial res
 - Deterministic code must perform arithmetic, ratios, DCF math, score normalization, and entitlement accounting.
 - AI may synthesize and explain, but must not invent metrics, sources, financial statements, or unsupported claims.
 - Production must never silently fall back to fake financial data.
-- Strong Buy/Strong Sell labels require stricter gates than score thresholds alone, including confidence and red-flag checks.
+- The neutral research view must fail closed when confidence, weighted coverage, freshness or source-integrity gates are not met; a Strong research view is not investment advice.
 
 ## Privacy Baseline
 

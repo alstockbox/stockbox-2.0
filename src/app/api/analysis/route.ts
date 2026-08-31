@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { captureServerEvent } from "@/lib/analytics/events";
+import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { analyzeCompany, searchCompanies } from "@/lib/data/provider";
@@ -14,7 +15,7 @@ import {
   releaseAnalysisReservation,
   reserveAnalysisEntitlement,
 } from "@/lib/db/repositories";
-import { sendStrongBuyAlert } from "@/lib/notifications/admin-alerts";
+import { sendStrongResearchAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
 import { publicDiagnosticCode, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse, RATE_LIMITS } from "@/lib/security/rate-limit";
@@ -285,13 +286,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const researchView = researchViewForReport(result.data);
   await recordUsageEvent({
     userId: user.id,
     event: "analysis_completed",
     metadata: {
       ticker: result.data.ticker,
       score: result.data.score.score,
-      recommendation: result.data.recommendation
+      researchView
     }
   });
 
@@ -299,18 +301,18 @@ export async function POST(request: Request) {
     userId: user.id,
     ticker: result.data.ticker,
     score: result.data.score.score,
-    recommendation: result.data.recommendation
+    researchView
   });
 
   try {
-    await sendStrongBuyAlert(
+    await sendStrongResearchAlert(
       result.data,
       `${getServerEnv().NEXT_PUBLIC_APP_URL}/admin?analysis=${encodeURIComponent(result.data.id)}`
     );
   } catch (error) {
     await logApplicationError({
       service: "admin-alerts",
-      message: sanitizeDiagnosticMessage(error, "Strong Buy alert failed unexpectedly."),
+      message: sanitizeDiagnosticMessage(error, "Strong research-view alert failed unexpectedly."),
       userId: user.id,
       context: {
         ticker: result.data.ticker,

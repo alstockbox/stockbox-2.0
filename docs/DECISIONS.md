@@ -10,7 +10,7 @@ Supabase provides PostgreSQL, cookie-compatible auth, migrations, and RLS on a l
 
 ## ADR-003: Deterministic research core
 
-Financial arithmetic, normalization, DCF, scoring, confidence, recommendation gates, and flags run in typed code. AI is disabled by default and may later explain already-derived evidence through a provider-neutral interface.
+Financial arithmetic, normalization, DCF, scoring, confidence, neutral research-view classification, and flags run in typed code. AI is disabled by default and may later explain already-derived evidence through a provider-neutral interface. A legacy directional field is retained only for historical schema and regression compatibility.
 
 ## ADR-004: Verified provider chain first
 

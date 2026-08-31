@@ -46,7 +46,7 @@ const allowedProperties: Record<AnalyticsEvent, readonly string[]> = {
   onboarding_completed: ["experience", "investmentProfile"],
   company_searched: ["queryLength", "resultCount"],
   analysis_started: ["ticker", "analysisType"],
-  analysis_completed: ["ticker", "score", "recommendation", "analysisType"],
+  analysis_completed: ["ticker", "score", "researchView", "analysisType"],
   analysis_failed: ["ticker", "analysisType", "errorCode"],
   report_viewed: ["ticker"],
   explain_clicked: ["ticker", "dimension"],
