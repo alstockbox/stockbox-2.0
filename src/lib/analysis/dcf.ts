@@ -14,6 +14,7 @@ import type {
 } from "./types";
 import { addMissingData, clamp, firstFinite, isFiniteNumber, round } from "./math";
 import { economicCurrencyCode, quotePriceToEconomic } from "./currency-units";
+import { getOfficialAnalysisContext } from "@/lib/data/official-analysis-context";
 import {
   computeFinancialMetrics,
   contiguousAnnualHistory,
@@ -163,7 +164,7 @@ function routedMethod(archetype: ReturnType<typeof resolveFinancialArchetype>): 
     case "property_company":
       return { method: "NAV / property earnings", reason: "Property-company valuation requires property-level NAV, NOI or cap-rate inputs; corporate FCFF is inappropriate." };
     case "asset_manager":
-      return { method: "AUM / fee-related earnings", reason: "Asset-manager valuation requires AUM, net flows or fee-related earnings inputs; corporate FCFF is inappropriate." };
+      return { method: "AUM / fee-related earnings", reason: "Asset-manager valuation requires AUM, net flows or fee-related earnings inputs." };
     case "holding_company":
       return { method: "NAV / SOTP", reason: "Look-through holdings and holding-company net debt are required." };
     case "pre_revenue_biotech":
@@ -181,12 +182,27 @@ function deriveWacc(input: FinancialAnalysisInput, metrics: FinancialMetrics) {
   if (!isFiniteNumber(marketCap) || marketCap <= 0 || !isFiniteNumber(debt) || debt < 0) return null;
   const analysisAsOf = input.analysisDate ?? null;
   const configuredRiskFree = input.dcfAssumptions?.riskFreeRate;
-  const riskFree = isFiniteNumber(configuredRiskFree) ? configuredRiskFree : 0.04;
+  const officialContext = getOfficialAnalysisContext();
+  const officialRiskFree = officialContext?.riskFreeRate;
+  const hasOfficialRiskFree = isFiniteNumber(officialRiskFree) && officialRiskFree >= 0 && officialRiskFree <= 0.2;
+  const riskFree = isFiniteNumber(configuredRiskFree)
+    ? configuredRiskFree
+    : hasOfficialRiskFree
+      ? officialRiskFree
+      : 0.04;
   assumptions.riskFreeRate = assumption(
     riskFree,
-    isFiniteNumber(configuredRiskFree) ? "Analysis configuration" : "StockBox versioned policy",
-    analysisAsOf,
-    isFiniteNumber(configuredRiskFree) ? "configured" : "policy",
+    isFiniteNumber(configuredRiskFree)
+      ? "Analysis configuration"
+      : hasOfficialRiskFree
+        ? officialContext?.riskFreeSource ?? "Verified official government-bond benchmark"
+        : "StockBox versioned policy",
+    isFiniteNumber(configuredRiskFree)
+      ? analysisAsOf
+      : hasOfficialRiskFree
+        ? officialContext?.riskFreeAsOf ?? analysisAsOf
+        : analysisAsOf,
+    isFiniteNumber(configuredRiskFree) ? "configured" : hasOfficialRiskFree ? "market_sourced" : "policy",
   );
   const configuredErp = input.dcfAssumptions?.equityRiskPremium;
   const erp = isFiniteNumber(configuredErp) ? configuredErp : 0.05;
@@ -211,7 +227,11 @@ function deriveWacc(input: FinancialAnalysisInput, metrics: FinancialMetrics) {
     input.market?.priceDate ?? analysisAsOf,
     isFiniteNumber(input.market?.beta) ? "market_sourced" : "fallback",
   );
-  if (!isFiniteNumber(configuredRiskFree)) notes.push("StockBox policy risk-free rate: 4.0%.");
+  if (!isFiniteNumber(configuredRiskFree) && hasOfficialRiskFree) {
+    notes.push(`Verified official risk-free benchmark: ${(riskFree * 100).toFixed(3)}%${officialContext?.riskFreeAsOf ? ` as of ${officialContext.riskFreeAsOf}` : ""}.`);
+  } else if (!isFiniteNumber(configuredRiskFree)) {
+    notes.push("StockBox policy risk-free rate: 4.0%.");
+  }
   if (!isFiniteNumber(configuredErp)) notes.push("StockBox policy equity risk premium: 5.0%.");
   if (!isFiniteNumber(configuredCountryRisk)) notes.push("StockBox policy country risk premium: 0.0%.");
   if (!isFiniteNumber(input.market?.beta)) notes.push("Fallback beta: 1.0.");

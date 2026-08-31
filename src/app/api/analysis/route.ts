@@ -4,7 +4,7 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
-import { analyzeCompany, searchCompanies } from "@/lib/data/provider";
+import { analyzeCompany, searchCompanies } from "@/lib/data/enhanced-provider";
 import { canAttemptConfiguredFundamentals } from "@/lib/data/security-classification";
 import {
   completeAnalysisReservation,
@@ -19,6 +19,8 @@ import { sendStrongResearchAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
 import { publicDiagnosticCode, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse, RATE_LIMITS } from "@/lib/security/rate-limit";
+
+export const runtime = "nodejs";
 
 const requestSchema = z.object({
   company: z.object({
@@ -48,7 +50,6 @@ const requestSchema = z.object({
     .default("balanced"),
   idempotencyKey: z.string().uuid().optional()
 });
-
 
 function analysisRequestFingerprint(input: {
   securityId?: string;
