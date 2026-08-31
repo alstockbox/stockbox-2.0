@@ -8,6 +8,7 @@ import { getLegalSeller } from "@/lib/legal/commerce";
 export const metadata: Metadata = {
   title: "Contact StockBox",
   description: "Contact StockBox about accounts, billing, research reports, privacy or support.",
+  alternates: { canonical: "/contact" },
 };
 
 export default async function ContactPage() {

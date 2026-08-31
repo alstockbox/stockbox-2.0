@@ -31,6 +31,7 @@ export const RATE_LIMITS = {
   batchResolve: { limit: 30, windowMs: 10 * 60 * 1000 },
   companySearch: { limit: 60, windowMs: 60 * 1000 },
   share: { limit: 30, windowMs: 10 * 60 * 1000 },
+  analytics: { limit: 60, windowMs: 60 * 1000 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 const buckets = new Map<string, Bucket>();

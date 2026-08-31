@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { captureServerEvent } from "@/lib/analytics/events";
 import { normalizeReferralCode } from "@/lib/affiliate/attribution";
 import { isSupabaseConfigured } from "@/lib/env/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -63,6 +64,7 @@ async function captureAffiliateLanding(
   if (!incomingCode) return;
   const affiliate = await resolveActiveAffiliate(incomingCode);
   if (!affiliate) return;
+  captureServerEvent("affiliate_visit");
 
   const existingCode = normalizeReferralCode(request.cookies.get("stockbox_ref")?.value);
   const existingVisitor = request.cookies.get("stockbox_ref_visitor")?.value;

@@ -8,6 +8,7 @@ import { submitWithdrawalAction } from "./actions";
 export const metadata: Metadata = {
   title: "Withdraw from a StockBox contract",
   description: "Submit a statutory withdrawal notice for a StockBox subscription and receive a timestamped receipt.",
+  alternates: { canonical: "/withdraw" },
 };
 
 type Props = { searchParams: Promise<{ error?: string }> };

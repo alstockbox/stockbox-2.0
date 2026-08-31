@@ -2,8 +2,8 @@ import type { Locale } from "./types";
 
 export const marketingCopy = {
   en: {
-    kicker: "Source-backed equity research",
-    heroTitle: "Analyze stocks with source-backed fundamentals, valuation and risk",
+    kicker: "Data-driven equity research",
+    heroTitle: "Analyze stocks with data-driven fundamentals, valuation and risk",
     heroCopy: "StockBox turns company filings, market data and versioned model logic into a structured view for your own investment research.",
     primaryCta: "Analyze a stock free",
     sampleCta: "View sample analysis",
@@ -14,11 +14,11 @@ export const marketingCopy = {
     sourceTitle: "Sources stay visible",
     sourceCopy: "Reports preserve provider, period and provenance so you can inspect what the model actually used.",
     proofTitle: "See the research before you sign up",
-    proofCopy: "A real Apple analysis from the current production engine shows the same score, recommendation and dimension structure available in StockBox reports.",
+    proofCopy: "A real Apple analysis from the current production engine shows the same score, research view and dimension structure available in StockBox reports.",
   },
   sv: {
-    kicker: "Källbaserad aktieanalys",
-    heroTitle: "Analysera aktier med källbaserad fundamenta, värdering och risk",
+    kicker: "Databaserad aktieanalys",
+    heroTitle: "Analysera aktier med databaserad fundamenta, värdering och risk",
     heroCopy: "StockBox omvandlar bolagsrapporter, marknadsdata och versionsstyrd modellogik till en strukturerad vy för din egen investeringsanalys.",
     primaryCta: "Analysera en aktie gratis",
     sampleCta: "Se exempelanalys",
@@ -29,7 +29,7 @@ export const marketingCopy = {
     sourceTitle: "Källorna förblir synliga",
     sourceCopy: "Rapporter bevarar leverantör, period och proveniens så att du kan kontrollera vad modellen faktiskt använde.",
     proofTitle: "Se analysen innan du skapar konto",
-    proofCopy: "En riktig Apple-analys från nuvarande produktionsmotor visar samma poäng, rekommendation och dimensionsstruktur som används i StockBox-rapporter.",
+    proofCopy: "En riktig Apple-analys från nuvarande produktionsmotor visar samma poäng, researchvy och dimensionsstruktur som används i StockBox-rapporter.",
   },
 } as const;
 

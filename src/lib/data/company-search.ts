@@ -101,6 +101,15 @@ export function resolveCanonicalCompanySelection(
 
   const stableMatches = narrowByStableIdentifiers(requested, exactListings);
   if (!stableMatches.length) return { ok: false, reason: "identity_mismatch" };
+
+  // A raw canonical ticker is stronger identity evidence than a local/provider alias.
+  // Example: bare META is Meta Platforms' canonical US ticker, while Swedish Metacon
+  // legitimately exposes META as a local/provider alias for canonical META.ST.
+  const canonicalMatches = stableMatches.filter((candidate) =>
+    (candidate.canonicalTicker ?? candidate.ticker).trim().toUpperCase() === requestedTicker
+  );
+  if (canonicalMatches.length === 1) return { ok: true, company: canonicalMatches[0] };
+  if (canonicalMatches.length > 1) return { ok: false, reason: "ambiguous" };
   if (stableMatches.length > 1) return { ok: false, reason: "ambiguous" };
 
   const company = stableMatches[0];

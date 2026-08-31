@@ -5,7 +5,11 @@ import { commerciallyActivePlans } from "@/lib/billing/plans";
 import { getLocale } from "@/lib/i18n/server";
 import { getLegalCommerceReadiness, legalVatDescription } from "@/lib/legal/commerce";
 
-export const metadata: Metadata = { title: "Terms" };
+export const metadata: Metadata = {
+  title: "Terms",
+  description: "Terms for StockBox accounts, subscriptions, research outputs, consumer withdrawal rights, billing and acceptable use.",
+  alternates: { canonical: "/legal/terms" },
+};
 
 export default async function TermsPage() {
   const locale = await getLocale();

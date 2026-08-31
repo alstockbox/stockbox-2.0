@@ -6,6 +6,7 @@ import { PortalButton } from "@/components/billing/portal-button";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Container, Section } from "@/components/ui/card";
+import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { commerciallyActivePlans, findPlan, type PlanKey } from "@/lib/billing/plans";
 import {
@@ -23,7 +24,7 @@ import { getLocale } from "@/lib/i18n/server";
 import type { Locale } from "@/lib/i18n/types";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 
-export const metadata: Metadata = { title: "Pricing", description: "StockBox launch pricing for source-backed stock analysis, deep research reports and batch analysis." };
+export const metadata: Metadata = { title: "Pricing", description: "StockBox launch pricing for data-driven stock analysis, deep research reports and batch analysis.", alternates: { canonical: "/pricing" } };
 
 function formatDeepReports(count: number, locale: Locale) {
   if (locale === "sv") return `${count} ${count === 1 ? "djup rapport" : "djupa rapporter"}`;
@@ -102,6 +103,7 @@ export default async function PricingPage() {
   if (!readiness.checkoutReady) reportBillingReadiness(readiness);
 
   const user = await getCurrentUser();
+  captureServerEvent("pricing_view", { userId: user?.id });
   const subscriptionLookup = user ? await getUserSubscription(user.id) : null;
   const viewer: BillingViewerState = !user
     ? "signed_out"

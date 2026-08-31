@@ -850,7 +850,7 @@ export function resolveSecFinancialPeriods(
     ...annualMaps.netIncome.keys(),
     ...annualMaps.assets.keys(),
     ...annualMaps.operatingCashFlow.keys(),
-  ])].sort().slice(-6);
+  ])].sort().slice(-11);
   const ttm = buildTtmPeriods(facts, instantMaps, archetype);
   return {
     annualPeriods: periodEnds.map((end) => periodFromMaps(annualMaps, end)),

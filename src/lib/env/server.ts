@@ -56,6 +56,8 @@ const envSchema = z.object({
   LEGAL_SUPPORT_PHONE: z.string().trim().optional().or(z.literal("")),
   LEGAL_VAT_MODE: z.enum(["small_business_exempt", "vat_registered"]).optional().or(z.literal("")),
   LEGAL_VAT_NUMBER: z.string().trim().optional().or(z.literal("")),
+  NEXT_PUBLIC_GA_ID: z.string().trim().optional().or(z.literal("")),
+  NEXT_PUBLIC_META_PIXEL_ID: z.string().trim().optional().or(z.literal("")),
   NEXT_PUBLIC_POSTHOG_KEY: z.string().optional().or(z.literal("")),
   NEXT_PUBLIC_POSTHOG_HOST: z
     .string()

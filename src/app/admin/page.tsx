@@ -6,7 +6,7 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth/session";
 import { adminEmails, getServerEnv, isFinancialProviderConfigured, isStripeConfigured, isSupabaseConfigured } from "@/lib/env/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createAffiliateGiveawayCampaignAction, revokeAffiliateGiveawayCampaignAction, setAffiliateAmbassadorAccessAction, updateContactMessageAction, updateFeedbackAction } from "./actions";
+import { createAffiliateGiveawayCampaignAction, revokeAffiliateGiveawayCampaignAction, setAffiliateAmbassadorAccessAction, updateAffiliateProfileAction, updateContactMessageAction, updateFeedbackAction } from "./actions";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -328,6 +328,26 @@ export default async function AdminPage() {
                       <p className="mt-1">Affiliate status: <span className="text-[#f4efe5]">{affiliate?.status ?? "not provisioned"}</span></p>
                     </div>
                   </div>
+
+                  {affiliate ? (
+                    <form action={updateAffiliateProfileAction} className="mt-4 grid gap-3 border-t border-white/10 pt-4 md:grid-cols-[1.2fr_1fr_0.8fr_auto] md:items-end">
+                      <input type="hidden" name="affiliateId" value={affiliate.id} />
+                      <label className="text-xs text-[#9aa7b8]">Affiliate name
+                        <input name="displayName" minLength={2} maxLength={80} defaultValue={affiliate.display_name ?? profile.email ?? "Affiliate"} required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white" />
+                      </label>
+                      <label className="text-xs text-[#9aa7b8]">Referral code
+                        <input name="referralCode" minLength={3} maxLength={48} defaultValue={affiliate.code} required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 font-mono text-sm text-white" />
+                      </label>
+                      <label className="text-xs text-[#9aa7b8]">Status
+                        <select name="affiliateStatus" defaultValue={affiliate.status} className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white">
+                          <option value="active">Active</option>
+                          <option value="paused">Paused</option>
+                          <option value="pending">Pending</option>
+                        </select>
+                      </label>
+                      <button type="submit" disabled={protectedAccount} className="rounded-md border border-[#e1cb95]/30 px-3 py-2 text-xs font-medium text-[#f4e5b8] hover:bg-[#e1cb95]/10 disabled:opacity-40">Save affiliate</button>
+                    </form>
+                  ) : null}
 
                   <form action={setAffiliateAmbassadorAccessAction} className="mt-4">
                     <input type="hidden" name="userId" value={profile.id} />

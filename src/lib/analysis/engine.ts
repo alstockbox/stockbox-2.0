@@ -9,9 +9,11 @@ import {
 import { computeDcfRange } from "./dcf";
 import { detectArchetypeGreenFlags, detectFinancialRedFlags } from "./flags";
 import { assessDataFreshness } from "./freshness";
+import { buildHistoricalResearchData } from "./historical";
 import { isFiniteNumber } from "./math";
 import { computeFinancialMetrics, valuationCurrencyAlignment } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
+import { overallResearchView } from "./research-view";
 import { reconcileFinancialData, reconciliationConfidence, ttmPeriodBasisCheck } from "./reconciliation";
 import { attachInstitutionalResearch } from "./research";
 import { buildAnalysisScenarios, scenarioStatusFor } from "./scenarios";
@@ -596,6 +598,11 @@ export function presentAnalysisReport(
   }));
   const score = result.scores.stockBoxScore;
   const rating = result.recommendation.rating;
+  const researchView = overallResearchView({
+    score: result.scores.personalizedScore ?? score,
+    confidence: result.scores.confidence,
+    coverage: result.dataCoverage,
+  });
   const companyName = canonicalInput.company.name ?? legacyInput.company.name;
   const report: AnalysisReport = {
     id: randomUUID(),
@@ -606,14 +613,14 @@ export function presentAnalysisReport(
     generatedAt: canonicalInput.analysisDate ?? new Date().toISOString(),
     oneSentence: result.dataStatus === "stale"
       ? "Latest reliable financial statements are too old for a current analysis."
-      : score === null
-      ? `${companyName} receives No Rating because weighted data coverage is insufficient.`
-      : `${companyName} receives a ${rating} model rating with a StockBox Score of ${Math.round(score)}/100 and ${result.scores.confidence}% confidence.`,
+      : researchView === "Insufficient data" || score === null
+      ? `${companyName} has insufficient weighted data coverage for an overall research view.`
+      : `${companyName} has a ${researchView.toLowerCase()} overall research view with a StockBox Score of ${Math.round(score)}/100 and ${result.scores.confidence}% confidence.`,
     summary: result.dataStatus === "stale"
-      ? "StockBox has blocked scoring and opportunity conclusions because the latest reliable fundamentals exceed the hard freshness threshold."
-      : rating === "No Rating"
-      ? "StockBox does not have enough suitable, reconciled data for a directional model rating. Available facts and missing-data reasons remain visible."
-      : `${companyName} is rated ${rating} by the versioned StockBox model. The rating separates business quality from valuation coverage and data confidence.`,
+      ? "StockBox has blocked current scoring conclusions because the latest reliable fundamentals exceed the hard freshness threshold."
+      : researchView === "Insufficient data"
+      ? "StockBox does not have enough suitable, reconciled data for an overall research view. Available facts and missing-data reasons remain visible."
+      : `The ${researchView.toLowerCase()} research view combines the versioned StockBox dimensions while keeping business quality, valuation coverage, risk and data confidence visible separately.`,
     recommendation: rating,
     shortTermAssessment: result.dataStatus === "stale"
       ? "No current short-term assessment is produced from stale financial statements."
@@ -657,6 +664,9 @@ export function presentAnalysisReport(
     analysisArchetype: result.analysisArchetype,
     dataCoverage: result.dataCoverage,
     reportingCurrency: canonicalInput.company.reportingCurrency ?? canonicalInput.company.currency ?? null,
+    historical: canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
+      ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [])
+      : undefined,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,
     dataStatus: result.dataStatus,
     confidenceBreakdown: result.confidenceBreakdown,

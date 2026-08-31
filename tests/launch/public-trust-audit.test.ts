@@ -16,7 +16,8 @@ const sitemap = read("src/app/sitemap.ts");
 describe("public launch trust layer", () => {
   it("uses benefit-led research copy instead of internal provider or advice-adjacent language", () => {
     const marketing = read("src/lib/i18n/marketing-copy.ts");
-    expect(marketing).toContain("Analyze stocks with source-backed fundamentals");
+    expect(marketing).toContain("Analyze stocks with data-driven fundamentals");
+    expect(marketing).toContain("Sources stay visible");
     expect(marketing).toContain("Missing data stays missing");
     expect(home).not.toContain("Missing provider setup is shown honestly");
     expect(home).not.toContain("decision-ready");

@@ -4,7 +4,11 @@ import { Container, Section } from "@/components/ui/card";
 import { getLocale } from "@/lib/i18n/server";
 import { getLegalCommerceReadiness } from "@/lib/legal/commerce";
 
-export const metadata: Metadata = { title: "Privacy" };
+export const metadata: Metadata = {
+  title: "Privacy",
+  description: "How StockBox processes account, research, billing, support and analytics data, including privacy rights and data-protection safeguards.",
+  alternates: { canonical: "/legal/privacy" },
+};
 
 export default async function PrivacyPage() {
   const locale = await getLocale();
@@ -68,12 +72,15 @@ export default async function PrivacyPage() {
             <p className={paragraph}>{sv
               ? "Serverbaserade produktanalytikhändelser kan skickas till PostHog. StockBox skickar inte rått användar-ID, analys-ID, Stripe-abonnemangs-ID, e-postadress eller fria söksträngar genom analytics-boundaryn. Användaridentifieraren pseudonymiseras envägs och eventegenskaper begränsas av en uttrycklig allowlist."
               : "Server-side product-analytics events may be sent to PostHog. The StockBox analytics boundary does not send raw user IDs, analysis IDs, Stripe subscription IDs, email addresses or free-form search strings. The user identifier is one-way pseudonymized and event properties are limited by an explicit allowlist."}</p>
+            <p className={paragraph}>{sv
+              ? "När Google Analytics 4 eller Meta Pixel är konfigurerade laddas dessa webbläsarbaserade analysverktyg först efter att du uttryckligen har lämnat samtycke i StockBox. Om du nekar samtycke laddas de inte, och nödvändiga konto-, betalnings- och säkerhetsfunktioner fortsätter att fungera."
+              : "When Google Analytics 4 or Meta Pixel are configured, these browser-based analytics tools load only after you explicitly give consent in StockBox. If you reject consent, they are not loaded, and essential account, billing and security functions continue to work."}</p>
           </section>
           <section>
             <h2 className={heading}>{sv ? "Personuppgiftsbiträden och mottagare" : "Processors and recipients"}</h2>
             <p className={paragraph}>{sv
               ? "Vi använder tjänsteleverantörer för att driva StockBox. De viktigaste är Supabase för autentisering och databas, Vercel för hosting och drift, Stripe för betalningar och abonnemang, PostHog för begränsad produktanalys och, när e-postfunktionen är aktiverad, den konfigurerade e-postleverantören. De får bara behandla personuppgifter för avtalade ändamål och enligt tillämpliga dataskyddskrav."
-              : "We use service providers to operate StockBox. The principal providers are Supabase for authentication and database services, Vercel for hosting and operations, Stripe for payments and subscriptions, PostHog for limited product analytics and, when email delivery is enabled, the configured email provider. They may process personal data only for agreed purposes and subject to applicable data-protection requirements."}</p>
+              : "We use service providers to operate StockBox. The principal providers are Supabase for authentication and database services, Vercel for hosting and operations, Stripe for payments and subscriptions, PostHog for limited product analytics, Google Analytics 4 and Meta Pixel only when configured and consented to, and, when email delivery is enabled, the configured email provider. They may process personal data only for agreed purposes and subject to applicable data-protection requirements."}</p>
           </section>
 
           <section>

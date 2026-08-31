@@ -23,7 +23,7 @@ describe("commercial release plan ladder", () => {
     expect(findPlan("free")?.entitlements.monthlyAnalyses).toBe(3);
     expect(findPlan("basic")).toMatchObject({ name: "Basic", monthlyPriceSek: 69, entitlements: { monthlyAnalyses: 10 } });
     expect(findPlan("standard")).toMatchObject({ name: "Standard", monthlyPriceSek: 119, entitlements: { monthlyAnalyses: 35 } });
-    expect(findPlan("premium")).toMatchObject({ name: "Pro", monthlyPriceSek: 179, entitlements: { monthlyAnalyses: 90 } });
+    expect(findPlan("premium")).toMatchObject({ name: "Pro", monthlyPriceSek: 179, entitlements: { monthlyAnalyses: 70 } });
     expect(findPlan("elite")).toMatchObject({ name: "Elite", monthlyPriceSek: 399, entitlements: { monthlyAnalyses: 350 } });
   });
   it("models the approved three-month launch offers and no Elite launch", () => {

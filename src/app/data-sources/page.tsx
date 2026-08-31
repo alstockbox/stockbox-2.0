@@ -5,6 +5,7 @@ import { getLocale } from "@/lib/i18n/server";
 export const metadata: Metadata = {
   title: "Data Sources",
   description: "How StockBox sources, reconciles and labels financial statements, market observations and missing data.",
+  alternates: { canonical: "/data-sources" },
 };
 
 const sources = [

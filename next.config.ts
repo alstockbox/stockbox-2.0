@@ -4,7 +4,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const contentSecurityPolicy = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
+  `script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://connect.facebook.net${isProduction ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
@@ -14,6 +14,9 @@ const contentSecurityPolicy = [
     "wss://*.supabase.co",
     "https://app.posthog.com",
     "https://*.posthog.com",
+    "https://www.google-analytics.com",
+    "https://region1.google-analytics.com",
+    "https://www.facebook.com",
     ...(isProduction ? [] : ["http://localhost:*", "ws://localhost:*"]),
   ].join(" "),
   "frame-src 'self' https://checkout.stripe.com https://billing.stripe.com",
@@ -32,6 +35,13 @@ const nextConfig: NextConfig = {
   typedRoutes: true,
   async redirects() {
     return [
+      { source: "/methodology", destination: "/docs/methodology", permanent: true },
+      { source: "/terms", destination: "/legal/terms", permanent: true },
+      { source: "/privacy", destination: "/legal/privacy", permanent: true },
+      { source: "/billing", destination: "/settings/billing", permanent: true },
+      { source: "/comparison", destination: "/compare", permanent: true },
+      { source: "/login", destination: "/auth/login", permanent: true },
+      { source: "/signup", destination: "/auth/signup", permanent: true },
       {
         source: "/:path*",
         has: [{ type: "host", value: "getstockbox.app" }],

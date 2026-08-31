@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { captureServerEvent } from "@/lib/analytics/events";
 import { getServerEnv, isSupabaseConfigured } from "@/lib/env/server";
 import { safeInternalPath } from "@/lib/auth/redirects";
 import { newPasswordSchema } from "@/lib/auth/password-policy";
@@ -87,12 +88,13 @@ export async function signInAction(
   const supabase = await createClient();
   if (!supabase) return disabledState(copy);
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: email.data,
     password: password.data
   });
 
   if (error) return { ok: false, message: copy.signInError };
+  captureServerEvent("login_completed", { userId: data.user?.id });
 
   revalidatePath("/", "layout");
   redirect(next as Route);
@@ -122,6 +124,7 @@ export async function signUpAction(
   const supabase = await createClient();
   if (!supabase) return disabledState(copy);
 
+  captureServerEvent("signup_started");
   const env = getServerEnv();
   const { data, error } = await supabase.auth.signUp({
     email: email.data,
@@ -134,6 +137,7 @@ export async function signUpAction(
   if (error) {
     return { ok: false, message: isEmailDeliveryRateLimit(error) ? copy.emailDeliveryBusy : copy.signUpError };
   }
+  captureServerEvent("signup_completed", { userId: data?.user?.id });
 
   if (data?.user?.id) {
     const cookieStore = await cookies();

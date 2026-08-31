@@ -1,4 +1,4 @@
-import type { CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
+import type { CompanySearchResult, MarketPricePoint, MarketSnapshot } from "@/lib/analysis/types";
 import {
   providerDiagnostic,
   type AdapterResult,
@@ -132,6 +132,14 @@ function parseRows(result: JsonObject): PriceRow[] {
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function monthlyPriceHistory(rows: PriceRow[]): MarketPricePoint[] {
+  const byMonth = new Map<string, MarketPricePoint>();
+  for (const row of rows) {
+    byMonth.set(row.date.slice(0, 7), { date: row.date, close: row.close });
+  }
+  return [...byMonth.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function weekKey(date: string): string {
   const value = new Date(`${date}T00:00:00Z`);
   const daysSinceMonday = (value.getUTCDay() + 6) % 7;
@@ -232,9 +240,9 @@ function firstChartResult(payload: JsonObject): JsonObject | null {
   const results = Array.isArray(chart?.result) ? chart.result : [];
   return object(results[0]);
 }
-async function requestChart(symbol: string): Promise<AdapterResult<JsonObject>> {
+async function requestChart(symbol: string, range: "2y" | "10y" = "2y"): Promise<AdapterResult<JsonObject>> {
   const url = new URL(`${BASE_URL}/${encodeURIComponent(symbol)}`);
-  url.searchParams.set("range", "2y");
+  url.searchParams.set("range", range);
   url.searchParams.set("interval", "1d");
   url.searchParams.set("events", "div,splits");
   url.searchParams.set("includeAdjustedClose", "true");
@@ -306,7 +314,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
   async fetchMarketData(company): Promise<AdapterResult<MarketSnapshot>> {
     const symbol = toYahooSymbol(company);
     const benchmarkSymbol = betaBenchmarkSymbol(company);
-    const response = await requestChart(symbol);
+    const response = await requestChart(symbol, "10y");
     if (!response.ok) return response;
     const result = firstChartResult(response.data);
     if (!result) return failure("empty_response", "Yahoo Finance returned no chart result for this security.");
@@ -350,6 +358,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         betaObservationCount: betaEstimate?.observations ?? null,
         provider: PROVIDER_ID,
         historyLength: history.length,
+        priceHistory: monthlyPriceHistory(history),
         performance: performance(history),
       },
       diagnostic: providerDiagnostic("Yahoo Finance chart", "market_data", history.length >= 250 ? "available" : "partial", history.length >= 250 ? undefined : "history_short"),

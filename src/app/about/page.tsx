@@ -7,6 +7,7 @@ import { getLegalSeller } from "@/lib/legal/commerce";
 export const metadata: Metadata = {
   title: "About StockBox",
   description: "What StockBox is, who it is built for, how it approaches equity research, and how to contact the team.",
+  alternates: { canonical: "/about" },
 };
 
 export default async function AboutPage() {

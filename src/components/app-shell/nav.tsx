@@ -20,7 +20,7 @@ import { LanguageSwitcher } from "./language-switcher";
 import { SignOutButton } from "./sign-out-button";
 
 const marketingNavItems = [
-  { href: "/#product", en: "Product", sv: "Produkt" },
+  { href: "/product", en: "Product", sv: "Produkt" },
   { href: "/sample-analysis", en: "Sample analysis", sv: "Exempelanalys" },
   { href: "/docs/methodology", en: "Methodology", sv: "Metodik" },
   { href: "/pricing", en: "Pricing", sv: "Priser" },

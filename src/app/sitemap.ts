@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const paths = [
-    "", "/pricing", "/about", "/contact", "/data-sources", "/faq",
-    "/sample-analysis", "/docs/methodology", "/changelog", "/legal/privacy", "/legal/terms", "/withdraw",
+    "", "/product", "/pricing", "/about", "/contact", "/data-sources", "/faq",
+    "/sample-analysis", "/docs/methodology", "/changelog", "/legal/privacy", "/legal/terms", "/withdraw", "/legal/withdrawal-form",
   ];
   return paths.map((path) => ({
     url: `${base}${path}`,

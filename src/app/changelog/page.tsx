@@ -6,6 +6,7 @@ import { getLocale } from "@/lib/i18n/server";
 export const metadata: Metadata = {
   title: "Changelog",
   description: "StockBox product and analysis-engine release notes, with versioned methodology and reliability changes.",
+  alternates: { canonical: "/changelog" },
 };
 
 const releases = [

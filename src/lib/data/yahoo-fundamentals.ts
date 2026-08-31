@@ -373,7 +373,7 @@ function annualDates(values: YahooValue[]): string[] {
     .filter((item) => anchors.has(item.concept) && item.periodType === "12M")
     .map((item) => item.asOfDate))]
     .sort()
-    .slice(-6);
+    .slice(-11);
 }
 
 function latestAtOrBefore(values: YahooValue[], concepts: string[], date: string): YahooValue | null {

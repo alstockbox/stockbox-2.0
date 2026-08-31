@@ -111,7 +111,7 @@ export const p0Copy = {
       setupTitle: "Live data temporarily unavailable", setupDetail: "Live financial data is temporarily unavailable. Please try again later.",
       duplicateRemoved: "duplicate ticker removed automatically", duplicatesRemoved: "duplicate tickers removed automatically", invalid: "Invalid",
       rowsPerBatch: "companies per batch", successfulUsesOne: "Each successful report uses one monthly analysis. Failed attempts are released automatically.",
-      run: "Run", retry: "Retry", rank: "Rank", ticker: "Ticker", company: "Company", status: "Status", score: "Score", recommendation: "Recommendation", coverage: "Coverage", result: "Result",
+      run: "Run", retry: "Retry", rank: "Rank", ticker: "Ticker", company: "Company", status: "Status", score: "Score", recommendation: "Model rating", coverage: "Coverage", result: "Result",
       exportQaCopy: "Export the full QA file when you want the analysis engine reviewed and calibrated.",
     },
     pricing: {
@@ -235,7 +235,7 @@ export const p0Copy = {
       setupTitle: "Livedata är tillfälligt otillgänglig", setupDetail: "Finansiell livedata är tillfälligt otillgänglig. Försök igen senare.",
       duplicateRemoved: "dubblett-ticker togs bort automatiskt", duplicatesRemoved: "dubblett-tickers togs bort automatiskt", invalid: "Ogiltiga",
       rowsPerBatch: "bolag per batch", successfulUsesOne: "Varje lyckad rapport anv\u00e4nder en m\u00e5natlig analys. Misslyckade f\u00f6rs\u00f6k frisl\u00e4pps automatiskt.",
-      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", rank: "Placering", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", recommendation: "Rekommendation", coverage: "T\u00e4ckning", result: "Resultat",
+      run: "K\u00f6r", retry: "F\u00f6rs\u00f6k igen", rank: "Placering", ticker: "Ticker", company: "Bolag", status: "Status", score: "Po\u00e4ng", recommendation: "Modellbedömning", coverage: "T\u00e4ckning", result: "Resultat",
       exportQaCopy: "Exportera hela QA-filen n\u00e4r du vill granska och kalibrera analysmotorn.",
     },
     pricing: {

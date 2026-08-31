@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ fetchSecTickerUniverse: vi.fn() }));
 
 vi.mock("@/lib/data/sec", () => ({ fetchSecTickerUniverse: mocks.fetchSecTickerUniverse }));
 
-import { normalizedTicker, searchCompanyCatalog } from "../../src/lib/data/company-search";
+import { normalizedTicker, resolveCanonicalCompanySelection, searchCompanyCatalog } from "../../src/lib/data/company-search";
 import { providerDiagnostic, type CompanySearchProvider } from "../../src/lib/data/providers";
 import { swedishSecurityMasterProvider } from "../../src/lib/data/security-master";
 
@@ -87,6 +87,16 @@ describe("company search catalog", () => {
   ])("ranks %s with canonical ticker %s first", async (query, ticker) => {
     const results = await searchCompanyCatalog(query);
     expect(results[0]?.canonicalTicker).toBe(ticker);
+  });
+
+  it("resolves canonical bare tickers ahead of foreign local/provider aliases while respecting explicit suffixes", async () => {
+    const metaResults = await searchCompanyCatalog("META");
+    const meta = resolveCanonicalCompanySelection({ ticker: "META", canonicalTicker: "META", name: "META" }, metaResults);
+    expect(meta).toEqual(expect.objectContaining({ ok: true, company: expect.objectContaining({ canonicalTicker: "META", name: expect.stringContaining("Meta") }) }));
+
+    const metaconResults = await searchCompanyCatalog("META.ST");
+    const metacon = resolveCanonicalCompanySelection({ ticker: "META.ST", canonicalTicker: "META.ST", name: "META.ST" }, metaconResults);
+    expect(metacon).toEqual(expect.objectContaining({ ok: true, company: expect.objectContaining({ canonicalTicker: "META.ST", name: "Metacon" }) }));
   });
 
   it("merges duplicate bare US ticker representations when one provider supplies stable SEC identity", async () => {

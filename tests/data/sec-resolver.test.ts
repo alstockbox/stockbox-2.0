@@ -26,6 +26,30 @@ describe("SEC XBRL fact resolver", () => {
     expect(resolved.get("2023-12-31")?.val).toBe(125);
   });
 
+  it("retains eleven SEC annual observations so a true 10Y CAGR can be calculated", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => {
+      const year = 2015 + index;
+      return {
+        start: `${year}-01-01`,
+        end: `${year}-12-31`,
+        form: "10-K",
+        filed: `${year + 1}-02-01`,
+        fy: year,
+        val: 100 + index * 10,
+      };
+    });
+    const fixture = facts({
+      "us-gaap": {
+        RevenueFromContractWithCustomerExcludingAssessedTax: { units: { USD: rows } },
+      },
+    });
+
+    const resolved = resolveSecFinancialPeriods(fixture).annualPeriods;
+    expect(resolved).toHaveLength(11);
+    expect(resolved[0]?.periodEndDate).toBe("2016-12-31");
+    expect(resolved.at(-1)?.periodEndDate).toBe("2026-12-31");
+  });
+
   it("resolves utility revenue reported inclusive of assessed tax", () => {
     const fixture = facts({
       "us-gaap": {

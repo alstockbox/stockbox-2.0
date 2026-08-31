@@ -10,6 +10,9 @@ import { adminQaSections } from "./admin-qa";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import { ReportExportActions } from "./report-export-actions";
 import type { Locale } from "@/lib/i18n/types";
+import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
+import { localizedResearchView, researchViewCopy, researchViewForReport } from "@/lib/analysis/research-view";
+import { HistoricalResearchView } from "./historical-research";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
   return {
@@ -95,6 +98,8 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
     revenueGrowth1y: growthBasis === "TTM_YOY" ? copy.metricLabels.revenueGrowthTtm : copy.metricLabels.revenueGrowthAnnual,
   };
   const scoreAvailable = report.score.score !== null;
+  const researchView = localizedResearchView(researchViewForReport(report), locale);
+  const neutralCopy = researchViewCopy(report, locale);
   const adminDiagnostics = adminQaSections(report.adminQa);
   return (
     <div className="space-y-5" data-report-print>
@@ -129,13 +134,13 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
               {report.analysisArchetype ? <Badge>{report.analysisArchetype.replaceAll("_", " ")}</Badge> : null}
             </div>
             <h1 className="serif mt-4 text-3xl font-semibold text-[#f4efe5]">{report.companyName}</h1>
-            <p className="mt-3 max-w-3xl text-lg leading-8 text-[#d6deea]">{report.oneSentence}</p>
+            <p className="mt-3 max-w-3xl text-lg leading-8 text-[#d6deea]">{neutralCopy.oneSentence}</p>
           </div>
           <div className="grid min-w-56 grid-cols-2 gap-3 text-center">
             <div className="rounded-md border border-[#b99b5f]/30 bg-[#b99b5f]/10 p-4">
               <p className="text-xs text-[#e1cb95]">{copy.stockboxScore}</p>
               <p className={`${scoreAvailable ? "number text-4xl" : "text-lg"} mt-1 font-semibold text-[#f4efe5]`}>
-                {scoreAvailable ? report.score.score : copy.noRating}
+                {scoreAvailable ? `${Math.round(report.score.score as number)}/100` : copy.noRating}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/5 p-4">
@@ -151,7 +156,8 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
               ) : report.dataAsOf ? <span>{copy.financialDataThrough} {report.dataAsOf}</span> : null}
               {engine?.diagnostics.balanceSheetPeriodEnd ? <span>{copy.balanceSheetAsOf} {engine.diagnostics.balanceSheetPeriodEnd}</span> : null}
               {engine?.diagnostics.marketPriceDate ? <span>{copy.marketPriceAsOf} {engine.diagnostics.marketPriceDate}</span> : null}
-              {report.modelVersion ? <span>{report.modelVersion}</span> : null}
+              <span>{locale === "sv" ? "Analyserad" : "Analyzed"}: {formatAnalysisTimestamp(report.generatedAt, locale)}</span>
+               {report.modelVersion ? <span>{report.modelVersion}</span> : null}
             </div>
           ) : null}
         </div>
@@ -161,9 +167,9 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
         <Card>
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.modelAssessment}</h2>
-            <Badge>{report.recommendation}</Badge>
+            <Badge>{researchView}</Badge>
           </div>
-          <p className="mt-3 text-sm leading-6 text-[#c9d2df]">{report.summary}</p>
+          <p className="mt-3 text-sm leading-6 text-[#c9d2df]">{neutralCopy.summary}</p>
           {report.score.score !== null && report.score.personalizedScore !== null ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <Meter value={report.score.score} label={copy.generalScore} />
@@ -257,6 +263,8 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
           ))}
         </div>
       </Card> : null}
+
+      {report.historical ? <HistoricalResearchView report={report} mode={mode} locale={locale} /> : null}
 
       {report.scenarios.length ? <Card>
         <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.bullBaseBear}</h2>

@@ -5,6 +5,7 @@ import { getLocale } from "@/lib/i18n/server";
 export const metadata: Metadata = {
   title: "FAQ",
   description: "Answers about StockBox data, analysis limits, ratings, missing data, markets and subscriptions.",
+  alternates: { canonical: "/faq" },
 };
 
 const en = [

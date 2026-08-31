@@ -23,7 +23,7 @@ export const dictionaries: Record<Locale, Dictionary> = {
     marketing: {
       heroTitle: "StockBox",
       heroCopy:
-        "A calm equity research workspace that turns raw filings, market data, and model logic into a decision-ready view.",
+        "A calm equity research workspace that turns raw filings, market data, and model logic into a research-ready view.",
       primaryCta: "Analyze a stock",
       secondaryCta: "View pricing",
       proof: "Built for search -> analyze -> understand, with clear methodology and no black-box arithmetic."
@@ -31,7 +31,7 @@ export const dictionaries: Record<Locale, Dictionary> = {
     analysis: {
       oneSentence: "One sentence analysis",
       stockboxScore: "StockBox Score",
-      personalizedScore: "Personalized score",
+      personalizedScore: "Profile-weighted score",
       recommendation: "Model assessment",
       shortTerm: "Short-term assessment",
       longTerm: "Long-term assessment",

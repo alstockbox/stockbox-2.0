@@ -14,12 +14,15 @@ import {
   XCircle,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import { captureClientEvent } from "@/lib/analytics/client";
 import type {
   AnalysisReport,
   AnalysisType,
   CompanySearchResult,
   InvestmentProfile,
 } from "@/lib/analysis/types";
+import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
+import { localizedResearchView, researchViewForReport } from "@/lib/analysis/research-view";
 import { MAX_BATCH_ROWS, parseBatchInput } from "@/lib/batch/input";
 import { rankBatchResults } from "@/lib/batch/ranking";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
@@ -112,6 +115,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const [entitlement, setEntitlement] = useState<ResolvePayload["entitlement"]>();
   const [isResolving, setIsResolving] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelled = useRef(false);
   const parsed = useMemo(() => parseBatchInput(input), [input]);
@@ -190,6 +194,9 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     cancelled.current = false;
     setError(null);
     setIsRunning(true);
+    captureClientEvent("batch_started", { count: candidates.length, analysisType });
+    let completedCount = 0;
+    let failedCount = 0;
 
     for (const candidate of candidates) {
       if (cancelled.current) break;
@@ -209,6 +216,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
         });
         const payload = (await response.json()) as AnalysisPayload;
         if (response.ok && "ok" in payload && payload.ok && payload.persisted) {
+          completedCount += 1;
           updateRow(candidate.input, {
             status: "completed",
             report: payload.data,
@@ -221,6 +229,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           const limitMessage = "entitlement" in payload && payload.entitlement
             ? copy.monthlyLimit
             : copy.rateLimited;
+          failedCount += 1;
           updateRow(candidate.input, { status: "failed", error: limitMessage });
           setError(limitMessage);
           break;
@@ -230,14 +239,17 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           locale === "en" && "error" in payload
             ? payload.error
             : copy.saveFailed;
+        failedCount += 1;
         updateRow(candidate.input, { status: "failed", error: message });
       } catch {
+        failedCount += 1;
         updateRow(candidate.input, {
           status: "failed",
           error: copy.connectionInterrupted,
         });
       }
     }
+    captureClientEvent("batch_completed", { count: candidates.length, completedCount, failedCount });
     setIsRunning(false);
   }
 
@@ -261,7 +273,8 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
       "Status",
       "Score",
       "Confidence",
-      "Recommendation",
+      "Model rating",
+      "Research view",
       "Data coverage",
       "Analysis ID",
       "Error",
@@ -274,6 +287,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
       row.report?.score.score ?? "",
       row.report?.score.confidence ?? "",
       row.report?.recommendation ?? "",
+      row.report ? localizedResearchView(researchViewForReport(row.report), locale) : "",
       row.report?.dataCoverage ?? "",
       row.report?.id ?? "",
       row.error ?? "",
@@ -284,6 +298,24 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
       csv,
       "text/csv;charset=utf-8",
     );
+  }
+
+  async function exportZip() {
+    const analysisIds = completedRows.map((row) => row.report?.id).filter((id): id is string => Boolean(id));
+    if (!analysisIds.length || isExporting) return;
+    setIsExporting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/batch/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ analysisIds }) });
+      if (!response.ok) { setError(locale === "sv" ? "ZIP-exporten kunde inte skapas." : "The ZIP export could not be created."); return; }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `StockBox_Batch_${new Date().toISOString().slice(0, 10)}.zip`; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(locale === "sv" ? "ZIP-exporten kunde inte laddas ner. Försök igen." : "The ZIP export could not be downloaded. Try again.");
+    } finally { setIsExporting(false); }
   }
 
   function exportQaJson() {
@@ -493,6 +525,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                   <th className="px-5 py-3 font-semibold">{copy.status}</th>
                   <th className="px-5 py-3 text-right font-semibold">{copy.score}</th>
                   <th className="px-5 py-3 font-semibold">{copy.recommendation}</th>
+                  <th className="px-5 py-3 font-semibold">{locale === "sv" ? "Researchvy" : "Research view"}</th>
                   <th className="px-5 py-3 text-right font-semibold">{copy.coverage}</th>
                   <th className="px-5 py-3 font-semibold">{copy.result}</th>
                 </tr>
@@ -508,6 +541,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                     </td>
                     <td className="max-w-xs px-5 py-4">
                       <span className="block truncate">{row.company?.name ?? "—"}</span>
+                      {row.report?.generatedAt ? <span className="mt-1 block text-xs text-[#7f8da0]">{formatAnalysisTimestamp(row.report.generatedAt, locale)}</span> : null}
                       {row.error ? <span className="mt-1 block text-xs text-red-200">{row.error}</span> : null}
                     </td>
                     <td className="px-5 py-4">
@@ -517,10 +551,11 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                       </span>
                     </td>
                     <td className="number px-5 py-4 text-right text-[#f4efe5]">
-                      {row.report?.score.score ?? "—"}
+                      {row.report?.score.score === null || row.report?.score.score === undefined ? "—" : Math.round(row.report.score.score)}
                     </td>
+                    <td className="px-5 py-4 font-semibold text-[#e1cb95]">{row.report?.recommendation ?? "?"}</td>
                     <td className="px-5 py-4 font-semibold text-[#e1cb95]">
-                      {row.report?.recommendation ?? "?"}
+                      {row.report ? localizedResearchView(researchViewForReport(row.report), locale) : "—"}
                     </td>
                     <td className="number px-5 py-4 text-right">
                       {row.report?.dataCoverage === undefined
@@ -546,6 +581,10 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                 {copy.exportQaCopy}
               </p>
               <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={() => void exportZip()} disabled={isExporting}>
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  {isExporting ? (locale === "sv" ? "Skapar ZIP..." : "Building ZIP...") : (locale === "sv" ? `Ladda ner ${completedRows.length} färdiga rapporter (.zip)` : `Download ${completedRows.length} completed reports (.zip)`)}
+                </Button>
                 <Button type="button" variant="secondary" onClick={exportCsv}>
                   <Download className="h-4 w-4" aria-hidden="true" />
                   {copy.downloadCsv}

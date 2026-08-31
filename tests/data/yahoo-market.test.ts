@@ -15,7 +15,7 @@ describe("Yahoo chart market adapter", () => {
     const timestamps = Array.from({ length: 400 }, (_, index) => 1_735_689_600 + index * 86_400);
     const closes = Array.from({ length: 400 }, (_, index) => 100 + index);
     const volumes = Array.from({ length: 400 }, () => 1_000_000);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({
       chart: {
         result: [{
           meta: {
@@ -57,6 +57,12 @@ describe("Yahoo chart market adapter", () => {
     }));
     expect(result.data.performance["3M"]).toBeTypeOf("number");
     expect(result.data.performance["1Y"]).toBeTypeOf("number");
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get("range")).toBe("10y");
+    expect(result.data.priceHistory?.length).toBeGreaterThan(10);
+    expect(result.data.priceHistory?.length).toBeLessThan(24);
+    expect(new Set(result.data.priceHistory?.map((point) => point.date.slice(0, 7))).size)
+      .toBe(result.data.priceHistory?.length);
+    expect(result.data.priceHistory?.at(-1)?.close).toBe(499);
   });
 
   it("uses the latest usable history quote when chart metadata is older than the history", async () => {

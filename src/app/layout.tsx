@@ -3,6 +3,8 @@ import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { AppNav } from "@/components/app-shell/nav";
 import { AppFooter } from "@/components/app-shell/footer";
+import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
+import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 
@@ -12,18 +14,18 @@ const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfa
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app"),
   title: {
-    default: "StockBox | Source-backed stock analysis",
+    default: "StockBox | Data-driven stock analysis",
     template: "%s | StockBox",
   },
   description:
-    "StockBox turns filings, market data, scoring logic and research workflows into source-backed equity analysis with visible coverage and confidence.",
+    "StockBox turns filings, market data, scoring logic and research workflows into data-driven equity analysis with visible sources, coverage and confidence.",
   icons: {
     icon: "/images/stockbox-logo.png",
     shortcut: "/images/stockbox-logo.png",
     apple: "/images/stockbox-logo.png",
   },
   openGraph: {
-    title: "StockBox | Source-backed stock analysis",
+    title: "StockBox | Data-driven stock analysis",
     description:
       "Understand any stock faster with visible sources, deterministic calculations and honest missing-data handling.",
     type: "website",
@@ -43,6 +45,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const locale = await getLocale();
   const navCopy = getP0Copy(locale).nav;
+  const env = getServerEnv();
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app";
   const structuredData = {
     "@context": "https://schema.org",
@@ -70,6 +73,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <AppNav />
         <main id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
+        <BrowserAnalytics gaId={env.NEXT_PUBLIC_GA_ID || undefined} metaPixelId={env.NEXT_PUBLIC_META_PIXEL_ID || undefined} locale={locale} />
       </body>
     </html>
   );

@@ -341,6 +341,29 @@ describe("Yahoo global fundamentals adapter", () => {
     expect(result.data.classificationDiagnostics?.reason).toContain("capital-markets");
   });
 
+  it("retains eleven annual observations so a true 10Y CAGR can be calculated", async () => {
+    const dates = Array.from({ length: 12 }, (_, index) => `${2015 + index}-12-31`);
+    const longHistoryPayload = {
+      timeseries: {
+        result: [
+          series("annualTotalRevenue", dates.map((date, index) => annual(date, 100 + index * 10))),
+          series("annualNetIncome", dates.map((date, index) => annual(date, 10 + index))),
+          series("annualTotalAssets", dates.map((date, index) => annual(date, 200 + index * 10))),
+        ],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fundamentals-timeseries") ? longHistoryPayload : metadataPayload
+    ), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchYahooFundamentalsResult(company);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.annualPeriods).toHaveLength(11);
+    expect(result.data.annualPeriods?.[0]?.periodEndDate).toBe("2016-12-31");
+    expect(result.data.annualPeriods?.at(-1)?.periodEndDate).toBe("2026-12-31");
+  });
+
   it("builds verified local-currency TTM and annual periods without SEC", async () => {
     const result = await fetchYahooFundamentalsResult(company);
     expect(result.ok).toBe(true);

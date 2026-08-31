@@ -156,6 +156,11 @@ export type AnalysisSource = {
   version?: string;
 };
 
+export type MarketPricePoint = {
+  date: string;
+  close: number;
+};
+
 export type MarketSnapshot = {
   ticker: string;
   price: number | null;
@@ -175,6 +180,7 @@ export type MarketSnapshot = {
   betaObservationCount?: number | null;
   provider?: string;
   historyLength?: number;
+  priceHistory?: MarketPricePoint[];
   performance: Partial<Record<"1D" | "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y", number>>;
 };
 
@@ -384,6 +390,60 @@ export type Scenario = {
   confidence: number;
 };
 
+export type HistoricalFinancialPoint = {
+  fiscalYear: number;
+  periodEndDate: string | null;
+  currency: string | null;
+  revenue: number | null;
+  revenueGrowth: number | null;
+  eps: number | null;
+  epsGrowth: number | null;
+  netIncome: number | null;
+  freeCashFlow: number | null;
+  freeCashFlowPerShare: number | null;
+  freeCashFlowMargin: number | null;
+  grossMargin: number | null;
+  operatingMargin: number | null;
+  netMargin: number | null;
+  returnOnEquity: number | null;
+  returnOnAssets: number | null;
+  returnOnInvestedCapital: number | null;
+  cash: number | null;
+  totalDebt: number | null;
+  netDebt: number | null;
+  debtToEquity: number | null;
+  currentRatio: number | null;
+  interestCoverage: number | null;
+  sharesOutstanding: number | null;
+  shareGrowth: number | null;
+  dividendsPaid: number | null;
+  dividendPerShare: number | null;
+  dividendGrowth: number | null;
+  payoutRatio: number | null;
+  freeCashFlowPayoutRatio: number | null;
+  referencePrice: number | null;
+  priceEarnings: number | null;
+  dividendYield: number | null;
+  provenance?: Record<string, MetricProvenance>;
+};
+
+export type HistoricalResearchData = {
+  financials: HistoricalFinancialPoint[];
+  price: MarketPricePoint[];
+  revenueCagr3y: number | null;
+  revenueCagr5y: number | null;
+  revenueCagr10y: number | null;
+  epsCagr3y: number | null;
+  epsCagr5y: number | null;
+  epsCagr10y: number | null;
+  dividendCagr3y: number | null;
+  dividendCagr5y: number | null;
+  dividendCagr10y: number | null;
+  dividendYearsIncreased: number;
+  dividendYearsUnchanged: number;
+  dividendYearsCut: number;
+};
+
 export type AnalysisReport = {
   id: string;
   ticker: string;
@@ -409,6 +469,7 @@ export type AnalysisReport = {
   analysisArchetype?: AnalysisArchetype;
   dataCoverage?: number;
   reportingCurrency?: string | null;
+  historical?: HistoricalResearchData;
   dataAsOf?: string | null;
   dataStatus?: DataStatus;
   confidenceBreakdown?: ConfidenceBreakdown;

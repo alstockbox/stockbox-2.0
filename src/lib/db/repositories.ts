@@ -249,7 +249,7 @@ export async function getUserAnalysisHistory(input: {
   const to = from + pageSize - 1;
   const { data, error, count } = await supabase
     .from("analyses")
-    .select("id,ticker,company_name,recommendation,score,confidence,created_at", { count: "exact" })
+    .select("id,ticker,company_name,analysis_type,recommendation,score,confidence,data_coverage,model_version,generated_at:report->>generatedAt,created_at", { count: "exact" })
     .eq("user_id", input.userId)
     .order("created_at", { ascending: false })
     .range(from, to);

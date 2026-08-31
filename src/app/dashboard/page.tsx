@@ -4,6 +4,7 @@ import { ArrowRight, BarChart3, Clock3, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
+import { localizedResearchView, overallResearchView } from "@/lib/analysis/research-view";
 import { getUserSubscription, subscriptionBillingState } from "@/lib/billing/subscriptions";
 import { getUserAnalysisHistory } from "@/lib/db/repositories";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
@@ -55,7 +56,7 @@ export default async function DashboardPage() {
               <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
                 {analyses?.length ? analyses.map((analysis) => (
                   <Link key={analysis.id} href={`/analysis/${analysis.id}`} className="grid gap-2 border-b border-white/10 bg-[#0d1c2e]/70 px-4 py-4 last:border-0 hover:bg-white/8 sm:grid-cols-[90px_1fr_120px_80px] sm:items-center">
-                    <span className="font-semibold text-[#e1cb95]">{analysis.ticker}</span><span className="text-sm text-[#f4efe5]">{analysis.company_name}</span><span className="text-sm text-[#c9d2df]">{analysis.recommendation}</span><span className="number text-sm text-[#9aa7b8]">{analysis.score}/100</span>
+                    <span className="font-semibold text-[#e1cb95]">{analysis.ticker}</span><span className="text-sm text-[#f4efe5]">{analysis.company_name}</span><span className="text-sm text-[#c9d2df]">{localizedResearchView(overallResearchView({ score: analysis.score, confidence: analysis.confidence, coverage: analysis.data_coverage }), locale)}</span><span className="number text-sm text-[#9aa7b8]">{analysis.score === null ? "—" : `${Math.round(analysis.score)}/100`}</span>
                   </Link>
                 )) : <p className="bg-[#0d1c2e]/70 p-5 text-sm text-[#9aa7b8]">{copy.empty}</p>}
               </div>

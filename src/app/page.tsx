@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { FileSearch, Scale, ShieldCheck } from "lucide-react";
 import { AnalysisWorkbench } from "@/components/analysis/analysis-workbench";
+import { captureServerEvent } from "@/lib/analytics/events";
 import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
@@ -10,13 +11,15 @@ import { getLocale } from "@/lib/i18n/server";
 import { getMarketingCopy } from "@/lib/i18n/marketing-copy";
 
 export const metadata: Metadata = {
-  title: "Source-backed stock analysis and equity research",
-  description: "Analyze stocks with source-backed fundamentals, valuation, growth, financial health, quality and risk. Missing financial data is never fabricated.",
+  title: "Data-driven stock analysis and equity research",
+  description: "Analyze stocks with data-driven fundamentals, valuation, growth, financial health, quality and risk. Sources remain visible and missing financial data is never fabricated.",
+  alternates: { canonical: "/" },
 };
 
 const sampleDimensions = [["Valuation", 28], ["Growth", 36], ["Profitability", 85], ["Financial health", 69], ["Quality", 100], ["Risk", 56]] as const;
 
 export default async function HomePage() {
+  captureServerEvent("homepage_view");
   const locale = await getLocale();
   const copy = getMarketingCopy(locale);
   const sv = locale === "sv";
@@ -46,8 +49,8 @@ export default async function HomePage() {
             </div>
             <Card className="border-[#e1cb95]/25 bg-[#0b1829] p-0">
               <div className="border-b border-white/10 p-5">
-                <div className="flex items-center justify-between gap-3"><div><p className="font-mono text-sm text-[#e1cb95]">AAPL</p><h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">Apple Inc.</h2></div><span className="rounded-full border border-[#e1cb95]/30 px-3 py-1 text-xs font-semibold text-[#e1cb95]">Hold</span></div>
-                <div className="mt-5 grid grid-cols-3 gap-3"><div><p className="text-xs text-[#7f8b9b]">Score</p><p className="number mt-1 text-2xl font-semibold">66.5</p></div><div><p className="text-xs text-[#7f8b9b]">Confidence</p><p className="number mt-1 text-2xl font-semibold">90%</p></div><div><p className="text-xs text-[#7f8b9b]">Coverage</p><p className="number mt-1 text-2xl font-semibold">89.7%</p></div></div>
+                <div className="flex items-center justify-between gap-3"><div><p className="font-mono text-sm text-[#e1cb95]">AAPL</p><h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">Apple Inc.</h2></div><span className="rounded-full border border-[#e1cb95]/30 px-3 py-1 text-xs font-semibold text-[#e1cb95]">{sv ? "Stabil researchvy" : "Solid research view"}</span></div>
+                <div className="mt-5 grid grid-cols-3 gap-3"><div><p className="text-xs text-[#7f8b9b]">Score</p><p className="number mt-1 text-2xl font-semibold">67/100</p></div><div><p className="text-xs text-[#7f8b9b]">Confidence</p><p className="number mt-1 text-2xl font-semibold">90%</p></div><div><p className="text-xs text-[#7f8b9b]">Coverage</p><p className="number mt-1 text-2xl font-semibold">90%</p></div></div>
               </div>
               <div className="grid gap-3 p-5 sm:grid-cols-2">
                 {sampleDimensions.map(([label, score]) => <div key={label}><div className="flex justify-between text-xs"><span className="text-[#c9d2df]">{label}</span><span className="number text-[#e1cb95]">{score}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[#b99b5f]" style={{ width: `${score}%` }} /></div></div>)}

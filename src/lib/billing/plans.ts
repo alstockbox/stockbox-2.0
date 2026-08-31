@@ -110,7 +110,7 @@ export const plans: Plan[] = [
       stripeCouponEnv: "STRIPE_COUPON_PREMIUM_LAUNCH",
     },
     entitlements: {
-      monthlyAnalyses: 90,
+      monthlyAnalyses: 70,
       deepAnalyses: 35,
       watchlistItems: 250,
       batchRows: 50,

@@ -12,12 +12,28 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: mocks.createAdminCli
 
 import { setAffiliateAmbassadorAccessAction } from "../../src/app/admin/actions";
 
+type AdminActionsModule = typeof import("../../src/app/admin/actions") & {
+  updateAffiliateProfileAction?: (formData: FormData) => Promise<void>;
+};
+
 function request(overrides: Record<string, string> = {}) {
   const data = new FormData();
   const defaults = {
     userId: "22222222-2222-4222-8222-222222222222", enabled: "true",
     monthlyAnalyses: "150", deepAnalyses: "150", batchRows: "50",
     watchlistItems: "75", portfolios: "5", commissionPercent: "0",
+  };
+  for (const [key, value] of Object.entries({ ...defaults, ...overrides })) data.set(key, value);
+  return data;
+}
+
+function profileRequest(overrides: Record<string, string> = {}) {
+  const data = new FormData();
+  const defaults = {
+    affiliateId: "33333333-3333-4333-8333-333333333333",
+    displayName: "Partner Two",
+    referralCode: " partner-2 ",
+    affiliateStatus: "paused",
   };
   for (const [key, value] of Object.entries({ ...defaults, ...overrides })) data.set(key, value);
   return data;
@@ -71,5 +87,27 @@ describe("affiliate ambassador admin action", () => {
   it("refuses changing the signed-in admin account", async () => {
     await expect(setAffiliateAmbassadorAccessAction(request({ userId: adminId }))).rejects.toThrow("own admin role");
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("updates affiliate identity and status with a normalized referral code", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    mocks.createAdminClient.mockReturnValue({ from });
+
+    const actions = await import("../../src/app/admin/actions") as AdminActionsModule;
+    expect(actions.updateAffiliateProfileAction).toBeTypeOf("function");
+    await actions.updateAffiliateProfileAction!(profileRequest());
+
+    expect(from).toHaveBeenCalledWith("affiliates");
+    expect(update).toHaveBeenCalledWith({
+      display_name: "Partner Two",
+      code: "PARTNER-2",
+      status: "paused",
+      updated_at: expect.any(String),
+    });
+    expect(eq).toHaveBeenCalledWith("id", "33333333-3333-4333-8333-333333333333");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/affiliate");
   });
 });

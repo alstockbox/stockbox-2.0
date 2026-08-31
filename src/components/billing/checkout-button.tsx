@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { captureClientEvent } from "@/lib/analytics/client";
 import { ArrowRight } from "lucide-react";
 import type { PlanKey } from "@/lib/billing/plans";
 import type { Locale } from "@/lib/i18n/types";
@@ -25,6 +26,7 @@ export function CheckoutButton({
   const [error, setError] = useState("");
 
   async function checkout() {
+    captureClientEvent("pricing_plan_clicked", { plan });
     setPending(true);
     setError("");
     try {

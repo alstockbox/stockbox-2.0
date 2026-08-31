@@ -18,7 +18,10 @@ describe("saved analysis history repository", () => {
     mocks.range.mockResolvedValue({
       data: [{
         id: "analysis-8", ticker: "AAPL", company_name: "Apple Inc.", recommendation: "Hold",
-        score: 72, confidence: 84, created_at: "2026-08-28T08:00:00.000Z",
+        analysis_type: "summary", score: 72, confidence: 84, data_coverage: 0.92,
+        model_version: "stockbox-analysis-engine-v2.7.0",
+        generated_at: "2026-08-28T07:59:00.000Z",
+        created_at: "2026-08-28T08:00:00.000Z",
       }],
       count: 30,
       error: null,
@@ -35,7 +38,7 @@ describe("saved analysis history repository", () => {
       data: [{ id: "analysis-8" }],
     });
     expect(mocks.select).toHaveBeenCalledWith(
-      "id,ticker,company_name,recommendation,score,confidence,created_at",
+      "id,ticker,company_name,analysis_type,recommendation,score,confidence,data_coverage,model_version,generated_at:report->>generatedAt,created_at",
       { count: "exact" },
     );
     expect(mocks.eq).toHaveBeenCalledWith("user_id", "user_1");

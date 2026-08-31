@@ -10,7 +10,7 @@ export const reportCopy = {
     stockboxScore: "StockBox Score", confidence: "Confidence", dataCoverage: "Data coverage",
     financialFlowFy: "Financial flow FY", financialFlowTtm: "Financial flow TTM", through: "through",
     financialDataThrough: "Financial data through", balanceSheetAsOf: "Balance sheet as of", marketPriceAsOf: "Market price as of",
-    modelAssessment: "Model Assessment", generalScore: "General score", personalizedScore: "Personalized score",
+    modelAssessment: "Model Assessment", generalScore: "General score", personalizedScore: "Profile-weighted score",
     belowRatingThreshold: "Weighted coverage is below the rating threshold.", sixtySecond: "60-Second View",
     shortTerm: "Short term", longTerm: "Long term", explainability: "Score Explainability", coverage: "Coverage",
     contributors: "Contributors", missing: "missing", redFlags: "Red Flags", greenFlags: "Green Flags", numbers: "Numbers",

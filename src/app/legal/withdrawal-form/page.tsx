@@ -8,6 +8,7 @@ import { withdrawalFormText } from "@/lib/legal/withdrawal-form";
 export const metadata: Metadata = {
   title: "Standard withdrawal form",
   description: "The model form consumers may use to exercise the statutory right of withdrawal for a StockBox subscription.",
+  alternates: { canonical: "/legal/withdrawal-form" },
 };
 
 export default async function WithdrawalFormPage() {

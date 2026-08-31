@@ -39,6 +39,12 @@ const giveawayCampaignSchema = z.object({
   ),
 });
 const giveawayRevokeSchema = z.object({ campaignId: z.string().uuid() });
+const affiliateProfileSchema = z.object({
+  affiliateId: z.string().uuid(),
+  displayName: z.string().trim().min(2).max(80),
+  referralCode: z.string().trim().min(3).max(48),
+  affiliateStatus: z.enum(["active", "paused", "pending"]),
+});
 
 function ambassadorState(ok: boolean, message: string): AdminAmbassadorState { return { ok, message }; }
 function generatedCode(name: string) { return buildAffiliateCode(name, randomBytes(3).toString("hex")); }
@@ -128,6 +134,37 @@ export async function setAffiliateAmbassadorAction(formData: FormData) {
   if (!expanded.has("portfolios")) expanded.set("portfolios", "5");
   if (!expanded.has("commissionPercent")) expanded.set("commissionPercent", "0");
   return setAffiliateAmbassadorAccessAction(expanded);
+}
+
+export async function updateAffiliateProfileAction(formData: FormData) {
+  await requireAdmin();
+  const parsed = affiliateProfileSchema.safeParse({
+    affiliateId: formData.get("affiliateId"),
+    displayName: formData.get("displayName"),
+    referralCode: formData.get("referralCode"),
+    affiliateStatus: formData.get("affiliateStatus"),
+  });
+  if (!parsed.success) throw new Error("Invalid affiliate profile settings.");
+
+  const code = normalizeReferralCode(parsed.data.referralCode);
+  if (!code) throw new Error("Invalid affiliate referral code.");
+  const supabase = createAdminClient();
+  if (!supabase) throw new Error("Admin database access is not configured.");
+
+  const { error } = await supabase.from("affiliates").update({
+    display_name: parsed.data.displayName,
+    code,
+    status: parsed.data.affiliateStatus,
+    updated_at: new Date().toISOString(),
+  }).eq("id", parsed.data.affiliateId);
+  if (error) {
+    throw new Error(error.message?.toLowerCase().includes("duplicate")
+      ? "That affiliate code is already in use."
+      : "Affiliate profile settings could not be updated.");
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/affiliate");
 }
 
 export async function createAmbassadorAction(

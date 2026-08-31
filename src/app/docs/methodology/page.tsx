@@ -7,6 +7,7 @@ import { getLocale } from "@/lib/i18n/server";
 export const metadata: Metadata = {
   title: "Stock Analysis Methodology",
   description: "How StockBox evaluates valuation, growth, profitability, financial health, quality, risk, coverage and confidence.",
+  alternates: { canonical: "/docs/methodology" },
 };
 
 const dimensions = [

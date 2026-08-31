@@ -8,7 +8,7 @@ describe("billing plan catalog", () => {
   });
 
   it.each([
-    ["basic", 69, 10], ["standard", 119, 35], ["premium", 179, 90], ["elite", 399, 350]
+    ["basic", 69, 10], ["standard", 119, 35], ["premium", 179, 70], ["elite", 399, 350]
   ] as const)("makes %s purchasable at the approved regular price", (key, price, analyses) => {
     const plan = findPlan(key)!;
     expect(plan.monthlyPriceSek).toBe(price);

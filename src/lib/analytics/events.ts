@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 import { getServerEnv } from "@/lib/env/server";
 
 export type AnalyticsEvent =
+  | "homepage_view"
+  | "pricing_view"
+  | "sample_analysis_view"
   | "landing_view"
   | "signup_started"
   | "signup_completed"
+  | "login_completed"
   | "onboarding_completed"
   | "company_searched"
   | "analysis_started"
@@ -16,7 +20,14 @@ export type AnalyticsEvent =
   | "share_created"
   | "share_opened"
   | "paywall_viewed"
+  | "pricing_plan_clicked"
   | "checkout_started"
+  | "checkout_completed"
+  | "comparison_started"
+  | "comparison_completed"
+  | "batch_started"
+  | "batch_completed"
+  | "affiliate_visit"
   | "subscription_started"
   | "subscription_cancelled"
   | "referral_shared"
@@ -25,9 +36,13 @@ export type AnalyticsEvent =
   | "streak_completed";
 
 const allowedProperties: Record<AnalyticsEvent, readonly string[]> = {
+  homepage_view: [],
+  pricing_view: [],
+  sample_analysis_view: [],
   landing_view: [],
   signup_started: [],
   signup_completed: [],
+  login_completed: [],
   onboarding_completed: ["experience", "investmentProfile"],
   company_searched: ["queryLength", "resultCount"],
   analysis_started: ["ticker", "analysisType"],
@@ -39,14 +54,34 @@ const allowedProperties: Record<AnalyticsEvent, readonly string[]> = {
   share_created: [],
   share_opened: [],
   paywall_viewed: ["analysisType", "plan"],
+  pricing_plan_clicked: ["plan"],
   checkout_started: ["plan"],
+  checkout_completed: ["plan"],
+  comparison_started: ["count"],
+  comparison_completed: ["count"],
+  batch_started: ["count", "analysisType"],
+  batch_completed: ["count", "completedCount", "failedCount"],
+  affiliate_visit: [],
   subscription_started: ["plan"],
   subscription_cancelled: ["plan"],
   referral_shared: ["channel"],
   referral_signup: [],
-  affiliate_conversion: [],
+  affiliate_conversion: ["plan"],
   streak_completed: ["streak"],
 };
+
+export const CLIENT_ANALYTICS_EVENTS = [
+  "pricing_plan_clicked",
+  "batch_started",
+  "batch_completed",
+] as const;
+
+export type ClientAnalyticsEvent = (typeof CLIENT_ANALYTICS_EVENTS)[number];
+
+export function isClientAnalyticsEvent(value: unknown): value is ClientAnalyticsEvent {
+  return typeof value === "string"
+    && (CLIENT_ANALYTICS_EVENTS as readonly string[]).includes(value);
+}
 
 export function analyticsDistinctId(userId: unknown): string {
   if (typeof userId !== "string" || userId.length === 0) return "anonymous";

@@ -134,14 +134,14 @@ async function syncSubscription(
 
 async function recordAffiliateCommission(invoice: Stripe.Invoice, eventId: string, eventCreated: number) {
   const details = invoiceSubscriptionDetails(invoice);
-  if (!details?.userId || invoice.amount_paid <= 0) return;
+  if (!details?.userId || invoice.amount_paid <= 0) return false;
   const commissionableAmountCents = commissionableInvoiceAmountCents(invoice);
-  if (commissionableAmountCents <= 0) return;
+  if (commissionableAmountCents <= 0) return false;
 
   const supabase = createAdminClient();
   if (!supabase) throw new Error("Supabase admin client is unavailable.");
   const paidAtSeconds = invoice.status_transitions?.paid_at ?? eventCreated;
-  const { error } = await supabase.rpc("record_affiliate_commission", {
+  const { data, error } = await supabase.rpc("record_affiliate_commission", {
     p_referred_user_id: details.userId,
     p_source_event_id: eventId,
     p_stripe_invoice_id: invoice.id,
@@ -153,6 +153,8 @@ async function recordAffiliateCommission(invoice: Stripe.Invoice, eventId: strin
     p_paid_at: new Date(paidAtSeconds * 1000).toISOString(),
   });
   if (error) throw new Error("Affiliate commission creation failed.");
+  const payload = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  return payload.reason === "created";
 }
 
 async function sendInitialContractConfirmation(invoice: Stripe.Invoice, eventCreated: number) {
@@ -251,13 +253,23 @@ export async function POST(request: Request) {
             : "subscription_started",
           { subscriptionId: subscription.id }
         );
+        if (event.type === "customer.subscription.created") {
+          captureServerEvent("checkout_completed", {
+            userId: subscription.metadata.userId || undefined,
+            plan: subscription.metadata.plan || undefined,
+          });
+        }
       }
       break;
     }
     case "invoice.paid": {
       try {
         const invoice = event.data.object as Stripe.Invoice;
-        await recordAffiliateCommission(invoice, event.id, event.created);
+        const affiliateConverted = await recordAffiliateCommission(invoice, event.id, event.created);
+        if (affiliateConverted) {
+          const details = invoiceSubscriptionDetails(invoice);
+          captureServerEvent("affiliate_conversion", { userId: details?.userId, plan: details?.planKey });
+        }
         await sendInitialContractConfirmation(invoice, event.created);
       } catch {
         return Response.json({ error: "Webhook processing failed." }, { status: 500 });

@@ -192,7 +192,7 @@ export function deriveRecommendation(
     scoreUsed,
     confidence: score.confidence,
     rationale: [
-      scoreUsed === null ? "Insufficient score coverage." : `Personalized model score is ${Math.round(scoreUsed)}/100.`,
+      scoreUsed === null ? "Insufficient score coverage." : `Profile-weighted model score is ${Math.round(scoreUsed)}/100.`,
       `Data confidence is ${score.confidence}%.`,
       redFlags.length ? `${redFlags.length} deterministic red flag(s) remain visible.` : "No deterministic red flags were detected.",
     ],

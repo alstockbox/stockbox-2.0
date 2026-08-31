@@ -21,9 +21,9 @@ describe("affiliate payout automation", () => {
     expect(route).toContain("requireAdmin");
   });
 
-  it("schedules the payout sweep daily", () => {
+  it("schedules the payout sweep monthly", () => {
     const config = readFileSync(vercelPath, "utf8");
     expect(config).toContain('"/api/affiliate/payouts/run"');
-    expect(config).toContain('"0 7 * * *"');
+    expect(config).toContain('"0 7 1 * *"');
   });
 });
