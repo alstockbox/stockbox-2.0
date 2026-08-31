@@ -38,11 +38,17 @@ jobs:
           grep -q 'bounded transient provider retries' docs/STOCKBOX_FINAL_IMPLEMENTATION_REPORT.md
           ! grep -q 'Add authoritative FX normalization for multi-currency comparisons' docs/STOCKBOX_FINAL_IMPLEMENTATION_REPORT.md
 
+      - name: Align legacy regression contracts with bounded retry policy
+        run: python scripts/apply-retry-regression-tests.py
+
       - name: Targeted ECB FX regression
         run: npm test -- tests/data/ecb-fx-p1.test.ts
 
       - name: Targeted provider retry regression
         run: npm test -- tests/data/provider-retry-p1.test.ts
+
+      - name: Targeted legacy fundamentals and market routing regressions
+        run: npm test -- tests/data/global-fundamentals-provider.test.ts tests/env/market-provider-routing.test.ts
 
       - name: Targeted observability regression
         run: npm test -- tests/analytics/analysis-observability-p1.test.ts
@@ -59,11 +65,12 @@ jobs:
           rm -f scripts/apply-fx-p1.py
           rm -f scripts/apply-provider-retry-p1.py
           rm -f scripts/apply-final-report-p1.py
+          rm -f scripts/apply-retry-regression-tests.py
 
       - name: Verify temporary release machinery is clean
         run: |
           leftovers=$(find .github/workflows -maxdepth 1 -type f \( -name 'p0-*.yml' -o -name 'p1-*.yml' -o -name 'final-release-gate.yml' \) -print 2>/dev/null || true)
-          patches=$(find scripts -maxdepth 1 -type f \( -name 'apply-*-p0.py' -o -name 'apply-*-p1.py' \) -print 2>/dev/null || true)
+          patches=$(find scripts -maxdepth 1 -type f \( -name 'apply-*-p0.py' -o -name 'apply-*-p1.py' -o -name 'apply-retry-regression-tests.py' \) -print 2>/dev/null || true)
           if [ -n "$leftovers" ] || [ -n "$patches" ]; then
             echo "Unexpected temporary release machinery remains:"
             printf '%s\n%s\n' "$leftovers" "$patches"
