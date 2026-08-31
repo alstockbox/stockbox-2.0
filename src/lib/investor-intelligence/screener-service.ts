@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AnalysisArchetype } from "@/lib/analysis/types";
@@ -18,6 +19,11 @@ function toCompany(row: Record<string, unknown>): ScreenerCompany | null {
     archetype: typeof row.archetype === "string" ? row.archetype as AnalysisArchetype : null,
     snapshot: normalized,
   };
+}
+
+function screenerNotificationEventKey(screenerId: string, entered: string[], now = new Date()) {
+  const day = now.toISOString().slice(0, 10);
+  return createHash("sha256").update(`screener:${screenerId}:${day}:${[...entered].sort().join(",")}`).digest("hex");
 }
 
 export async function getScreenerUniverse(limit = 5000) {
@@ -81,13 +87,18 @@ export async function runSavedScreener(input: { userId: string; screenerId: stri
   if (snapshotError) return { ok: false as const, error: snapshotError.message };
   await supabase.from("saved_screeners").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", screener.id).eq("user_id", input.userId);
   if (entered.length && screener.notification_preference !== "none") {
-    await supabase.from("notifications").insert({
+    const eventKey = screenerNotificationEventKey(screener.id as string, entered);
+    const { error: notificationError } = await supabase.from("notifications").insert({
       user_id: input.userId,
       kind: "screener_match",
       title: `${entered.length} new ${entered.length === 1 ? "company" : "companies"} match ${screener.name}`,
       body: entered.slice(0, 8).join(", ") + (entered.length > 8 ? ` +${entered.length - 8} more` : ""),
+      event_key: eventKey,
       metadata: { screenerId: screener.id, enteredTickers: entered, matchCount: matches.length },
     });
+    if (notificationError && notificationError.code !== "23505") {
+      return { ok: false as const, error: notificationError.message };
+    }
   }
   return { ok: true as const, matches, entered, left };
 }
