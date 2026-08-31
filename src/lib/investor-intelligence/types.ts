@@ -66,6 +66,8 @@ export type CompanyMetricSnapshot = {
   sourceMeta: Record<string, unknown>;
 };
 
+export type PublicCompanyMetricSnapshot = Omit<CompanyMetricSnapshot, "analysisId" | "personalizedScore" | "sourceMeta">;
+
 export type MaterialChange = {
   metricKey: string;
   category: MaterialChangeCategory;
