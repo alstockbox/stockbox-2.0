@@ -60,15 +60,30 @@ export function buildPeerBenchmarkComparison(report: AnalysisReport): PeerBenchm
   const sector = report.engine?.scores.sector;
   const benchmarks = benchmarksForSector(sector);
   const sectorLabel = sector ?? "other";
+  const benchmarkVersion = report.engine?.scores.methodology.benchmarkVersion ?? STATIC_BENCHMARK_VERSION;
 
   if (!metrics) {
     return {
       status: "unavailable",
       sectorLabel,
-      benchmarkVersion: STATIC_BENCHMARK_VERSION,
+      benchmarkVersion,
       rows: [],
       missingReasons: ["Canonical financial metrics are unavailable for this saved report."],
       summary: "Peer and benchmark comparison is unavailable because StockBox does not have traceable metrics for this report.",
+    };
+  }
+
+  if (report.engine?.analysisArchetype === "holding_company") {
+    return {
+      status: "unavailable",
+      sectorLabel,
+      benchmarkVersion,
+      rows: [],
+      missingReasons: [
+        "Holding-company peer valuation requires verified look-through NAV or SOTP data and a comparable NAV discount/premium benchmark.",
+        "Generic operating-company P/E, EV/EBITDA, EV/Sales, FCF-yield, revenue-growth and margin benchmarks are intentionally suppressed for holding companies.",
+      ],
+      summary: "Generic sector benchmarks are not used for holding companies because NAV/SOTP and discount-to-NAV are the economically relevant comparison basis.",
     };
   }
 
@@ -94,7 +109,7 @@ export function buildPeerBenchmarkComparison(report: AnalysisReport): PeerBenchm
   return {
     status: "benchmark_only",
     sectorLabel,
-    benchmarkVersion: report.engine?.scores.methodology.benchmarkVersion ?? STATIC_BENCHMARK_VERSION,
+    benchmarkVersion,
     rows,
     missingReasons: [
       "Live peer constituents and live peer medians are not configured for this local report.",
