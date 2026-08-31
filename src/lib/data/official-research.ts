@@ -83,19 +83,20 @@ export async function fetchOfficialResearchBundle(
   const positioningPromise = swedish
     ? fetchFiShortPosition(enrichedCompany, { lei: enrichedCompany.lei }, { fetcher })
     : Promise.resolve(null);
+  const bolagsverketCredentials = env.BOLAGSVERKET_CLIENT_ID
+    && env.BOLAGSVERKET_CLIENT_SECRET
+    && env.BOLAGSVERKET_TOKEN_URL
+    && env.BOLAGSVERKET_BASE_URL
+    ? {
+      clientId: env.BOLAGSVERKET_CLIENT_ID,
+      clientSecret: env.BOLAGSVERKET_CLIENT_SECRET,
+      tokenUrl: env.BOLAGSVERKET_TOKEN_URL,
+      baseUrl: env.BOLAGSVERKET_BASE_URL,
+      scope: env.BOLAGSVERKET_SCOPE,
+    }
+    : null;
   const bolagsverketPromise = swedish
-    ? fetchBolagsverketAnnualReportEvidence(
-      organizationNumber,
-      env.BOLAGSVERKET_CLIENT_ID && env.BOLAGSVERKET_CLIENT_SECRET
-        ? {
-          clientId: env.BOLAGSVERKET_CLIENT_ID,
-          clientSecret: env.BOLAGSVERKET_CLIENT_SECRET,
-          tokenUrl: env.BOLAGSVERKET_TOKEN_URL,
-          baseUrl: env.BOLAGSVERKET_BASE_URL,
-        }
-        : null,
-      { fetcher },
-    )
+    ? fetchBolagsverketAnnualReportEvidence(organizationNumber, bolagsverketCredentials, { fetcher })
     : Promise.resolve(null);
 
   const [insiderResult, positioningResult, bolagsverketResult] = await Promise.all([
