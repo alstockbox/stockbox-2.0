@@ -1,0 +1,27 @@
+name: P0 dividend context
+
+on:
+  push:
+    branches:
+      - stockbox/p0-release-hardening-20260831
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: stockbox/p0-release-hardening-20260831
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run dividend-context P0 test
+        run: npx vitest run tests/analysis/dividend-context-p0.test.ts
