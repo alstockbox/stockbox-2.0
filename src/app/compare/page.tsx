@@ -18,6 +18,11 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { searchCompanies } from "@/lib/data/provider";
+import {
+  convertWithComparisonFxContext,
+  resolveComparisonFxContexts,
+  type ComparisonFxContext,
+} from "@/lib/data/ecb-fx";
 import { getAnalysis, getUserAnalysisHistory } from "@/lib/db/repositories";
 import { getLocale } from "@/lib/i18n/server";
 import type { Locale } from "@/lib/i18n/types";
@@ -42,11 +47,21 @@ function unavailable(locale: Locale) {
   return locale === "sv" ? "Ej tillgängligt" : "Not available";
 }
 
-function metricValue(report: AnalysisReport, metric: ComparisonMetric, locale: Locale) {
+function metricValue(
+  report: AnalysisReport,
+  metric: ComparisonMetric,
+  locale: Locale,
+  fxContext?: ComparisonFxContext,
+) {
   const value = metric.read(report);
   if (typeof value !== "number" || !Number.isFinite(value)) return unavailable(locale);
   if (metric.kind === "percent") return formatPercent(value, 1);
-  if (metric.kind === "currency") return formatCompactCurrency(value, report.reportingCurrency ?? "USD");
+  if (metric.kind === "currency") {
+    const native = formatCompactCurrency(value, report.reportingCurrency ?? "USD");
+    const normalized = convertWithComparisonFxContext(value, fxContext);
+    if (normalized === null || !fxContext || fxContext.status !== "normalized") return native;
+    return `${native} · ≈ ${formatCompactCurrency(normalized, fxContext.targetCurrency)}`;
+  }
   if (metric.kind === "multiple") return `${formatNumber(value, { maximumFractionDigits: 2 })}×`;
   return formatNumber(value, { maximumFractionDigits: 2 });
 }
@@ -105,13 +120,26 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
   const loaded = await Promise.all(ids.map((id) => getAnalysis(id, user.id)));
   const reports = loaded.map(reportFromRow).filter((report): report is AnalysisReport => Boolean(report));
   const exchanges = await Promise.all(reports.map(exchangeFor));
+  const currencies = [...new Set(reports.map((report) => report.reportingCurrency).filter((currency): currency is string => Boolean(currency)))];
+  const mixedCurrencies = currencies.length > 1;
+  const fxContexts = mixedCurrencies
+    ? await resolveComparisonFxContexts(reports.map((report) => ({
+        id: report.id,
+        currency: report.reportingCurrency,
+        date: report.generatedAt,
+      })), "EUR")
+    : new Map<string, ComparisonFxContext>();
+  const fxNormalized = mixedCurrencies && reports.every((report) => {
+    const context = fxContexts.get(report.id);
+    return context?.status === "normalized" || context?.status === "same_currency";
+  });
 
   if (ids.length > 0) captureServerEvent("comparison_started", { userId: user.id, count: ids.length });
   if (reports.length >= 2) captureServerEvent("comparison_completed", { userId: user.id, count: reports.length });
 
   const resolvedComparisonProfile = resolveComparisonProfile(reports);
   const comparisonLens = comparisonLensForProfile(resolvedComparisonProfile.profile);
-  const warnings = comparisonWarnings(reports, locale);
+  const warnings = comparisonWarnings(reports, locale, { fxNormalized, fxTargetCurrency: "EUR" });
   const orderedComparisonGroups = comparisonLens.groupOrder.flatMap((groupId) => {
     const group = comparisonGroups.find((candidate) => candidate.id === groupId);
     return group ? [group] : [];
@@ -154,6 +182,16 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
           <p className="mt-4 text-xs leading-5 text-[#9aa7b8]">{sv ? "Alla valda snapshots använder samma investeringsprofil." : "All selected snapshots use the same investment profile."}</p>
         )}
         {warnings.length ? <div className="mt-3 space-y-2">{warnings.map((warning) => <p key={warning} className="rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-[#c9d2df]">{warning}</p>)}</div> : null}
+        {mixedCurrencies ? <div className="mt-3 rounded-md border border-white/10 bg-white/[0.02] p-3 text-xs leading-5 text-[#9aa7b8]">
+          {fxNormalized ? <>
+            <p>{sv ? "FX-normalisering: native belopp behålls och kompletteras med ungefärlig EUR vid ECB:s senaste referenskurs på eller före varje snapshot-datum." : "FX normalization: native amounts are preserved and supplemented with approximate EUR at the latest ECB reference rate on or before each snapshot date."}</p>
+            <p className="mt-1">{reports.map((report) => {
+              const context = fxContexts.get(report.id);
+              return context ? `${report.ticker}: ${context.sourceCurrency}→${context.targetCurrency} @ ${context.rateDate ?? "N/A"}` : `${report.ticker}: FX N/A`;
+            }).join(" · ")}</p>
+            <p className="mt-1">Source: ECB statistics. {sv ? "EUR-beloppen är härledda jämförelsevärden, inte transaktionskurser." : "EUR amounts are derived comparison values, not transaction rates."}</p>
+          </> : <p>{sv ? "FX-normalisering kunde inte verifieras för alla snapshots. Native valuta visas och ingen EUR-siffra fabriceras. Source: ECB statistics." : "FX normalization could not be verified for every snapshot. Native currency is shown and no EUR value is fabricated. Source: ECB statistics."}</p>}
+        </div> : null}
       </Card>
 
       <Card className="overflow-hidden p-0">
@@ -201,7 +239,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
         if (!metrics.length) return null;
         return <Card key={group.id}>
           <h2 className="text-xl font-semibold text-[#f4efe5]">{group.label}</h2>
-          <div className="mt-4 space-y-2">{metrics.map((metric) => <div key={metric.key} className="rounded-lg border border-white/10 p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-[#9aa7b8]">{metric.label}</p><span className="text-[11px] text-[#6f7b8c]">{metricDirectionLabel(metric, locale)}</span></div><div className={reportGridClass(reports.length)}>{reports.map((report) => <div key={report.id} className="rounded-md bg-white/[0.03] p-3"><span className="block font-mono text-[11px] text-[#e1cb95]">{report.ticker}</span><span className="number mt-1 block text-base font-semibold text-[#f4efe5]">{metricValue(report, metric, locale)}</span></div>)}</div></div>)}</div>
+          <div className="mt-4 space-y-2">{metrics.map((metric) => <div key={metric.key} className="rounded-lg border border-white/10 p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-[#9aa7b8]">{metric.label}</p><span className="text-[11px] text-[#6f7b8c]">{metricDirectionLabel(metric, locale)}</span></div><div className={reportGridClass(reports.length)}>{reports.map((report) => <div key={report.id} className="rounded-md bg-white/[0.03] p-3"><span className="block font-mono text-[11px] text-[#e1cb95]">{report.ticker}</span><span className="number mt-1 block text-base font-semibold text-[#f4efe5]">{metricValue(report, metric, locale, fxContexts.get(report.id))}</span></div>)}</div></div>)}</div>
         </Card>;
       })}
 

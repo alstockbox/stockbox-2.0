@@ -163,7 +163,16 @@ export function resolveComparisonProfile(reports: AnalysisReport[]): { profile: 
   return { profile: "balanced", mixed: profiles.length > 1 };
 }
 
-export function comparisonWarnings(reports: AnalysisReport[], locale: "en" | "sv" = "en"): string[] {
+export type ComparisonWarningOptions = {
+  fxNormalized?: boolean;
+  fxTargetCurrency?: string;
+};
+
+export function comparisonWarnings(
+  reports: AnalysisReport[],
+  locale: "en" | "sv" = "en",
+  options: ComparisonWarningOptions = {},
+): string[] {
   if (reports.length < 2) return [];
   const warnings: string[] = [];
   const currencies = [...new Set(reports.map((report) => report.reportingCurrency).filter((value): value is string => Boolean(value)))];
@@ -171,9 +180,16 @@ export function comparisonWarnings(reports: AnalysisReport[], locale: "en" | "sv
   const modelVersions = [...new Set(reports.map((report) => report.modelVersion).filter((value): value is string => Boolean(value)))];
 
   if (currencies.length > 1) {
-    warnings.push(locale === "sv"
-      ? "Valda snapshots använder olika rapporteringsvalutor. Valutadenominerade värden visas i respektive native valuta och rankas inte direkt mot varandra."
-      : "Selected snapshots use different reporting currencies. Currency-denominated values stay in native currency and are not ranked directly against each other.");
+    if (options.fxNormalized) {
+      const target = options.fxTargetCurrency ?? "EUR";
+      warnings.push(locale === "sv"
+        ? `Valda snapshots använder olika rapporteringsvalutor. Valutadenominerade värden visas i native valuta med en extra ${target}-normalisering från ECB:s referenskurser på eller före respektive snapshot-datum. Source: ECB statistics.`
+        : `Selected snapshots use different reporting currencies. Currency-denominated values stay in native currency with an additional ${target} normalization from ECB reference rates on or before each snapshot date. Source: ECB statistics.`);
+    } else {
+      warnings.push(locale === "sv"
+        ? "Valda snapshots använder olika rapporteringsvalutor. Valutadenominerade värden visas i respektive native valuta och rankas inte direkt mot varandra."
+        : "Selected snapshots use different reporting currencies. Currency-denominated values stay in native currency and are not ranked directly against each other.");
+    }
   }
   if (archetypes.length > 1) {
     warnings.push(locale === "sv"
