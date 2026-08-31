@@ -1,9 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import type { AwaitedReturn } from "@/lib/utils/types";
 import { getPeerIntelligence } from "@/lib/investor-intelligence/peer-service";
 
-export type PeerIntelligenceData = NonNullable<AwaitedReturn<typeof getPeerIntelligence>>;
+export type PeerIntelligenceData = NonNullable<Awaited<ReturnType<typeof getPeerIntelligence>>>;
 
 function formatMetric(key: string, value: number | null) {
   if (value === null || !Number.isFinite(value)) return "—";
