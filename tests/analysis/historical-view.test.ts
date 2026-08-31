@@ -31,9 +31,9 @@ function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
     historical: {
       financials,
       price: [
-        { date: "2024-12-31", close: 20 },
-        { date: "2025-12-31", close: 22 },
-        { date: "2026-08-31", close: 25 },
+        { date: "2024-12-31", close: 20, currency: "USD" },
+        { date: "2025-12-31", close: 22, currency: "USD" },
+        { date: "2026-08-31", close: 25, currency: "USD" },
       ],
       valuationMethodVersion: "historical-valuation-v2",
       valuation: [
