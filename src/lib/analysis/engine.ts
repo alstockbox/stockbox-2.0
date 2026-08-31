@@ -611,6 +611,10 @@ export function presentAnalysisReport(
         ttmEpsHistory: legacyInput.fundamentals?.historicalTtmEps,
         dividendEvents: legacyInput.market?.dividendEvents,
         currentPriceEarnings: result.metrics.valuation.priceEarnings,
+        currentPrice: legacyInput.market?.price,
+        currentPriceDate: legacyInput.market?.date,
+        yearHigh: legacyInput.market?.yearHigh,
+        yearLow: legacyInput.market?.yearLow,
       })
     : undefined;
   const historical = historicalBase

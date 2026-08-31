@@ -533,9 +533,38 @@ export type HistoricalDiscountQuality = {
   summary: string;
 };
 
+export type HistoricalPriceWindowStats = {
+  requestedYears: 1 | 3 | 5 | 10 | null;
+  firstDate: string | null;
+  lastDate: string | null;
+  spanYears: number;
+  sufficientHistory: boolean;
+  observationCount: number;
+  low: number | null;
+  high: number | null;
+  currentVsLow: number | null;
+  currentVsHigh: number | null;
+};
+
+export type HistoricalPriceContext = {
+  currentPrice: number | null;
+  currentPriceDate: string | null;
+  yearHigh: number | null;
+  yearLow: number | null;
+  distanceToYearHigh: number | null;
+  distanceFromYearLow: number | null;
+  yearRangeSource: "provider" | "price_history" | null;
+  oneYear: HistoricalPriceWindowStats;
+  threeYear: HistoricalPriceWindowStats;
+  fiveYear: HistoricalPriceWindowStats;
+  tenYear: HistoricalPriceWindowStats;
+  maximum: HistoricalPriceWindowStats;
+};
+
 export type HistoricalResearchData = {
   financials: HistoricalFinancialPoint[];
   price: MarketPricePoint[];
+  priceContext?: HistoricalPriceContext;
   valuation?: HistoricalValuationPoint[];
   valuationContext?: HistoricalValuationContext;
   valuationMethodVersion?: string;

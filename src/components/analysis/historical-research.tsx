@@ -138,6 +138,9 @@ function extraCopyFor(locale: Locale) {
     signalEvidence: "Deterministiska signaler", historicalSnapshot: "Historisk översikt",
     currentColumn: "Nu", oneYearColumn: "1 år", threeYearColumn: "3 år", fiveYearColumn: "5 år", tenYearColumn: "10 år", maxColumn: "MAX",
     dividendGrowth: "Utdelningstillväxt", snapshotNote: "Nu visar senaste nivå där det är relevant. Horisonter visar tillväxt eller historisk median/snitt. MAX använder längsta verifierade historik och märker aldrig kortare historik som 10 år.",
+    priceContext: "Priskontext", currentPrice: "Aktuell kurs", yearHigh: "52V högsta", yearLow: "52V lägsta",
+    threeYearRange: "3 år intervall", fiveYearRange: "5 år intervall", tenYearRange: "10 år intervall", maxRange: "MAX intervall",
+    below: "under", above: "över", priceContextNote: "52-veckorsintervallet använder providerdata när den är komplett, annars verifierad 1-årshistorik. Flerårsintervall visas bara när faktisk tidsbredd är tillräcklig.",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -156,6 +159,9 @@ function extraCopyFor(locale: Locale) {
     signalEvidence: "Deterministic signals", historicalSnapshot: "Historical snapshot",
     currentColumn: "Current", oneYearColumn: "1Y", threeYearColumn: "3Y", fiveYearColumn: "5Y", tenYearColumn: "10Y", maxColumn: "MAX",
     dividendGrowth: "Dividend growth", snapshotNote: "Current shows the latest level where applicable. Horizon columns show growth or historical median/average context. MAX uses the longest verified history and never relabels shorter history as 10Y.",
+    priceContext: "Price context", currentPrice: "Current price", yearHigh: "52W high", yearLow: "52W low",
+    threeYearRange: "3Y range", fiveYearRange: "5Y range", tenYearRange: "10Y range", maxRange: "MAX range",
+    below: "below", above: "above", priceContextNote: "The 52-week range uses provider data when complete, otherwise verified one-year price history. Multi-year ranges are shown only when actual time coverage is sufficient.",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -215,6 +221,43 @@ function longestGrowthValue(
 ) {
   const match = values.find((item) => isNumber(item.value));
   return match ? match.label + " " + formatPercent(match.value ?? null, locale, unavailable) : insufficientHistory;
+}
+
+function PriceContextCard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const context = report.historical?.priceContext;
+  if (!context) return null;
+  const copy = copyFor(locale);
+  const extra = extraCopyFor(locale);
+  const currency = report.market?.currency ?? report.reportingCurrency;
+  const money = (value: number | null) => formatMoney(value, currency, locale, copy.unavailable, false);
+  const relation = (value: number | null, direction: "high" | "low") => {
+    if (!isNumber(value)) return copy.unavailable;
+    const magnitude = formatPercent(Math.abs(value), locale, copy.unavailable);
+    if (direction === "high") return value <= 0 ? magnitude + " " + extra.below : magnitude + " " + extra.above;
+    return value >= 0 ? magnitude + " " + extra.above : magnitude + " " + extra.below;
+  };
+  const range = (window: typeof context.oneYear) =>
+    window.sufficientHistory && isNumber(window.low) && isNumber(window.high)
+      ? money(window.low) + " – " + money(window.high)
+      : extra.insufficientHistory;
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-[#f4efe5]">{extra.priceContext}</h2>
+        {context.currentPriceDate ? <Badge>{context.currentPriceDate}</Badge> : null}
+      </div>
+      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{extra.priceContextNote}</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Stat label={extra.currentPrice} value={money(context.currentPrice)} />
+        <Stat label={extra.yearHigh} value={context.yearHigh === null ? copy.unavailable : money(context.yearHigh) + " · " + relation(context.distanceToYearHigh, "high")} />
+        <Stat label={extra.yearLow} value={context.yearLow === null ? copy.unavailable : money(context.yearLow) + " · " + relation(context.distanceFromYearLow, "low")} />
+        <Stat label={extra.threeYearRange} value={range(context.threeYear)} />
+        <Stat label={extra.fiveYearRange} value={range(context.fiveYear)} />
+        <Stat label={extra.tenYearRange} value={range(context.tenYear)} />
+        <Stat label={extra.maxRange} value={range(context.maximum)} />
+      </div>
+    </Card>
+  );
 }
 
 function HistoricalSnapshot({ report, locale }: { report: AnalysisReport; locale: Locale }) {
@@ -636,6 +679,7 @@ export function HistoricalResearchView({
   return (
     <div className="space-y-5">
       {dividendProfile ? <DividendSnapshot report={report} locale={locale} /> : null}
+      {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
       {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />
       <HistoricalDiscountQualityCard report={report} locale={locale} />

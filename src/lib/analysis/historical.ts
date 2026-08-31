@@ -1,6 +1,8 @@
 import type {
   FinancialPeriod,
   HistoricalFinancialPoint,
+  HistoricalPriceContext,
+  HistoricalPriceWindowStats,
   HistoricalResearchData,
   HistoricalTtmEpsPoint,
   MarketDividendEvent,
@@ -183,6 +185,99 @@ function growthForYears(
   return calculateGrowth(selector(latest), selector(prior));
 }
 
+function parsedPriceDate(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(value.includes("T") ? value : value + "T00:00:00Z");
+  return Number.isFinite(time) ? time : null;
+}
+
+function priceSpanYears(firstDate: string | null, lastDate: string | null): number {
+  const first = parsedPriceDate(firstDate);
+  const last = parsedPriceDate(lastDate);
+  if (first === null || last === null || last < first) return 0;
+  return (last - first) / (365.2425 * 86_400_000);
+}
+
+function historicalPriceWindow(
+  prices: MarketPricePoint[],
+  currentPrice: number | null,
+  endDate: string | null,
+  years: 1 | 3 | 5 | 10 | null,
+): HistoricalPriceWindowStats {
+  const endMs = parsedPriceDate(endDate) ?? parsedPriceDate(prices.at(-1)?.date);
+  const startMs = endMs !== null && years !== null
+    ? (() => {
+        const date = new Date(endMs);
+        date.setUTCFullYear(date.getUTCFullYear() - years);
+        return date.getTime();
+      })()
+    : null;
+  const selected = prices.filter((point) => {
+    const time = parsedPriceDate(point.date);
+    if (time === null || !isFiniteNumber(point.close) || point.close <= 0) return false;
+    if (endMs !== null && time > endMs) return false;
+    return startMs === null || time >= startMs;
+  });
+  const values = selected.map((point) => point.close);
+  const firstDate = selected.at(0)?.date ?? null;
+  const lastDate = selected.at(-1)?.date ?? null;
+  const spanYears = priceSpanYears(firstDate, lastDate);
+  const minimumObservations = years === null ? 2 : Math.max(3, years * 2);
+  const sufficientHistory = years === null
+    ? selected.length >= minimumObservations
+    : spanYears >= years - 0.1 && selected.length >= minimumObservations;
+  const low = values.length ? Math.min(...values) : null;
+  const high = values.length ? Math.max(...values) : null;
+  return {
+    requestedYears: years,
+    firstDate,
+    lastDate,
+    spanYears,
+    sufficientHistory,
+    observationCount: selected.length,
+    low,
+    high,
+    currentVsLow: currentPrice !== null && low !== null ? currentPrice / low - 1 : null,
+    currentVsHigh: currentPrice !== null && high !== null ? currentPrice / high - 1 : null,
+  };
+}
+
+function buildHistoricalPriceContext(
+  prices: MarketPricePoint[],
+  options: HistoricalResearchOptions,
+): HistoricalPriceContext {
+  const latestPrice = prices.at(-1) ?? null;
+  const currentPrice = positive(options.currentPrice) ?? positive(latestPrice?.close);
+  const currentPriceDate = parsedPriceDate(options.currentPriceDate) !== null
+    ? options.currentPriceDate ?? null
+    : latestPrice?.date ?? null;
+  const oneYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 1);
+  const threeYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 3);
+  const fiveYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 5);
+  const tenYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 10);
+  const maximum = historicalPriceWindow(prices, currentPrice, currentPriceDate, null);
+  const providerHigh = positive(options.yearHigh);
+  const providerLow = positive(options.yearLow);
+  const useProviderRange = providerHigh !== null && providerLow !== null && providerHigh >= providerLow;
+  const useHistoryRange = !useProviderRange && oneYear.sufficientHistory && oneYear.high !== null && oneYear.low !== null;
+  const yearHigh = useProviderRange ? providerHigh : useHistoryRange ? oneYear.high : null;
+  const yearLow = useProviderRange ? providerLow : useHistoryRange ? oneYear.low : null;
+  return {
+    currentPrice,
+    currentPriceDate,
+    yearHigh,
+    yearLow,
+    distanceToYearHigh: currentPrice !== null && yearHigh !== null ? currentPrice / yearHigh - 1 : null,
+    distanceFromYearLow: currentPrice !== null && yearLow !== null ? currentPrice / yearLow - 1 : null,
+    yearRangeSource: useProviderRange ? "provider" : useHistoryRange ? "price_history" : null,
+    oneYear,
+    threeYear,
+    fiveYear,
+    tenYear,
+    maximum,
+  };
+}
+
 function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   let increased = 0;
   let unchanged = 0;
@@ -203,6 +298,10 @@ export type HistoricalResearchOptions = {
   ttmEpsHistory?: HistoricalTtmEpsPoint[];
   dividendEvents?: MarketDividendEvent[];
   currentPriceEarnings?: number | null;
+  currentPrice?: number | null;
+  currentPriceDate?: string | null;
+  yearHigh?: number | null;
+  yearLow?: number | null;
 };
 
 export function buildHistoricalResearchData(
@@ -222,6 +321,7 @@ export function buildHistoricalResearchData(
     return point ? [point] : [];
   });
   const dividendStats = dividendStreakStats(points);
+  const priceContext = buildHistoricalPriceContext(sortedPrices, options);
   const valuation = buildHistoricalValuationSeries({
     prices: sortedPrices,
     ttmEps: options.ttmEpsHistory ?? [],
@@ -237,6 +337,7 @@ export function buildHistoricalResearchData(
   return {
     financials: points.slice(-10),
     price: sortedPrices,
+    priceContext,
     valuation,
     valuationContext,
     valuationMethodVersion: HISTORICAL_VALUATION_METHOD_VERSION,
