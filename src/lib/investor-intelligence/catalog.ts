@@ -39,7 +39,6 @@ export async function upsertCompanyMetricCatalog(input: {
     industry: null,
     market_cap: marketCap,
     archetype: input.report.engine?.analysisArchetype ?? input.report.analysisArchetype ?? null,
-    analysis_id: input.report.id || null,
     normalized: snapshot,
     updated_at: input.report.generatedAt,
   }, { onConflict: "ticker" });
