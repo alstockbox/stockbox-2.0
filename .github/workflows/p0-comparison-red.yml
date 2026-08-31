@@ -1,4 +1,4 @@
-name: P0 comparison red
+name: P0 comparison patch
 
 on:
   push:
@@ -6,22 +6,47 @@ on:
       - stockbox/p0-release-hardening-20260831
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  red-test:
+  patch-verify-commit:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout release branch
         uses: actions/checkout@v4
         with:
           ref: stockbox/p0-release-hardening-20260831
+          fetch-depth: 0
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Apply guarded comparison P0 patch
+        run: node scripts/release/apply-comparison-p0.mjs
       - name: Install dependencies
         run: npm ci
-      - name: Run comparison P0 contract tests
+      - name: Targeted comparison tests
         run: npx vitest run tests/analysis/comparison.test.ts tests/analysis/comparison-page.test.ts
+      - name: Unit and regression tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Remove temporary patch script before static checks
+        run: rm -f scripts/release/apply-comparison-p0.mjs
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Commit verified comparison implementation
+        run: |
+          git config user.name "StockBox Release Bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          rm -f .github/workflows/p0-comparison-red.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No verified changes to commit"
+            exit 1
+          fi
+          git commit -m "Harden comparison P0"
+          git push origin HEAD:stockbox/p0-release-hardening-20260831
