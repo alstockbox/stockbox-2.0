@@ -1,6 +1,6 @@
-import type { CompanyMetricSnapshot } from "./types";
+import type { CompanyMetricSnapshot, PublicCompanyMetricSnapshot } from "./types";
 
-export function readSnapshotMetric(snapshot: CompanyMetricSnapshot, metricKey: string): number | null {
+export function readSnapshotMetric(snapshot: CompanyMetricSnapshot | PublicCompanyMetricSnapshot, metricKey: string): number | null {
   let current: unknown = snapshot;
   for (const part of metricKey.split(".").filter(Boolean)) {
     if (current === null || typeof current !== "object") return null;
