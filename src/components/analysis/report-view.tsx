@@ -426,9 +426,9 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
   const profilePresentation = profilePresentationFor(report.investmentProfile, locale);
   const profileDimensions = orderScoreDimensions(report.score.dimensions, report.investmentProfile);
   const extended = report.analysisType === "deep" || report.analysisType === "research";
-  const showExplainability = mode === "pro" || extended;
-  const showNumbers = mode === "pro" || report.analysisType !== "summary";
-  const showValuation = mode === "pro" || extended;
+  const showExplainability = mode === "pro";
+  const showNumbers = mode === "pro";
+  const showValuation = mode === "pro";
   const engine = report.engine;
   const growthBasis = engine?.metrics.growth.revenueGrowthBasis;
   const displayedMetricLabels = {
@@ -592,6 +592,8 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
         </Card>
       </div>
 
+      {mode === "simple" && report.historical ? <HistoricalResearchView report={report} mode={mode} locale={locale} /> : null}
+
       <WhatChanged report={report} previousReport={previousReport} copy={copy} locale={locale} />
 
       {showExplainability ? <Card>
@@ -682,7 +684,7 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
         </div>
       </Card> : null}
 
-      {report.historical ? <HistoricalResearchView report={report} mode={mode} locale={locale} /> : null}
+      {mode === "pro" && report.historical ? <HistoricalResearchView report={report} mode={mode} locale={locale} /> : null}
 
       {report.scenarios.length ? <Card>
         <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.bullBaseBear}</h2>

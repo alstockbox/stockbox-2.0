@@ -758,12 +758,12 @@ export function HistoricalResearchView({
   const showDividendSnapshot = dividendProfile || (mode === "simple" && (dividendStatus === "available" || dividendStatus === "partial"));
   return (
     <div className="space-y-5">
-      {showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}
-      {mode === "simple" ? <HistoricalCoverageCard report={report} locale={locale} /> : null}
-      {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
       {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
-      <HistoricalOverview report={report} locale={locale} />
+      {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
+      {showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}
       <HistoricalDiscountQualityCard report={report} locale={locale} />
+      <HistoricalOverview report={report} locale={locale} />
+      {mode === "simple" ? <HistoricalCoverageCard report={report} locale={locale} /> : null}
       {mode === "pro" ? (
         <>
           <GrowthDashboard report={report} locale={locale} />
