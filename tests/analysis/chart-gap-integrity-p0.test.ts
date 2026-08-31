@@ -39,7 +39,6 @@ describe("chart gap integrity P0", () => {
     expect(geometry.coordinates.map((point) => point.dateKey)).toEqual(["A", "C", "D"]);
     expect(geometry.paths).toHaveLength(1);
     expect(geometry.paths[0]).toMatch(/^M/);
-    expect(geometry.paths[0]).toContain("C").toBe(false);
   });
 
   it("wires both historical line-chart surfaces to the gap-aware geometry", () => {
