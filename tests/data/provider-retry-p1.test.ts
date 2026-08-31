@@ -106,6 +106,6 @@ describe("provider retry resilience P1", () => {
     expect(providerSource).toContain("fetchCompanyFundamentalsResult(company)");
     expect(providerSource).toContain("fetchYahooFundamentalsResult(company)");
     expect(providerSource).toContain("provider.fetchMarketData(company)");
-    expect(providerSource).toContain("candidate.provider.fetchMarketData(company)");
+    expect(providerSource).toContain("candidate.provider!.fetchMarketData(company)");
   });
 });
