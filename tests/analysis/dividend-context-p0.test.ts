@@ -94,6 +94,18 @@ describe("dividend context P0", () => {
     expect(historical.dividendContext?.latestPaymentCurrency).toBe("USD");
   });
 
+  it("uses DPS divided by diluted EPS for EPS payout", () => {
+    const historical = buildHistoricalResearchData(
+      [period(2025, 0), period(2026, 1, { netIncome: 1_000, epsDiluted: 4 })],
+      prices(),
+      { dividendEvents: quarterlyEvents, currentPrice: 20, currentPriceDate: "2026-08-31" },
+    );
+    const latest = historical.financials.at(-1);
+
+    expect(latest?.dividendPerShare).toBeCloseTo(1.05, 8);
+    expect(latest?.payoutRatio).toBeCloseTo(1.05 / 4, 8);
+  });
+
   it("derives a consecutive increase streak and covered payout status without treating missing endpoints as zero", () => {
     const historical = withDividendContext(buildHistoricalResearchData(
       Array.from({ length: 6 }, (_, index) => period(2021 + index, index)),
