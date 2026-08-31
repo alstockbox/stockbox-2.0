@@ -46,6 +46,11 @@ jobs:
         run: npm test
       - name: Typecheck
         run: npm run typecheck
+      - name: Remove temporary patch scripts before static checks
+        run: |
+          rm -f scripts/release/apply-low-pe-p0.mjs
+          rm -f scripts/release/apply-low-pe-p0-v2.mjs
+          rm -f scripts/release/apply-low-pe-export-p0.mjs
       - name: Lint
         run: npm run lint
       - name: Production build
@@ -54,9 +59,6 @@ jobs:
         run: |
           git config user.name "StockBox Release Bot"
           git config user.email "release-bot@users.noreply.github.com"
-          rm -f scripts/release/apply-low-pe-p0.mjs
-          rm -f scripts/release/apply-low-pe-p0-v2.mjs
-          rm -f scripts/release/apply-low-pe-export-p0.mjs
           rm -f .github/workflows/p0-low-pe-red.yml
           git add -A
           if git diff --cached --quiet; then
