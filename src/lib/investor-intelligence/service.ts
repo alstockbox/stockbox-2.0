@@ -1,5 +1,6 @@
-import type { AnalysisReport } from "@/lib/analysis/types";
+import type { AnalysisReport, CompanySearchResult } from "@/lib/analysis/types";
 import { buildAlertEventKey } from "./alerts";
+import { upsertCompanyMetricCatalog } from "./catalog";
 import { evaluateInvestorIntelligence } from "./pipeline";
 import {
   getActiveThesis,
@@ -31,6 +32,7 @@ export type InvestorIntelligenceProcessingResult = {
 export async function processPersistedAnalysisIntelligence(input: {
   userId: string;
   report: AnalysisReport;
+  company?: CompanySearchResult | null;
 }): Promise<InvestorIntelligenceProcessingResult> {
   const errors: string[] = [];
   const snapshot = buildCompanyMetricSnapshot(input.report);
@@ -48,6 +50,13 @@ export async function processPersistedAnalysisIntelligence(input: {
   if (alertsResult.status === "rejected") errors.push(errorClass(alertsResult.reason));
 
   const snapshotId = await persistCompanySnapshot(input.userId, snapshot);
+  try {
+    const catalog = await upsertCompanyMetricCatalog({ report: input.report, company: input.company });
+    if (!catalog.ok) errors.push(`catalog:${catalog.error}`);
+  } catch (error) {
+    errors.push(errorClass(error));
+  }
+
   let previousThesisResults;
   if (thesis) {
     try {
