@@ -1,6 +1,6 @@
 import type { AnalysisArchetype } from "@/lib/analysis/types";
 import { readSnapshotMetric } from "./metrics";
-import type { CompanyMetricSnapshot } from "./types";
+import type { PublicCompanyMetricSnapshot } from "./types";
 
 export type MetricRange = { min?: number; max?: number };
 export type ScreenerDefinition = {
@@ -22,7 +22,7 @@ export type ScreenerCompany = {
   industry: string | null;
   marketCap: number | null;
   archetype: AnalysisArchetype | null;
-  snapshot: CompanyMetricSnapshot;
+  snapshot: PublicCompanyMetricSnapshot;
 };
 
 function includesNormalized(value: string | null, allowed?: string[]) {
