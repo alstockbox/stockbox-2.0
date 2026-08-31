@@ -3,6 +3,8 @@ import type { AnalysisArchetype, ScoreDimensionKey } from "@/lib/analysis/types"
 export type ThesisStatus = "STRONG" | "INTACT" | "WATCH" | "WEAKENING" | "BROKEN" | "ARCHIVED";
 export type ThesisRuleOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "between";
 export type ThesisRuleResultStatus = "passed" | "failed" | "unavailable";
+export type Materiality = "NONE" | "MINOR" | "IMPORTANT" | "THESIS_CHANGING";
+export type MaterialChangeCategory = "price" | "valuation" | "business" | "stockbox" | "estimates" | "dividend" | "risk";
 
 export type CompanyMetricSnapshot = {
   ticker: string;
@@ -62,6 +64,17 @@ export type CompanyMetricSnapshot = {
   dimensions: Partial<Record<ScoreDimensionKey, number | null>>;
   riskFlags: Array<{ code?: string; label: string; severity: string }>;
   sourceMeta: Record<string, unknown>;
+};
+
+export type MaterialChange = {
+  metricKey: string;
+  category: MaterialChangeCategory;
+  previousValue: number | null;
+  currentValue: number | null;
+  absoluteChange: number | null;
+  relativeChange: number | null;
+  materiality: Materiality;
+  reasoning: string;
 };
 
 export type ThesisRuleDefinition = {
