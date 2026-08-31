@@ -17,6 +17,7 @@ import { ValuationScenarioLab } from "./valuation-scenario-lab";
 import { ResearchQuestionPanel } from "./research-question-panel";
 import { buildPeerBenchmarkComparison, type PeerBenchmarkRow } from "@/lib/analysis/peer-benchmark";
 import { buildAnalystExpectationsSummary } from "@/lib/analysis/analyst-expectations";
+import { orderScoreDimensions, profilePresentationFor } from "@/lib/analysis/profile-presentation";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
   return {
@@ -422,6 +423,8 @@ function ScoreDriverList({
 
 export function ReportView({ report, mode = "pro", locale = "en", previousReport = null }: { report: AnalysisReport; mode?: UiMode; locale?: Locale; previousReport?: AnalysisReport | null }) {
   const copy = getP0Copy(locale).report;
+  const profilePresentation = profilePresentationFor(report.investmentProfile, locale);
+  const profileDimensions = orderScoreDimensions(report.score.dimensions, report.investmentProfile);
   const extended = report.analysisType === "deep" || report.analysisType === "research";
   const showExplainability = mode === "pro" || extended;
   const showNumbers = mode === "pro" || report.analysisType !== "summary";
@@ -504,6 +507,10 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
             </div>
           ) : null}
         </div>
+        <div className="mt-4 rounded-md border border-[#b99b5f]/20 bg-[#b99b5f]/5 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e1cb95]">{locale === "sv" ? "Investeringslins" : "Investment lens"} · {report.investmentProfile.replaceAll("_", " ")}</p>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-[#c9d2df]">{profilePresentation.description}</p>
+        </div>
         <div className="mt-6 border-t border-white/10 pt-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -537,7 +544,7 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
           <div className="mt-5">
             <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.scoreStack}</h3>
             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {report.score.dimensions.map((dimension) => (
+              {profileDimensions.map((dimension) => (
                 <div key={dimension.key} className="rounded-md border border-white/10 bg-white/5 p-3">
                   <div className="flex items-center justify-between gap-3 text-xs text-[#9aa7b8]">
                     <span>{dimension.label}</span>
@@ -609,9 +616,9 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
       {showExplainability ? <Card>
         <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.explainability}</h2>
         <div className="mt-4 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-          <ScoreChart dimensions={report.score.dimensions} />
+          <ScoreChart dimensions={profileDimensions} />
           <div className="space-y-3">
-            {report.score.dimensions.map((dimension) => (
+            {profileDimensions.map((dimension) => (
               <div key={dimension.key} className="rounded-md border border-white/10 bg-white/5 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-[#f4efe5]">{dimension.label}</p>

@@ -3,7 +3,7 @@ import { normalizeWeights } from "./math";
 
 export const MODEL_VERSION = "stockbox-analysis-engine-v2.7.0";
 export const REPORT_SCHEMA_VERSION = "stockbox-analysis-report-v5";
-export const SCORE_POLICY_VERSION = "stockbox-score-policy-v8";
+export const SCORE_POLICY_VERSION = "stockbox-score-policy-v9";
 export const STATIC_BENCHMARK_VERSION = "stockbox-static-benchmarks-v1";
 export const DCF_ASSUMPTION_POLICY_VERSION = "stockbox-dcf-assumptions-v4";
 
@@ -256,6 +256,17 @@ export const profileWeights: Record<InvestmentProfile, Record<ScoreDimensionKey,
     quality: 0.12,
     momentum: 0.01,
     risk: 0.05,
+  }),
+  defensive: normalizeWeights({
+    growth: 0.03,
+    profitability: 0.08,
+    financialHealth: 0.26,
+    valuation: 0.05,
+    cashFlow: 0.18,
+    earningsQuality: 0.14,
+    quality: 0.13,
+    momentum: 0.01,
+    risk: 0.12,
   }),
   long_term: normalizeWeights({
     growth: 0.18,

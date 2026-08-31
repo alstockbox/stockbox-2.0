@@ -24,6 +24,7 @@ export type InvestmentProfile =
   | "value"
   | "quality"
   | "dividend"
+  | "defensive"
   | "balanced";
 
 export type Recommendation =

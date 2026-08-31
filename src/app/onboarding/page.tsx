@@ -37,7 +37,7 @@ export default async function OnboardingPage() {
           <Card>
             <label className="block text-lg font-semibold text-[#f4efe5]" htmlFor="investmentProfile">{copy.investmentProfile}</label>
             <select id="investmentProfile" name="investmentProfile" defaultValue="balanced" className="mt-4 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]">
-              <option value="balanced">{analysisCopy.balanced}</option><option value="long_term">{analysisCopy.longTerm}</option><option value="short_term">{analysisCopy.shortTerm}</option><option value="growth">{analysisCopy.growth}</option><option value="value">{analysisCopy.value}</option><option value="quality">{analysisCopy.quality}</option><option value="dividend">{analysisCopy.dividend}</option>
+              <option value="balanced">{analysisCopy.balanced}</option><option value="long_term">{analysisCopy.longTerm}</option><option value="short_term">{analysisCopy.shortTerm}</option><option value="growth">{analysisCopy.growth}</option><option value="value">{analysisCopy.value}</option><option value="quality">{analysisCopy.quality}</option><option value="dividend">{analysisCopy.dividend}</option><option value="defensive">{analysisCopy.defensive}</option>
             </select>
           </Card>
           <Button>{copy.saveProfile} <ArrowRight className="h-4 w-4" aria-hidden="true" /></Button>

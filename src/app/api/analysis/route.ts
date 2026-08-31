@@ -44,7 +44,7 @@ const requestSchema = z.object({
   }),
   analysisType: z.enum(["summary", "numbers", "deep", "research"]).default("summary"),
   investmentProfile: z
-    .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"])
+    .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "defensive", "balanced"])
     .default("balanced"),
   idempotencyKey: z.string().uuid().optional()
 });

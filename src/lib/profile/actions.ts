@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/auth/session";
 import { upsertProfile } from "@/lib/db/repositories";
 
 const experienceSchema = z.enum(["beginner", "intermediate", "advanced"]);
-const investmentProfileSchema = z.enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"]);
+const investmentProfileSchema = z.enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "defensive", "balanced"]);
 const uiModeSchema = z.enum(["simple", "pro"]);
 
 const onboardingSchema = z.object({

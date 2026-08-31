@@ -564,6 +564,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
               <option value="value">{analyzeCopy.value}</option>
               <option value="quality">{analyzeCopy.quality}</option>
               <option value="dividend">{analyzeCopy.dividend}</option>
+              <option value="defensive">{analyzeCopy.defensive}</option>
             </select>
           </label>
         </div>
