@@ -1,11 +1,11 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AnalysisArchetype } from "@/lib/analysis/types";
-import type { CompanyMetricSnapshot } from "./types";
+import type { PublicCompanyMetricSnapshot } from "./types";
 import { screenCompanies, type ScreenerCompany, type ScreenerDefinition } from "./screener";
 
 function toCompany(row: Record<string, unknown>): ScreenerCompany | null {
-  const normalized = row.normalized as CompanyMetricSnapshot | null;
+  const normalized = row.normalized as PublicCompanyMetricSnapshot | null;
   if (!normalized || typeof row.ticker !== "string") return null;
   return {
     ticker: row.ticker,
