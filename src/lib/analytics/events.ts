@@ -14,6 +14,9 @@ export type AnalyticsEvent =
   | "analysis_started"
   | "analysis_completed"
   | "analysis_failed"
+  | "provider_degraded"
+  | "historical_coverage_partial"
+  | "historical_valuation_unavailable"
   | "report_viewed"
   | "explain_clicked"
   | "company_followed"
@@ -48,6 +51,19 @@ const allowedProperties: Record<AnalyticsEvent, readonly string[]> = {
   analysis_started: ["ticker", "analysisType"],
   analysis_completed: ["ticker", "score", "researchView", "analysisType"],
   analysis_failed: ["ticker", "analysisType", "errorCode"],
+  provider_degraded: ["provider", "capability", "status"],
+  historical_coverage_partial: [
+    "ticker",
+    "financialStatus",
+    "financialYears",
+    "priceStatus",
+    "priceYears",
+    "valuationStatus",
+    "valuationYears",
+    "dividendStatus",
+    "dividendYears",
+  ],
+  historical_valuation_unavailable: ["ticker", "valuationYears", "valuationObservations"],
   report_viewed: ["ticker"],
   explain_clicked: ["ticker", "dimension"],
   company_followed: ["ticker"],
