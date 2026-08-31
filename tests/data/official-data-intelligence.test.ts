@@ -23,7 +23,7 @@ describe("official data intelligence adapters", () => {
     expect(parseRiksbankLatestObservation({ observations: [] })).toBeNull();
   });
 
-  it("parses FI insider CSV and classifies acquisitions and disposals", () => {
+  it("parses FI insider CSV and classifies acquisitions and disposals newest first", () => {
     const csv = [
       "Publiceringsdatum;Emittent;Person i ledande ställning;Befattning;Närstående;Karaktär;Instrumentnamn;Instrumenttyp;ISIN;Transaktionsdatum;Volym;Volymsenhet;Pris;Valuta;Status;Detaljer",
       "2026-08-20;Exempel AB;Anna Andersson;VD;Nej;Förvärv;Aktie;Aktie;SE0000000001;2026-08-19;1000;Antal;42,50;SEK;Aktuell;",
@@ -31,8 +31,8 @@ describe("official data intelligence adapters", () => {
     ].join("\n");
     const parsed = parseFiInsiderCsv(csv, "Exempel AB");
     expect(parsed).toHaveLength(2);
-    expect(parsed[0]).toEqual(expect.objectContaining({ transactionType: "open_market_buy", insiderRole: "VD", shares: 1000, value: 42500, date: "2026-08-19" }));
-    expect(parsed[1]).toEqual(expect.objectContaining({ transactionType: "open_market_sell", insiderRole: "Styrelseledamot", shares: 500, value: 22500, date: "2026-08-20" }));
+    expect(parsed[0]).toEqual(expect.objectContaining({ transactionType: "open_market_sell", insiderRole: "Styrelseledamot", shares: 500, value: 22500, date: "2026-08-20" }));
+    expect(parsed[1]).toEqual(expect.objectContaining({ transactionType: "open_market_buy", insiderRole: "VD", shares: 1000, value: 42500, date: "2026-08-19" }));
   });
 
   it("matches FI short-interest rows by LEI rather than a fuzzy company name", () => {
