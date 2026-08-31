@@ -46,12 +46,12 @@ describe("research utility launch improvements", () => {
     expect(chart).toContain('fontSize="15"');
   });
 
-  it("supports comparing two or three saved reports without changing the underlying reports", () => {
+  it("supports comparing two to five saved reports without changing the underlying reports", () => {
     expect(existsSync(join(root, "src/app/compare/page.tsx"))).toBe(true);
     const compare = read("src/app/compare/page.tsx");
     expect(compare).toContain("getUserAnalysisHistory");
     expect(compare).toContain("getAnalysis");
-    expect(compare).toContain("slice(0, 3)");
+    expect(compare).toContain("slice(0, 5)");
     expect(compare).toContain("recommendation");
     expect(compare).toContain("score.dimensions");
     expect(compare).toContain("generatedAt");
