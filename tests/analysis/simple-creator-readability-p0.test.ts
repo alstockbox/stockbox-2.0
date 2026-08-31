@@ -48,7 +48,7 @@ describe("Simple Mode creator readability P0", () => {
 
   it("keeps creator-critical Simple copy readable instead of exposing engineering-first labels at the top", () => {
     expect(reportView).toContain("Investment lens");
-    expect(reportView).toContain("Company snapshot");
+    expect(reportView).toContain("copy.companySnapshot");
     expect(historicalView).toContain("Historical snapshot");
     expect(historicalView).toContain("Price context");
     expect(historicalView).toContain("Historical Discount Quality");
