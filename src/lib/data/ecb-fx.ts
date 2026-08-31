@@ -200,8 +200,8 @@ export async function resolveComparisonFxContexts(
       sourceCurrency: source,
       targetCurrency: target,
       rateDate: observation.date,
-      sourceRatePerEuro: sourceRate,
-      targetRatePerEuro: targetRate,
+      sourceRatePerEuro: sourceRate ?? null,
+      targetRatePerEuro: targetRate ?? null,
       provider: ECB_FX_PROVIDER,
       methodologyVersion: ECB_FX_METHOD,
     });
