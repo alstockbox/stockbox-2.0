@@ -21,6 +21,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Refresh guarded Simple dividend visibility anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply-historical-coverage-p0.py")
+          text = path.read_text()
+          old = '{dividendProfile ? <DividendSnapshot report={report} locale={locale} /> : null}'
+          new = '{showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}'
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f"expected 2 guarded dividend anchors, found {count}")
+          path.write_text(text.replace(old, new))
+          PY
       - name: Apply guarded historical coverage P0 patch
         run: python3 scripts/apply-historical-coverage-p0.py
       - name: Install dependencies
