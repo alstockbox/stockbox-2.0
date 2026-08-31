@@ -6,12 +6,12 @@ import type { HistoricalResearchData, MarketPricePoint } from "../../src/lib/ana
 
 type CurrencyPricePoint = MarketPricePoint & { currency?: string | null };
 
-function historicalWithPrice(currency?: string | null): HistoricalResearchData {
+function historicalWithPrice(currency?: string | null, current = 417.2, prior = 152.3): HistoricalResearchData {
   return {
     financials: [],
     price: [
-      { date: "2021-08-31", close: 152.3, currency } as CurrencyPricePoint,
-      { date: "2026-08-31", close: 417.2, currency } as CurrencyPricePoint,
+      { date: "2021-08-31", close: prior, currency } as CurrencyPricePoint,
+      { date: "2026-08-31", close: current, currency } as CurrencyPricePoint,
     ],
     revenueCagr3y: null,
     revenueCagr5y: null,
@@ -50,6 +50,16 @@ describe("historical chart price currency P0", () => {
 
     expect(markup).toContain(formatted(417.2, currency, numberLocale));
     if (currency !== "USD") expect(markup).not.toContain(formatted(417.2, "USD", numberLocale));
+  });
+
+  it("converts London pence quote units to economic GBP before formatting", () => {
+    const markup = renderToStaticMarkup(createElement(HistoricalChartExplorer, {
+      historical: historicalWithPrice("GBp", 2500, 1800),
+      locale: "en",
+    }));
+
+    expect(markup).toContain(formatted(25, "GBP", "en-US"));
+    expect(markup).not.toContain(formatted(2500, "GBP", "en-US"));
   });
 
   it("never invents USD when historical price currency is unknown", () => {
