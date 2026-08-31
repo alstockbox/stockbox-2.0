@@ -2,12 +2,17 @@ import Link from "next/link";
 import {
   BarChart3,
   Bell,
+  BellRing,
+  BookOpenCheck,
+  Bot,
   BriefcaseBusiness,
   Gauge,
   History,
   LayoutDashboard,
+  Search,
   Settings,
   ShieldCheck,
+  Target,
   UsersRound,
 } from "lucide-react";
 import { StockBoxLogo } from "@/components/brand/stockbox-logo";
@@ -36,6 +41,12 @@ const appNavItems = [
   { href: "/portfolio", labelKey: "portfolio", icon: BriefcaseBusiness, enabled: isFeatureEnabled("portfolio") },
   { href: "/watchlist", labelKey: "watchlist", icon: Bell, enabled: true },
 ] as const;
+
+const investorNavItems = [
+  { href: "/screener", en: "Screener", sv: "Screener", icon: Search },
+  { href: "/thesis", en: "Thesis", sv: "Tes", icon: Target },
+] as const;
+
 function Brand() {
   return (
     <Link href="/" className="group flex shrink-0 items-center gap-3 pr-2" aria-label="StockBox home">
@@ -50,8 +61,13 @@ export async function AppNav() {
   const copy = getP0Copy(locale).nav;
   const initial = user?.email?.trim().charAt(0).toUpperCase() || "S";
   const accountLabels = locale === "sv"
-    ? { settings: "Inställningar", profile: "Profil", billing: "Betalning", security: "Säkerhet", feedback: "Ge feedback", contact: "Kontakt", menu: "Meny" }
-    : { settings: "Settings", profile: "Profile", billing: "Billing", security: "Security", feedback: "Give feedback", contact: "Contact", menu: "Menu" };
+    ? { settings: "Inställningar", profile: "Profil", billing: "Betalning", security: "Säkerhet", feedback: "Ge feedback", contact: "Kontakt", menu: "Meny", alerts: "Investeringsalerts", briefs: "Weekly Brief", copilot: "StockBox Copilot", portfolioIntelligence: "Portfolio Intelligence" }
+    : { settings: "Settings", profile: "Profile", billing: "Billing", security: "Security", feedback: "Give feedback", contact: "Contact", menu: "Menu", alerts: "Investment alerts", briefs: "Weekly Brief", copilot: "StockBox Copilot", portfolioIntelligence: "Portfolio Intelligence" };
+
+  const mobileWorkspaceItems = [
+    ...appNavItems.filter((item) => item.enabled).map((item) => ({ href: item.href, label: copy[item.labelKey] })),
+    ...investorNavItems.map((item) => ({ href: item.href, label: locale === "sv" ? item.sv : item.en })),
+  ];
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#07111f]/94 backdrop-blur">
@@ -67,22 +83,28 @@ export async function AppNav() {
             ))}
           </nav>
         ) : (
-          <nav className="ml-4 hidden flex-1 items-center gap-0.5 xl:flex" aria-label="Workspace">
+          <nav className="ml-4 hidden flex-1 items-center gap-0.5 2xl:flex" aria-label="Workspace">
             {appNavItems.filter((item) => item.enabled).map((item) => (
               <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
                 <item.icon className="h-4 w-4" aria-hidden="true" />
                 {copy[item.labelKey]}
               </Link>
             ))}
+            {investorNavItems.map((item) => (
+              <Link key={item.href} href={item.href} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                <item.icon className="h-4 w-4" aria-hidden="true" />
+                {locale === "sv" ? item.sv : item.en}
+              </Link>
+            ))}
           </nav>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <details className={user ? "relative xl:hidden" : "relative lg:hidden"}>
+          <details className={user ? "relative 2xl:hidden" : "relative lg:hidden"}>
             <summary className="cursor-pointer list-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-[#f4efe5]">
               {accountLabels.menu}
             </summary>
             <div className="absolute right-0 mt-2 w-72 rounded-xl border border-white/10 bg-[#0a1626] p-2 shadow-2xl">
-              {(user ? appNavItems.filter((item) => item.enabled).map((item) => ({ href: item.href, label: copy[item.labelKey] })) : marketingNavItems.map((item) => ({ href: item.href, label: locale === "sv" ? item.sv : item.en }))).map((item) => (
+              {(user ? mobileWorkspaceItems : marketingNavItems.map((item) => ({ href: item.href, label: locale === "sv" ? item.sv : item.en }))).map((item) => (
                 <Link key={item.href} href={item.href} className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">{item.label}</Link>
               ))}
               <div className="my-2 border-t border-white/10" />
@@ -97,6 +119,11 @@ export async function AppNav() {
                 <span className="hidden max-w-36 truncate lg:inline">{user.email ?? "Account"}</span>
               </summary>
               <div className="absolute right-0 mt-2 w-64 rounded-xl border border-white/10 bg-[#0a1626] p-2 shadow-2xl">
+                <Link href="/copilot" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#e1cb95] hover:bg-white/8"><Bot className="h-4 w-4" />{accountLabels.copilot}</Link>
+                <Link href="/alerts" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8"><BellRing className="h-4 w-4" />{accountLabels.alerts}</Link>
+                <Link href="/briefs" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8"><BookOpenCheck className="h-4 w-4" />{accountLabels.briefs}</Link>
+                <Link href="/portfolio/intelligence" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8"><BriefcaseBusiness className="h-4 w-4" />{accountLabels.portfolioIntelligence}</Link>
+                <div className="my-2 border-t border-white/10" />
                 <Link href="/settings" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-white/8"><Settings className="h-4 w-4" />{accountLabels.settings}</Link>
                 <Link href="/settings/profile" className="block rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8">{accountLabels.profile}</Link>
                 <Link href="/settings/billing" className="block rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8">{accountLabels.billing}</Link>
