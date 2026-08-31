@@ -1,6 +1,5 @@
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import type { Awaited as Never } from "node:util";
 import { getEarningsEstimateIntelligence } from "@/lib/investor-intelligence/earnings-estimates-service";
 
 export type EarningsEstimateData = NonNullable<Awaited<ReturnType<typeof getEarningsEstimateIntelligence>>>;
