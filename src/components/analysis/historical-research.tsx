@@ -141,6 +141,9 @@ function extraCopyFor(locale: Locale) {
     priceContext: "Priskontext", currentPrice: "Aktuell kurs", yearHigh: "52V högsta", yearLow: "52V lägsta",
     threeYearRange: "3 år intervall", fiveYearRange: "5 år intervall", tenYearRange: "10 år intervall", maxRange: "MAX intervall",
     below: "under", above: "över", priceContextNote: "52-veckorsintervallet använder providerdata när den är komplett, annars verifierad 1-årshistorik. Flerårsintervall visas bara när faktisk tidsbredd är tillräcklig.",
+    paymentFrequency: "Betalningsfrekvens", latestPayment: "Senaste betalning", increaseStreak: "Höjningssvit", dividendSafety: "Utdelningssäkerhet", coverage: "Täckning",
+    monthly: "Månadsvis", quarterly: "Kvartalsvis", semiannual: "Halvårsvis", annual: "Årlig", irregular: "Oregelbunden", none: "Ingen", unknown: "Okänd",
+    covered: "Täckt", stretched: "Ansträngd", notCovered: "Ej täckt", insufficient: "Otillräckligt underlag", events: "event",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -162,6 +165,9 @@ function extraCopyFor(locale: Locale) {
     priceContext: "Price context", currentPrice: "Current price", yearHigh: "52W high", yearLow: "52W low",
     threeYearRange: "3Y range", fiveYearRange: "5Y range", tenYearRange: "10Y range", maxRange: "MAX range",
     below: "below", above: "above", priceContextNote: "The 52-week range uses provider data when complete, otherwise verified one-year price history. Multi-year ranges are shown only when actual time coverage is sufficient.",
+    paymentFrequency: "Payment frequency", latestPayment: "Latest payment", increaseStreak: "Increase streak", dividendSafety: "Dividend safety", coverage: "Coverage",
+    monthly: "Monthly", quarterly: "Quarterly", semiannual: "Semiannual", annual: "Annual", irregular: "Irregular", none: "None", unknown: "Unknown",
+    covered: "Covered", stretched: "Stretched", notCovered: "Not covered", insufficient: "Insufficient data", events: "events",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -432,6 +438,18 @@ function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: 
   const extra = extraCopyFor(locale);
   const latest = latestFinancial(historical.financials);
   const valuation = historical.valuationContext;
+  const context = historical.dividendContext;
+  const frequencyLabel = context?.paymentFrequency ? extra[context.paymentFrequency] : copy.unavailable;
+  const safetyLabel = context?.safety === "covered" ? extra.covered
+    : context?.safety === "stretched" ? extra.stretched
+      : context?.safety === "not_covered" ? extra.notCovered
+        : extra.insufficient;
+  const latestPayment = context?.latestPaymentDate && isNumber(context.latestPaymentAmount)
+    ? formatMoney(context.latestPaymentAmount, context.latestPaymentCurrency ?? latest?.currency ?? report.reportingCurrency, locale, copy.unavailable, false) + " · " + context.latestPaymentDate
+    : copy.unavailable;
+  const coverage = context
+    ? context.annualHistoryYears + " " + extra.years + " · " + formatNumber(context.eventCoverageYears, locale, copy.unavailable, 1) + " " + extra.years + " " + extra.events
+    : copy.unavailable;
   return (
     <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -439,8 +457,13 @@ function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: 
         <Badge>{historical.financials.length} {extra.years}</Badge>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label={extra.latestDps} value={formatMoney(valuation?.currentTrailingDividendsPerShare ?? null, latest?.currency ?? report.reportingCurrency, locale, copy.unavailable, false)} />
-        <Stat label={extra.latestYield} value={formatPercent(valuation?.currentDividendYield ?? null, locale, copy.unavailable)} />
+        <Stat label={extra.latestDps} value={formatMoney(context?.trailingDividendsPerShare ?? valuation?.currentTrailingDividendsPerShare ?? null, latest?.currency ?? report.reportingCurrency, locale, copy.unavailable, false)} />
+        <Stat label={extra.latestYield} value={formatPercent(context?.currentDividendYield ?? valuation?.currentDividendYield ?? null, locale, copy.unavailable)} />
+        <Stat label={extra.paymentFrequency} value={frequencyLabel} />
+        <Stat label={extra.latestPayment} value={latestPayment} />
+        <Stat label={extra.increaseStreak} value={context?.increaseStreakYears === null || context?.increaseStreakYears === undefined ? copy.unavailable : context.increaseStreakYears + " " + extra.years} />
+        <Stat label={extra.dividendSafety} value={safetyLabel} />
+        <Stat label={extra.coverage} value={coverage} />
         <Stat label={extra.payout} value={formatPercent(latest?.payoutRatio ?? null, locale, copy.unavailable)} />
         <Stat label={extra.fcfPayout} value={formatPercent(latest?.freeCashFlowPayoutRatio ?? null, locale, copy.unavailable)} />
         <Stat label={extra.dividendCagr3y} value={formatPercent(historical.dividendCagr3y, locale, copy.unavailable)} />
@@ -676,9 +699,11 @@ export function HistoricalResearchView({
   const historical = report.historical;
   if (!historical || (!historical.financials.length && !historical.price.length)) return null;
   const dividendProfile = report.investmentProfile === "dividend";
+  const dividendStatus = historical.dividendContext?.status;
+  const showDividendSnapshot = dividendProfile || (mode === "simple" && (dividendStatus === "available" || dividendStatus === "partial"));
   return (
     <div className="space-y-5">
-      {dividendProfile ? <DividendSnapshot report={report} locale={locale} /> : null}
+      {showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}
       {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
       {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />

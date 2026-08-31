@@ -561,10 +561,27 @@ export type HistoricalPriceContext = {
   maximum: HistoricalPriceWindowStats;
 };
 
+export type DividendResearchContext = {
+  methodVersion: string;
+  status: "available" | "partial" | "nonpayer" | "unavailable";
+  trailingDividendsPerShare: number | null;
+  currentDividendYield: number | null;
+  paymentCountTtm: number;
+  paymentFrequency: "monthly" | "quarterly" | "semiannual" | "annual" | "irregular" | "none" | "unknown";
+  latestPaymentDate: string | null;
+  latestPaymentAmount: number | null;
+  latestPaymentCurrency: string | null;
+  increaseStreakYears: number | null;
+  safety: "covered" | "stretched" | "not_covered" | "insufficient";
+  annualHistoryYears: number;
+  eventCoverageYears: number;
+};
+
 export type HistoricalResearchData = {
   financials: HistoricalFinancialPoint[];
   price: MarketPricePoint[];
   priceContext?: HistoricalPriceContext;
+  dividendContext?: DividendResearchContext;
   valuation?: HistoricalValuationPoint[];
   valuationContext?: HistoricalValuationContext;
   valuationMethodVersion?: string;

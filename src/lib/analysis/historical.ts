@@ -1,4 +1,5 @@
 import type {
+  DividendResearchContext,
   FinancialPeriod,
   HistoricalFinancialPoint,
   HistoricalPriceContext,
@@ -14,10 +15,12 @@ import {
   buildHistoricalValuationContext,
   buildHistoricalValuationSeries,
   HISTORICAL_VALUATION_METHOD_VERSION,
+  trailingDividendPerShare,
 } from "./historical-valuation";
 
 const MAX_REFERENCE_PRICE_LAG_DAYS = 45;
 const MAX_PRICE_POINTS = 121;
+export const DIVIDEND_CONTEXT_METHOD_VERSION = "dividend-context-v1";
 
 function positive(value: number | null | undefined): number | null {
   return isFiniteNumber(value) && value > 0 ? value : null;
@@ -99,7 +102,7 @@ function pointForPeriod(
   const positiveFcf = positive(fcf);
   const dividends = dividendsPaid(period);
   const price = referencePrice(period, prices);
-  const positiveNetIncome = positive(period.netIncome);
+  const positiveDilutedEps = positive(period.epsDiluted);
   const dividendPerShare = shareCount !== null && isFiniteNumber(dividends) ? dividends / shareCount : null;
   const priorDividends = prior ? dividendsPaid(prior) : null;
   const priorDividendPerShare = prior && priorShareCount !== null && isFiniteNumber(priorDividends)
@@ -148,8 +151,8 @@ function pointForPeriod(
     dividendsPaid: dividends,
     dividendPerShare,
     dividendGrowth: calculateGrowth(dividendPerShare, priorDividendPerShare),
-    payoutRatio: positiveNetIncome !== null && isFiniteNumber(dividends)
-      ? dividends / positiveNetIncome
+    payoutRatio: positiveDilutedEps !== null && isFiniteNumber(dividendPerShare)
+      ? dividendPerShare / positiveDilutedEps
       : null,
     freeCashFlowPayoutRatio: positiveFcf !== null && isFiniteNumber(dividends) ? dividends / positiveFcf : null,
     referencePrice: price,
@@ -278,6 +281,109 @@ function buildHistoricalPriceContext(
   };
 }
 
+function eventCoverageYears(events: MarketDividendEvent[]): number {
+  if (events.length < 2) return 0;
+  const first = parsedPriceDate(events[0]?.date);
+  const last = parsedPriceDate(events.at(-1)?.date);
+  if (first === null || last === null || last < first) return 0;
+  return (last - first) / (365.2425 * 86_400_000);
+}
+
+function inferPaymentFrequency(
+  events: MarketDividendEvent[] | undefined,
+  annualPayer: boolean,
+): DividendResearchContext["paymentFrequency"] {
+  if (events === undefined) return "unknown";
+  if (!events.length) return annualPayer ? "unknown" : "none";
+  if (events.length < 2) return "unknown";
+  const gaps = events.slice(1).map((event, index) => {
+    const current = parsedPriceDate(event.date);
+    const prior = parsedPriceDate(events[index]?.date);
+    return current !== null && prior !== null ? (current - prior) / 86_400_000 : null;
+  }).filter((value): value is number => isFiniteNumber(value) && value > 0).sort((a, b) => a - b);
+  if (!gaps.length) return "unknown";
+  const middle = Math.floor(gaps.length / 2);
+  const median = gaps.length % 2 ? gaps[middle] : (gaps[middle - 1] + gaps[middle]) / 2;
+  if (median >= 20 && median <= 45) return "monthly";
+  if (median >= 60 && median <= 120) return "quarterly";
+  if (median >= 130 && median <= 220) return "semiannual";
+  if (median >= 280 && median <= 430) return "annual";
+  return "irregular";
+}
+
+function consecutiveDividendIncreaseStreak(points: HistoricalFinancialPoint[]): number | null {
+  if (points.length < 2) return null;
+  let streak = 0;
+  for (let index = points.length - 1; index > 0; index -= 1) {
+    const current = positive(points[index]?.dividendPerShare);
+    const prior = positive(points[index - 1]?.dividendPerShare);
+    if (current === null || prior === null) return streak > 0 ? streak : null;
+    if (current / prior - 1 > 0.005) streak += 1;
+    else break;
+  }
+  return streak;
+}
+
+function dividendSafety(points: HistoricalFinancialPoint[]): DividendResearchContext["safety"] {
+  const latest = points.at(-1);
+  const epsPayout = latest?.payoutRatio;
+  const fcfPayout = latest?.freeCashFlowPayoutRatio;
+  if (!isFiniteNumber(epsPayout) || !isFiniteNumber(fcfPayout) || epsPayout < 0 || fcfPayout < 0) return "insufficient";
+  if (epsPayout > 1 || fcfPayout > 1) return "not_covered";
+  if (epsPayout <= 0.75 && fcfPayout <= 0.75) return "covered";
+  return "stretched";
+}
+
+function buildDividendResearchContext(
+  points: HistoricalFinancialPoint[],
+  prices: MarketPricePoint[],
+  options: HistoricalResearchOptions,
+): DividendResearchContext {
+  const latestPrice = prices.at(-1) ?? null;
+  const currentPrice = positive(options.currentPrice) ?? positive(latestPrice?.close);
+  const currentDate = (parsedPriceDate(options.currentPriceDate) !== null
+    ? options.currentPriceDate
+    : latestPrice?.date)?.slice(0, 10) ?? null;
+  const endMs = parsedPriceDate(currentDate);
+  const events = options.dividendEvents === undefined ? undefined : [...options.dividendEvents]
+    .filter((event) => {
+      const time = parsedPriceDate(event.date);
+      return time !== null && (endMs === null || time <= endMs) && isFiniteNumber(event.amount) && event.amount > 0;
+    })
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const trailing = currentDate
+    ? trailingDividendPerShare(currentDate, options.dividendEvents)
+    : { amount: null, paymentCount: 0 };
+  const latestPayment = events?.at(-1) ?? null;
+  const latestAnnual = points.at(-1);
+  const annualPayer = positive(latestAnnual?.dividendPerShare) !== null;
+  const hasEvents = Boolean(events?.length);
+  const annualHistoryYears = points.filter((point) => isFiniteNumber(point.dividendPerShare)).length;
+  const currentDividendYield = currentPrice !== null && trailing.amount !== null ? trailing.amount / currentPrice : null;
+  const status: DividendResearchContext["status"] = hasEvents && currentDividendYield !== null && annualHistoryYears > 0
+    ? "available"
+    : hasEvents || annualPayer
+      ? "partial"
+      : options.dividendEvents !== undefined
+        ? "nonpayer"
+        : "unavailable";
+  return {
+    methodVersion: DIVIDEND_CONTEXT_METHOD_VERSION,
+    status,
+    trailingDividendsPerShare: trailing.amount,
+    currentDividendYield,
+    paymentCountTtm: trailing.paymentCount,
+    paymentFrequency: inferPaymentFrequency(events, annualPayer),
+    latestPaymentDate: latestPayment?.date ?? null,
+    latestPaymentAmount: latestPayment?.amount ?? null,
+    latestPaymentCurrency: latestPayment?.currency ?? null,
+    increaseStreakYears: consecutiveDividendIncreaseStreak(points),
+    safety: dividendSafety(points),
+    annualHistoryYears,
+    eventCoverageYears: eventCoverageYears(events ?? []),
+  };
+}
+
 function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   let increased = 0;
   let unchanged = 0;
@@ -322,6 +428,7 @@ export function buildHistoricalResearchData(
   });
   const dividendStats = dividendStreakStats(points);
   const priceContext = buildHistoricalPriceContext(sortedPrices, options);
+  const dividendContext = buildDividendResearchContext(points, sortedPrices, options);
   const valuation = buildHistoricalValuationSeries({
     prices: sortedPrices,
     ttmEps: options.ttmEpsHistory ?? [],
@@ -338,6 +445,7 @@ export function buildHistoricalResearchData(
     financials: points.slice(-10),
     price: sortedPrices,
     priceContext,
+    dividendContext,
     valuation,
     valuationContext,
     valuationMethodVersion: HISTORICAL_VALUATION_METHOD_VERSION,
