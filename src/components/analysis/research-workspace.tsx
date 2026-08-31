@@ -1,0 +1,17 @@
+import { ButtonLink } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { getInvestmentThesisDetail } from "@/lib/investor-intelligence/queries";
+import { createClient } from "@/lib/supabase/server";
+
+export async function AnalysisResearchWorkspace({ticker,analysisId}:{ticker:string;analysisId:string}){
+  const [detail,supabase]=await Promise.all([getInvestmentThesisDetail(ticker),createClient()]);
+  const {data:changes}=supabase?await supabase.from("material_changes").select("id,metric_key,materiality,previous_value,current_value,reasoning,created_at").eq("ticker",ticker).eq("current_snapshot_id",(await supabase.from("company_metric_snapshots").select("id").eq("analysis_id",analysisId).maybeSingle()).data?.id??"").order("created_at",{ascending:false}).limit(20):{data:[]};
+  return <div className="grid gap-5 lg:grid-cols-2">
+    <Card id="thesis"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#e1cb95]">INVESTMENT THESIS</p><h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{detail?.thesis.title??`Track your ${ticker} thesis`}</h2></div>{detail?<span className={`text-xs font-bold ${["WATCH","WEAKENING","BROKEN"].includes(detail.thesis.status)?"text-amber-300":"text-emerald-300"}`}>{detail.thesis.status}</span>:null}</div>
+      {detail?<><p className="mt-3 text-sm text-[#c9d2df]">{detail.thesis.notes??"No thesis notes saved."}</p><div className="mt-4 grid grid-cols-3 gap-2 text-xs"><div><p className="text-[#9aa7b8]">Rules</p><p className="number mt-1 text-lg font-semibold">{detail.rules.length}</p></div><div><p className="text-[#9aa7b8]">New failures</p><p className="number mt-1 text-lg font-semibold text-amber-300">{detail.evaluation?.newlyFailed.length??0}</p></div><div><p className="text-[#9aa7b8]">Recovered</p><p className="number mt-1 text-lg font-semibold text-emerald-300">{detail.evaluation?.newlyRecovered.length??0}</p></div></div><ButtonLink href={`/thesis/${encodeURIComponent(ticker)}`} variant="secondary" className="mt-4">Open thesis</ButtonLink></>:<><p className="mt-3 text-sm leading-6 text-[#9aa7b8]">Create persistent investment requirements, invalidation conditions, valuation targets and catalysts for this company.</p><ButtonLink href="/thesis" variant="secondary" className="mt-4">Create thesis</ButtonLink></>}
+    </Card>
+    <Card id="what-changed"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#e1cb95]">WHAT CHANGED V2</p><h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">Changes versus the prior valid snapshot</h2></div><ButtonLink href="/watchlist?filter=recently_changed" variant="ghost" className="h-8 px-2 text-xs">Monitoring view</ButtonLink></div>
+      <div className="mt-4 space-y-2">{changes?.length?changes.map((change)=><div key={change.id} className="rounded-md border border-white/10 bg-white/5 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-[#f4efe5]">{change.metric_key}</p><span className={`text-[11px] font-bold ${change.materiality==="THESIS_CHANGING"?"text-red-300":change.materiality==="IMPORTANT"?"text-amber-300":"text-[#9aa7b8]"}`}>{change.materiality}</span></div><p className="mt-1 text-sm leading-5 text-[#c9d2df]">{change.reasoning}</p></div>):<p className="text-sm text-[#9aa7b8]">No normalized material changes were recorded for this analysis. This may be the first snapshot or no tracked metric changed materially.</p>}</div>
+    </Card>
+  </div>;
+}
