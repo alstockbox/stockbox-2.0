@@ -6,10 +6,10 @@ on:
       - stockbox/p0-release-hardening-20260831
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  patch-verify-commit:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout release branch
@@ -21,7 +21,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Apply guarded Simple creator readability P0 patch
+        run: python3 scripts/apply-simple-creator-readability-p0.py
       - name: Install dependencies
         run: npm ci
-      - name: Run Simple creator readability P0 test
-        run: npx vitest run tests/analysis/simple-creator-readability-p0.test.ts
+      - name: Targeted Simple readability tests
+        run: npx vitest run tests/analysis/simple-creator-readability-p0.test.ts tests/analysis/investment-profiles-p0.test.ts tests/analysis/historical-coverage-integrity-p0.test.ts tests/analysis/dividend-context-p0.test.ts tests/analysis/price-context-p0.test.ts
+      - name: Unit and regression tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Remove temporary Simple readability machinery
+        run: rm -f scripts/apply-simple-creator-readability-p0.py .github/workflows/p0-simple-creator-readability.yml
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Commit verified Simple creator readability
+        run: |
+          git config user.name "alstockbox"
+          git config user.email "alwatchbox@gmail.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: simplify Simple Mode decision hierarchy"
+          git push origin HEAD:stockbox/p0-release-hardening-20260831
