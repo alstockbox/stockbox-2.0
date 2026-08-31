@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Metadata } from "next";
+import type { Metadata, Route } from "next";
 import { AlertTriangle, Bell, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
@@ -81,7 +81,8 @@ export default async function WatchlistPage({ searchParams }: PageProps) {
         {rows.length ? rows.map((row) => {
           const s = row.snapshot;
           const delta = scoreDelta(row);
-          const analysisHref = s ? `/analysis/${s.analysisId}` : "/analyze";
+          const analysisHref = (s ? `/analysis/${s.analysisId}` : "/analyze") as Route;
+          const historicalHref = (s ? `/analysis/${s.analysisId}#historical` : "/analyze") as Route;
           return <tr key={row.watchlistId} className="border-t border-white/10 bg-[#0d1c2e]/70 align-top text-[#d6deea]">
             <td className="px-4 py-4"><p className="font-semibold text-[#e1cb95]">{row.ticker}</p><p className="mt-1 max-w-[180px] text-[#f4efe5]">{row.companyName}</p><p className="mt-2 text-[11px] text-[#748196]">Exchange: —</p></td>
             <td className="px-3 py-4"><p className="number font-semibold text-[#f4efe5]">{num(s?.price, 2)}</p><p className={`mt-1 ${typeof s?.priceChange1d === "number" && s.priceChange1d < 0 ? "text-red-300" : "text-emerald-300"}`}>{pct(s?.priceChange1d)}</p></td>
@@ -92,7 +93,7 @@ export default async function WatchlistPage({ searchParams }: PageProps) {
             <td className="px-3 py-4">{row.thesis ? <><Link href={`/thesis/${encodeURIComponent(row.ticker)}`} className={`font-bold ${["WATCH","WEAKENING","BROKEN"].includes(row.thesis.status) ? "text-amber-300" : "text-emerald-300"}`}>{row.thesis.status}</Link><p className="mt-1 max-w-[160px] text-[#9aa7b8]">{row.thesis.title}</p></> : <ButtonLink href="/thesis" variant="ghost" className="h-8 px-2 text-xs">Create thesis</ButtonLink>}</td>
             <td className="px-3 py-4">{row.latestChange ? <div className="max-w-[260px]"><p className={`font-bold ${row.latestChange.materiality === "THESIS_CHANGING" ? "text-red-300" : "text-amber-300"}`}><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />{row.latestChange.materiality}</p><p className="mt-1 leading-5 text-[#c9d2df]">{row.latestChange.reasoning}</p></div> : <span className="text-[#748196]">No important change recorded</span>}</td>
             <td className="px-3 py-4"><p>{s ? new Date(s.capturedAt).toLocaleDateString() : "Never analyzed"}</p><p className="mt-1 text-[#748196]">{row.activeAlertCount} active alert{row.activeAlertCount === 1 ? "" : "s"}</p></td>
-            <td className="px-3 py-4"><div className="flex max-w-[170px] flex-wrap gap-1"><ButtonLink href={analysisHref} variant="ghost" className="h-8 px-2 text-xs">Analysis</ButtonLink><ButtonLink href={`/alerts?ticker=${encodeURIComponent(row.ticker)}`} variant="ghost" className="h-8 px-2 text-xs"><Bell className="h-3 w-3" />Alert</ButtonLink>{s ? <ButtonLink href={`/compare?id=${encodeURIComponent(s.analysisId)}`} variant="ghost" className="h-8 px-2 text-xs">Compare</ButtonLink> : null}{s ? <ButtonLink href={`${analysisHref}#historical`} variant="ghost" className="h-8 px-2 text-xs">History</ButtonLink> : null}<form action={removeWatchlistItemAction}><input type="hidden" name="id" value={row.watchlistId} /><Button variant="ghost" className="h-8 w-8 px-0" title={copy.remove}><Trash2 className="h-3.5 w-3.5" /></Button></form></div></td>
+            <td className="px-3 py-4"><div className="flex max-w-[170px] flex-wrap gap-1"><ButtonLink href={analysisHref} variant="ghost" className="h-8 px-2 text-xs">Analysis</ButtonLink><ButtonLink href={`/alerts?ticker=${encodeURIComponent(row.ticker)}`} variant="ghost" className="h-8 px-2 text-xs"><Bell className="h-3 w-3" />Alert</ButtonLink>{s ? <ButtonLink href={`/compare?id=${encodeURIComponent(s.analysisId)}`} variant="ghost" className="h-8 px-2 text-xs">Compare</ButtonLink> : null}{s ? <ButtonLink href={historicalHref} variant="ghost" className="h-8 px-2 text-xs">History</ButtonLink> : null}<form action={removeWatchlistItemAction}><input type="hidden" name="id" value={row.watchlistId} /><Button variant="ghost" className="h-8 w-8 px-0" title={copy.remove}><Trash2 className="h-3.5 w-3.5" /></Button></form></div></td>
           </tr>;
         }) : <tr><td colSpan={10} className="bg-[#0d1c2e]/70 p-6 text-sm text-[#9aa7b8]"><Bell className="mr-2 inline h-5 w-5" />{intelligence.length ? "No companies match the current filter." : copy.empty}</td></tr>}
       </tbody></table></div>
