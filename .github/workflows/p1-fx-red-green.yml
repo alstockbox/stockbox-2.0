@@ -1,0 +1,21 @@
+name: P1 FX red-green
+
+on:
+  push:
+    branches:
+      - stockbox/p0-release-hardening-20260831
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-fx:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- tests/data/ecb-fx-p1.test.ts
