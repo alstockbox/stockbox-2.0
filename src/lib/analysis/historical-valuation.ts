@@ -125,7 +125,7 @@ function windowStart(latestDate: string, years: number): number | null {
 
 function statsForWindow(
   points: HistoricalValuationPoint[],
-  years: 3 | 5 | 10,
+  years: 1 | 3 | 5 | 10,
 ): HistoricalValuationWindowStats {
   const latestDate = points.at(-1)?.date ?? null;
   const startMs = latestDate ? windowStart(latestDate, years) : null;
@@ -192,6 +192,7 @@ export function buildHistoricalValuationContext(input: {
   const currentDividendYield = latestPrice && positive(latestPrice.close) && currentDividend.amount !== null
     ? currentDividend.amount / latestPrice.close
     : null;
+  const oneYear = statsForWindow(series, 1);
   const threeYear = statsForWindow(series, 3);
   const fiveYear = statsForWindow(series, 5);
   const tenYear = statsForWindow(series, 10);
@@ -211,6 +212,7 @@ export function buildHistoricalValuationContext(input: {
     referenceWindow: fiveYear.sufficientHistory ? "5Y" : "MAX",
     referencePriceEarningsMedian: referenceMedian,
     availableSince: maximum.firstDate,
+    oneYear,
     threeYear,
     fiveYear,
     tenYear,

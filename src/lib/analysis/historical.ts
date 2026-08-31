@@ -171,6 +171,18 @@ function cagrForYears(
   return calculateCagr(selector(prior), selector(latest), years);
 }
 
+function growthForYears(
+  points: HistoricalFinancialPoint[],
+  years: number,
+  selector: (point: HistoricalFinancialPoint) => number | null,
+): number | null {
+  const latest = points.at(-1);
+  if (!latest) return null;
+  const prior = points.find((point) => point.fiscalYear === latest.fiscalYear - years);
+  if (!prior) return null;
+  return calculateGrowth(selector(latest), selector(prior));
+}
+
 function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   let increased = 0;
   let unchanged = 0;
@@ -234,6 +246,10 @@ export function buildHistoricalResearchData(
     epsCagr3y: cagrForYears(points, 3, (point) => point.eps),
     epsCagr5y: cagrForYears(points, 5, (point) => point.eps),
     epsCagr10y: cagrForYears(points, 10, (point) => point.eps),
+    freeCashFlowGrowth1y: growthForYears(points, 1, (point) => point.freeCashFlow),
+    freeCashFlowCagr3y: cagrForYears(points, 3, (point) => point.freeCashFlow),
+    freeCashFlowCagr5y: cagrForYears(points, 5, (point) => point.freeCashFlow),
+    freeCashFlowCagr10y: cagrForYears(points, 10, (point) => point.freeCashFlow),
     dividendCagr3y: cagrForYears(points, 3, (point) => point.dividendPerShare),
     dividendCagr5y: cagrForYears(points, 5, (point) => point.dividendPerShare),
     dividendCagr10y: cagrForYears(points, 10, (point) => point.dividendPerShare),

@@ -44,7 +44,7 @@ function valuationFixtures() {
       if (date > "2026-06-30") continue;
       eps.push({
         periodEndDate: date,
-        epsDiluted: 1,
+        epsDiluted: 4,
         currency: "USD",
         basis: "TTM_FROM_QUARTERS",
         provenance: { source: "fixture", valueKind: "derived", periodEnd: date },

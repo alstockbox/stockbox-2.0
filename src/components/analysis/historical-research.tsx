@@ -3,6 +3,7 @@ import type {
   AnalysisReport,
   HistoricalFinancialPoint,
   HistoricalValuationPoint,
+  HistoricalValuationWindowStats,
   UiMode,
 } from "@/lib/analysis/types";
 import type { Locale } from "@/lib/i18n/types";
@@ -134,7 +135,9 @@ function extraCopyFor(locale: Locale) {
     ttmEps: "TTM EPS", ttmDividend: "TTM utdelning/aktie", valuationDate: "Datum", insufficientHistory: "Otillräcklig historik",
     discountQuality: "Historisk rabattkvalitet", discountVsHistoricalMedian: "Rabatt mot historisk median",
     evidenceCoverage: "Evidenstäckning", deteriorationScore: "Försämringspoäng", notApplicable: "Ej tillämpligt",
-    signalEvidence: "Deterministiska signaler",
+    signalEvidence: "Deterministiska signaler", historicalSnapshot: "Historisk översikt",
+    currentColumn: "Nu", oneYearColumn: "1 år", threeYearColumn: "3 år", fiveYearColumn: "5 år", tenYearColumn: "10 år", maxColumn: "MAX",
+    dividendGrowth: "Utdelningstillväxt", snapshotNote: "Nu visar senaste nivå där det är relevant. Horisonter visar tillväxt eller historisk median/snitt. MAX använder längsta verifierade historik och märker aldrig kortare historik som 10 år.",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -150,7 +153,9 @@ function extraCopyFor(locale: Locale) {
     ttmEps: "TTM EPS", ttmDividend: "TTM dividend / share", valuationDate: "Date", insufficientHistory: "Insufficient history",
     discountQuality: "Historical Discount Quality", discountVsHistoricalMedian: "Discount vs historical median",
     evidenceCoverage: "Evidence coverage", deteriorationScore: "Deterioration score", notApplicable: "Not applicable",
-    signalEvidence: "Deterministic signals",
+    signalEvidence: "Deterministic signals", historicalSnapshot: "Historical snapshot",
+    currentColumn: "Current", oneYearColumn: "1Y", threeYearColumn: "3Y", fiveYearColumn: "5Y", tenYearColumn: "10Y", maxColumn: "MAX",
+    dividendGrowth: "Dividend growth", snapshotNote: "Current shows the latest level where applicable. Horizon columns show growth or historical median/average context. MAX uses the longest verified history and never relabels shorter history as 10Y.",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -190,6 +195,141 @@ function trendLabel(classification: HistoricalTrendClassification, copy: ReturnT
 
 function latestFinancial(points: HistoricalFinancialPoint[]) {
   return points.at(-1) ?? null;
+}
+
+function valuationWindowValue(
+  window: HistoricalValuationWindowStats | undefined,
+  selector: (value: HistoricalValuationWindowStats) => number | null,
+  formatter: (value: number | null) => string,
+  insufficientHistory: string,
+) {
+  if (!window?.sufficientHistory) return insufficientHistory;
+  return formatter(selector(window));
+}
+
+function longestGrowthValue(
+  values: Array<{ label: string; value: number | null | undefined }>,
+  locale: Locale,
+  unavailable: string,
+  insufficientHistory: string,
+) {
+  const match = values.find((item) => isNumber(item.value));
+  return match ? match.label + " " + formatPercent(match.value ?? null, locale, unavailable) : insufficientHistory;
+}
+
+function HistoricalSnapshot({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const historical = report.historical;
+  if (!historical) return null;
+  const copy = copyFor(locale);
+  const extra = extraCopyFor(locale);
+  const latest = latestFinancial(historical.financials);
+  const valuation = historical.valuationContext;
+  const currency = latest?.currency ?? report.reportingCurrency;
+  const percent = (value: number | null | undefined) => formatPercent(value ?? null, locale, copy.unavailable);
+  const multiple = (value: number | null | undefined) => isNumber(value) ? formatNumber(value, locale, copy.unavailable, 1) + "×" : copy.unavailable;
+  const longest = (ten: number | null | undefined, five: number | null | undefined, three: number | null | undefined, one: number | null | undefined) =>
+    longestGrowthValue([
+      { label: "10Y", value: ten },
+      { label: "5Y", value: five },
+      { label: "3Y", value: three },
+      { label: "1Y", value: one },
+    ], locale, copy.unavailable, extra.insufficientHistory);
+  const windowPe = (window: HistoricalValuationWindowStats | undefined) =>
+    valuationWindowValue(window, (value) => value.priceEarningsMedian, (value) => multiple(value), extra.insufficientHistory);
+  const windowYield = (window: HistoricalValuationWindowStats | undefined) =>
+    valuationWindowValue(window, (value) => value.dividendYieldAverage, (value) => percent(value), extra.insufficientHistory);
+
+  const rows = [
+    {
+      key: "pe", label: "P/E",
+      values: [
+        multiple(valuation?.currentPriceEarnings),
+        windowPe(valuation?.oneYear),
+        windowPe(valuation?.threeYear),
+        windowPe(valuation?.fiveYear),
+        windowPe(valuation?.tenYear),
+        windowPe(valuation?.maximum),
+      ],
+    },
+    {
+      key: "yield", label: extra.dividendYield,
+      values: [
+        percent(valuation?.currentDividendYield),
+        windowYield(valuation?.oneYear),
+        windowYield(valuation?.threeYear),
+        windowYield(valuation?.fiveYear),
+        windowYield(valuation?.tenYear),
+        windowYield(valuation?.maximum),
+      ],
+    },
+    {
+      key: "dividend-growth", label: extra.dividendGrowth,
+      values: [
+        formatMoney(latest?.dividendPerShare ?? null, currency, locale, copy.unavailable, false),
+        percent(latest?.dividendGrowth),
+        percent(historical.dividendCagr3y),
+        percent(historical.dividendCagr5y),
+        isNumber(historical.dividendCagr10y) ? percent(historical.dividendCagr10y) : extra.insufficientHistory,
+        longest(historical.dividendCagr10y, historical.dividendCagr5y, historical.dividendCagr3y, latest?.dividendGrowth),
+      ],
+    },
+    {
+      key: "revenue", label: copy.revenue,
+      values: [
+        formatMoney(latest?.revenue ?? null, currency, locale, copy.unavailable),
+        percent(latest?.revenueGrowth),
+        percent(historical.revenueCagr3y),
+        percent(historical.revenueCagr5y),
+        isNumber(historical.revenueCagr10y) ? percent(historical.revenueCagr10y) : extra.insufficientHistory,
+        longest(historical.revenueCagr10y, historical.revenueCagr5y, historical.revenueCagr3y, latest?.revenueGrowth),
+      ],
+    },
+    {
+      key: "eps", label: copy.eps,
+      values: [
+        formatNumber(latest?.eps ?? null, locale, copy.unavailable),
+        percent(latest?.epsGrowth),
+        percent(historical.epsCagr3y),
+        percent(historical.epsCagr5y),
+        isNumber(historical.epsCagr10y) ? percent(historical.epsCagr10y) : extra.insufficientHistory,
+        longest(historical.epsCagr10y, historical.epsCagr5y, historical.epsCagr3y, latest?.epsGrowth),
+      ],
+    },
+    {
+      key: "fcf", label: copy.fcf,
+      values: [
+        formatMoney(latest?.freeCashFlow ?? null, currency, locale, copy.unavailable),
+        percent(historical.freeCashFlowGrowth1y),
+        percent(historical.freeCashFlowCagr3y),
+        percent(historical.freeCashFlowCagr5y),
+        isNumber(historical.freeCashFlowCagr10y) ? percent(historical.freeCashFlowCagr10y) : extra.insufficientHistory,
+        longest(historical.freeCashFlowCagr10y, historical.freeCashFlowCagr5y, historical.freeCashFlowCagr3y, historical.freeCashFlowGrowth1y),
+      ],
+    },
+  ];
+
+  return (
+    <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/[0.035]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-[#f4efe5]">{extra.historicalSnapshot}</h2>
+        <Badge>{historical.financials.length} {extra.years}</Badge>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{extra.snapshotNote}</p>
+      <TableShell>
+        <thead><tr>
+          {[copy.metric, extra.currentColumn, extra.oneYearColumn, extra.threeYearColumn, extra.fiveYearColumn, extra.tenYearColumn, extra.maxColumn].map((label) => (
+            <th key={label} className={headClass}>{label}</th>
+          ))}
+        </tr></thead>
+        <tbody>{rows.map((row) => (
+          <tr key={row.key}>
+            <td className={cellClass + " font-semibold text-[#f4efe5]"}>{row.label}</td>
+            {row.values.map((value, index) => <td key={index} className={cellClass}>{value}</td>)}
+          </tr>
+        ))}</tbody>
+      </TableShell>
+    </Card>
+  );
 }
 
 function GrowthDashboard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
@@ -496,6 +636,7 @@ export function HistoricalResearchView({
   return (
     <div className="space-y-5">
       {dividendProfile ? <DividendSnapshot report={report} locale={locale} /> : null}
+      {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />
       <HistoricalDiscountQualityCard report={report} locale={locale} />
       {mode === "pro" ? (

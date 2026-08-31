@@ -470,7 +470,7 @@ export type HistoricalValuationPoint = {
 };
 
 export type HistoricalValuationWindowStats = {
-  requestedYears: 3 | 5 | 10 | null;
+  requestedYears: 1 | 3 | 5 | 10 | null;
   firstDate: string | null;
   lastDate: string | null;
   spanYears: number;
@@ -493,6 +493,7 @@ export type HistoricalValuationContext = {
   referenceWindow: "5Y" | "MAX";
   referencePriceEarningsMedian: number | null;
   availableSince: string | null;
+  oneYear?: HistoricalValuationWindowStats;
   threeYear: HistoricalValuationWindowStats;
   fiveYear: HistoricalValuationWindowStats;
   tenYear: HistoricalValuationWindowStats;
@@ -545,6 +546,10 @@ export type HistoricalResearchData = {
   epsCagr3y: number | null;
   epsCagr5y: number | null;
   epsCagr10y: number | null;
+  freeCashFlowGrowth1y?: number | null;
+  freeCashFlowCagr3y?: number | null;
+  freeCashFlowCagr5y?: number | null;
+  freeCashFlowCagr10y?: number | null;
   dividendCagr3y: number | null;
   dividendCagr5y: number | null;
   dividendCagr10y: number | null;
