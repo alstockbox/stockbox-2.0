@@ -6,22 +6,46 @@ on:
       - stockbox/p0-release-hardening-20260831
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  patch-verify-commit:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout release branch
         uses: actions/checkout@v4
         with:
           ref: stockbox/p0-release-hardening-20260831
+          fetch-depth: 0
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Apply guarded price-context P0 patch
+        run: node scripts/release/apply-price-context-p0.mjs
       - name: Install dependencies
         run: npm ci
-      - name: Run price-context P0 test
-        run: npx vitest run tests/analysis/price-context-p0.test.ts
+      - name: Targeted price-context tests
+        run: npx vitest run tests/analysis/price-context-p0.test.ts tests/analysis/historical.test.ts tests/analysis/historical-view.test.ts tests/analysis/chart-geometry.test.ts
+      - name: Unit and regression tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Remove temporary patch machinery before static checks
+        run: rm scripts/release/apply-price-context-p0.mjs .github/workflows/p0-price-context.yml
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Commit verified historical price context
+        run: |
+          git config user.name "alstockbox"
+          git config user.email "alwatchbox@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No verified changes to commit"
+            exit 1
+          fi
+          git commit -m "feat: add historical price context"
+          git push origin HEAD:stockbox/p0-release-hardening-20260831
