@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { EarningsEstimateIntelligence } from "@/components/analysis/earnings-estimate-intelligence";
 import { InvestorValuationSummary } from "@/components/analysis/investor-valuation-summary";
 import { RealPeerIntelligence } from "@/components/analysis/real-peer-intelligence";
 import { ReportView } from "@/components/analysis/report-view";
@@ -7,6 +8,7 @@ import { requireUser } from "@/lib/auth/session";
 import { getAnalysis, getPreviousAnalysisForTicker } from "@/lib/db/repositories";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { getLocale } from "@/lib/i18n/server";
+import { getEarningsEstimateIntelligence } from "@/lib/investor-intelligence/earnings-estimates-service";
 import { getPeerIntelligence } from "@/lib/investor-intelligence/peer-service";
 
 export default async function AnalysisPage({ params }: { params: Promise<{ id: string }> }) {
@@ -14,7 +16,7 @@ export default async function AnalysisPage({ params }: { params: Promise<{ id: s
   const analysis = await getAnalysis(id, user.id);
   if (!analysis) notFound();
   const report = analysis.report as AnalysisReport;
-  const [previousReport, peerIntelligence] = await Promise.all([
+  const [previousReport, peerIntelligence, earningsEstimateIntelligence] = await Promise.all([
     getPreviousAnalysisForTicker({
       userId: user.id,
       ticker: report.ticker,
@@ -22,6 +24,7 @@ export default async function AnalysisPage({ params }: { params: Promise<{ id: s
       beforeGeneratedAt: report.generatedAt,
     }),
     getPeerIntelligence(report.ticker),
+    getEarningsEstimateIntelligence(report.ticker),
   ]);
-  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><RealPeerIntelligence data={peerIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
+  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><EarningsEstimateIntelligence data={earningsEstimateIntelligence} /><RealPeerIntelligence data={peerIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
 }
