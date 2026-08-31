@@ -23,7 +23,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply guarded low PE P0 patch
-        run: node scripts/release/apply-low-pe-p0.mjs
+        run: node scripts/release/apply-low-pe-p0-v2.mjs
       - name: Install dependencies
         run: npm ci
       - name: Targeted low PE tests
@@ -41,6 +41,7 @@ jobs:
           git config user.name "StockBox Release Bot"
           git config user.email "release-bot@users.noreply.github.com"
           rm -f scripts/release/apply-low-pe-p0.mjs
+          rm -f scripts/release/apply-low-pe-p0-v2.mjs
           rm -f .github/workflows/p0-low-pe-red.yml
           git add -A
           if git diff --cached --quiet; then
