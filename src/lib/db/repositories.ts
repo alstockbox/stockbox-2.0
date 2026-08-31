@@ -265,6 +265,32 @@ export async function getAnalysis(id: string, userId: string) {
   return data;
 }
 
+export async function getPreviousAnalysisForTicker(input: {
+  userId: string;
+  ticker: string;
+  currentAnalysisId: string;
+  beforeGeneratedAt?: string | null;
+}) {
+  const supabase = createAdminClient();
+  if (!supabase) return null;
+
+  let query = supabase
+    .from("analyses")
+    .select("report")
+    .eq("user_id", input.userId)
+    .eq("ticker", input.ticker)
+    .neq("id", input.currentAnalysisId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (input.beforeGeneratedAt) {
+    query = query.lt("created_at", input.beforeGeneratedAt);
+  }
+
+  const { data } = await query.maybeSingle();
+  return data?.report as AnalysisReport | undefined;
+}
+
 export async function getSharedAnalysis(token: string) {
   const supabase = createAdminClient();
   if (!supabase) return null;

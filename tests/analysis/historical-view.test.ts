@@ -49,6 +49,9 @@ describe("historical research view", () => {
       report: report("balanced"), mode: "simple", locale: "en",
     }));
     expect(html).toContain("Historical context");
+    expect(html).toContain("Interactive chart view");
+    expect(html).toContain("Change");
+    expect(html).toContain("Bars");
     expect(html).toContain("Revenue CAGR 10Y");
     expect(html).not.toContain("Balance sheet history");
     expect(html).not.toContain("Historical P/E");

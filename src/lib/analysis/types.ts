@@ -271,6 +271,7 @@ export type AnalysisInput = {
   fundamentals: CompanyFundamentals | null;
   analysisType: AnalysisType;
   investmentProfile: InvestmentProfile;
+  estimates?: ForwardEstimates;
   providerDiagnostics?: ProviderDiagnostic[];
   analysisDate?: string;
 };
@@ -470,6 +471,7 @@ export type AnalysisReport = {
   dataCoverage?: number;
   reportingCurrency?: string | null;
   historical?: HistoricalResearchData;
+  forwardEstimates?: ForwardEstimates;
   dataAsOf?: string | null;
   dataStatus?: DataStatus;
   confidenceBreakdown?: ConfidenceBreakdown;

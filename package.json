@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "next typegen && tsc --noEmit",
+    "release:smoke:local": "node scripts/launch/local-release-smoke.mjs",
     "security-master:build-sweden": "node scripts/security-master/build-swedish-snapshot.mjs",
     "market-data:smoke": "node scripts/market-data-smoke.mjs"
   },

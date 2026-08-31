@@ -2,12 +2,18 @@ import type { ReactNode } from "react";
 import type {
   AnalysisReport,
   HistoricalFinancialPoint,
-  MarketPricePoint,
   UiMode,
 } from "@/lib/analysis/types";
 import type { Locale } from "@/lib/i18n/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FinancialDataExportButton } from "./financial-data-export-button";
+import {
+  buildGrowthDashboardRows,
+  buildMarginDashboardRows,
+  type HistoricalTrendClassification,
+} from "@/lib/analysis/historical-dashboard";
+import { HistoricalChartExplorer } from "./historical-chart-explorer";
 
 const isNumber = (value: number | null | undefined): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -16,6 +22,7 @@ function copyFor(locale: Locale) {
   if (locale === "sv") return {
     historicalContext: "Historisk utveckling", priceHistory: "Prishistorik",
     growthHistory: "Tillväxt- & lönsamhetshistorik", balanceHistory: "Balansräkningshistorik",
+    growthDashboard: "Tillväxtdashboard", marginDashboard: "Marginalanalys",
     valuationHistory: "Historisk värdering", dividendSnapshot: "Utdelningsöversikt",
     dividendHistory: "Utdelningshistorik", unavailable: "Saknas", notMeaningful: "Ej meningsfullt",
     fiscalYear: "År", revenue: "Omsättning", revenueGrowth: "Omsättningstillväxt",
@@ -23,10 +30,17 @@ function copyFor(locale: Locale) {
     fcfMargin: "FCF-marginal", operatingMargin: "Rörelsemarginal", roe: "ROE", roic: "ROIC",
     cash: "Kassa", debt: "Skuld", netDebt: "Nettoskuld", debtEquity: "Skuld/eget kapital",
     currentRatio: "Current ratio", shares: "Aktier", shareGrowth: "Aktieförändring",
+    metric: "Mått",
+    oneYear: "1 år", threeYearCagr: "3 år CAGR", fiveYearCagr: "5 år CAGR", tenYearCagr: "10 år CAGR",
+    current: "Nu", oneYearAgo: "1 år sedan", threeYearAverage: "3-årssnitt", fiveYearAverage: "5-årssnitt",
+    classification: "Klassning", accelerating: "Accelererande", decelerating: "Bromsande",
+    stable: "Stabilt", volatile: "Volatilt",
+    downloadCsv: "Ladda ner CSV",
   };
   return {
     historicalContext: "Historical context", priceHistory: "Price history",
     growthHistory: "Growth & profitability history", balanceHistory: "Balance sheet history",
+    growthDashboard: "Growth dashboard", marginDashboard: "Margin analysis",
     valuationHistory: "Historical valuation", dividendSnapshot: "Dividend snapshot",
     dividendHistory: "Dividend history", unavailable: "Unavailable", notMeaningful: "Not meaningful",
     fiscalYear: "FY", revenue: "Revenue", revenueGrowth: "Revenue growth",
@@ -34,6 +48,12 @@ function copyFor(locale: Locale) {
     fcfMargin: "FCF margin", operatingMargin: "Operating margin", roe: "ROE", roic: "ROIC",
     cash: "Cash", debt: "Debt", netDebt: "Net debt", debtEquity: "Debt / equity",
     currentRatio: "Current ratio", shares: "Shares", shareGrowth: "Share growth",
+    metric: "Metric",
+    oneYear: "1Y", threeYearCagr: "3Y CAGR", fiveYearCagr: "5Y CAGR", tenYearCagr: "10Y CAGR",
+    current: "Current", oneYearAgo: "1Y ago", threeYearAverage: "3Y avg", fiveYearAverage: "5Y avg",
+    classification: "Classification", accelerating: "Accelerating", decelerating: "Decelerating",
+    stable: "Stable", volatile: "Volatile",
+    downloadCsv: "Download CSV",
   };
 }
 function localeTag(locale: Locale) {
@@ -147,9 +167,68 @@ function peLabel(point: HistoricalFinancialPoint, notMeaningful: string, unavail
   return unavailable;
 }
 
+function trendLabel(classification: HistoricalTrendClassification, copy: ReturnType<typeof copyFor>) {
+  if (classification === "accelerating") return copy.accelerating;
+  if (classification === "decelerating") return copy.decelerating;
+  if (classification === "stable") return copy.stable;
+  if (classification === "volatile") return copy.volatile;
+  return copy.unavailable;
+}
+
 function latestFinancial(points: HistoricalFinancialPoint[]) {
   return points.at(-1) ?? null;
 }
+
+function GrowthDashboard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const historical = report.historical;
+  if (!historical) return null;
+  const copy = copyFor(locale);
+  const rows = buildGrowthDashboardRows(historical.financials);
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.growthDashboard}</h2>
+      <TableShell>
+        <thead><tr>
+          {[copy.metric, copy.oneYear, copy.threeYearCagr, copy.fiveYearCagr, copy.tenYearCagr, copy.classification].map((label) => <th key={label} className={headClass}>{label}</th>)}
+        </tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.key}>
+          <td className={cellClass}>{row.label}</td>
+          <td className={cellClass}>{formatPercent(row.oneYearGrowth, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.threeYearCagr, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.fiveYearCagr, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.tenYearCagr, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{trendLabel(row.classification, copy)}</td>
+        </tr>)}</tbody>
+      </TableShell>
+    </Card>
+  );
+}
+
+function MarginDashboard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const historical = report.historical;
+  if (!historical) return null;
+  const copy = copyFor(locale);
+  const rows = buildMarginDashboardRows(historical.financials);
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.marginDashboard}</h2>
+      <TableShell>
+        <thead><tr>
+          {[copy.metric, copy.current, copy.oneYearAgo, copy.threeYearAverage, copy.fiveYearAverage, copy.classification].map((label) => <th key={label} className={headClass}>{label}</th>)}
+        </tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.key}>
+          <td className={cellClass}>{row.label}</td>
+          <td className={cellClass}>{formatPercent(row.current, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.oneYearAgo, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.threeYearAverage, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{formatPercent(row.fiveYearAverage, locale, copy.unavailable)}</td>
+          <td className={cellClass}>{trendLabel(row.classification, copy)}</td>
+        </tr>)}</tbody>
+      </TableShell>
+    </Card>
+  );
+}
+
 function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: Locale }) {
   const historical = report.historical;
   if (!historical) return null;
@@ -177,10 +256,6 @@ function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: 
     </Card>
   );
 }
-function priceChartPoints(points: MarketPricePoint[]): ChartPoint[] {
-  return points.map((point) => ({ label: point.date.slice(0, 7), value: point.close }));
-}
-
 function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale: Locale }) {
   const historical = report.historical;
   if (!historical) return null;
@@ -190,7 +265,10 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.historicalContext}</h2>
-        <Badge>{historical.financials.length} {extra.years}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <FinancialDataExportButton ticker={report.ticker} historical={historical} label={copy.downloadCsv} />
+          <Badge>{historical.financials.length} {extra.years}</Badge>
+        </div>
       </div>
       <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{extra.reportedDerived}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -202,7 +280,7 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
       <div className="mt-5 border-t border-white/10 pt-4">
         <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.priceHistory}</h3>
         <div className="mt-2">
-          <LineChart points={priceChartPoints(historical.price)} label={copy.priceHistory} unavailable={copy.unavailable} />
+          <HistoricalChartExplorer historical={historical} locale={locale} />
         </div>
       </div>
     </Card>
@@ -334,6 +412,8 @@ export function HistoricalResearchView({
       <HistoricalOverview report={report} locale={locale} />
       {mode === "pro" ? (
         <>
+          <GrowthDashboard report={report} locale={locale} />
+          <MarginDashboard report={report} locale={locale} />
           <GrowthHistory report={report} locale={locale} />
           <BalanceHistory report={report} locale={locale} />
           <ValuationHistory report={report} locale={locale} />

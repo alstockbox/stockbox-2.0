@@ -13,4 +13,12 @@ describe("repository query projections", () => {
   it("only selects the report field when loading a single analysis", () => {
     expect(source).toContain('.from("analyses").select("report")');
   });
+
+  it("loads previous same-ticker analyses with a narrow report projection", () => {
+    expect(source).toContain("getPreviousAnalysisForTicker");
+    expect(source).toContain('.eq("ticker", input.ticker)');
+    expect(source).toContain('.neq("id", input.currentAnalysisId)');
+    expect(source).toContain('.order("created_at", { ascending: false })');
+    expect(source).toContain(".limit(1)");
+  });
 });

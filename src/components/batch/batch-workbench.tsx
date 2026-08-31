@@ -8,12 +8,14 @@ import {
   FileUp,
   LoaderCircle,
   Play,
+  Plus,
   RotateCcw,
+  Search,
   ShieldCheck,
   Square,
   XCircle,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { captureClientEvent } from "@/lib/analytics/client";
 import type {
   AnalysisReport,
@@ -110,6 +112,9 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const analyzeCopy = allCopy.analyze;
   const [input, setInput] = useState("");
   const [rows, setRows] = useState<BatchRow[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<CompanySearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
   const [investmentProfile, setInvestmentProfile] = useState<InvestmentProfile>("balanced");
   const [entitlement, setEntitlement] = useState<ResolvePayload["entitlement"]>();
@@ -135,6 +140,53 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     setRows((current) =>
       current.map((row) => row.input === symbol ? { ...row, ...patch } : row),
     );
+  }
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setIsSearching(true);
+      void fetch(`/api/companies/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+        .then(async (response) => response.json() as Promise<{ companies?: CompanySearchResult[] }>)
+        .then((payload) => setSearchResults(payload.companies ?? []))
+        .catch((reason: unknown) => {
+          if (!(reason instanceof DOMException && reason.name === "AbortError")) setSearchResults([]);
+        })
+        .finally(() => setIsSearching(false));
+    }, 250);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [searchQuery]);
+
+  function searchCompanies(value: string) {
+    setSearchQuery(value);
+    if (value.trim().length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+    }
+  }
+
+  function appendTicker(symbol: string) {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) return;
+    if (parsed.symbols.includes(normalized)) return;
+    setInput((current) => `${current.trimEnd()}${current.trim() ? "\n" : ""}${normalized}`);
+    setRows([]);
+    setError(null);
+  }
+
+
+  function removeTicker(symbol: string) {
+    const next = parsed.symbols.filter((item) => item !== symbol);
+    setInput(next.join("\n"));
+    setRows([]);
+    setError(null);
   }
 
   async function importFile(file?: File) {
@@ -352,6 +404,59 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
           </div>
         </div>
         <div className="p-5">
+          <div className="mb-4 rounded-md border border-white/10 bg-white/[0.03] p-4">
+            <label htmlFor="batch-company-search" className="text-sm font-semibold text-[#f4efe5]">
+              {copy.searchAndAdd}
+            </label>
+            <div className="mt-2 flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[#9aa7b8]" aria-hidden="true" />
+                <input
+                  id="batch-company-search"
+                  value={searchQuery}
+                  onChange={(event) => void searchCompanies(event.target.value)}
+                  disabled={isRunning}
+                  placeholder={copy.searchPlaceholder}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-controls="batch-company-search-results"
+                  aria-expanded={searchResults.length > 0}
+                  className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] pl-9 pr-3 text-sm text-[#f4efe5] placeholder:text-[#6f7b8c]"
+                />
+              </div>
+              {isSearching ? <LoaderCircle className="mt-2.5 h-5 w-5 animate-spin text-[#e1cb95]" aria-hidden="true" /> : null}
+            </div>
+            {searchResults.length ? (
+              <div id="batch-company-search-results" role="listbox" className="mt-3 grid gap-2 md:grid-cols-2">
+                {searchResults.slice(0, 6).map((company) => {
+                  const symbol = company.canonicalTicker ?? company.ticker;
+                  const alreadyAdded = parsed.symbols.includes(symbol.toUpperCase());
+                  return (
+                    <button
+                      key={`${company.ticker}-${company.name}`}
+                      type="button"
+                      onClick={() => appendTicker(symbol)}
+                      disabled={isRunning || alreadyAdded}
+                      role="option"
+                      aria-selected={alreadyAdded}
+                      className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-[#07111f] p-3 text-left hover:bg-white/5 disabled:opacity-60"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-[#f4efe5]">{company.name}</span>
+                        <span className="mt-1 block text-xs text-[#9aa7b8]">{symbol}{company.exchange ? ` · ${company.exchange}` : ""}{company.country ? ` · ${company.country}` : ""}</span>
+                      </span>
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#e1cb95]">
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        {alreadyAdded ? copy.alreadyAdded : copy.addTicker}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : searchQuery.trim().length >= 2 && !isSearching ? (
+              <p className="mt-3 text-sm text-[#9aa7b8]">{analyzeCopy.noMatch}</p>
+            ) : null}
+          </div>
           <label htmlFor="batch-tickers" className="text-sm font-semibold text-[#f4efe5]">
             {copy.tickerSymbols}
           </label>
@@ -368,6 +473,26 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
             placeholder="AAPL, MSFT, NVDA, JPM, VOLV-B.ST..."
             className="mt-2 w-full resize-y rounded-md border border-white/12 bg-[#07111f] p-3 font-mono text-sm leading-6 text-[#f4efe5] placeholder:text-[#6f7b8c]"
           />
+          {parsed.symbols.length ? (
+            <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#e1cb95]">{copy.selectedTickers}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {parsed.symbols.slice(0, MAX_BATCH_ROWS).map((symbol) => (
+                  <button
+                    key={symbol}
+                    type="button"
+                    onClick={() => removeTicker(symbol)}
+                    disabled={isRunning}
+                    className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-[#07111f] px-2.5 py-1.5 font-mono text-xs font-semibold text-[#f4efe5] hover:bg-white/8 disabled:opacity-60"
+                    aria-label={`${copy.removeTicker}: ${symbol}`}
+                  >
+                    {symbol}
+                    <XCircle className="h-3.5 w-3.5 text-[#9aa7b8]" aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-white/15 bg-white/7 px-4 text-sm font-semibold text-[#f4efe5] hover:bg-white/12">
               <FileUp className="h-4 w-4" aria-hidden="true" />

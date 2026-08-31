@@ -1,0 +1,107 @@
+import { STATIC_BENCHMARK_VERSION, benchmarksForSector } from "./config";
+import type { AnalysisReport } from "./types";
+
+export type PeerBenchmarkDirection = "higher_is_better" | "lower_is_better";
+export type PeerBenchmarkStatus = "strong" | "weak" | "in_range" | "unavailable";
+
+export type PeerBenchmarkRow = {
+  key: string;
+  label: string;
+  group: "valuation" | "growth" | "profitability" | "financialHealth";
+  value: number | null;
+  kind: "percent" | "multiple";
+  direction: PeerBenchmarkDirection;
+  attractiveOrStrong: number;
+  expensiveOrWeak: number;
+  status: PeerBenchmarkStatus;
+  note: string;
+};
+
+export type PeerBenchmarkComparison = {
+  status: "benchmark_only" | "unavailable";
+  sectorLabel: string;
+  benchmarkVersion: string;
+  rows: PeerBenchmarkRow[];
+  missingReasons: string[];
+  summary: string;
+};
+
+function finite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function statusFor(
+  value: number | null | undefined,
+  direction: PeerBenchmarkDirection,
+  attractiveOrStrong: number,
+  expensiveOrWeak: number,
+): PeerBenchmarkStatus {
+  if (!finite(value)) return "unavailable";
+  if (direction === "higher_is_better") {
+    if (value >= attractiveOrStrong) return "strong";
+    if (value <= expensiveOrWeak) return "weak";
+    return "in_range";
+  }
+  if (value <= attractiveOrStrong) return "strong";
+  if (value >= expensiveOrWeak) return "weak";
+  return "in_range";
+}
+
+function row(input: Omit<PeerBenchmarkRow, "status" | "note">): PeerBenchmarkRow {
+  const status = statusFor(input.value, input.direction, input.attractiveOrStrong, input.expensiveOrWeak);
+  const note = status === "unavailable"
+    ? "Company value is unavailable, so StockBox does not infer a peer-relative view."
+    : "Compared with StockBox's versioned static sector benchmark; this is not a live peer median.";
+  return { ...input, status, note };
+}
+
+export function buildPeerBenchmarkComparison(report: AnalysisReport): PeerBenchmarkComparison {
+  const metrics = report.engine?.metrics;
+  const sector = report.engine?.scores.sector;
+  const benchmarks = benchmarksForSector(sector);
+  const sectorLabel = sector ?? "other";
+
+  if (!metrics) {
+    return {
+      status: "unavailable",
+      sectorLabel,
+      benchmarkVersion: STATIC_BENCHMARK_VERSION,
+      rows: [],
+      missingReasons: ["Canonical financial metrics are unavailable for this saved report."],
+      summary: "Peer and benchmark comparison is unavailable because StockBox does not have traceable metrics for this report.",
+    };
+  }
+
+  const rows: PeerBenchmarkRow[] = [
+    row({ key: "pe", label: "P/E", group: "valuation", value: metrics.valuation.priceEarnings ?? null, kind: "multiple", direction: "lower_is_better", attractiveOrStrong: benchmarks.peAttractive, expensiveOrWeak: benchmarks.peExpensive }),
+    row({ key: "evEbitda", label: "EV / EBITDA", group: "valuation", value: metrics.valuation.evEbitda ?? null, kind: "multiple", direction: "lower_is_better", attractiveOrStrong: benchmarks.evEbitdaAttractive, expensiveOrWeak: benchmarks.evEbitdaExpensive }),
+    row({ key: "evSales", label: "EV / Sales", group: "valuation", value: metrics.valuation.evSales ?? null, kind: "multiple", direction: "lower_is_better", attractiveOrStrong: benchmarks.evSalesAttractive, expensiveOrWeak: benchmarks.evSalesExpensive }),
+    row({ key: "fcfYield", label: "FCF yield", group: "valuation", value: metrics.valuation.freeCashFlowYield ?? null, kind: "percent", direction: "higher_is_better", attractiveOrStrong: benchmarks.fcfYieldStrong, expensiveOrWeak: benchmarks.fcfYieldWeak }),
+    row({ key: "revenueGrowth", label: "Revenue growth", group: "growth", value: metrics.growth.revenueGrowthYoY ?? null, kind: "percent", direction: "higher_is_better", attractiveOrStrong: benchmarks.revenueGrowthStrong, expensiveOrWeak: benchmarks.revenueGrowthWeak }),
+    row({ key: "operatingMargin", label: "Operating margin", group: "profitability", value: metrics.margins.operatingMargin ?? null, kind: "percent", direction: "higher_is_better", attractiveOrStrong: benchmarks.operatingMarginStrong, expensiveOrWeak: benchmarks.operatingMarginWeak }),
+    row({ key: "roic", label: "ROIC", group: "profitability", value: metrics.ratios.returnOnInvestedCapital ?? null, kind: "percent", direction: "higher_is_better", attractiveOrStrong: benchmarks.roicStrong, expensiveOrWeak: benchmarks.roicWeak }),
+    row({ key: "netDebtEbitda", label: "Net debt / EBITDA", group: "financialHealth", value: metrics.ratios.netDebtToEbitda ?? null, kind: "multiple", direction: "lower_is_better", attractiveOrStrong: benchmarks.netDebtToEbitdaStrong, expensiveOrWeak: benchmarks.netDebtToEbitdaWeak }),
+    row({ key: "interestCoverage", label: "Interest coverage", group: "financialHealth", value: metrics.ratios.interestCoverage ?? null, kind: "multiple", direction: "higher_is_better", attractiveOrStrong: benchmarks.interestCoverageStrong, expensiveOrWeak: benchmarks.interestCoverageWeak }),
+  ];
+
+  const available = rows.filter((item) => item.status !== "unavailable");
+  const strong = rows.filter((item) => item.status === "strong").length;
+  const weak = rows.filter((item) => item.status === "weak").length;
+  const missingReasons = rows
+    .filter((item) => item.status === "unavailable")
+    .map((item) => `${item.label}: company metric unavailable.`);
+
+  return {
+    status: "benchmark_only",
+    sectorLabel,
+    benchmarkVersion: report.engine?.scores.methodology.benchmarkVersion ?? STATIC_BENCHMARK_VERSION,
+    rows,
+    missingReasons: [
+      "Live peer constituents and live peer medians are not configured for this local report.",
+      ...missingReasons,
+    ],
+    summary: available.length
+      ? `${strong} metrics screen strong versus the sector benchmark, ${weak} screen weak, and ${available.length - strong - weak} sit inside the benchmark range.`
+      : "No peer-readable metrics are available, so StockBox does not infer a relative positioning view.",
+  };
+}

@@ -13,4 +13,11 @@ describe("analysis first-value UX", () => {
     expect(copy).toContain('advancedSettings: "Avancerade inst\\u00e4llningar"');
     expect(copy).not.toContain("Avancerade inst?llningar");
   });
+
+  it("shows premium staged analysis progress instead of a blank pending state", () => {
+    expect(workbench).toContain("copy.loadingStages.map");
+    expect(copy).toContain("Resolving company identity");
+    expect(copy).toContain("Loading financial statements");
+    expect(copy).toContain("Building thesis, risks and watch signals");
+  });
 });

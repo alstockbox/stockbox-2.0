@@ -137,6 +137,79 @@ describe("historical research data", () => {
     const html = renderToStaticMarkup(createElement(ReportView, { report, mode: "simple", locale: "en" }));
     expect(html).toContain("Historical context");
     expect(html).toContain("Revenue CAGR 3Y");
+    expect(html).toContain("Download CSV");
+  });
+
+  it("renders the premium cockpit, score drivers and watch signals without fabricating missing data", () => {
+    const annualPeriods = Array.from({ length: 4 }, (_, index) => period(2023 + index, index));
+    const input: AnalysisInput = {
+      company: { ticker: "FIX", name: "Fixture Corp", country: "US", currency: "USD" },
+      market: {
+        ticker: "FIX", price: 40, currency: "USD", date: "2026-08-31", volume: 1_000,
+        yearHigh: 45, yearLow: 20, provider: "fixture",
+        priceHistory: yearlyPrices(2023, 2026), performance: {},
+      },
+      fundamentals: {
+        ticker: "FIX", name: "Fixture Corp", sector: "Technology", industry: "Software",
+        annual: [], annualPeriods, reportingCurrency: "USD",
+      },
+      analysisType: "research",
+      investmentProfile: "balanced",
+      analysisDate: "2026-08-31T00:00:00.000Z",
+    };
+    const report = buildAnalysis(input);
+    const html = renderToStaticMarkup(createElement(ReportView, { report, mode: "pro", locale: "en" }));
+
+    expect(html).toContain("Investment Cockpit");
+    expect(html).toContain("Growth dashboard");
+    expect(html).toContain("Margin analysis");
+    expect(html).toContain("Score Driver Snapshot");
+    expect(html).toContain("Peer &amp; Benchmark Lens");
+    expect(html).toContain("Benchmark-only view");
+    expect(html).toContain("Analyst Expectations");
+    expect(html).toContain("Positive contributors");
+    expect(html).toContain("What To Watch Next");
+    expect(html).toContain("Ask StockBox");
+    expect(html).toContain("Missing and unsuitable metrics are not backfilled");
+    expect(html).toContain("Latest data timestamp");
+  });
+
+  it("renders what-changed comparisons only from a real previous report", () => {
+    const previousPeriods = Array.from({ length: 4 }, (_, index) => period(2020 + index, index, {
+      revenue: 100 + index * 10,
+      operatingIncome: 12 + index * 2,
+    }));
+    const currentPeriods = Array.from({ length: 4 }, (_, index) => period(2023 + index, index, {
+      revenue: 180 + index * 30,
+      operatingIncome: 32 + index * 8,
+    }));
+    const baseInput: AnalysisInput = {
+      company: { ticker: "FIX", name: "Fixture Corp", country: "US", currency: "USD" },
+      market: {
+        ticker: "FIX", price: 40, currency: "USD", date: "2026-08-31", volume: 1_000,
+        yearHigh: 45, yearLow: 20, provider: "fixture",
+        priceHistory: yearlyPrices(2020, 2026), performance: {},
+      },
+      fundamentals: {
+        ticker: "FIX", name: "Fixture Corp", sector: "Technology", industry: "Software",
+        annual: [], annualPeriods: currentPeriods, reportingCurrency: "USD",
+      },
+      analysisType: "research",
+      investmentProfile: "balanced",
+      analysisDate: "2026-08-31T00:00:00.000Z",
+    };
+    const previousReport = buildAnalysis({
+      ...baseInput,
+      fundamentals: { ...baseInput.fundamentals!, annualPeriods: previousPeriods },
+      analysisDate: "2023-08-31T00:00:00.000Z",
+    });
+    const report = buildAnalysis(baseInput);
+    const html = renderToStaticMarkup(createElement(ReportView, { report, previousReport, mode: "pro", locale: "en" }));
+
+    expect(html).toContain("What Changed?");
+    expect(html).toContain("Previous analysis");
+    expect(html).toContain("Current analysis");
+    expect(html).toContain("Improved");
   });
 
 });

@@ -2,12 +2,13 @@ const SYMBOLS = ["AAPL", "MSFT", "NVDA", "SPY"];
 const TRADING_DAYS = { "3M": 63, "1Y": 252 };
 
 function providerChain() {
-  const primary = (process.env.MARKET_DATA_PROVIDER || "stooq").trim().toLowerCase();
+  const primary = (process.env.MARKET_DATA_PROVIDER || "yahoo").trim().toLowerCase();
   const fallback = (process.env.MARKET_DATA_FALLBACK_PROVIDERS || "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
-  return [...new Set([primary, ...fallback].filter((provider) => provider !== "disabled"))];
+  if (primary === "disabled") return [];
+  return [...new Set([primary, ...fallback, "yahoo"].filter((provider) => provider !== "disabled"))];
 }
 
 function splitCsvRow(line) {
@@ -119,14 +120,71 @@ async function fetchTwelveData(symbol) {
   }
 }
 
+function dateFromUnix(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  const date = new Date(timestamp * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+function parseYahooRows(result) {
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const quote = Array.isArray(result?.indicators?.quote) ? result.indicators.quote[0] : null;
+  const adjusted = Array.isArray(result?.indicators?.adjclose) ? result.indicators.adjclose[0] : null;
+  const closes = Array.isArray(adjusted?.adjclose)
+    ? adjusted.adjclose
+    : Array.isArray(quote?.close) ? quote.close : [];
+
+  return timestamps.flatMap((timestamp, index) => {
+    const date = dateFromUnix(Number(timestamp));
+    const close = Number(closes[index]);
+    if (!date || !Number.isFinite(close) || close <= 0) return [];
+    return [{ date, close }];
+  }).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+async function fetchYahoo(symbol) {
+  const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`);
+  url.searchParams.set("range", "2y");
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("events", "div,splits");
+  url.searchParams.set("includeAdjustedClose", "true");
+
+  try {
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("text/html")) return { ok: false, reason: "html_response" };
+    if (!response.ok) return { ok: false, reason: response.status === 429 ? "rate_limited" : response.status === 404 ? "not_found" : "upstream_error" };
+    if (!contentType.includes("json")) return { ok: false, reason: "unexpected_content_type" };
+    const payload = await response.json();
+    const error = payload?.chart?.error;
+    if (error) return { ok: false, reason: /not found/i.test(String(error.description ?? error.code ?? "")) ? "not_found" : "upstream_error" };
+    const result = Array.isArray(payload?.chart?.result) ? payload.chart.result[0] : null;
+    const rows = parseYahooRows(result);
+    if (!rows.length) return { ok: false, reason: "empty_response" };
+    return {
+      ok: true,
+      provider: "yahoo-chart",
+      date: rows.at(-1)?.date ?? null,
+      historyLength: rows.length,
+      momentum3MAvailable: performance(rows, TRADING_DAYS["3M"]) !== null,
+      momentum1YAvailable: performance(rows, TRADING_DAYS["1Y"]) !== null,
+      betaAvailable: false,
+      marketCapAvailable: false,
+    };
+  } catch {
+    return { ok: false, reason: "upstream_error" };
+  }
+}
+
 async function probe(symbol) {
   const attemptedProviders = [];
   for (const provider of providerChain()) {
     const result = provider === "twelve_data" ? await fetchTwelveData(symbol)
       : provider === "stooq" ? await fetchStooq(symbol)
+        : provider === "yahoo" ? await fetchYahoo(symbol)
         : { ok: false, reason: "not_configured" };
     attemptedProviders.push({
-      provider: provider === "twelve_data" ? "twelve-data" : provider === "stooq" ? "stooq-eod" : provider,
+      provider: provider === "twelve_data" ? "twelve-data" : provider === "stooq" ? "stooq-eod" : provider === "yahoo" ? "yahoo-chart" : provider,
       status: result.ok ? "available" : "unavailable",
       reason: result.ok ? undefined : result.reason,
     });

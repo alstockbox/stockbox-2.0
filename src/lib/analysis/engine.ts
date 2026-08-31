@@ -154,6 +154,7 @@ export function toFinancialAnalysisInput(input: AnalysisInput): FinancialAnalysi
     trailingTwelveMonths: fundamentals?.trailingTwelveMonths,
     priorTrailingTwelveMonths: fundamentals?.priorTrailingTwelveMonths,
     reportedValuation: fundamentals?.reportedValuation,
+    estimates: input.estimates,
     market: input.market ? {
       price: input.market.price,
       currency: input.market.currency || null,
@@ -667,6 +668,7 @@ export function presentAnalysisReport(
     historical: canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
       ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [])
       : undefined,
+    forwardEstimates: canonicalInput.estimates,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,
     dataStatus: result.dataStatus,
     confidenceBreakdown: result.confidenceBreakdown,

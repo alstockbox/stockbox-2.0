@@ -1,5 +1,5 @@
-import { AlertCircle, CheckCircle2, FileText, ShieldAlert } from "lucide-react";
-import type { AnalysisReport, Flag, Metrics, UiMode } from "@/lib/analysis/types";
+import { AlertCircle, BarChart3, CalendarClock, CheckCircle2, Compass, Database, Eye, FileText, ShieldAlert, TrendingDown, TrendingUp } from "lucide-react";
+import type { AnalysisReport, Flag, Metrics, ScoreContributor, UiMode } from "@/lib/analysis/types";
 import { formatCompactCurrency, formatNumber, formatPercent } from "@/lib/utils/format";
 import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,10 @@ import type { Locale } from "@/lib/i18n/types";
 import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
 import { localizedResearchView, researchViewCopy, researchViewForReport } from "@/lib/analysis/research-view";
 import { HistoricalResearchView } from "./historical-research";
+import { ValuationScenarioLab } from "./valuation-scenario-lab";
+import { ResearchQuestionPanel } from "./research-question-panel";
+import { buildPeerBenchmarkComparison, type PeerBenchmarkRow } from "@/lib/analysis/peer-benchmark";
+import { buildAnalystExpectationsSummary } from "@/lib/analysis/analyst-expectations";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
   return {
@@ -85,7 +89,329 @@ function localizedStatus(status: string, copy: ReturnType<typeof getP0Copy>["rep
   return status;
 }
 
-export function ReportView({ report, mode = "pro", locale = "en" }: { report: AnalysisReport; mode?: UiMode; locale?: Locale }) {
+function isFiniteMetric(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function scoreLabel(value: number | null | undefined, unavailable: string) {
+  return isFiniteMetric(value) ? `${Math.round(value)}/100` : unavailable;
+}
+
+function scoreDrivers(report: AnalysisReport, impact: ScoreContributor["impact"]) {
+  return report.score.dimensions
+    .flatMap((dimension) => (dimension.contributors ?? []).map((contributor) => ({ ...contributor, dimension: dimension.label })))
+    .filter((contributor) => contributor.impact === impact && contributor.availability === "available")
+    .sort((left, right) => (right.weight * Math.abs((right.score ?? 50) - 50)) - (left.weight * Math.abs((left.score ?? 50) - 50)))
+    .slice(0, 6);
+}
+
+function unavailableAwareCurrency(value: number | null | undefined, currency: string | null | undefined, unavailable: string) {
+  return isFiniteMetric(value) ? formatCompactCurrency(value, currency ?? undefined) : unavailable;
+}
+
+type ChangeDirection = "improved" | "worsened" | "unchanged" | "unavailable";
+type ChangeRow = {
+  label: string;
+  previous: string;
+  current: string;
+  delta: string;
+  direction: ChangeDirection;
+};
+
+function directionFor(previous: number | null | undefined, current: number | null | undefined, higherIsBetter = true): ChangeDirection {
+  if (!isFiniteMetric(previous) || !isFiniteMetric(current)) return "unavailable";
+  const delta = current - previous;
+  if (Math.abs(delta) < 0.005) return "unchanged";
+  return higherIsBetter ? delta > 0 ? "improved" : "worsened" : delta < 0 ? "improved" : "worsened";
+}
+
+function signedDelta(previous: number | null | undefined, current: number | null | undefined, formatter: (value: number) => string) {
+  if (!isFiniteMetric(previous) || !isFiniteMetric(current)) return "—";
+  const delta = current - previous;
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${formatter(delta)}`;
+}
+
+function metricChangeRow(
+  label: string,
+  previous: number | null | undefined,
+  current: number | null | undefined,
+  unavailable: string,
+  formatter: (value: number) => string,
+  higherIsBetter = true,
+): ChangeRow {
+  return {
+    label,
+    previous: isFiniteMetric(previous) ? formatter(previous) : unavailable,
+    current: isFiniteMetric(current) ? formatter(current) : unavailable,
+    delta: signedDelta(previous, current, formatter),
+    direction: directionFor(previous, current, higherIsBetter),
+  };
+}
+
+function changeRows(report: AnalysisReport, previousReport: AnalysisReport | null | undefined, copy: ReturnType<typeof getP0Copy>["report"]): ChangeRow[] {
+  if (!previousReport) return [];
+  const previousDimensions = new Map(previousReport.score.dimensions.map((dimension) => [dimension.key, dimension]));
+  const dimensionRows = report.score.dimensions.map((dimension) => metricChangeRow(
+    dimension.label,
+    previousDimensions.get(dimension.key)?.score,
+    dimension.score,
+    copy.unavailable,
+    (value) => `${Math.round(value)}/100`,
+  ));
+  return [
+    metricChangeRow(copy.stockboxScore, previousReport.score.score, report.score.score, copy.unavailable, (value) => `${Math.round(value)}/100`),
+    metricChangeRow(copy.confidence, previousReport.score.confidence, report.score.confidence, copy.unavailable, (value) => `${Math.round(value)}%`),
+    metricChangeRow(copy.dataCoverage, previousReport.dataCoverage, report.dataCoverage, copy.unavailable, (value) => formatPercent(value, 0)),
+    metricChangeRow(copy.currentSharePrice, previousReport.engine?.dcf.currentPrice, report.engine?.dcf.currentPrice, copy.unavailable, (value) => formatCompactCurrency(value, report.engine?.dcf.currency ?? report.reportingCurrency ?? undefined)),
+    metricChangeRow(copy.metricLabels.revenueGrowthAnnual, previousReport.metrics.revenueGrowth1y, report.metrics.revenueGrowth1y, copy.unavailable, (value) => formatPercent(value)),
+    metricChangeRow(copy.metricLabels.operatingMargin, previousReport.metrics.operatingMargin, report.metrics.operatingMargin, copy.unavailable, (value) => formatPercent(value)),
+    metricChangeRow(copy.metricLabels.netDebt, previousReport.metrics.netDebt, report.metrics.netDebt, copy.unavailable, (value) => formatCompactCurrency(value, report.reportingCurrency ?? undefined), false),
+    metricChangeRow(copy.metricLabels.fcfYield, previousReport.metrics.fcfYield, report.metrics.fcfYield, copy.unavailable, (value) => formatPercent(value)),
+    ...dimensionRows,
+  ];
+}
+
+function directionLabel(direction: ChangeDirection, copy: ReturnType<typeof getP0Copy>["report"]) {
+  if (direction === "improved") return copy.improved;
+  if (direction === "worsened") return copy.worsened;
+  if (direction === "unchanged") return copy.unchanged;
+  return copy.dataUnavailable;
+}
+
+function WhatChanged({
+  report,
+  previousReport,
+  copy,
+  locale,
+}: {
+  report: AnalysisReport;
+  previousReport?: AnalysisReport | null;
+  copy: ReturnType<typeof getP0Copy>["report"];
+  locale: Locale;
+}) {
+  if (!previousReport) return null;
+  const rows = changeRows(report, previousReport, copy);
+  const visibleRows = rows.filter((row, index, all) =>
+    row.direction !== "unavailable"
+    || index < 3
+    || all.filter((item) => item.direction !== "unavailable").length < 6
+  ).slice(0, 14);
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.whatChanged}</h2>
+          <p className="mt-2 text-sm text-[#9aa7b8]">
+            {copy.previousAnalysis}: {formatAnalysisTimestamp(previousReport.generatedAt, locale)} · {copy.currentAnalysis}: {formatAnalysisTimestamp(report.generatedAt, locale)}
+          </p>
+        </div>
+        <Badge>{previousReport.ticker}</Badge>
+      </div>
+      <div className="mt-5 overflow-x-auto rounded-md border border-white/10">
+        <table className="min-w-full border-collapse text-left text-xs">
+          <thead>
+            <tr>
+              {[copy.metric, copy.previousAnalysis, copy.currentAnalysis, copy.change, copy.changing].map((heading) => (
+                <th key={heading} className="whitespace-nowrap border-b border-white/10 px-3 py-2 font-semibold text-[#e1cb95]">{heading}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={row.label}>
+                <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#f4efe5]">{row.label}</td>
+                <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]">{row.previous}</td>
+                <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]">{row.current}</td>
+                <td className="number whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]">{row.delta}</td>
+                <td className="whitespace-nowrap border-b border-white/5 px-3 py-2">
+                  <span className={row.direction === "improved" ? "text-emerald-200" : row.direction === "worsened" ? "text-red-200" : "text-[#9aa7b8]"}>
+                    {directionLabel(row.direction, copy)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function peerBenchmarkStatusLabel(status: PeerBenchmarkRow["status"], copy: ReturnType<typeof getP0Copy>["report"]) {
+  if (status === "strong") return copy.strongVsBenchmark;
+  if (status === "weak") return copy.weakVsBenchmark;
+  if (status === "in_range") return copy.inBenchmarkRange;
+  return copy.dataUnavailable;
+}
+
+function peerBenchmarkValue(row: PeerBenchmarkRow, unavailable: string) {
+  if (!isFiniteMetric(row.value)) return unavailable;
+  return row.kind === "percent" ? formatPercent(row.value) : `${formatNumber(row.value, { maximumFractionDigits: 2 })}x`;
+}
+
+function peerBenchmarkRange(row: PeerBenchmarkRow) {
+  const low = row.kind === "percent" ? formatPercent(row.attractiveOrStrong) : `${formatNumber(row.attractiveOrStrong, { maximumFractionDigits: 2 })}x`;
+  const high = row.kind === "percent" ? formatPercent(row.expensiveOrWeak) : `${formatNumber(row.expensiveOrWeak, { maximumFractionDigits: 2 })}x`;
+  return row.direction === "higher_is_better" ? `${high} - ${low}` : `${low} - ${high}`;
+}
+
+function PeerBenchmarkLens({ report, copy }: { report: AnalysisReport; copy: ReturnType<typeof getP0Copy>["report"] }) {
+  const comparison = buildPeerBenchmarkComparison(report);
+  const visibleRows = comparison.rows.slice(0, 9);
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-[#f4efe5]">
+            <BarChart3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" />
+            {copy.peerBenchmarkLens}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{comparison.summary}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge>{copy.benchmarkOnly}</Badge>
+          <Badge>{comparison.benchmarkVersion}</Badge>
+        </div>
+      </div>
+      <p className="mt-4 rounded-md border border-[#b99b5f]/20 bg-[#b99b5f]/5 p-3 text-xs leading-5 text-[#d7c9a3]">
+        {copy.benchmarkOnlyHint}
+      </p>
+      {visibleRows.length ? (
+        <div className="mt-5 overflow-x-auto rounded-md border border-white/10">
+          <table className="min-w-full border-collapse text-left text-xs">
+            <thead>
+              <tr>
+                {[copy.metric, report.ticker, copy.sectorBenchmark, copy.changing, copy.status].map((heading) => (
+                  <th key={heading} className="whitespace-nowrap border-b border-white/10 px-3 py-2 font-semibold text-[#e1cb95]">{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <tr key={row.key}>
+                  <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#f4efe5]">{row.label}</td>
+                  <td className="number whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]">{peerBenchmarkValue(row, copy.unavailable)}</td>
+                  <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]">{peerBenchmarkRange(row)}</td>
+                  <td className="whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#9aa7b8]">
+                    {row.direction === "higher_is_better" ? copy.higherIsBetter : copy.lowerIsBetter}
+                  </td>
+                  <td className="whitespace-nowrap border-b border-white/5 px-3 py-2">
+                    <span className={row.status === "strong" ? "text-emerald-200" : row.status === "weak" ? "text-red-200" : "text-[#9aa7b8]"}>
+                      {peerBenchmarkStatusLabel(row.status, copy)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="mt-5 text-sm text-[#9aa7b8]">{copy.dataUnavailable}</p>
+      )}
+      {comparison.missingReasons.length ? (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">{copy.missingData}</summary>
+          <ul className="mt-2 space-y-1 text-xs leading-5 text-[#9aa7b8]">
+            {comparison.missingReasons.slice(0, 8).map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </details>
+      ) : null}
+    </Card>
+  );
+}
+
+function AnalystExpectationsPanel({ report, copy }: { report: AnalysisReport; copy: ReturnType<typeof getP0Copy>["report"] }) {
+  const summary = buildAnalystExpectationsSummary(report);
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.analystExpectations}</h2>
+          {summary.status === "unavailable" ? (
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{copy.estimatesUnavailableHint}</p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge>{copy.estimateAvailability}: {summary.estimateAvailability === null ? copy.unavailable : `${summary.estimateAvailability}%`}</Badge>
+          {summary.providerStatus ? <Badge>{copy.providerStatus}: {summary.providerStatus}</Badge> : null}
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {summary.rows.map((row) => (
+          <div key={row.key} className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs text-[#9aa7b8]">{row.label}</p>
+            <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{isFiniteMetric(row.value) ? formatPercent(row.value) : copy.unavailable}</p>
+            <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{row.note}</p>
+          </div>
+        ))}
+      </div>
+      {summary.missingReasons.length ? (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">{copy.missingData}</summary>
+          <ul className="mt-2 space-y-1 text-xs leading-5 text-[#9aa7b8]">
+            {summary.missingReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </details>
+      ) : null}
+    </Card>
+  );
+}
+
+function WatchSignalList({ title, items, emptyLabel }: { title: string; items: string[]; emptyLabel: string }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase text-[#e1cb95]">{title}</h3>
+      <div className="mt-3 space-y-2 text-sm leading-6 text-[#c9d2df]">
+        {items.length ? items.slice(0, 8).map((item) => (
+          <p key={item} className="flex gap-2">
+            <Eye className="mt-1 h-4 w-4 shrink-0 text-[#e1cb95]" aria-hidden="true" />
+            <span>{item}</span>
+          </p>
+        )) : <p className="text-[#9aa7b8]">{emptyLabel}</p>}
+      </div>
+    </section>
+  );
+}
+
+function ScoreDriverList({
+  title,
+  drivers,
+  tone,
+  emptyLabel,
+}: {
+  title: string;
+  drivers: ReturnType<typeof scoreDrivers>;
+  tone: "positive" | "negative" | "neutral";
+  emptyLabel: string;
+}) {
+  const Icon = tone === "positive" ? TrendingUp : tone === "negative" ? TrendingDown : BarChart3;
+  const iconClass = tone === "positive" ? "text-emerald-300" : tone === "negative" ? "text-red-300" : "text-[#e1cb95]";
+  return (
+    <section>
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-[#f4efe5]">
+        <Icon className={`h-4 w-4 ${iconClass}`} aria-hidden="true" />
+        {title}
+      </h3>
+      <div className="mt-3 space-y-2">
+        {drivers.length ? drivers.map((driver) => (
+          <div key={`${driver.dimension}-${driver.label}`} className="rounded-md border border-white/10 bg-white/5 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-[#f4efe5]">{driver.label}</p>
+                <p className="mt-1 text-xs text-[#9aa7b8]">{driver.dimension}{driver.period ? ` / ${driver.period}` : ""}</p>
+              </div>
+              <p className="number shrink-0 text-sm font-semibold text-[#e1cb95]">{scoreLabel(driver.score, "N/A")}</p>
+            </div>
+            {isFiniteMetric(driver.value) ? <p className="number mt-2 text-xs text-[#c9d2df]">{formatNumber(driver.value, { maximumFractionDigits: 3 })}</p> : null}
+          </div>
+        )) : <p className="text-sm text-[#9aa7b8]">{emptyLabel}</p>}
+      </div>
+    </section>
+  );
+}
+
+export function ReportView({ report, mode = "pro", locale = "en", previousReport = null }: { report: AnalysisReport; mode?: UiMode; locale?: Locale; previousReport?: AnalysisReport | null }) {
   const copy = getP0Copy(locale).report;
   const extended = report.analysisType === "deep" || report.analysisType === "research";
   const showExplainability = mode === "pro" || extended;
@@ -101,6 +427,13 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
   const researchView = localizedResearchView(researchViewForReport(report), locale);
   const neutralCopy = researchViewCopy(report, locale);
   const adminDiagnostics = adminQaSections(report.adminQa);
+  const positiveDrivers = scoreDrivers(report, "positive");
+  const negativeDrivers = scoreDrivers(report, "negative");
+  const neutralDrivers = scoreDrivers(report, "neutral");
+  const latestDataTimestamp = engine?.diagnostics.financialFlowPeriodEnd
+    ?? engine?.diagnostics.latestFinancialPeriodEnd
+    ?? report.dataAsOf
+    ?? null;
   return (
     <div className="space-y-5" data-report-print>
       <div data-report-brand className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-white/10 bg-[#081421] px-4 py-3 print:border-0 print:bg-transparent print:px-0 print:py-0">
@@ -161,6 +494,53 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
             </div>
           ) : null}
         </div>
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-[#e1cb95]">{copy.investmentCockpit}</p>
+              <h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">{copy.companySnapshot}</h2>
+            </div>
+            <Badge>{copy.latestDataTimestamp}: {latestDataTimestamp ?? copy.unavailable}</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs text-[#9aa7b8]">{copy.currentSharePrice}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
+                {unavailableAwareCurrency(engine?.dcf.currentPrice, engine?.dcf.currency ?? report.reportingCurrency, copy.unavailable)}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs text-[#9aa7b8]">{copy.marketCap}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
+                {unavailableAwareCurrency(engine?.metrics.valuation.marketCap, report.reportingCurrency, copy.unavailable)}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs text-[#9aa7b8]">{copy.reportingCurrency}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{report.reportingCurrency ?? copy.unavailable}</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/5 p-3">
+              <p className="text-xs text-[#9aa7b8]">{copy.engineVersion}</p>
+              <p className="mt-1 text-sm font-semibold text-[#f4efe5]">{report.modelVersion ?? engine?.modelVersion ?? copy.unavailable}</p>
+            </div>
+          </div>
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.scoreStack}</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {report.score.dimensions.map((dimension) => (
+                <div key={dimension.key} className="rounded-md border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between gap-3 text-xs text-[#9aa7b8]">
+                    <span>{dimension.label}</span>
+                    <span className="number text-[#e1cb95]">{scoreLabel(dimension.score, copy.unavailable)}</span>
+                  </div>
+                  {isFiniteMetric(dimension.score) ? <Meter value={dimension.score} className="mt-2" /> : (
+                    <p className="mt-2 text-xs text-[#9aa7b8]">{dimension.missingData?.[0]?.reason ?? copy.missingMetricReason}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
@@ -194,6 +574,27 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
           </dl>
         </Card>
       </div>
+
+      <WhatChanged report={report} previousReport={previousReport} copy={copy} locale={locale} />
+
+      {showExplainability ? <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.scoreDriverSnapshot}</h2>
+            <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">{copy.scoreContributionHint}</p>
+          </div>
+          <Badge>{positiveDrivers.length + negativeDrivers.length + neutralDrivers.length} {copy.contributors}</Badge>
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          <ScoreDriverList title={copy.positiveContributors} drivers={positiveDrivers} tone="positive" emptyLabel={copy.noPositiveDrivers} />
+          <ScoreDriverList title={copy.negativeContributors} drivers={negativeDrivers} tone="negative" emptyLabel={copy.noNegativeDrivers} />
+          <ScoreDriverList title={copy.neutralContributors} drivers={neutralDrivers.slice(0, 4)} tone="neutral" emptyLabel={copy.insufficientSignals} />
+        </div>
+      </Card> : null}
+
+      {showExplainability ? <PeerBenchmarkLens report={report} copy={copy} /> : null}
+
+      {showExplainability ? <AnalystExpectationsPanel report={report} copy={copy} /> : null}
 
       {showExplainability ? <Card>
         <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.explainability}</h2>
@@ -286,6 +687,31 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
         </div>
       </Card> : null}
 
+      {report.researchPlan ? <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-[#f4efe5]">
+              <Compass className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" />
+              {copy.whatToWatchNext}
+            </h2>
+            {report.researchPlan.nextSuggestedReview ? (
+              <p className="mt-2 flex items-center gap-2 text-sm text-[#9aa7b8]">
+                <CalendarClock className="h-4 w-4 text-[#e1cb95]" aria-hidden="true" />
+                {copy.nextReview}: {report.researchPlan.nextSuggestedReview}
+              </p>
+            ) : null}
+          </div>
+          {report.researchPlan.valuationReviewZone ? <Badge>{copy.valuationReviewZone}: {report.researchPlan.valuationReviewZone}</Badge> : null}
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          <WatchSignalList title={copy.whatToWatchNext} items={report.researchPlan.whatToWatch} emptyLabel={copy.noWatchSignals} />
+          <WatchSignalList title={copy.improveCase} items={report.researchPlan.improveCase} emptyLabel={copy.noWatchSignals} />
+          <WatchSignalList title={copy.weakenCase} items={[...report.researchPlan.weakenCase, ...report.researchPlan.invalidationTriggers]} emptyLabel={copy.noWatchSignals} />
+        </div>
+      </Card> : null}
+
+      {showExplainability ? <ResearchQuestionPanel report={report} locale={locale} /> : null}
+
       {showValuation ? <Card>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.valuation}</h2>
@@ -324,6 +750,7 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
             </ul>
           </details>
         ) : null}
+        {engine?.dcf.status === "available" ? <ValuationScenarioLab dcf={engine.dcf} locale={locale} /> : null}
       </Card> : null}
 
       {report.research ? <Card>
@@ -453,6 +880,23 @@ export function ReportView({ report, mode = "pro", locale = "en" }: { report: An
         </div>
         <details className="mt-4 rounded-md border border-white/10 bg-white/5 p-3">
           <summary className="cursor-pointer text-sm font-semibold text-[#e1cb95]">{copy.metricSources}</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-md border border-white/10 bg-[#081421]/80 p-3">
+              <Database className="h-4 w-4 text-[#e1cb95]" aria-hidden="true" />
+              <p className="mt-2 text-xs text-[#9aa7b8]">{copy.dataCoverage}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{formatPercent(report.dataCoverage ?? engine.dataCoverage, 0)}</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-[#081421]/80 p-3">
+              <CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+              <p className="mt-2 text-xs text-[#9aa7b8]">{copy.confidence}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{report.score.confidence}%</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-[#081421]/80 p-3">
+              <AlertCircle className="h-4 w-4 text-red-300" aria-hidden="true" />
+              <p className="mt-2 text-xs text-[#9aa7b8]">{copy.missingData}</p>
+              <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">{engine.missingData.length}</p>
+            </div>
+          </div>
           <div className="mt-3 space-y-2 text-xs leading-5 text-[#9aa7b8]">
             {Object.entries(engine.provenance).map(([metric, source]) => (
               <p key={metric}><span className="font-semibold text-[#c9d2df]">{metric}</span>: {source.source}{source.concept ? ` / ${source.concept}` : ""}{source.periodEnd ? ` / ${source.periodEnd}` : ""}{source.periodBasis ? ` / ${source.periodBasis}` : ""} ({source.valueKind})</p>

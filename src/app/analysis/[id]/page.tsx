@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { ReportView } from "@/components/analysis/report-view";
 import { Container, Section } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/session";
-import { getAnalysis } from "@/lib/db/repositories";
+import { getAnalysis, getPreviousAnalysisForTicker } from "@/lib/db/repositories";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { getLocale } from "@/lib/i18n/server";
 
@@ -10,5 +10,12 @@ export default async function AnalysisPage({ params }: { params: Promise<{ id: s
   const [{ id }, user, locale] = await Promise.all([params, requireUser(), getLocale()]);
   const analysis = await getAnalysis(id, user.id);
   if (!analysis) notFound();
-  return <Section><Container><ReportView report={analysis.report as AnalysisReport} locale={locale} /></Container></Section>;
+  const report = analysis.report as AnalysisReport;
+  const previousReport = await getPreviousAnalysisForTicker({
+    userId: user.id,
+    ticker: report.ticker,
+    currentAnalysisId: id,
+    beforeGeneratedAt: report.generatedAt,
+  });
+  return <Section><Container><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></Container></Section>;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, Sparkles } from "lucide-react";
+import { CheckCircle2, CircleDashed, Search, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type {
   AnalysisReport,
@@ -41,6 +41,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
   const [mode, setMode] = useState<UiMode>(initialMode);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingStage, setLoadingStage] = useState(0);
   const [isPending, startTransition] = useTransition();
   const searchRequest = useRef(0);
 
@@ -115,6 +116,14 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
     };
   }, [query, selected]);
 
+  useEffect(() => {
+    if (!isPending) return;
+    const interval = window.setInterval(() => {
+      setLoadingStage((stage) => Math.min(stage + 1, copy.loadingStages.length - 1));
+    }, 900);
+    return () => window.clearInterval(interval);
+  }, [copy.loadingStages.length, isPending]);
+
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       setResults([]);
@@ -137,6 +146,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
   function runAnalysis() {
     if (!selected) return;
     setError(null);
+    setLoadingStage(0);
     startTransition(async () => {
       const response = await fetch("/api/analysis", {
         method: "POST",
@@ -284,6 +294,31 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
       ) : null}
 
       {error ? <SetupNotice title={copy.failedTitle} detail={error} /> : null}
+
+      {isPending ? (
+        <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-[#e1cb95]">{copy.analyzing}</p>
+              <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{selected?.name ?? selected?.ticker}</h2>
+            </div>
+            <span className="number text-xs text-[#9aa7b8]">{loadingStage + 1}/{copy.loadingStages.length}</span>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-5">
+            {copy.loadingStages.map((stage, index) => {
+              const complete = index < loadingStage;
+              const active = index === loadingStage;
+              const Icon = complete ? CheckCircle2 : CircleDashed;
+              return (
+                <div key={stage} className={active ? "rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 p-3" : "rounded-md border border-white/10 bg-white/5 p-3"}>
+                  <Icon className={complete ? "h-4 w-4 text-emerald-300" : active ? "h-4 w-4 animate-spin text-[#e1cb95]" : "h-4 w-4 text-[#6f7b8c]"} aria-hidden="true" />
+                  <p className="mt-2 text-xs leading-5 text-[#c9d2df]">{stage}</p>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
 
       {report ? <ReportView report={report} mode={mode} locale={locale} /> : null}
     </div>
