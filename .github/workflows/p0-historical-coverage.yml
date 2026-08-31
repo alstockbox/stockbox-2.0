@@ -33,8 +33,8 @@ jobs:
           if count != 2:
               raise SystemExit(f"expected 2 guarded dividend anchors, found {count}")
           text = text.replace(old_dividend, new_dividend)
-          old_status = 'currentPriceEarningsStatus: \\"available\\" | \\"not_meaningful\\" | \\"unavailable\\";'
-          new_status = 'currentPriceEarningsStatus?: \\"available\\" | \\"not_meaningful\\" | \\"unavailable\\";'
+          old_status = 'currentPriceEarningsStatus: "available" | "not_meaningful" | "unavailable";'
+          new_status = 'currentPriceEarningsStatus?: "available" | "not_meaningful" | "unavailable";'
           count = text.count(old_status)
           if count != 1:
               raise SystemExit(f"expected 1 valuation status type anchor, found {count}")
