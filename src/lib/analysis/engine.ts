@@ -665,6 +665,7 @@ export function presentAnalysisReport(
     analysisArchetype: result.analysisArchetype,
     dataCoverage: result.dataCoverage,
     reportingCurrency: canonicalInput.company.reportingCurrency ?? canonicalInput.company.currency ?? null,
+    market: legacyInput.market ?? undefined,
     historical: canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
       ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [])
       : undefined,

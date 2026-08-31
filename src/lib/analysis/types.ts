@@ -470,6 +470,7 @@ export type AnalysisReport = {
   analysisArchetype?: AnalysisArchetype;
   dataCoverage?: number;
   reportingCurrency?: string | null;
+  market?: MarketSnapshot;
   historical?: HistoricalResearchData;
   forwardEstimates?: ForwardEstimates;
   dataAsOf?: string | null;

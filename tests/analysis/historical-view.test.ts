@@ -52,6 +52,10 @@ describe("historical research view", () => {
     expect(html).toContain("Interactive chart view");
     expect(html).toContain("Change");
     expect(html).toContain("Bars");
+    expect(html).toContain("Selected point: 2026-08");
+    expect(html).toContain("$25");
+    expect(html).toContain("font-size=\"12\"");
+    expect(html).toContain("font-size=\"15\"");
     expect(html).toContain("Revenue CAGR 10Y");
     expect(html).not.toContain("Balance sheet history");
     expect(html).not.toContain("Historical P/E");

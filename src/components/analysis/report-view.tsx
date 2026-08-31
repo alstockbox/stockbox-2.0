@@ -109,6 +109,13 @@ function unavailableAwareCurrency(value: number | null | undefined, currency: st
   return isFiniteMetric(value) ? formatCompactCurrency(value, currency ?? undefined) : unavailable;
 }
 
+function currentSharePrice(report: AnalysisReport) {
+  return {
+    value: report.market?.price ?? report.engine?.dcf.currentPrice ?? report.historical?.price.at(-1)?.close ?? null,
+    currency: report.market?.currency ?? report.engine?.dcf.currency ?? report.reportingCurrency,
+  };
+}
+
 type ChangeDirection = "improved" | "worsened" | "unchanged" | "unavailable";
 type ChangeRow = {
   label: string;
@@ -151,6 +158,8 @@ function metricChangeRow(
 
 function changeRows(report: AnalysisReport, previousReport: AnalysisReport | null | undefined, copy: ReturnType<typeof getP0Copy>["report"]): ChangeRow[] {
   if (!previousReport) return [];
+  const previousPrice = currentSharePrice(previousReport);
+  const currentPrice = currentSharePrice(report);
   const previousDimensions = new Map(previousReport.score.dimensions.map((dimension) => [dimension.key, dimension]));
   const dimensionRows = report.score.dimensions.map((dimension) => metricChangeRow(
     dimension.label,
@@ -163,7 +172,7 @@ function changeRows(report: AnalysisReport, previousReport: AnalysisReport | nul
     metricChangeRow(copy.stockboxScore, previousReport.score.score, report.score.score, copy.unavailable, (value) => `${Math.round(value)}/100`),
     metricChangeRow(copy.confidence, previousReport.score.confidence, report.score.confidence, copy.unavailable, (value) => `${Math.round(value)}%`),
     metricChangeRow(copy.dataCoverage, previousReport.dataCoverage, report.dataCoverage, copy.unavailable, (value) => formatPercent(value, 0)),
-    metricChangeRow(copy.currentSharePrice, previousReport.engine?.dcf.currentPrice, report.engine?.dcf.currentPrice, copy.unavailable, (value) => formatCompactCurrency(value, report.engine?.dcf.currency ?? report.reportingCurrency ?? undefined)),
+    metricChangeRow(copy.currentSharePrice, previousPrice.value, currentPrice.value, copy.unavailable, (value) => formatCompactCurrency(value, currentPrice.currency ?? undefined)),
     metricChangeRow(copy.metricLabels.revenueGrowthAnnual, previousReport.metrics.revenueGrowth1y, report.metrics.revenueGrowth1y, copy.unavailable, (value) => formatPercent(value)),
     metricChangeRow(copy.metricLabels.operatingMargin, previousReport.metrics.operatingMargin, report.metrics.operatingMargin, copy.unavailable, (value) => formatPercent(value)),
     metricChangeRow(copy.metricLabels.netDebt, previousReport.metrics.netDebt, report.metrics.netDebt, copy.unavailable, (value) => formatCompactCurrency(value, report.reportingCurrency ?? undefined), false),
@@ -430,6 +439,7 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
   const positiveDrivers = scoreDrivers(report, "positive");
   const negativeDrivers = scoreDrivers(report, "negative");
   const neutralDrivers = scoreDrivers(report, "neutral");
+  const sharePrice = currentSharePrice(report);
   const latestDataTimestamp = engine?.diagnostics.financialFlowPeriodEnd
     ?? engine?.diagnostics.latestFinancialPeriodEnd
     ?? report.dataAsOf
@@ -506,7 +516,7 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
             <div className="rounded-md border border-white/10 bg-white/5 p-3">
               <p className="text-xs text-[#9aa7b8]">{copy.currentSharePrice}</p>
               <p className="number mt-1 text-lg font-semibold text-[#f4efe5]">
-                {unavailableAwareCurrency(engine?.dcf.currentPrice, engine?.dcf.currency ?? report.reportingCurrency, copy.unavailable)}
+                {unavailableAwareCurrency(sharePrice.value, sharePrice.currency, copy.unavailable)}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/5 p-3">

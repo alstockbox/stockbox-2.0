@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { HistoricalFinancialPoint, HistoricalResearchData, MarketPricePoint } from "@/lib/analysis/types";
-import { barGeometry, chartCoordinates, chartDomain } from "@/lib/analysis/chart-geometry";
+import { barGeometry, chartCoordinates, chartDomain, yForChartValue } from "@/lib/analysis/chart-geometry";
 import type { Locale } from "@/lib/i18n/types";
 
 type SeriesKind = "currency" | "percent" | "number";
@@ -11,6 +11,10 @@ type PeriodKey = "1y" | "3y" | "5y" | "10y" | "max";
 type ValueMode = "absolute" | "growth";
 type ChartType = "line" | "bar";
 type ChartPoint = { label: string; dateKey: string; value: number | null; kind: SeriesKind; currency?: string | null };
+const CHART_WIDTH = 720;
+const CHART_HEIGHT = 240;
+const PADDING_X = 78;
+const PADDING_Y = 22;
 
 const PERIODS: Array<{ key: PeriodKey; label: string; limit: number | null }> = [
   { key: "1y", label: "1Y", limit: 13 },
@@ -129,6 +133,13 @@ function growthPoints(points: ChartPoint[]): ChartPoint[] {
   });
 }
 
+function tickValues(min: number, max: number) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
+  if (min === max) return [max, min];
+  const middle = min + (max - min) / 2;
+  return [max, middle, min];
+}
+
 export function HistoricalChartExplorer({
   historical,
   locale,
@@ -147,10 +158,13 @@ export function HistoricalChartExplorer({
   }, [historical, metric, period, valueMode]);
   const numeric = points.filter((point): point is ChartPoint & { value: number } => isNumber(point.value));
   const domain = chartDomain(numeric, chartType === "bar");
-  const coords = chartCoordinates(numeric, 720, 220, chartType === "bar");
-  const zeroLine = barGeometry({ label: "0", dateKey: "0", value: 0, x: 0, y: 0 }, domain, 220, coords.length).baselineY;
+  const coords = chartCoordinates(numeric, CHART_WIDTH, CHART_HEIGHT, chartType === "bar", PADDING_X, PADDING_Y);
+  const ticks = tickValues(domain.min, domain.max);
+  const zeroLine = barGeometry({ label: "0", dateKey: "0", value: 0, x: 0, y: 0 }, domain, CHART_HEIGHT, coords.length, PADDING_Y).baselineY;
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const active = coords.find((point) => point.dateKey === activeKey) ?? coords.at(-1) ?? null;
+  const tooltipX = active ? Math.max(PADDING_X, Math.min(active.x > 540 ? active.x - 178 : active.x + 14, CHART_WIDTH - 170)) : 0;
+  const tooltipY = active ? Math.max(8, Math.min(active.y - 48, CHART_HEIGHT - 70)) : 0;
   const path = coords.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
   const metrics: Array<{ key: MetricKey; label: string }> = [
     { key: "price", label: copy.price },
@@ -236,13 +250,24 @@ export function HistoricalChartExplorer({
       </div>
       <div className="mt-4">
         {coords.length >= 2 ? (
-          <svg viewBox="0 0 720 220" role="img" aria-label={`${copy.title}: ${metrics.find((item) => item.key === metric)?.label ?? metric}`} className="h-56 w-full text-[#e1cb95]">
+          <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} role="img" aria-label={`${copy.title}: ${metrics.find((item) => item.key === metric)?.label ?? metric}`} className="h-64 w-full text-[#e1cb95]">
+            {ticks.map((tick) => {
+              const y = yForChartValue(tick, domain, CHART_HEIGHT, PADDING_Y);
+              return (
+                <g key={tick}>
+                  <line x1={PADDING_X} x2={CHART_WIDTH - 28} y1={y} y2={y} className="stroke-white/10" />
+                  <text x={PADDING_X - 10} y={y + 4} textAnchor="end" className="fill-[#c9d2df]" fontSize="12" fontWeight="600">
+                    {formatValue({ ...(numeric[0] ?? active), value: tick } as ChartPoint, locale, copy.unavailable)}
+                  </text>
+                </g>
+              );
+            })}
             {chartType === "bar" && domain.min < 0 && domain.max > 0 ? (
-              <line x1="28" x2="692" y1={zeroLine} y2={zeroLine} className="stroke-white/20" strokeDasharray="4 4" />
+              <line x1={PADDING_X} x2={CHART_WIDTH - 28} y1={zeroLine} y2={zeroLine} className="stroke-white/25" strokeDasharray="4 4" />
             ) : null}
             {chartType === "line" ? <path d={path} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" /> : null}
             {chartType === "bar" ? coords.map((point) => {
-              const bar = barGeometry(point, domain, 220, coords.length);
+              const bar = barGeometry(point, domain, CHART_HEIGHT, coords.length, PADDING_Y);
               return (
                 <rect
                   key={`bar-${point.dateKey}`}
@@ -253,6 +278,8 @@ export function HistoricalChartExplorer({
                   rx={2}
                   className={active?.dateKey === point.dateKey ? "fill-[#f4efe5]" : "fill-[#e1cb95]"}
                   onMouseEnter={() => setActiveKey(point.dateKey)}
+                  onClick={() => setActiveKey(point.dateKey)}
+                  onTouchStart={() => setActiveKey(point.dateKey)}
                 />
               );
             }) : null}
@@ -261,19 +288,33 @@ export function HistoricalChartExplorer({
                 <circle
                   cx={point.x}
                   cy={point.y}
-                  r={active?.dateKey === point.dateKey ? 5 : 3}
+                  r={active?.dateKey === point.dateKey ? 7 : 5}
                   className="cursor-pointer fill-[#f4efe5] stroke-[#081421]"
-                  strokeWidth="2"
+                  strokeWidth="3"
                   tabIndex={0}
                   role="button"
                   aria-label={`${point.label}: ${formatValue(point, locale, copy.unavailable)}`}
                   onMouseEnter={() => setActiveKey(point.dateKey)}
+                  onClick={() => setActiveKey(point.dateKey)}
+                  onTouchStart={() => setActiveKey(point.dateKey)}
                   onFocus={() => setActiveKey(point.dateKey)}
                 >
                   <title>{`${point.label}: ${formatValue(point, locale, copy.unavailable)}`}</title>
                 </circle>
               </g>
             ))}
+            {active ? (
+              <g pointerEvents="none">
+                <line x1={active.x} x2={active.x} y1={PADDING_Y} y2={CHART_HEIGHT - PADDING_Y} className="stroke-white/15" />
+                <rect x={tooltipX} y={tooltipY} width="164" height="56" rx="6" className="fill-[#07111f] stroke-[#b99b5f]/50" />
+                <text x={tooltipX + 12} y={tooltipY + 21} className="fill-[#9aa7b8]" fontSize="11" fontWeight="600">
+                  {active.label}
+                </text>
+                <text x={tooltipX + 12} y={tooltipY + 42} className="fill-[#f4efe5]" fontSize="15" fontWeight="700">
+                  {formatValue(active, locale, copy.unavailable)}
+                </text>
+              </g>
+            ) : null}
           </svg>
         ) : (
           <p className="text-sm text-[#9aa7b8]">{copy.unavailable}</p>

@@ -172,6 +172,9 @@ describe("historical research data", () => {
     expect(html).toContain("Ask StockBox");
     expect(html).toContain("Missing and unsuitable metrics are not backfilled");
     expect(html).toContain("Latest data timestamp");
+    expect(report.market?.price).toBe(40);
+    expect(html).toContain("Current share price");
+    expect(html).toContain("$40");
   });
 
   it("renders what-changed comparisons only from a real previous report", () => {
