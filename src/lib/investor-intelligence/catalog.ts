@@ -34,6 +34,7 @@ export async function upsertCompanyMetricCatalog(input: {
     company_name: input.report.companyName,
     exchange: company?.exchange ?? company?.mic ?? null,
     country: company?.country ?? null,
+    currency: company?.currency ?? input.report.market?.currency ?? input.report.reportingCurrency ?? null,
     sector,
     industry: null,
     market_cap: marketCap,
