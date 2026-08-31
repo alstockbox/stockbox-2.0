@@ -10,6 +10,7 @@ const stripeCatalog = {
   STRIPE_PRICE_PREMIUM_MONTHLY: "price_pro",
   STRIPE_COUPON_PREMIUM_LAUNCH: "coupon_pro",
   STRIPE_PRICE_ELITE_MONTHLY: "price_elite",
+  STRIPE_COUPON_AFFILIATE_10: "coupon_affiliate_10",
 };
 
 const legalCatalog = {
@@ -25,6 +26,7 @@ function readyEnv(overrides: Record<string, string | undefined> = {}) {
   return parseServerEnv({
     NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
     STRIPE_RESTRICTED_KEY: "rk_test_checkout",
     EMAIL_PROVIDER: "resend",
     RESEND_API_KEY: "re_test_receipts",
@@ -70,6 +72,19 @@ describe("billing readiness", () => {
     const missingStandard = getBillingReadiness(readyEnv({ STRIPE_PRICE_STANDARD_MONTHLY: "" }));
     expect(missingStandard.checkoutReady).toBe(false);
     expect(missingStandard.missingVariables).toEqual(["STRIPE_PRICE_STANDARD_MONTHLY"]);
+  });
+
+  it("blocks paid checkout when Supabase service-role access is missing", () => {
+    const readiness = getBillingReadiness(readyEnv({ SUPABASE_SERVICE_ROLE_KEY: "" }));
+    expect(readiness.checkoutReady).toBe(false);
+    expect(readiness.missingVariables).toContain("SUPABASE_SERVICE_ROLE_KEY");
+  });
+
+  it("blocks checkout when the affiliate customer coupon is missing", () => {
+    const readiness = getBillingReadiness(readyEnv({ STRIPE_COUPON_AFFILIATE_10: "" }));
+    expect(readiness.checkoutReady).toBe(false);
+    expect(readiness.paidCatalogReady).toBe(false);
+    expect(readiness.missingVariables).toEqual(["STRIPE_COUPON_AFFILIATE_10"]);
   });
 
   it("blocks paid checkout until seller identity and VAT mode are configured", () => {

@@ -15,6 +15,6 @@ describe("commercial pricing page", () => {
 
   it("visually marks the catalog-highlighted plan", () => {
     expect(page).toContain("plan.highlight");
-    expect(page).toMatch(/Most popular/i);
+    expect(page).toContain("copy.mostPopular");
   });
 });

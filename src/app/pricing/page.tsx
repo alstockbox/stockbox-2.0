@@ -129,7 +129,7 @@ export default async function PricingPage() {
               <article key={plan.key} className={`rounded-lg border p-5 ${plan.highlight ? "border-[#e1cb95]/60 bg-[#14243a] shadow-lg shadow-black/20" : "border-white/10 bg-[#0d1c2e]/75"}`}>
                 <div className="flex min-h-8 items-start justify-between gap-2">
                   <h2 className="text-lg font-semibold text-[#f4efe5]">{plan.name}</h2>
-                  {plan.highlight ? <Badge>Most Popular</Badge> : action.current ? <Badge>{copy.currentPlan}</Badge> : null}
+                  {plan.highlight ? <Badge>{copy.mostPopular}</Badge> : action.current ? <Badge>{copy.currentPlan}</Badge> : null}
                 </div>
                 <p className="number mt-5 text-3xl font-semibold text-[#f4efe5]">
                   {plan.launchOffer?.monthlyPriceSek ?? plan.monthlyPriceSek} kr
@@ -168,6 +168,9 @@ export default async function PricingPage() {
             <ButtonLink href="/withdraw" variant="ghost" className="px-0 text-[#e1cb95] hover:bg-transparent hover:text-white">
               {copy.withdrawalFunction}
             </ButtonLink>
+            <Link href="/legal/withdrawal-form" className="text-[#e1cb95] hover:text-white">
+              {locale === "sv" ? "Standardblankett för ångerrätt" : "Model withdrawal form"}
+            </Link>
             <Link href="/legal/terms" className="text-[#e1cb95] hover:text-white">{copy.terms}</Link>
             <Link href="/legal/privacy" className="text-[#e1cb95] hover:text-white">{copy.privacy}</Link>
           </div>

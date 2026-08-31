@@ -121,12 +121,17 @@ export async function POST(request: Request) {
         ? `Du startar ett m\u00e5nadsabonnemang f\u00f6r ${regularMonthlyPriceSek} kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig.`
         : `You are starting a monthly subscription at SEK ${regularMonthlyPriceSek}/month until cancelled. By clicking Subscribe you incur a payment obligation.`;
 
+  const withdrawalFormUrl = `${env.NEXT_PUBLIC_APP_URL}/legal/withdrawal-form`;
+  const checkoutDisclosureWithWithdrawal = body.data.locale === "sv"
+    ? `${checkoutDisclosure} Standardblankett för ångerrätt: ${withdrawalFormUrl}`
+    : `${checkoutDisclosure} Model withdrawal form: ${withdrawalFormUrl}`;
+
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
     locale: body.data.locale,
     submit_type: "subscribe",
-    custom_text: { submit: { message: checkoutDisclosure } },
+    custom_text: { submit: { message: checkoutDisclosureWithWithdrawal } },
     ...(env.LEGAL_VAT_MODE === "vat_registered"
       ? { automatic_tax: { enabled: true } }
       : {}),
@@ -140,13 +145,15 @@ export async function POST(request: Request) {
     metadata: {
       userId: user.id,
       plan: plan.key,
-      offer
+      offer,
+      locale: body.data.locale
     },
     subscription_data: {
       metadata: {
         userId: user.id,
         plan: plan.key,
-        offer
+        offer,
+        locale: body.data.locale
       }
     }
   };

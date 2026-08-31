@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 const root = join(import.meta.dirname, "../..");
@@ -16,6 +16,8 @@ describe("admin giveaway controls", () => {
     expect(actions).toContain(".min(1).max(24)");
     expect(page).toContain("Free access months");
     expect(page).toContain("Redemption deadline (days, optional)");
+    expect(page).toContain("{campaign.duration_months} months");
+    expect(page).not.toContain("{campaign.duration_months} days");
   });
   it("wires admin revocation without deleting campaign history", () => {
     expect(actions).toContain("revokeAffiliateGiveawayCampaignAction");

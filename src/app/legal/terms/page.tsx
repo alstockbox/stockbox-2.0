@@ -89,6 +89,14 @@ export default async function TermsPage() {
                 {sv ? "Öppna ångerfunktionen" : "Open the withdrawal function"}
               </Link>.
             </p>
+            <p className={paragraph}>
+              {sv
+                ? "Du kan också använda standardblanketten för utövande av ångerrätten."
+                : "You may also use the model withdrawal form."}{" "}
+              <Link href="/legal/withdrawal-form" className="font-semibold text-[#e1cb95] hover:text-white">
+                {sv ? "Öppna standardblanketten" : "Open the model form"}
+              </Link>.
+            </p>
             <p className={paragraph}>{sv
               ? "Vid giltigt utövande återbetalas belopp i den omfattning och inom den tid som tvingande lag kräver."
               : "When the statutory right is validly exercised, amounts are refunded to the extent and within the time required by mandatory law."}</p>

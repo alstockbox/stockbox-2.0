@@ -31,4 +31,19 @@ describe("pricing consumer-rights copy", () => {
     expect(getP0Copy("sv").billing.withdrawContract).toBe("\u00c5ngra avtal");
     expect(getP0Copy("en").billing.withdrawContract).toBe("Withdraw from a contract");
   });
+
+
+  it("does not advertise deferred monitoring or AI assistant access", () => {
+    expect(getP0Copy("en").pricing.copy.toLowerCase()).not.toContain("monitor");
+    expect(getP0Copy("sv").pricing.copy.toLowerCase()).not.toContain("bevakning");
+    expect(getP0Copy("en").pricing.copy.toLowerCase()).not.toContain("ai");
+    expect(getP0Copy("sv").pricing.copy.toLowerCase()).not.toContain("ai");
+    expect(getP0Copy("en").pricing.copy.toLowerCase()).toContain("batch");
+  });
+
+
+  it("localizes the highlighted-plan badge", () => {
+    expect(getP0Copy("en").pricing.mostPopular).toBe("Most Popular");
+    expect(getP0Copy("sv").pricing.mostPopular).toBe("Mest populär");
+  });
 });

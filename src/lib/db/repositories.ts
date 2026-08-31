@@ -1,7 +1,6 @@
 import type { AnalysisReport, BatchQaResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getPlan, type PlanKey } from "@/lib/billing/plans";
-import { hasPaidAccessStatus } from "@/lib/billing/subscriptions";
+import { findPlan, getPlan, type PlanKey } from "@/lib/billing/plans";
 import { MODEL_VERSION } from "@/lib/analysis/config";
 import { sanitizeDiagnosticContext, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 
@@ -39,14 +38,17 @@ function numberFromJson(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function entitlementPlanFromJson(value: unknown): EntitlementPlanKey | null {
+  if (value === "affiliate_ambassador") return "affiliate_ambassador";
+  if (typeof value !== "string") return null;
+  return findPlan(value)?.key ?? null;
+}
+
 function entitlementFromJson(value: unknown): AnalysisEntitlementResult {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return fallbackEntitlement(false);
   const payload = value as Record<string, unknown>;
-  const planKey: EntitlementPlanKey = payload.plan === "affiliate_ambassador"
-    ? "affiliate_ambassador"
-    : typeof payload.plan === "string" && getPlan(payload.plan as PlanKey).key === payload.plan
-      ? payload.plan as PlanKey
-      : "free";
+  const planKey = entitlementPlanFromJson(payload.plan);
+  if (!planKey) return fallbackEntitlement(false);
   const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
     ? payload.usage as Record<string, unknown>
     : {};
@@ -317,46 +319,34 @@ export async function getBatchEntitlement(input: {
   if (input.isAdmin) {
     return { allowed: true, configured: true, plan: "elite", rowLimit: 50 };
   }
-  if (input.isAffiliateAmbassador) {
-    const supabase = createAdminClient();
-    if (!supabase) {
-      return { allowed: true, configured: false, plan: "affiliate_ambassador", rowLimit: 50 };
-    }
-    const { data, error } = await supabase
-      .from("ambassador_entitlements")
-      .select("batch_rows")
-      .eq("user_id", input.userId)
-      .single();
-    if (error || !data) {
-      await logApplicationError({
-        service: "ambassador-entitlements",
-        message: "Ambassador entitlement row missing; using historical fallback.",
-        userId: input.userId,
-      });
-      return { allowed: true, configured: true, plan: "affiliate_ambassador", rowLimit: 50 };
-    }
-    const rowLimit = Math.min(Math.max(Number(data.batch_rows) || 0, 0), 50);
-    return { allowed: rowLimit > 0, configured: true, plan: "affiliate_ambassador", rowLimit };
-  }
 
   const supabase = createAdminClient();
   if (!supabase) {
-    return { allowed: false, configured: false, plan: "free", rowLimit: 0 };
+    return { allowed: false, configured: false, plan: input.isAffiliateAmbassador ? "affiliate_ambassador" : "free", rowLimit: 0 };
   }
 
-  const { data: subscription } = await supabase
-    .from("subscriptions")
-    .select("plan_key,status")
-    .eq("user_id", input.userId)
-    .single();
-  const active = subscription && hasPaidAccessStatus(subscription.status);
-  const plan = getPlan(active ? subscription.plan_key : "free");
-  const rowLimit = Math.min(plan.entitlements.batchRows, 50);
+  const { data, error } = await supabase.rpc("get_effective_workspace_entitlements", {
+    p_user_id: input.userId,
+  });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    return { allowed: false, configured: false, plan: input.isAffiliateAmbassador ? "affiliate_ambassador" : "free", rowLimit: 0 };
+  }
+
+  const payload = data as Record<string, unknown>;
+  const plan = entitlementPlanFromJson(payload.plan);
+  if (!plan) {
+    return { allowed: false, configured: false, plan: "free", rowLimit: 0 };
+  }
+  const entitlements = payload.entitlements && typeof payload.entitlements === "object" && !Array.isArray(payload.entitlements)
+    ? payload.entitlements as Record<string, unknown>
+    : {};
+  const configured = payload.configured !== false;
+  const rowLimit = Math.min(Math.max(numberFromJson(entitlements.batchRows), 0), 50);
 
   return {
-    allowed: rowLimit > 0,
-    configured: true,
-    plan: plan.key,
+    allowed: configured && rowLimit > 0,
+    configured,
+    plan,
     rowLimit,
   };
 }

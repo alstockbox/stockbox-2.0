@@ -142,7 +142,7 @@ describe("Basic checkout flow", () => {
       submit_type: "subscribe",
       custom_text: {
         submit: {
-          message: "You are starting a monthly subscription. Introductory price SEK 49/month for 3 months, then SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation."
+          message: "You are starting a monthly subscription. Introductory price SEK 49/month for 3 months, then SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation. Model withdrawal form: https://stockbox.test/legal/withdrawal-form"
         }
       },
       success_url: "https://stockbox.test/settings/billing?checkout=success",
@@ -153,13 +153,15 @@ describe("Basic checkout flow", () => {
       metadata: {
         userId: "user_1",
         plan: "basic",
-        offer: "basic_launch_3_months"
+        offer: "basic_launch_3_months",
+        locale: "en"
       },
       subscription_data: {
         metadata: {
           userId: "user_1",
           plan: "basic",
-          offer: "basic_launch_3_months"
+          offer: "basic_launch_3_months",
+          locale: "en"
         }
       }
     });
@@ -185,7 +187,7 @@ describe("Basic checkout flow", () => {
       submit_type: "subscribe",
       custom_text: {
         submit: {
-          message: "Du startar ett m\u00e5nadsabonnemang. Introduktionspris 49 kr/m\u00e5n i 3 m\u00e5nader, d\u00e4refter 69 kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig."
+          message: "Du startar ett m\u00e5nadsabonnemang. Introduktionspris 49 kr/m\u00e5n i 3 m\u00e5nader, d\u00e4refter 69 kr/m\u00e5n tills du avslutar. Genom att klicka Prenumerera blir du betalningsskyldig. Standardblankett för ångerrätt: https://stockbox.test/legal/withdrawal-form"
         }
       }
     });
@@ -274,7 +276,7 @@ describe("Basic checkout flow", () => {
     expect(params.subscription_data?.metadata).toMatchObject({ offer: "none" });
     expect(params.locale).toBe("en");
     expect(params.custom_text?.submit?.message).toBe(
-      "You are starting a monthly subscription at SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation."
+      "You are starting a monthly subscription at SEK 69/month until cancelled. By clicking Subscribe you incur a payment obligation. Model withdrawal form: https://stockbox.test/legal/withdrawal-form"
     );
     expect(params.custom_text?.submit?.message).not.toContain("49");
   });

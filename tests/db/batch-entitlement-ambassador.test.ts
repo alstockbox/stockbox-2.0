@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -10,35 +11,32 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 import { getBatchEntitlement } from "../../src/lib/db/repositories";
 
-function queryResult(data: unknown) {
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    single: vi.fn().mockResolvedValue({ data, error: null }),
-    maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
-  };
-  return query;
-}
-
 describe("ambassador batch entitlement", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
   });
-  it("allows an active ambassador to use batch without a paid subscription", async () => {
-    const entitlements = queryResult({ batch_rows: 50 });
 
-    mocks.createAdminClient.mockReturnValue({
-      from: vi.fn((table: string) => {
-        if (table === "ambassador_entitlements") return entitlements;
-        throw new Error(`Unexpected table: ${table}`);
-      }),
+  it("allows an active ambassador to use the configured batch entitlement without a paid subscription", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: {
+        configured: true,
+        plan: "affiliate_ambassador",
+        entitlements: { batchRows: 50 },
+      },
+      error: null,
     });
-
-    await expect(getBatchEntitlement({ userId: "ambassador_1", isAffiliateAmbassador: true })).resolves.toEqual({
+    await expect(getBatchEntitlement({
+      userId: "ambassador_1",
+      isAffiliateAmbassador: true,
+    })).resolves.toEqual({
       allowed: true,
       configured: true,
       plan: "affiliate_ambassador",
       rowLimit: 50,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("get_effective_workspace_entitlements", {
+      p_user_id: "ambassador_1",
     });
   });
 });

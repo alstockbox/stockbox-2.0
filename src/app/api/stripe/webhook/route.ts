@@ -3,7 +3,9 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { commissionableInvoiceAmountCents } from "@/lib/affiliate/commission";
 import { getPlanByStripePrice } from "@/lib/billing/plans";
 import { getStripe } from "@/lib/billing/stripe";
+import { markContractConfirmationFailed, markContractConfirmationSent, reserveContractConfirmation } from "@/lib/billing/contract-confirmation-delivery";
 import { getServerEnv } from "@/lib/env/server";
+import { sendContractConfirmationEmail } from "@/lib/notifications/contract-confirmation";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function sanitizeSupabaseErrorMessage(message: string) {
@@ -45,6 +47,9 @@ function invoiceSubscriptionDetails(invoice: Stripe.Invoice) {
   return {
     userId: typeof userId === "string" && userId.length > 0 ? userId : null,
     subscriptionId: stripeId(details.subscription),
+    planKey: typeof details.metadata?.plan === "string" ? details.metadata.plan : null,
+    offer: typeof details.metadata?.offer === "string" ? details.metadata.offer : "none",
+    locale: details.metadata?.locale === "sv" ? "sv" as const : "en" as const,
   };
 }
 
@@ -150,6 +155,39 @@ async function recordAffiliateCommission(invoice: Stripe.Invoice, eventId: strin
   if (error) throw new Error("Affiliate commission creation failed.");
 }
 
+async function sendInitialContractConfirmation(invoice: Stripe.Invoice, eventCreated: number) {
+  if (invoice.billing_reason !== "subscription_create" || invoice.amount_paid <= 0) return;
+  const details = invoiceSubscriptionDetails(invoice);
+  const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
+  if (!details?.userId || !details.planKey || !email) throw new Error("Initial paid invoice is missing contract-confirmation identity data.");
+
+  const reservation = await reserveContractConfirmation({ invoiceId: invoice.id, userId: details.userId, subscriptionId: details.subscriptionId });
+  if (!reservation.ok) throw new Error("Contract confirmation reservation failed.");
+  if (!reservation.reserved) return;
+
+  const paidAt = invoice.status_transitions?.paid_at ?? eventCreated;
+  let sent: Awaited<ReturnType<typeof sendContractConfirmationEmail>>;
+  try {
+    sent = await sendContractConfirmationEmail({
+      to: email, locale: details.locale, planKey: details.planKey, offer: details.offer, invoiceId: invoice.id,
+      subscriptionId: details.subscriptionId, contractDate: new Date(paidAt * 1000).toISOString(),
+      amountPaidCents: invoice.amount_paid, currency: invoice.currency.toLowerCase(),
+    });
+  } catch {
+    await markContractConfirmationFailed(invoice.id);
+    throw new Error("Contract confirmation delivery failed.");
+  }
+  if (!sent.ok) {
+    await markContractConfirmationFailed(invoice.id);
+    throw new Error("Contract confirmation delivery failed.");
+  }
+  const marked = await markContractConfirmationSent(invoice.id, sent.providerMessageId);
+  if (!marked) {
+    await markContractConfirmationFailed(invoice.id);
+    throw new Error("Contract confirmation sent-state persistence failed.");
+  }
+}
+
 async function reverseAffiliateCommission(paymentIntentId: string | null, reason: "refund" | "chargeback") {
   if (!paymentIntentId) return;
   const supabase = createAdminClient();
@@ -218,7 +256,9 @@ export async function POST(request: Request) {
     }
     case "invoice.paid": {
       try {
-        await recordAffiliateCommission(event.data.object as Stripe.Invoice, event.id, event.created);
+        const invoice = event.data.object as Stripe.Invoice;
+        await recordAffiliateCommission(invoice, event.id, event.created);
+        await sendInitialContractConfirmation(invoice, event.created);
       } catch {
         return Response.json({ error: "Webhook processing failed." }, { status: 500 });
       }

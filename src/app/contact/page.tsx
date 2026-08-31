@@ -30,7 +30,7 @@ export default async function ContactPage() {
         {seller.postalAddress ? <p className="text-sm leading-6 text-[#c9d2df]">{seller.postalAddress}</p> : null}
         {seller.organizationNumber ? <p className="text-xs text-[#9aa7b8]">{sv ? "Org.nr" : "Organization no."}: {seller.organizationNumber}</p> : null}
       </Card>
-      <Card><ContactForm /></Card>
+      <Card><ContactForm locale={locale} /></Card>
     </div>
   </Container></Section>;
 }

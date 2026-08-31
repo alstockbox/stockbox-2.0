@@ -7,6 +7,7 @@ export const SUBSCRIPTIONS_UNAVAILABLE_MESSAGE =
 export type BillingEnvironmentVariable =
   | "NEXT_PUBLIC_SUPABASE_URL"
   | "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+  | "SUPABASE_SERVICE_ROLE_KEY"
   | "STRIPE_RESTRICTED_KEY"
   | "STRIPE_PRICE_BASIC_MONTHLY"
   | "STRIPE_COUPON_BASIC_LAUNCH"
@@ -15,6 +16,7 @@ export type BillingEnvironmentVariable =
   | "STRIPE_PRICE_PREMIUM_MONTHLY"
   | "STRIPE_COUPON_PREMIUM_LAUNCH"
   | "STRIPE_PRICE_ELITE_MONTHLY"
+  | "STRIPE_COUPON_AFFILIATE_10"
   | "EMAIL_PROVIDER"
   | "RESEND_API_KEY"
   | "FROM_EMAIL"
@@ -23,6 +25,7 @@ export type BillingEnvironmentVariable =
 export type BillingReadiness = {
   checkoutReady: boolean;
   supabaseConfigured: boolean;
+  serviceRolePresent: boolean;
   restrictedKeyPresent: boolean;
   basicPricePresent: boolean;
   launchCouponPresent: boolean;
@@ -40,11 +43,13 @@ const requiredStripeCatalog: BillingEnvironmentVariable[] = [
   "STRIPE_PRICE_PREMIUM_MONTHLY",
   "STRIPE_COUPON_PREMIUM_LAUNCH",
   "STRIPE_PRICE_ELITE_MONTHLY",
+  "STRIPE_COUPON_AFFILIATE_10",
 ];
 
 export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingReadiness {
   const supabaseUrlPresent = Boolean(env.NEXT_PUBLIC_SUPABASE_URL);
   const supabaseKeyPresent = Boolean(env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
+  const serviceRolePresent = Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
   const restrictedKeyPresent = Boolean(env.STRIPE_RESTRICTED_KEY);
   const legalReadiness = getLegalCommerceReadiness(env);
   const withdrawalReceiptReady = env.EMAIL_PROVIDER === "resend" && Boolean(env.RESEND_API_KEY) && Boolean(env.FROM_EMAIL);
@@ -52,6 +57,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
 
   if (!supabaseUrlPresent) missingVariables.push("NEXT_PUBLIC_SUPABASE_URL");
   if (!supabaseKeyPresent) missingVariables.push("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  if (!serviceRolePresent) missingVariables.push("SUPABASE_SERVICE_ROLE_KEY");
   if (!restrictedKeyPresent) missingVariables.push("STRIPE_RESTRICTED_KEY");
   if (env.EMAIL_PROVIDER !== "resend") missingVariables.push("EMAIL_PROVIDER");
   if (!env.RESEND_API_KEY) missingVariables.push("RESEND_API_KEY");
@@ -66,6 +72,7 @@ export function getBillingReadiness(env: ServerEnv = getServerEnv()): BillingRea
   return {
     checkoutReady: missingVariables.length === 0,
     supabaseConfigured: supabaseUrlPresent && supabaseKeyPresent,
+    serviceRolePresent,
     restrictedKeyPresent,
     basicPricePresent: Boolean(env.STRIPE_PRICE_BASIC_MONTHLY),
     launchCouponPresent: Boolean(env.STRIPE_COUPON_BASIC_LAUNCH),
@@ -85,6 +92,7 @@ export function reportBillingReadiness(
   logger("[billing] Checkout is not ready.", {
     checkoutReady: false,
     supabaseConfigured: readiness.supabaseConfigured,
+    serviceRolePresent: readiness.serviceRolePresent,
     restrictedKeyPresent: readiness.restrictedKeyPresent,
     basicPricePresent: readiness.basicPricePresent,
     launchCouponPresent: readiness.launchCouponPresent,

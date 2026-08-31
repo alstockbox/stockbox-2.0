@@ -1,9 +1,9 @@
 # StockBox 2.0 Deployment
 
-Current date: August 27, 2026
+Current date: August 31, 2026
 Release deadline: August 31, 2026
 
-Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts supplies filings. Production market data should use Twelve Data as the primary provider and Stooq as the explicitly configured end-of-day fallback; StockBox does not append an unconfigured market-data provider to that chain. Yahoo remains available only when explicitly selected/configured for market data, while Yahoo reported fundamentals may still supplement SEC fundamentals under the engine's provider-orchestration rules. News and AI are disabled, and Resend is the optional email adapter.
+Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, Stripe for billing, and PostHog for product analytics. SEC Companyfacts supplies filing-grounded fundamentals where available. Production market data currently uses Yahoo as the configured primary provider with Stooq as the explicit fallback; StockBox does not append an unconfigured provider to the chain. Yahoo reported fundamentals may supplement SEC fundamentals under the engine's provider-orchestration rules. News and customer-facing AI are disabled. Resend is the production email adapter for paid-launch transactional delivery, including withdrawal receipts and first-purchase contract confirmations.
 
 ## P0 Deployment Principles
 
@@ -20,7 +20,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 1. Create a production Supabase project.
 2. Store project URL, anon key, service-role key, and database connection values in the deployment environment.
-3. Apply all database migrations in order through `20260827180007_distributed_rate_limits.sql`.
+3. Apply all database migrations in order through `20260830220500_contract_confirmation_delivery.sql`.
 4. Enable RLS on user-owned tables and write explicit policies.
 5. Configure Auth site URL and redirect URLs for production and preview domains.
 6. Configure email/SMTP settings if Supabase default emails are not acceptable.
@@ -33,18 +33,21 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 
 ## Stripe Setup
 
-1. Create the Basic recurring price at 79 SEK/month and a repeating three-month coupon that reduces the first three payments to 49 SEK/month. Keep Standard, Premium, and Elite unpriced and inactive.
+1. Create recurring monthly prices for Basic 69 SEK, Standard 119 SEK, Pro (`premium`) 179 SEK and Elite 399 SEK. Create three-month launch coupons that yield 49, 79 and 159 SEK/month for Basic, Standard and Pro. Create the 10% affiliate coupon for eligible referred customers. Elite has no launch coupon.
 2. Configure checkout success/cancel URLs.
 3. Configure billing portal.
 4. Create production webhook endpoint for subscription, invoice, checkout, customer, and payment events.
-5. Store a least-privilege restricted server key, the Basic price ID, Basic launch coupon ID, and webhook signing secret in environment variables.
+5. Store a least-privilege restricted server key, all four paid price IDs, all three launch coupon IDs, the affiliate 10% coupon ID, and the webhook signing secret in environment variables.
 6. Implement idempotent webhook handling and entitlement sync from Stripe events.
 7. Verify in test mode before live mode:
-   - checkout starts;
+   - checkout starts for every paid plan;
+   - only one StockBox launch offer can ever be redeemed per customer;
+   - affiliate 10% discount applies only when no better launch promotion applies and promotions never stack;
    - subscription activates;
    - credits/limits update;
    - cancellation/downgrade updates access;
    - duplicate webhook delivery does not duplicate credits;
+   - the initial paid invoice sends exactly one durable contract-confirmation email, while renewals do not resend it;
    - failed payment is reflected correctly.
 
 ## PostHog Setup
@@ -96,7 +99,7 @@ Target production stack: Vercel for web hosting, Supabase for PostgreSQL/auth, S
 - Supabase: URL, anon key, service-role key, database URL.
 - Auth: redirect URLs, session settings.
 - Stripe: secret key, publishable key, webhook secret, product/price IDs.
-- Financial data: `SEC_USER_AGENT`, `MARKET_DATA_PROVIDER=twelve_data`, `MARKET_DATA_FALLBACK_PROVIDERS=stooq`, `TWELVE_DATA_API_KEY`, base URLs, exchange coverage.
+- Financial data: `SEC_USER_AGENT`, configured market-data provider (currently `MARKET_DATA_PROVIDER=yahoo`), `MARKET_DATA_FALLBACK_PROVIDERS=stooq`, provider credentials where required, base URLs, and exchange coverage.
 - News: provider keys, base URLs, attribution settings.
 - AI: provider keys, model names, budget/rate limits.
 - Email: API key, sender, admin alert recipients.

@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -14,7 +14,7 @@ describe("commercial pricing release wiring", () => {
 
   it("visually marks the configured highlighted plan", () => {
     expect(pricing).toContain("plan.highlight");
-    expect(pricing).toMatch(/Most popular|Most Popular/);
+    expect(pricing).toContain("copy.mostPopular");
   });
 
   it("recognizes launch redemption metadata for every launch-enabled paid plan", () => {

@@ -14,6 +14,7 @@ type ProviderHealthRow = { provider: string; operation: string; ok: boolean; lat
 type ErrorLogRow = { id: number; service: string; sanitized_error: string; created_at: string };
 type RuntimeHealth = { provider: string; operation: string; calls: number; successes: number; latencyTotal: number; latencySamples: number; lastIssue: string | null };
 type AmbassadorEntitlementRow = { user_id: string; monthly_analyses: number; deep_analyses: number; batch_rows: number; watchlist_items: number; portfolios: number };
+type AmbassadorProfileRow = { id: string };
 type AffiliateRow = { id: string; user_id: string | null; display_name: string | null; code: string; status: string; commission_basis_points: number };
 type GiveawayCampaignRow = { id: string; affiliate_id: string; label: string; plan_key: string; quantity: number; duration_months: number; claim_expires_at: string | null; status: string; created_at: string };
 type GiveawayCodeRow = { campaign_id: string; status: string };
@@ -34,6 +35,12 @@ export default async function AdminPage() {
     ? await supabase.from("profiles").select("id,email,role,created_at").order("created_at", { ascending: false }).limit(50)
     : { data: [] };
   const profiles = profileResult.data ?? [];
+  const ambassadorProfileResult = supabase
+    ? await supabase.from("profiles").select("id").eq("role", "affiliate_ambassador")
+    : { data: [] };
+  const ambassadorUserIds = new Set(
+    ((ambassadorProfileResult.data ?? []) as AmbassadorProfileRow[]).map((profile) => profile.id),
+  );
   const [ambassadorEntitlementResult, affiliateResult] = supabase ? await Promise.all([
     supabase.from("ambassador_entitlements")
       .select("user_id,monthly_analyses,deep_analyses,batch_rows,watchlist_items,portfolios"),
@@ -177,7 +184,7 @@ export default async function AdminPage() {
             <label className="text-xs text-[#9aa7b8] lg:col-span-2">Ambassador
               <select name="affiliateId" required className="mt-1 w-full rounded-md border border-white/10 bg-[#081523] px-3 py-2 text-sm text-white">
                 <option value="">Select ambassador</option>
-                {((affiliateResult.data ?? []) as AffiliateRow[]).filter((item) => item.status === "active").map((item) => (
+                {((affiliateResult.data ?? []) as AffiliateRow[]).filter((item) => item.status === "active" && item.user_id !== null && ambassadorUserIds.has(item.user_id)).map((item) => (
                   <option key={item.id} value={item.id}>{item.display_name ?? item.code} ({item.code})</option>
                 ))}
               </select>
@@ -206,7 +213,7 @@ export default async function AdminPage() {
               const counts = giveawayCounts.get(campaign.id) ?? { available: 0, redeemed: 0, revoked: 0 };
               const planName = campaign.plan_key === "premium" ? "Pro" : campaign.plan_key.charAt(0).toUpperCase() + campaign.plan_key.slice(1);
               return <Card key={campaign.id} className="flex flex-wrap items-center justify-between gap-4">
-                <div><p className="font-semibold text-[#f4efe5]">{campaign.label}</p><p className="mt-1 text-xs text-[#9aa7b8]">{planName} · {campaign.duration_months} days · {counts.redeemed}/{campaign.quantity} redeemed · {counts.available} available · {campaign.claim_expires_at ? `claim by ${new Date(campaign.claim_expires_at).toLocaleDateString("sv-SE")}` : "no redemption deadline"}</p></div>
+                <div><p className="font-semibold text-[#f4efe5]">{campaign.label}</p><p className="mt-1 text-xs text-[#9aa7b8]">{planName} · {campaign.duration_months} months · {counts.redeemed}/{campaign.quantity} redeemed · {counts.available} available · {campaign.claim_expires_at ? `claim by ${new Date(campaign.claim_expires_at).toLocaleDateString("sv-SE")}` : "no redemption deadline"}</p></div>
                 <div className="flex items-center gap-3"><span className="text-xs uppercase text-[#9aa7b8]">{campaign.status}</span>{campaign.status === "active" ? <form action={revokeAffiliateGiveawayCampaignAction}><input type="hidden" name="campaignId" value={campaign.id} /><button className="rounded-md border border-red-300/20 px-3 py-2 text-xs text-red-200 hover:bg-red-400/10">Revoke unused codes</button></form> : null}</div>
               </Card>;
             })}

@@ -115,8 +115,8 @@ export const p0Copy = {
     },
     pricing: {
       kicker: "Simple monthly pricing", title: "Start free. Pay for depth and scale.",
-      copy: "All plans use the same factual engine. Higher tiers add analysis volume, monitoring and workflow capacity.",
-      currentPlan: "Current plan", perMonth: "per month", firstMonths: "per month for the first", monthsThen: "months, then",
+      copy: "All plans use the same factual engine. Higher tiers add analysis volume, deep-report capacity, batch capacity, and higher list and portfolio limits.",
+      currentPlan: "Current plan", mostPopular: "Most Popular", perMonth: "per month", firstMonths: "per month for the first", monthsThen: "months, then",
       analysesMonth: "analyses / month", freeIntroAnalyses: "5 analyses in your first 30 days, then 3 / month", deepReports: "deep reports", watchlistCompanies: "watchlist companies",
       batchRows: "batch rows", aiAssistant: "AI research assistant entitlement",
       subscriptionsUnavailable: "Subscriptions are temporarily unavailable. Please try again shortly.",
@@ -238,8 +238,8 @@ export const p0Copy = {
     },
     pricing: {
       kicker: "Enkel månadsprissättning", title: "Börja gratis. Betala för djup och skala.",
-      copy: "Alla planer använder samma faktamotor. Högre nivåer ger större analysvolym, bevakning och arbetsflödeskapacitet.",
-      currentPlan: "Nuvarande plan", perMonth: "per månad", firstMonths: "per månad de första", monthsThen: "månaderna, därefter",
+      copy: "Alla planer använder samma faktamotor. Högre nivåer ger större analysvolym, fler djupa rapporter, större batchkapacitet samt högre gränser för listor och portföljer.",
+      currentPlan: "Nuvarande plan", mostPopular: "Mest populär", perMonth: "per månad", firstMonths: "per månad de första", monthsThen: "månaderna, därefter",
       analysesMonth: "analyser / månad", freeIntroAnalyses: "5 analyser under dina första 30 dagar, därefter 3 / månad", deepReports: "djupa rapporter", watchlistCompanies: "bolag i bevakningslistan",
       batchRows: "batchrader", aiAssistant: "rätt till AI-analysassistent",
       subscriptionsUnavailable: "Abonnemang är tillfälligt otillgängliga. Försök igen om en stund.",

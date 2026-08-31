@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { getCurrentUser } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkDistributedRateLimit, rateLimitKeyFromHeaders, RATE_LIMITS } from "@/lib/security/rate-limit";
+import { getSupportCopy } from "@/lib/support/copy";
 import { contactSchema, feedbackSchema } from "@/lib/support/validation";
 
 export type SupportActionState = {
@@ -13,6 +14,10 @@ export type SupportActionState = {
 
 function state(ok: boolean, message: string): SupportActionState {
   return { ok, message };
+}
+
+function supportCopy(formData: FormData) {
+  return getSupportCopy(formData.get("locale") === "sv" ? "sv" : "en").messages;
 }
 
 async function allowSupportSubmission(scope: string, subject?: string | null) {
@@ -25,45 +30,47 @@ export async function submitFeedbackAction(
   _previous: SupportActionState,
   formData: FormData
 ): Promise<SupportActionState> {
+  const copy = supportCopy(formData);
   const parsed = feedbackSchema.safeParse({
     rating: formData.get("rating"),
     comment: formData.get("comment"),
   });
-  if (!parsed.success) return state(false, "Choose a rating and add a short comment.");
+  if (!parsed.success) return state(false, copy.feedbackInvalid);
 
   const user = await getCurrentUser();
   const rateLimit = await allowSupportSubmission("feedback", user?.id ?? null);
-  if (!rateLimit.allowed) return state(false, "Too many submissions. Please try again shortly.");
+  if (!rateLimit.allowed) return state(false, copy.rateLimited);
 
   const supabase = createAdminClient();
-  if (!supabase) return state(false, "Feedback is temporarily unavailable.");
+  if (!supabase) return state(false, copy.feedbackUnavailable);
   const { error } = await supabase.from("feedback_submissions").insert({
     user_id: user?.id ?? null,
     rating: parsed.data.rating,
     comment: parsed.data.comment,
   });
-  if (error) return state(false, "Feedback could not be sent. Please try again.");
+  if (error) return state(false, copy.feedbackError);
 
-  return state(true, "Thank you. Your feedback has been sent to StockBox.");
+  return state(true, copy.feedbackSuccess);
 }
 
 export async function submitContactAction(
   _previous: SupportActionState,
   formData: FormData
 ): Promise<SupportActionState> {
+  const copy = supportCopy(formData);
   const parsed = contactSchema.safeParse({
     name: formData.get("name"),
     email: formData.get("email"),
     subject: formData.get("subject"),
     message: formData.get("message"),
   });
-  if (!parsed.success) return state(false, "Check the contact details and message, then try again.");
+  if (!parsed.success) return state(false, copy.contactInvalid);
   const user = await getCurrentUser();
   const rateLimit = await allowSupportSubmission("contact", user?.id ?? parsed.data.email.toLowerCase());
-  if (!rateLimit.allowed) return state(false, "Too many submissions. Please try again shortly.");
+  if (!rateLimit.allowed) return state(false, copy.rateLimited);
 
   const supabase = createAdminClient();
-  if (!supabase) return state(false, "Contact is temporarily unavailable.");
+  if (!supabase) return state(false, copy.contactUnavailable);
   const { error } = await supabase.from("contact_messages").insert({
     user_id: user?.id ?? null,
     name: parsed.data.name,
@@ -71,7 +78,7 @@ export async function submitContactAction(
     subject: parsed.data.subject,
     message: parsed.data.message,
   });
-  if (error) return state(false, "Your message could not be sent. Please try again.");
+  if (error) return state(false, copy.contactError);
 
-  return state(true, "Message sent. StockBox has received your request.");
+  return state(true, copy.contactSuccess);
 }
