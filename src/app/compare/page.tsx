@@ -66,7 +66,8 @@ function idsHref(ids: string[]): Route {
 
 function reportGridClass(count: number) {
   if (count === 2) return "grid grid-cols-2 gap-2";
-  return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-3";
+  if (count === 3) return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-3";
+  return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
 }
 
 export default async function ComparePage({ searchParams }: ComparePageProps) {
@@ -84,7 +85,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
   }
 
   const allIds = requestedIds(params.id);
-  const ids = allIds.slice(0, 3);
+  const ids = allIds.slice(0, 5);
   const history = await getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 50 });
   const available = (history.ok ? history.data : []) as ComparisonHistoryItem[];
   const loaded = await Promise.all(ids.map((id) => getAnalysis(id, user.id)));
@@ -111,7 +112,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
       <ComparisonPicker available={available} initialSelectedIds={ids} locale={locale} />
     </div>
 
-    {allIds.length > 3 ? <p className="mt-3 text-sm text-amber-200">{sv ? "Max tre rapporter stöds. Endast de tre första valen används." : "A maximum of three reports is supported. Only the first three selections are used."}</p> : null}
+    {allIds.length > 5 ? <p className="mt-3 text-sm text-amber-200">{sv ? "Max fem rapporter stöds. Endast de fem första valen används." : "A maximum of five reports is supported. Only the first five selections are used."}</p> : null}
     {ids.length > 0 && reports.length !== ids.length ? <Card className="mt-5 border-red-300/20 bg-red-950/15"><p className="text-sm text-red-200">{sv ? "Minst en vald rapport kunde inte läsas från ditt konto. Byt den rapporten i väljaren ovan." : "At least one selected report could not be loaded from your account. Change that report in the selector above."}</p></Card> : null}
 
     {reports.length >= 2 ? <div className="mt-8 space-y-6">
@@ -119,7 +120,7 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
         <div className="border-b border-white/10 bg-white/[0.03] px-4 py-3 sm:px-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{sv ? "2. Valda snapshots" : "2. Selected snapshots"}</p>
         </div>
-        <div className={reports.length === 2 ? "grid gap-0 md:grid-cols-[1fr_auto_1fr]" : "grid gap-0 md:grid-cols-3"}>
+        <div className={reports.length === 2 ? "grid gap-0 md:grid-cols-[1fr_auto_1fr]" : reportGridClass(reports.length)}>
           {reports.map((report, index) => <div key={report.id} className="border-b border-white/10 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
             <div className="flex items-start justify-between gap-3">
               <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{report.ticker}</p><h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">{report.companyName}</h2></div>
@@ -173,15 +174,15 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
         </div>)}</div>
       </Card>
 
-      {reports.length === 2 ? <Card>
+      {reports.length >= 2 ? <Card>
         <h2 className="text-xl font-semibold text-[#f4efe5]">{sv ? "Vad sticker ut?" : "What stands out"}</h2>
-        <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Endast objektiva skillnader från numeriska canonical metrics i de två valda snapshotsen visas." : "Only objective differences from numeric canonical metrics in the two selected snapshots are shown."}</p>
+        <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Endast faktiska skillnader från numeriska canonical metrics i de valda snapshotsen visas. Lägre värderingsmultiplar behandlas inte automatiskt som bättre." : "Only factual differences from numeric canonical metrics in the selected snapshots are shown. Lower valuation multiples are not automatically treated as better."}</p>
         {differences.length ? <ul className="mt-4 space-y-2">{differences.map((difference) => <li key={difference} className="rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-[#c9d2df]">{difference}</li>)}</ul> : <p className="mt-4 text-sm text-[#9aa7b8]">{sv ? "Inte tillräckligt med jämförbara canonical metrics för säkra skillnadsstatement." : "Not enough comparable canonical metrics for reliable difference statements."}</p>}
       </Card> : null}
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-[#081421] p-4 text-sm">
         {reports.length === 2 ? <Link href={idsHref([ids[1], ids[0]])} className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Byt plats på bolagen" : "Swap companies"}</Link> : null}
-        {reports.length < 3 ? <Link href="#comparison-picker" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Lägg till en rapport" : "Add another report"}</Link> : null}
+        {reports.length < 5 ? <Link href="#comparison-picker" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Lägg till en rapport" : "Add another report"}</Link> : null}
         <Link href="/compare" className="font-semibold text-[#9aa7b8] hover:text-white">{sv ? "Ny jämförelse" : "New comparison"}</Link>
         {reports.map((report, index) => <Link key={report.id} href={idsHref(ids.filter((_, candidateIndex) => candidateIndex !== index))} className="text-xs font-semibold text-[#9aa7b8] hover:text-white">{sv ? "Ta bort" : "Remove"} {report.ticker}</Link>)}
       </div>

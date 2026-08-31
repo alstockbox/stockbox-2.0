@@ -61,23 +61,46 @@ function metric(report: AnalysisReport, group: ComparisonGroup["id"], key: strin
   return comparisonGroups.find((g) => g.id === group)?.metrics.find((m) => m.key === key)?.read(report);
 }
 export function objectiveDifferences(reports: AnalysisReport[], locale: "en" | "sv" = "en") {
-  if (reports.length !== 2) return [] as string[];
-  const [a,b]=reports;
-  const checks: Array<[string, number | null | undefined, number | null | undefined, "higher"|"lower"]> = [
-    ["operating margin", metric(a,"profitability","operatingMargin"), metric(b,"profitability","operatingMargin"), "higher"],
-    ["P/E", metric(a,"valuation","pe"), metric(b,"valuation","pe"), "lower"],
-    ["revenue growth", metric(a,"growth","revenueGrowth"), metric(b,"growth","revenueGrowth"), "higher"],
-    ["FCF yield", metric(a,"valuation","fcfYield"), metric(b,"valuation","fcfYield"), "higher"],
-    ["ROIC", metric(a,"profitability","roic"), metric(b,"profitability","roic"), "higher"],
-    ["net debt / EBITDA", metric(a,"financialHealth","netDebtEbitda"), metric(b,"financialHealth","netDebtEbitda"), "lower"],
+  if (reports.length < 2 || reports.length > 5) return [] as string[];
+  const out: string[] = [];
+
+  const observations: Array<{ label: string; group: ComparisonGroup["id"]; key: string; direction: "higher" | "lower" }> = [
+    { label: "operating margin", group: "profitability", key: "operatingMargin", direction: "higher" },
+    { label: "revenue growth", group: "growth", key: "revenueGrowth", direction: "higher" },
+    { label: "ROIC", group: "profitability", key: "roic", direction: "higher" },
+    { label: "net debt / EBITDA", group: "financialHealth", key: "netDebtEbitda", direction: "lower" },
   ];
-  const out:string[]=[];
-  for (const [label,av,bv,direction] of checks) {
-    if (!finite(av)||!finite(bv)||Math.abs(av-bv)<1e-9) continue;
-    const winner = direction === "higher" ? (av > bv ? a : b) : (av < bv ? a : b);
-    out.push(locale === "sv"
-      ? `${winner.ticker} har ${direction === "higher" ? "högre" : "lägre"} ${label} i de valda rapportsnapshotsen.`
-      : `${winner.ticker} has the ${direction} ${label} in the selected report snapshots.`);
+
+  for (const observation of observations) {
+    const available = reports.flatMap((report) => {
+      const value = metric(report, observation.group, observation.key);
+      return finite(value) ? [{ report, value }] : [];
+    });
+    if (available.length < 2) continue;
+    const values = available.map((item) => item.value);
+    if (Math.max(...values) - Math.min(...values) < 1e-9) continue;
+    const standout = [...available].sort((left, right) => observation.direction === "higher" ? right.value - left.value : left.value - right.value)[0];
+    if (reports.length === 2) {
+      out.push(locale === "sv"
+        ? `${standout.report.ticker} har ${observation.direction === "higher" ? "högre" : "lägre"} ${observation.label} i de valda rapportsnapshotsen.`
+        : `${standout.report.ticker} has the ${observation.direction} ${observation.label} in the selected report snapshots.`);
+    } else {
+      out.push(locale === "sv"
+        ? `${standout.report.ticker} har ${observation.direction === "higher" ? "högst" : "lägst"} ${observation.label} bland de valda rapportsnapshotsen.`
+        : `${standout.report.ticker} has the ${observation.direction === "higher" ? "highest" : "lowest"} ${observation.label} among the selected report snapshots.`);
+    }
   }
-  return out.slice(0,5);
+
+  if (reports.length === 2) {
+    const [left, right] = reports;
+    const leftPe = metric(left, "valuation", "pe");
+    const rightPe = metric(right, "valuation", "pe");
+    if (finite(leftPe) && finite(rightPe) && Math.abs(leftPe - rightPe) >= 1e-9) {
+      out.push(locale === "sv"
+        ? `P/E skiljer sig mellan ${left.ticker} (${leftPe.toFixed(1)}×) och ${right.ticker} (${rightPe.toFixed(1)}×); lägre P/E behandlas inte som bättre utan historisk och fundamental kontext.`
+        : `P/E differs between ${left.ticker} (${leftPe.toFixed(1)}×) and ${right.ticker} (${rightPe.toFixed(1)}×); the lower P/E is not treated as better without historical and fundamental context.`);
+    }
+  }
+
+  return out.slice(0, 5);
 }
