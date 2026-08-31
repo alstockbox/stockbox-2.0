@@ -33,7 +33,7 @@ export function AmbassadorCreateForm() {
       </label>
       <label className="text-sm text-[#c9d2df]">
         Commission %
-        <input className={inputClass} name="commissionPercent" type="number" min="0" max="100" step="0.1" defaultValue="20" required />
+        <input className={inputClass} name="commissionPercent" type="number" min="0" max="100" step="0.1" placeholder="Set per affiliate" required />
       </label>
       <label className="text-sm text-[#c9d2df]">
         Analyses / month
