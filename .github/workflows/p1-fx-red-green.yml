@@ -6,7 +6,7 @@ on:
       - stockbox/p0-release-hardening-20260831
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   targeted-fx:
@@ -18,4 +18,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/data/ecb-fx-p1.test.ts
+      - name: Apply FX integration patch
+        run: python scripts/apply-fx-p1.py
+      - name: Targeted FX tests
+        run: npm test -- tests/data/ecb-fx-p1.test.ts
+      - name: Typecheck FX integration
+        run: npm run typecheck
+      - name: Commit FX integration
+        if: success()
+        run: |
+          git config user.name "StockBox Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/analysis/comparison.ts src/app/compare/page.tsx
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "feat: normalize cross-currency comparison with ECB FX"
+          git push origin HEAD:stockbox/p0-release-hardening-20260831
