@@ -34,10 +34,10 @@ export default async function TermsPage() {
                 <p>{sv ? "Telefon" : "Phone"}: {seller.supportPhone}</p>
               </div>
             ) : (
-              <p className={`${paragraph} text-amber-200`}>
+              <p className={paragraph}>
                 {sv
-                  ? "Säljarens kontaktuppgifter är tillfälligt otillgängliga. Betalda abonnemang erbjuds inte medan denna information saknas."
-                  : "Seller contact details are temporarily unavailable. Paid subscriptions are not offered while this information is unavailable."}
+                  ? "Säljarens juridiska namn, organisationsnummer, adress, e-post och telefon lämnas här och i köpinformationen innan ett betalt abonnemang erbjuds."
+                  : "The seller's legal name, organization number, address, email and phone are provided here and in the purchase information before a paid subscription is offered."}
               </p>
             )}
           </section>

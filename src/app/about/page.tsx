@@ -24,7 +24,7 @@ export default async function AboutPage() {
     </div>
     <div className="mt-10 rounded-xl border border-white/10 bg-white/[0.03] p-6">
       <h2 className="text-lg font-semibold text-[#f4efe5]">{sv ? "Operatör och kontakt" : "Operator and contact"}</h2>
-      {seller.businessName ? <p className="mt-3 text-sm text-[#c9d2df]">{seller.businessName}{seller.organizationNumber ? ` · ${seller.organizationNumber}` : ""}</p> : <p className="mt-3 text-sm text-[#9aa7b8]">{sv ? "Verifierad företagsidentitet publiceras här innan betald checkout aktiveras." : "Verified seller identity is published here before paid checkout is enabled."}</p>}
+      {seller.businessName ? <p className="mt-3 text-sm text-[#c9d2df]">{seller.businessName}{seller.organizationNumber ? ` · ${seller.organizationNumber}` : ""}</p> : <p className="mt-3 text-sm text-[#9aa7b8]">{sv ? "Operatörsuppgifter lämnas här och i köpinformationen innan ett betalt abonnemang erbjuds." : "Operator details are provided here and in the purchase information before a paid subscription is offered."}</p>}
       {seller.postalAddress ? <p className="mt-1 text-sm text-[#9aa7b8]">{seller.postalAddress}</p> : null}
       <p className="mt-4 text-sm"><Link href="/contact" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Kontakta StockBox" : "Contact StockBox"}</Link></p>
     </div>

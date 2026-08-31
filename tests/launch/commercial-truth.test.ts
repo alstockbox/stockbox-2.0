@@ -24,6 +24,28 @@ describe("commercial launch truth", () => {
     expect(sql.match(/'false'::jsonb/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
+  it("keeps internal checkout readiness details out of public launch surfaces", () => {
+    const publicSources = [
+      read("src/app/pricing/page.tsx"),
+      read("src/app/legal/terms/page.tsx"),
+      read("src/app/legal/privacy/page.tsx"),
+      read("src/app/legal/withdrawal-form/page.tsx"),
+      read("src/app/about/page.tsx"),
+      read("src/lib/i18n/p0-copy.ts"),
+      read("src/lib/legal/commerce.ts"),
+      read("src/lib/legal/withdrawal-form.ts"),
+    ].join("\n");
+    expect(publicSources).not.toMatch(/subscriptions are temporarily unavailable/i);
+    expect(publicSources).not.toMatch(/paid checkout is blocked until/i);
+    expect(publicSources).not.toMatch(/paid checkout is therefore blocked/i);
+    expect(publicSources).not.toMatch(/not configured yet/i);
+    expect(publicSources).not.toMatch(/shown before paid checkout is enabled/i);
+    expect(publicSources).not.toMatch(/seller identity is published here before paid checkout/i);
+    expect(publicSources).not.toMatch(/email address above/i);
+    expect(publicSources).not.toMatch(/paid subscriptions are not offered while this information is unavailable/i);
+    expect(publicSources).not.toMatch(/betald checkout ?r sp?rrad/i);
+  });
+
   it("derives legal pricing disclosure from every active paid plan", () => {
     const terms = read("src/app/legal/terms/page.tsx");
     expect(terms).toContain("commerciallyActivePlans");

@@ -2,7 +2,7 @@ import { getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { getLegalCommerceReadiness, type LegalCommerceVariable } from "@/lib/legal/commerce";
 
 export const SUBSCRIPTIONS_UNAVAILABLE_MESSAGE =
-  "Subscriptions are temporarily unavailable. Please try again shortly.";
+  "Checkout could not start. Please try again or contact support if the problem continues.";
 
 export type BillingEnvironmentVariable =
   | "NEXT_PUBLIC_SUPABASE_URL"

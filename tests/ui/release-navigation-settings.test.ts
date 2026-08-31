@@ -23,6 +23,11 @@ describe("release navigation and settings", () => {
     expect(nav).toContain('user?.role === "admin"');
   });
 
+  it("keeps the authenticated menu available until the xl workspace navigation takes over", () => {
+    expect(nav).toContain('user ? "relative xl:hidden" : "relative md:hidden"');
+    expect(nav).toContain('hidden flex-1 items-center gap-0.5 xl:flex');
+  });
+
   it("provides one settings hub and in-app password changes", () => {
     expect(settings).toContain("Profile");
     expect(settings).toContain("Language");

@@ -10,7 +10,7 @@ export async function AppFooter() {
   const groups = [
     [sv ? "Produkt" : "Product", [["/sample-analysis", sv ? "Exempelanalys" : "Sample analysis"], ["/pricing", sv ? "Priser" : "Pricing"], ["/docs/methodology", sv ? "Metodik" : "Methodology"]]],
     [sv ? "Företag" : "Company", [["/about", sv ? "Om StockBox" : "About"], ["/contact", sv ? "Kontakt" : "Contact"]]],
-    [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"]]],
+    [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"], ["/changelog", "Changelog"]]],
     [sv ? "Juridik" : "Legal", [["/legal/terms", sv ? "Villkor" : "Terms"], ["/legal/privacy", sv ? "Integritet" : "Privacy"], ["/withdraw", sv ? "Ångra avtal" : "Exercise withdrawal right"]]],
   ] as const;
   return <footer className="border-t border-white/10 bg-[#050b13] px-4 py-10 text-sm text-[#9aa7b8] sm:px-6 lg:px-8">

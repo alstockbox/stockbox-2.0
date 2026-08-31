@@ -66,6 +66,6 @@ export function legalVatDescription(seller: LegalSeller, locale: "en" | "sv") {
       : `The business is VAT registered${seller.vatNumber ? ` (${seller.vatNumber})` : ""}. Applicable VAT is included in or shown as part of the total price before payment.`;
   }
   return locale === "sv"
-    ? "Betald checkout är spärrad tills momsstatus har verifierats."
-    : "Paid checkout is blocked until VAT status has been verified.";
+    ? "Tillämpliga skatter och det bindande totalpriset framgår före betalning."
+    : "Applicable taxes and the binding total price are shown before payment.";
 }

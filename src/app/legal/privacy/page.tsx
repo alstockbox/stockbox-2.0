@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Container, Section } from "@/components/ui/card";
 import { getLocale } from "@/lib/i18n/server";
 import { getLegalCommerceReadiness } from "@/lib/legal/commerce";
@@ -30,10 +31,10 @@ export default async function PrivacyPage() {
                 <p>{sv ? "Telefon" : "Phone"}: {seller.supportPhone}</p>
               </div>
             ) : (
-              <p className={`${paragraph} text-amber-200`}>
+              <p className={paragraph}>
                 {sv
-                  ? "Den personuppgiftsansvariges kontaktuppgifter är tillfälligt otillgängliga. Betalda abonnemang erbjuds inte medan denna information saknas."
-                  : "Controller contact details are temporarily unavailable. Paid subscriptions are not offered while this information is unavailable."}
+                  ? "Den personuppgiftsansvariges juridiska kontaktuppgifter lämnas här innan ett betalt abonnemang erbjuds."
+                  : "The controller's legal contact details are provided here before a paid subscription is offered."}
               </p>
             )}
           </section>
@@ -105,9 +106,15 @@ export default async function PrivacyPage() {
             <p className={paragraph}>{sv
               ? "Beroende på situationen har du rätt till information, tillgång, rättelse, radering, begränsning, dataportabilitet och att invända mot behandling som grundas på berättigat intresse. Om en behandling grundas på samtycke kan du återkalla samtycket utan att det påverkar lagligheten före återkallelsen."
               : "Depending on the circumstances, you have rights to information, access, rectification, erasure, restriction, data portability and to object to processing based on legitimate interests. Where processing is based on consent, you may withdraw that consent without affecting prior lawful processing."}</p>
-            <p className={paragraph}>{sv
-              ? "Kontakta oss via e-postadressen ovan för att utöva dina rättigheter. Vi kan behöva verifiera din identitet innan vi lämnar ut eller ändrar uppgifter."
-              : "Contact us at the email address above to exercise your rights. We may need to verify your identity before disclosing or changing data."}</p>
+            <p className={paragraph}>
+              {sv ? "Använd " : "Use the "}
+              <Link href="/contact" className="font-semibold text-[#e1cb95] hover:text-white">
+                {sv ? "kontaktformuläret" : "contact form"}
+              </Link>
+              {sv
+                ? " för att utöva dina rättigheter. Vi kan behöva verifiera din identitet innan vi lämnar ut eller ändrar uppgifter."
+                : " to exercise your rights. We may need to verify your identity before disclosing or changing data."}
+            </p>
           </section>
           <section>
             <h2 className={heading}>{sv ? "Klagomål till IMY" : "Complaints to IMY"}</h2>

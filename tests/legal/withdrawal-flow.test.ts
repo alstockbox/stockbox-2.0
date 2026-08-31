@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { withdrawalReceiptText } from "../../src/lib/legal/withdrawal";
+import { withdrawalFormText } from "../../src/lib/legal/withdrawal-form";
 
 const root = process.cwd();
 const source = (path: string) => readFileSync(`${root}/${path}`, "utf8");
@@ -34,5 +35,23 @@ describe("consumer withdrawal flow", () => {
     expect(text).toContain("Receipt ID: receipt-1");
     expect(text).toContain("Received at: 2026-08-28T18:00:00.000Z");
     expect(text).toContain("Subscription: sub_123");
+  });
+
+  it("keeps the public model form neutral when seller details are not yet published", () => {
+    const seller = {
+      businessName: "",
+      organizationNumber: "",
+      postalAddress: "",
+      supportEmail: "",
+      supportPhone: "",
+      vatMode: null,
+      vatNumber: null,
+    } as const;
+    const en = withdrawalFormText(seller, "en");
+    const sv = withdrawalFormText(seller, "sv");
+    expect(en).not.toMatch(/not configured|paid checkout/i);
+    expect(sv).not.toMatch(/inte konfigurerade|betald checkout/i);
+    expect(en).toContain("StockBox contact details are provided before a paid subscription is offered");
+    expect(sv).toContain("StockBox kontaktuppgifter lämnas innan ett betalt abonnemang erbjuds");
   });
 });

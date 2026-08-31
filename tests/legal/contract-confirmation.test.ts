@@ -32,6 +32,7 @@ describe("contract confirmation", () => {
     expect(text).toContain("STANDARDblankett FÖR UTÖVANDE AV ÅNGERRÄTT");
     expect(text).toContain("Example Seller");
     expect(text).toContain("support@example.test");
+    expect(text).not.toMatch(/entitlement/i);
   });
 
   it("renders the affiliate recurring price without claiming a launch offer", () => {
@@ -50,5 +51,6 @@ describe("contract confirmation", () => {
     expect(text).toContain("SEK 359.10/month (10% off regular SEK 399/month)");
     expect(text).not.toContain("SEK 159/month");
     expect(text).toContain("MODEL WITHDRAWAL FORM");
+    expect(text).not.toMatch(/entitlement/i);
   });
 });

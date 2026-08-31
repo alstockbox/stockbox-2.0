@@ -30,10 +30,10 @@ export default async function WithdrawalFormPage() {
         </p>
 
         {!legal.ready ? (
-          <p className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+          <p className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm text-[#c9d2df]">
             {sv
-              ? "Säljaruppgifterna är ännu inte konfigurerade. Betald checkout är därför spärrad tills blanketten kan visas med korrekta uppgifter."
-              : "Seller details are not configured yet. Paid checkout is therefore blocked until the form can be shown with the correct details."}
+              ? "Säljarens kontaktuppgifter lämnas här innan ett betalt abonnemang erbjuds."
+              : "Seller contact details are provided here before a paid subscription is offered."}
           </p>
         ) : null}
 

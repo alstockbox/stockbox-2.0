@@ -27,5 +27,9 @@ describe("research utility launch improvements", () => {
     expect(compare).toContain("slice(0, 3)");
     expect(compare).toContain("recommendation");
     expect(compare).toContain("score.dimensions");
+    expect(compare).toContain("generatedAt");
+    expect(compare).toContain("modelVersion");
+    expect(compare.match(/Analysis date/g) ?? []).toHaveLength(1);
+    expect(compare.match(/Engine version/g) ?? []).toHaveLength(1);
   });
 });

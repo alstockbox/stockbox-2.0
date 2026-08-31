@@ -46,4 +46,11 @@ describe("pricing consumer-rights copy", () => {
     expect(getP0Copy("en").pricing.mostPopular).toBe("Most Popular");
     expect(getP0Copy("sv").pricing.mostPopular).toBe("Mest populär");
   });
+
+  it("uses a neutral unavailable label for disabled checkout actions", () => {
+    expect(getP0Copy("en").pricing.subscriptionsUnavailable).toBe("Not available");
+    expect(getP0Copy("sv").pricing.subscriptionsUnavailable).toBe("Inte tillgängligt");
+    expect(getP0Copy("en").billing.unavailableSubscriptions).toBe("Not available");
+    expect(getP0Copy("sv").billing.unavailableSubscriptions).toBe("Inte tillgängligt");
+  });
 });

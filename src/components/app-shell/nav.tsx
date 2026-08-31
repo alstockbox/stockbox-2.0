@@ -77,7 +77,7 @@ export async function AppNav() {
           </nav>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <details className="relative md:hidden">
+          <details className={user ? "relative xl:hidden" : "relative md:hidden"}>
             <summary className="cursor-pointer list-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-[#f4efe5]">
               {accountLabels.menu}
             </summary>

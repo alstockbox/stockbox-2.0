@@ -222,7 +222,9 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
             ) : null}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+          <details className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">{copy.advancedSettings}</summary>
+            <div className="mt-4 grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
             <label className="space-y-2 text-sm">
               <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
               <select
@@ -269,7 +271,8 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
                 ))}
               </div>
             </fieldset>
-          </div>
+            </div>
+          </details>
         </div>
       </Card>
 

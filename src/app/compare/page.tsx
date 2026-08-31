@@ -22,6 +22,12 @@ function selectedIds(value: string | string[] | undefined) {
 function reportFromRow(row: Awaited<ReturnType<typeof getAnalysis>>) {
   return row?.report as AnalysisReport | undefined;
 }
+
+function formatGeneratedAt(generatedAt: string) {
+  const date = new Date(generatedAt);
+  return Number.isNaN(date.getTime()) ? generatedAt : date.toISOString().slice(0, 10);
+}
+
 export default async function ComparePage({ searchParams }: ComparePageProps) {
   const [user, locale, params] = await Promise.all([getCurrentUser(), getLocale(), searchParams]);
   const sv = locale === "sv";
@@ -77,6 +83,8 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
           <tr><td className="px-4 py-3 text-[#9aa7b8]">StockBox Score</td>{reports.map((report) => <td key={report.id} className="number px-4 py-3 text-[#f4efe5]">{report.score.score ?? "—"}/100</td>)}</tr>
           <tr><td className="px-4 py-3 text-[#9aa7b8]">{sv ? "Konfidens" : "Confidence"}</td>{reports.map((report) => <td key={report.id} className="number px-4 py-3">{Math.round(report.score.confidence)}%</td>)}</tr>
           <tr><td className="px-4 py-3 text-[#9aa7b8]">{sv ? "Datatäckning" : "Data coverage"}</td>{reports.map((report) => <td key={report.id} className="number px-4 py-3">{report.dataCoverage === undefined ? "—" : `${Math.round(report.dataCoverage * 100)}%`}</td>)}</tr>
+          <tr><td className="px-4 py-3 text-[#9aa7b8]">{sv ? "Analysdatum" : "Analysis date"}</td>{reports.map((report) => <td key={report.id} className="number px-4 py-3">{formatGeneratedAt(report.generatedAt)}</td>)}</tr>
+          <tr><td className="px-4 py-3 text-[#9aa7b8]">{sv ? "Motorversion" : "Engine version"}</td>{reports.map((report) => <td key={report.id} className="px-4 py-3">{report.modelVersion ?? "—"}</td>)}</tr>
           {dimensionKeys.map((key) => <tr key={key}>
             <td className="px-4 py-3 text-[#9aa7b8]">{reports.flatMap((report) => report.score.dimensions).find((dimension) => dimension.key === key)?.label ?? key}</td>
             {reports.map((report) => {

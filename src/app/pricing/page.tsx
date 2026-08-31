@@ -175,11 +175,6 @@ export default async function PricingPage() {
             <Link href="/legal/privacy" className="text-[#e1cb95] hover:text-white">{copy.privacy}</Link>
           </div>
         </div>
-        {!checkoutEnabled && (viewer === "free" || viewer === "signed_out") ? (
-          <p className="mt-5 text-sm text-[#e1cb95]">
-            {copy.subscriptionsUnavailable}
-          </p>
-        ) : null}
       </Container>
     </Section>
   );
