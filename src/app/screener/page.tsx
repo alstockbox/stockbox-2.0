@@ -16,7 +16,7 @@ function pct(value: number | null | undefined) { return typeof value === "number
 function num(value: number | null | undefined, digits = 1) { return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—"; }
 
 export default async function ScreenerPage({ searchParams }: Props) {
-  const user = await requireUser();
+  await requireUser();
   const params = await searchParams;
   const saved = await getSavedScreeners();
   const preset = SCREENER_PRESETS.find((item) => item.key === params.preset) ?? SCREENER_PRESETS[0];
