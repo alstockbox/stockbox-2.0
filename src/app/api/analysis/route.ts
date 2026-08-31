@@ -15,6 +15,7 @@ import {
   releaseAnalysisReservation,
   reserveAnalysisEntitlement,
 } from "@/lib/db/repositories";
+import { processPersistedAnalysisIntelligence } from "@/lib/investor-intelligence/service";
 import { sendStrongResearchAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
 import { publicDiagnosticCode, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
@@ -48,7 +49,6 @@ const requestSchema = z.object({
     .default("balanced"),
   idempotencyKey: z.string().uuid().optional()
 });
-
 
 function analysisRequestFingerprint(input: {
   securityId?: string;
@@ -284,6 +284,29 @@ export async function POST(request: Request) {
       },
       { status: 503 }
     );
+  }
+
+  try {
+    const intelligence = await processPersistedAnalysisIntelligence({ userId: user.id, report: result.data });
+    if (intelligence.status === "PARTIAL") {
+      await logApplicationError({
+        service: "investor-intelligence",
+        message: "Investor intelligence processing completed partially.",
+        userId: user.id,
+        context: {
+          ticker: result.data.ticker,
+          analysisId: result.data.id,
+          errorClasses: intelligence.errors,
+        },
+      });
+    }
+  } catch (error) {
+    await logApplicationError({
+      service: "investor-intelligence",
+      message: sanitizeDiagnosticMessage(error, "Investor intelligence processing failed unexpectedly."),
+      userId: user.id,
+      context: { ticker: result.data.ticker, analysisId: result.data.id },
+    });
   }
 
   const researchView = researchViewForReport(result.data);
