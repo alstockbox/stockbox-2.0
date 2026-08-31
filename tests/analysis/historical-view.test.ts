@@ -58,7 +58,7 @@ function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
       dividendCagr3y: 0.05, dividendCagr5y: 0.04, dividendCagr10y: 0.03,
       dividendYearsIncreased: 8, dividendYearsUnchanged: 1, dividendYearsCut: 1,
     },
-  } as AnalysisReport;
+  } as unknown as AnalysisReport;
 }
 
 describe("historical research view", () => {
