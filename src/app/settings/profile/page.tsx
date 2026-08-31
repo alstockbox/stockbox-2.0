@@ -58,6 +58,7 @@ export default async function ProfileSettingsPage({ searchParams }: PageProps) {
               <option value="value">{analysisCopy.value}</option>
               <option value="quality">{analysisCopy.quality}</option>
               <option value="dividend">{analysisCopy.dividend}</option>
+              <option value="defensive">{analysisCopy.defensive}</option>
             </select>
           </label>
           <label className="space-y-2 text-sm"><span className="font-semibold text-[#f4efe5]">{copy.defaultMode}</span>

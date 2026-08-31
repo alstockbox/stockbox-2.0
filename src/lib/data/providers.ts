@@ -35,6 +35,55 @@ export type AdapterResult<T> =
   | { ok: true; data: T; diagnostic: ProviderDiagnostic }
   | { ok: false; reason: ProviderFailureReason; message: string; diagnostic: ProviderDiagnostic };
 
+const TRANSIENT_PROVIDER_FAILURES = new Set<ProviderFailureReason>([
+  "timeout",
+  "rate_limited",
+  "upstream_error",
+]);
+
+export function shouldRetryProviderFailure(reason: ProviderFailureReason): boolean {
+  return TRANSIENT_PROVIDER_FAILURES.has(reason);
+}
+
+export type ProviderRetryExecution<T> = {
+  result: AdapterResult<T>;
+  attempts: AdapterResult<T>[];
+};
+
+export async function executeProviderWithRetry<T>({
+  operation,
+  exceptionResult,
+  retryDelayMs,
+}: {
+  operation: () => Promise<AdapterResult<T>>;
+  exceptionResult: () => AdapterResult<T>;
+  retryDelayMs?: number;
+}): Promise<ProviderRetryExecution<T>> {
+  const attempts: AdapterResult<T>[] = [];
+  const maxAttempts = 2;
+
+  for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
+    let result: AdapterResult<T>;
+    try {
+      result = await operation();
+    } catch {
+      result = exceptionResult();
+    }
+    attempts.push(result);
+
+    if (result.ok || !shouldRetryProviderFailure(result.reason) || attemptIndex === maxAttempts - 1) {
+      return { result, attempts };
+    }
+
+    const delay = retryDelayMs ?? (result.reason === "rate_limited" ? 750 : 150);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  const result = attempts.at(-1);
+  if (!result) throw new Error("Provider retry execution produced no attempts.");
+  return { result, attempts };
+}
+
 export interface CompanySearchProvider {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;

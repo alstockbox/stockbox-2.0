@@ -1,4 +1,4 @@
-import type { CompanySearchResult, MarketPricePoint, MarketSnapshot } from "@/lib/analysis/types";
+import type { CompanySearchResult, MarketDividendEvent, MarketPricePoint, MarketSnapshot, MarketSplitEvent } from "@/lib/analysis/types";
 import {
   providerDiagnostic,
   type AdapterResult,
@@ -129,6 +129,41 @@ function parseRows(result: JsonObject): PriceRow[] {
     if (!date || !close || close <= 0 || close > MAX_PRICE) return [];
     if (Date.parse(`${date}T00:00:00Z`) > Date.now()) return [];
     return [{ date, close, volume }];
+  }).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function parseDividendEvents(result: JsonObject, currency: string | null): MarketDividendEvent[] {
+  const events = object(result.events);
+  const dividends = object(events?.dividends);
+  if (!dividends) return [];
+  const deduped = new Map<string, MarketDividendEvent>();
+  for (const eventValue of Object.values(dividends)) {
+    const event = object(eventValue);
+    const amount = numberValue(event?.amount);
+    const date = dateFromUnix(numberValue(event?.date) ?? Number.NaN);
+    if (!date || amount === null || amount <= 0 || Date.parse(`${date}T00:00:00Z`) > Date.now()) continue;
+    deduped.set(`${date}:${amount}`, { date, amount, currency, provider: PROVIDER_ID });
+  }
+  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function parseSplitEvents(result: JsonObject): MarketSplitEvent[] {
+  const events = object(result.events);
+  const splits = object(events?.splits);
+  if (!splits) return [];
+  return Object.values(splits).flatMap((eventValue) => {
+    const event = object(eventValue);
+    const date = dateFromUnix(numberValue(event?.date) ?? Number.NaN);
+    if (!date || Date.parse(`${date}T00:00:00Z`) > Date.now()) return [];
+    const numerator = numberValue(event?.numerator);
+    const denominator = numberValue(event?.denominator);
+    const ratioFromNumbers = numerator !== null && denominator !== null && numerator > 0 && denominator > 0 ? numerator / denominator : null;
+    const ratioText = stringValue(event?.splitRatio);
+    const ratioParts = ratioText?.split(":").map(Number) ?? [];
+    const ratioFromText = ratioParts.length === 2 && Number.isFinite(ratioParts[0]) && Number.isFinite(ratioParts[1]) && ratioParts[1] > 0
+      ? ratioParts[0] / ratioParts[1]
+      : null;
+    return [{ date, numerator, denominator, splitRatio: ratioFromNumbers ?? ratioFromText, provider: PROVIDER_ID }];
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
 
@@ -337,6 +372,9 @@ export const yahooMarketDataProvider: MarketDataProvider = {
     const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
     const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
     const yearRows = lastYearRows(history);
+    const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
+    const dividendEvents = parseDividendEvents(result, marketCurrency);
+    const splitEvents = parseSplitEvents(result);
     const yearHigh = metaNumber(meta, "fiftyTwoWeekHigh") ?? (yearRows.length ? Math.max(...yearRows.map((row) => row.close)) : null);
     const yearLow = metaNumber(meta, "fiftyTwoWeekLow") ?? (yearRows.length ? Math.min(...yearRows.map((row) => row.close)) : null);
 
@@ -345,7 +383,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
       data: {
         ticker: company.ticker,
         price,
-        currency: stringValue(meta.currency) ?? company.currency ?? null,
+        currency: marketCurrency,
         date: currentDate,
         volume: historyIsNewer ? latest?.volume ?? null : metaNumber(meta, "regularMarketVolume") ?? latest?.volume ?? null,
         yearHigh,
@@ -359,6 +397,9 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         provider: PROVIDER_ID,
         historyLength: history.length,
         priceHistory: monthlyPriceHistory(history),
+        priceHistoryBasis: "adjusted_close",
+        dividendEvents,
+        splitEvents,
         performance: performance(history),
       },
       diagnostic: providerDiagnostic("Yahoo Finance chart", "market_data", history.length >= 250 ? "available" : "partial", history.length >= 250 ? undefined : "history_short"),

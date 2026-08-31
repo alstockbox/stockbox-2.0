@@ -3,7 +3,14 @@ import Link from "next/link";
 import { Card, Container, Section } from "@/components/ui/card";
 import { ButtonLink } from "@/components/ui/button";
 import { ComparisonPicker, type ComparisonHistoryItem } from "@/components/analysis/comparison-picker";
-import { comparisonGroups, objectiveDifferences, type ComparisonMetric } from "@/lib/analysis/comparison";
+import {
+  comparisonGroups,
+  comparisonLensForProfile,
+  comparisonWarnings,
+  objectiveDifferences,
+  resolveComparisonProfile,
+  type ComparisonMetric,
+} from "@/lib/analysis/comparison";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
 import { localizedResearchView, researchViewForReport } from "@/lib/analysis/research-view";
@@ -11,6 +18,11 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { searchCompanies } from "@/lib/data/provider";
+import {
+  convertWithComparisonFxContext,
+  resolveComparisonFxContexts,
+  type ComparisonFxContext,
+} from "@/lib/data/ecb-fx";
 import { getAnalysis, getUserAnalysisHistory } from "@/lib/db/repositories";
 import { getLocale } from "@/lib/i18n/server";
 import type { Locale } from "@/lib/i18n/types";
@@ -35,13 +47,30 @@ function unavailable(locale: Locale) {
   return locale === "sv" ? "Ej tillgängligt" : "Not available";
 }
 
-function metricValue(report: AnalysisReport, metric: ComparisonMetric, locale: Locale) {
+function metricValue(
+  report: AnalysisReport,
+  metric: ComparisonMetric,
+  locale: Locale,
+  fxContext?: ComparisonFxContext,
+) {
   const value = metric.read(report);
   if (typeof value !== "number" || !Number.isFinite(value)) return unavailable(locale);
   if (metric.kind === "percent") return formatPercent(value, 1);
-  if (metric.kind === "currency") return formatCompactCurrency(value, report.reportingCurrency ?? "USD");
+  if (metric.kind === "currency") {
+    const native = formatCompactCurrency(value, report.reportingCurrency ?? "USD");
+    const normalized = convertWithComparisonFxContext(value, fxContext);
+    if (normalized === null || !fxContext || fxContext.status !== "normalized") return native;
+    return `${native} · ≈ ${formatCompactCurrency(normalized, fxContext.targetCurrency)}`;
+  }
   if (metric.kind === "multiple") return `${formatNumber(value, { maximumFractionDigits: 2 })}×`;
   return formatNumber(value, { maximumFractionDigits: 2 });
+}
+
+function metricDirectionLabel(metric: ComparisonMetric, locale: Locale) {
+  if (metric.direction === "contextual") return locale === "sv" ? "Kontextuellt — ingen automatisk vinnare" : "Contextual — no automatic winner";
+  if (metric.direction === "higher_is_better") return locale === "sv" ? "Högre är normalt starkare" : "Higher is generally stronger";
+  if (metric.direction === "lower_is_better") return locale === "sv" ? "Lägre är normalt starkare" : "Lower is generally stronger";
+  return locale === "sv" ? "Ingen generell ranking" : "No general ranking";
 }
 
 async function exchangeFor(report: AnalysisReport) {
@@ -66,7 +95,8 @@ function idsHref(ids: string[]): Route {
 
 function reportGridClass(count: number) {
   if (count === 2) return "grid grid-cols-2 gap-2";
-  return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-3";
+  if (count === 3) return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-3";
+  return "grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
 }
 
 export default async function ComparePage({ searchParams }: ComparePageProps) {
@@ -84,17 +114,37 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
   }
 
   const allIds = requestedIds(params.id);
-  const ids = allIds.slice(0, 3);
+  const ids = allIds.slice(0, 5);
   const history = await getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 50 });
   const available = (history.ok ? history.data : []) as ComparisonHistoryItem[];
   const loaded = await Promise.all(ids.map((id) => getAnalysis(id, user.id)));
   const reports = loaded.map(reportFromRow).filter((report): report is AnalysisReport => Boolean(report));
   const exchanges = await Promise.all(reports.map(exchangeFor));
+  const currencies = [...new Set(reports.map((report) => report.reportingCurrency).filter((currency): currency is string => Boolean(currency)))];
+  const mixedCurrencies = currencies.length > 1;
+  const fxContexts = mixedCurrencies
+    ? await resolveComparisonFxContexts(reports.map((report) => ({
+        id: report.id,
+        currency: report.reportingCurrency,
+        date: report.generatedAt,
+      })), "EUR")
+    : new Map<string, ComparisonFxContext>();
+  const fxNormalized = mixedCurrencies && reports.every((report) => {
+    const context = fxContexts.get(report.id);
+    return context?.status === "normalized" || context?.status === "same_currency";
+  });
 
   if (ids.length > 0) captureServerEvent("comparison_started", { userId: user.id, count: ids.length });
   if (reports.length >= 2) captureServerEvent("comparison_completed", { userId: user.id, count: reports.length });
 
-  const differences = objectiveDifferences(reports, locale);
+  const resolvedComparisonProfile = resolveComparisonProfile(reports);
+  const comparisonLens = comparisonLensForProfile(resolvedComparisonProfile.profile);
+  const warnings = comparisonWarnings(reports, locale, { fxNormalized, fxTargetCurrency: "EUR" });
+  const orderedComparisonGroups = comparisonLens.groupOrder.flatMap((groupId) => {
+    const group = comparisonGroups.find((candidate) => candidate.id === groupId);
+    return group ? [group] : [];
+  });
+  const differences = objectiveDifferences(reports, locale, resolvedComparisonProfile.profile);
   const summaryKeys = SUMMARY_KEYS.filter((key) => reports.some((report) => report.score.dimensions.some((dimension) => dimension.key === key)));
 
   return <Section><Container>
@@ -111,15 +161,44 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
       <ComparisonPicker available={available} initialSelectedIds={ids} locale={locale} />
     </div>
 
-    {allIds.length > 3 ? <p className="mt-3 text-sm text-amber-200">{sv ? "Max tre rapporter stöds. Endast de tre första valen används." : "A maximum of three reports is supported. Only the first three selections are used."}</p> : null}
+    {allIds.length > 5 ? <p className="mt-3 text-sm text-amber-200">{sv ? "Max fem rapporter stöds. Endast de fem första valen används." : "A maximum of five reports is supported. Only the first five selections are used."}</p> : null}
     {ids.length > 0 && reports.length !== ids.length ? <Card className="mt-5 border-red-300/20 bg-red-950/15"><p className="text-sm text-red-200">{sv ? "Minst en vald rapport kunde inte läsas från ditt konto. Byt den rapporten i väljaren ovan." : "At least one selected report could not be loaded from your account. Change that report in the selector above."}</p></Card> : null}
 
     {reports.length >= 2 ? <div className="mt-8 space-y-6">
+      <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/[0.035]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{sv ? "Jämförelselins" : "Comparison lens"}</p>
+            <h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">{comparisonLens.label}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#c9d2df]">{comparisonLens.description}</p>
+          </div>
+          <span className="rounded-full border border-[#b99b5f]/30 bg-[#b99b5f]/10 px-3 py-1.5 text-xs font-semibold text-[#e1cb95]">{comparisonLens.profile.replaceAll("_", " ")}</span>
+        </div>
+        {resolvedComparisonProfile.mixed ? (
+          <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/5 p-3 text-sm leading-6 text-amber-100">
+            {sv ? "Blandade profilsnapshots: Balanced-linsen används för jämförelsens ordning och stand-out-signaler. De sparade canonical scores ändras eller räknas inte om." : "Mixed profile snapshots: the Balanced lens is used for comparison ordering and stand-out signals. Saved canonical scores are not changed or recalculated."}
+          </p>
+        ) : (
+          <p className="mt-4 text-xs leading-5 text-[#9aa7b8]">{sv ? "Alla valda snapshots använder samma investeringsprofil." : "All selected snapshots use the same investment profile."}</p>
+        )}
+        {warnings.length ? <div className="mt-3 space-y-2">{warnings.map((warning) => <p key={warning} className="rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-[#c9d2df]">{warning}</p>)}</div> : null}
+        {mixedCurrencies ? <div className="mt-3 rounded-md border border-white/10 bg-white/[0.02] p-3 text-xs leading-5 text-[#9aa7b8]">
+          {fxNormalized ? <>
+            <p>{sv ? "FX-normalisering: native belopp behålls och kompletteras med ungefärlig EUR vid ECB:s senaste referenskurs på eller före varje snapshot-datum." : "FX normalization: native amounts are preserved and supplemented with approximate EUR at the latest ECB reference rate on or before each snapshot date."}</p>
+            <p className="mt-1">{reports.map((report) => {
+              const context = fxContexts.get(report.id);
+              return context ? `${report.ticker}: ${context.sourceCurrency}→${context.targetCurrency} @ ${context.rateDate ?? "N/A"}` : `${report.ticker}: FX N/A`;
+            }).join(" · ")}</p>
+            <p className="mt-1">Source: ECB statistics. {sv ? "EUR-beloppen är härledda jämförelsevärden, inte transaktionskurser." : "EUR amounts are derived comparison values, not transaction rates."}</p>
+          </> : <p>{sv ? "FX-normalisering kunde inte verifieras för alla snapshots. Native valuta visas och ingen EUR-siffra fabriceras. Source: ECB statistics." : "FX normalization could not be verified for every snapshot. Native currency is shown and no EUR value is fabricated. Source: ECB statistics."}</p>}
+        </div> : null}
+      </Card>
+
       <Card className="overflow-hidden p-0">
         <div className="border-b border-white/10 bg-white/[0.03] px-4 py-3 sm:px-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{sv ? "2. Valda snapshots" : "2. Selected snapshots"}</p>
         </div>
-        <div className={reports.length === 2 ? "grid gap-0 md:grid-cols-[1fr_auto_1fr]" : "grid gap-0 md:grid-cols-3"}>
+        <div className={reports.length === 2 ? "grid gap-0 md:grid-cols-[1fr_auto_1fr]" : reportGridClass(reports.length)}>
           {reports.map((report, index) => <div key={report.id} className="border-b border-white/10 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
             <div className="flex items-start justify-between gap-3">
               <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{report.ticker}</p><h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">{report.companyName}</h2></div>
@@ -155,12 +234,12 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
         </div>
       </Card>
 
-      {comparisonGroups.map((group) => {
+      {orderedComparisonGroups.map((group) => {
         const metrics = group.metrics.filter((metric) => reports.some((report) => typeof metric.read(report) === "number" && Number.isFinite(metric.read(report))));
         if (!metrics.length) return null;
         return <Card key={group.id}>
           <h2 className="text-xl font-semibold text-[#f4efe5]">{group.label}</h2>
-          <div className="mt-4 space-y-2">{metrics.map((metric) => <div key={metric.key} className="rounded-lg border border-white/10 p-3"><p className="mb-2 text-xs font-semibold text-[#9aa7b8]">{metric.label}</p><div className={reportGridClass(reports.length)}>{reports.map((report) => <div key={report.id} className="rounded-md bg-white/[0.03] p-3"><span className="block font-mono text-[11px] text-[#e1cb95]">{report.ticker}</span><span className="number mt-1 block text-base font-semibold text-[#f4efe5]">{metricValue(report, metric, locale)}</span></div>)}</div></div>)}</div>
+          <div className="mt-4 space-y-2">{metrics.map((metric) => <div key={metric.key} className="rounded-lg border border-white/10 p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-[#9aa7b8]">{metric.label}</p><span className="text-[11px] text-[#6f7b8c]">{metricDirectionLabel(metric, locale)}</span></div><div className={reportGridClass(reports.length)}>{reports.map((report) => <div key={report.id} className="rounded-md bg-white/[0.03] p-3"><span className="block font-mono text-[11px] text-[#e1cb95]">{report.ticker}</span><span className="number mt-1 block text-base font-semibold text-[#f4efe5]">{metricValue(report, metric, locale, fxContexts.get(report.id))}</span></div>)}</div></div>)}</div>
         </Card>;
       })}
 
@@ -173,15 +252,15 @@ export default async function ComparePage({ searchParams }: ComparePageProps) {
         </div>)}</div>
       </Card>
 
-      {reports.length === 2 ? <Card>
+      {reports.length >= 2 ? <Card>
         <h2 className="text-xl font-semibold text-[#f4efe5]">{sv ? "Vad sticker ut?" : "What stands out"}</h2>
-        <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Endast objektiva skillnader från numeriska canonical metrics i de två valda snapshotsen visas." : "Only objective differences from numeric canonical metrics in the two selected snapshots are shown."}</p>
+        <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Endast faktiska skillnader från numeriska canonical metrics i de valda snapshotsen visas. Lägre värderingsmultiplar behandlas inte automatiskt som bättre." : "Only factual differences from numeric canonical metrics in the selected snapshots are shown. Lower valuation multiples are not automatically treated as better."}</p>
         {differences.length ? <ul className="mt-4 space-y-2">{differences.map((difference) => <li key={difference} className="rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-[#c9d2df]">{difference}</li>)}</ul> : <p className="mt-4 text-sm text-[#9aa7b8]">{sv ? "Inte tillräckligt med jämförbara canonical metrics för säkra skillnadsstatement." : "Not enough comparable canonical metrics for reliable difference statements."}</p>}
       </Card> : null}
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-[#081421] p-4 text-sm">
         {reports.length === 2 ? <Link href={idsHref([ids[1], ids[0]])} className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Byt plats på bolagen" : "Swap companies"}</Link> : null}
-        {reports.length < 3 ? <Link href="#comparison-picker" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Lägg till en rapport" : "Add another report"}</Link> : null}
+        {reports.length < 5 ? <Link href="#comparison-picker" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Lägg till en rapport" : "Add another report"}</Link> : null}
         <Link href="/compare" className="font-semibold text-[#9aa7b8] hover:text-white">{sv ? "Ny jämförelse" : "New comparison"}</Link>
         {reports.map((report, index) => <Link key={report.id} href={idsHref(ids.filter((_, candidateIndex) => candidateIndex !== index))} className="text-xs font-semibold text-[#9aa7b8] hover:text-white">{sv ? "Ta bort" : "Remove"} {report.ticker}</Link>)}
       </div>

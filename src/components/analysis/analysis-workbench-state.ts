@@ -1,7 +1,7 @@
 import type { CompanySearchResult, InvestmentProfile, UiMode } from "@/lib/analysis/types";
 import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
 
-const INVESTMENT_PROFILES = new Set<InvestmentProfile>(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"]);
+const INVESTMENT_PROFILES = new Set<InvestmentProfile>(["long_term", "short_term", "growth", "value", "quality", "dividend", "defensive", "balanced"]);
 
 export function analysisWorkbenchDefaults(profile: { uiMode?: unknown; investmentProfile?: unknown; experience?: unknown } | null | undefined): { mode: UiMode; investmentProfile: InvestmentProfile } {
   const mode: UiMode = profile?.uiMode === "pro" || profile?.uiMode === "simple" ? profile.uiMode : profile?.experience === "advanced" ? "pro" : "simple";

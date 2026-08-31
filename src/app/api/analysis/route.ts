@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { recordAnalysisObservability, recordProviderDiagnostics } from "@/lib/analytics/analysis-observability";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -46,7 +47,7 @@ const requestSchema = z.object({
   }),
   analysisType: z.enum(["summary", "numbers", "deep", "research"]).default("summary"),
   investmentProfile: z
-    .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "balanced"])
+    .enum(["long_term", "short_term", "growth", "value", "quality", "dividend", "defensive", "balanced"])
     .default("balanced"),
   idempotencyKey: z.string().uuid().optional()
 });
@@ -196,6 +197,7 @@ export async function POST(request: Request) {
     if (quotaReservationId) {
       await releaseAnalysisReservation({ reservationId: quotaReservationId, status: "failed" });
     }
+    await recordProviderDiagnostics(result.providerDiagnostics ?? [], "analysis_failed").catch(() => undefined);
     await recordUsageEvent({
       userId: user.id,
       event: "analysis_failed",
@@ -207,6 +209,15 @@ export async function POST(request: Request) {
       { status: 503 }
     );
   }
+
+  await recordAnalysisObservability({ userId: user.id, report: result.data }).catch(async (error) => {
+    await logApplicationError({
+      service: "analysis-observability",
+      message: sanitizeDiagnosticMessage(error, "Analysis observability failed unexpectedly."),
+      userId: user.id,
+      context: { ticker: result.data.ticker, stage: "observability" }
+    }).catch(() => undefined);
+  });
 
   const persisted = await persistAnalysis({
     userId: user.id,

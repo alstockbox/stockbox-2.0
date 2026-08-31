@@ -9,6 +9,7 @@ import type {
   InvestmentProfile,
   UiMode
 } from "@/lib/analysis/types";
+import { profilePresentationFor } from "@/lib/analysis/profile-presentation";
 import { commonCompanies } from "@/lib/data/common-companies";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import type { Locale } from "@/lib/i18n/types";
@@ -38,6 +39,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
   const [isSearching, setIsSearching] = useState(false);
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
   const [investmentProfile, setInvestmentProfile] = useState<InvestmentProfile>(initialInvestmentProfile);
+  const profilePresentation = profilePresentationFor(investmentProfile, locale);
   const [mode, setMode] = useState<UiMode>(initialMode);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -230,11 +232,33 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
             {!isSearching && query.trim().length >= 2 && !selected && results.length === 0 ? (
               <p className="mt-3 text-sm text-[#9aa7b8]">{copy.noMatch}</p>
             ) : null}
+            <div data-testid="primary-investment-profile" className="mt-5 rounded-lg border border-[#b99b5f]/25 bg-[#b99b5f]/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-sm font-semibold text-[#f4efe5]" htmlFor="investment-profile-primary">{copy.investmentProfile}</label>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[#e1cb95]">{copy.investmentProfile}</span>
+              </div>
+              <select
+                id="investment-profile-primary"
+                value={investmentProfile}
+                onChange={(event) => setInvestmentProfile(event.target.value as InvestmentProfile)}
+                className="mt-3 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
+              >
+                <option value="balanced">{copy.balanced}</option>
+                <option value="long_term">{copy.longTerm}</option>
+                <option value="short_term">{copy.shortTerm}</option>
+                <option value="growth">{copy.growth}</option>
+                <option value="value">{copy.value}</option>
+                <option value="quality">{copy.quality}</option>
+                <option value="dividend">{copy.dividend}</option>
+                <option value="defensive">{copy.defensive}</option>
+              </select>
+              <p className="mt-3 text-xs leading-5 text-[#aeb9c8]">{profilePresentation.description}</p>
+            </div>
           </div>
 
           <details className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-4">
             <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">{copy.advancedSettings}</summary>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
             <label className="space-y-2 text-sm">
               <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
               <select
@@ -246,22 +270,6 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
                 <option value="numbers">{copy.numbers}</option>
                 <option value="deep">{copy.deep}</option>
                 <option value="research">{copy.research}</option>
-              </select>
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="font-semibold text-[#f4efe5]">{copy.investmentProfile}</span>
-              <select
-                value={investmentProfile}
-                onChange={(event) => setInvestmentProfile(event.target.value as InvestmentProfile)}
-                className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
-              >
-                <option value="balanced">{copy.balanced}</option>
-                <option value="long_term">{copy.longTerm}</option>
-                <option value="short_term">{copy.shortTerm}</option>
-                <option value="growth">{copy.growth}</option>
-                <option value="value">{copy.value}</option>
-                <option value="quality">{copy.quality}</option>
-                <option value="dividend">{copy.dividend}</option>
               </select>
             </label>
             <fieldset className="space-y-2 text-sm">

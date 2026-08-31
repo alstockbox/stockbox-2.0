@@ -10,6 +10,7 @@ import { computeDcfRange } from "./dcf";
 import { detectArchetypeGreenFlags, detectFinancialRedFlags } from "./flags";
 import { assessDataFreshness } from "./freshness";
 import { buildHistoricalResearchData } from "./historical";
+import { evaluateHistoricalDiscountQuality } from "./historical-discount-quality";
 import { isFiniteNumber } from "./math";
 import { computeFinancialMetrics, valuationCurrencyAlignment } from "./metrics";
 import { deriveRecommendation } from "./recommendation";
@@ -605,6 +606,28 @@ export function presentAnalysisReport(
     coverage: result.dataCoverage,
   });
   const companyName = canonicalInput.company.name ?? legacyInput.company.name;
+  const historicalBase = canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
+    ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [], {
+        ttmEpsHistory: legacyInput.fundamentals?.historicalTtmEps,
+        dividendEvents: legacyInput.market?.dividendEvents,
+        currentPriceEarnings: result.metrics.valuation.priceEarnings,
+        currentPrice: legacyInput.market?.price,
+        currentPriceDate: legacyInput.market?.date,
+        yearHigh: legacyInput.market?.yearHigh,
+        yearLow: legacyInput.market?.yearLow,
+      })
+    : undefined;
+  const historical = historicalBase
+    ? {
+        ...historicalBase,
+        discountQuality: evaluateHistoricalDiscountQuality({
+          valuation: historicalBase.valuationContext,
+          metrics: result.metrics,
+          financials: historicalBase.financials,
+          archetype: result.analysisArchetype,
+        }),
+      }
+    : undefined;
   const report: AnalysisReport = {
     id: randomUUID(),
     ticker: legacyInput.company.ticker,
@@ -666,9 +689,7 @@ export function presentAnalysisReport(
     dataCoverage: result.dataCoverage,
     reportingCurrency: canonicalInput.company.reportingCurrency ?? canonicalInput.company.currency ?? null,
     market: legacyInput.market ?? undefined,
-    historical: canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
-      ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [])
-      : undefined,
+    historical,
     forwardEstimates: canonicalInput.estimates,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,
     dataStatus: result.dataStatus,

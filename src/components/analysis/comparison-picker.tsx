@@ -74,7 +74,7 @@ export function ComparisonPicker({ available, initialSelectedIds, locale }: {
   function toggleReport(id: string) {
     setSelectedIds((current) => {
       if (current.includes(id)) return current.filter((candidate) => candidate !== id);
-      if (current.length >= 3) return current;
+      if (current.length >= 5) return current;
       return [...current, id];
     });
   }
@@ -86,9 +86,9 @@ export function ComparisonPicker({ available, initialSelectedIds, locale }: {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{sv ? "1. Hitta bolag eller rapport" : "1. Find a company or report"}</p>
           <h2 className="mt-1 text-lg font-semibold text-[#f4efe5]">{sv ? "Välj sparade rapporter" : "Select saved reports"}</h2>
-          <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{sv ? "Sök ticker, bolagsnamn eller bland dina tidigare StockBox-analyser. Välj upp till tre snapshots." : "Search by ticker, company name, or your previous StockBox analyses. Select up to three snapshots."}</p>
+          <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{sv ? "Sök ticker, bolagsnamn eller bland dina tidigare StockBox-analyser. Välj upp till fem snapshots." : "Search by ticker, company name, or your previous StockBox analyses. Select up to five snapshots."}</p>
         </div>
-        <div className="rounded-full border border-white/10 bg-[#07111f] px-3 py-1 text-xs text-[#c9d2df]">{selectedIds.length}/3 {sv ? "valda" : "selected"}</div>
+        <div className="rounded-full border border-white/10 bg-[#07111f] px-3 py-1 text-xs text-[#c9d2df]">{selectedIds.length}/5 {sv ? "valda" : "selected"}</div>
       </div>
 
       <div className="relative mt-5">
@@ -127,7 +127,7 @@ export function ComparisonPicker({ available, initialSelectedIds, locale }: {
         <div className="mt-2 grid gap-2 md:grid-cols-2">
           {matchingReports.slice(0, 30).map((analysis) => {
             const selected = selectedIds.includes(analysis.id);
-            const disabled = !selected && selectedIds.length >= 3;
+            const disabled = !selected && selectedIds.length >= 5;
             return (
               <button key={analysis.id} type="button" disabled={disabled} onClick={() => toggleReport(analysis.id)} className={`rounded-lg border p-3 text-left transition ${selected ? "border-[#b99b5f]/70 bg-[#b99b5f]/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"} disabled:cursor-not-allowed disabled:opacity-45`}>
                 <span className="flex items-start justify-between gap-3">

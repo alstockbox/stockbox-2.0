@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { HistoricalFinancialPoint, HistoricalResearchData, MarketPricePoint } from "@/lib/analysis/types";
-import { barGeometry, chartCoordinates, chartDomain, yForChartValue } from "@/lib/analysis/chart-geometry";
+import { barGeometry, chartDomain, gapAwareLineGeometry, yForChartValue } from "@/lib/analysis/chart-geometry";
 import type { Locale } from "@/lib/i18n/types";
 
 type SeriesKind = "currency" | "percent" | "number";
@@ -166,16 +166,22 @@ export function HistoricalChartExplorer({
   }, [historical, metric, period, valueMode]);
   const numeric = points.filter((point): point is ChartPoint & { value: number } => isNumber(point.value));
   const domain = chartDomain(numeric, chartType === "bar");
-  const coords = chartCoordinates(numeric, CHART_WIDTH, CHART_HEIGHT, chartType === "bar", PADDING_X, PADDING_Y);
+  const { coordinates: coords, paths } = gapAwareLineGeometry(
+    points,
+    domain,
+    CHART_WIDTH,
+    CHART_HEIGHT,
+    PADDING_X,
+    PADDING_Y,
+  );
   const ticks = tickValues(domain.min, domain.max);
-  const zeroLine = barGeometry({ label: "0", dateKey: "0", value: 0, x: 0, y: 0 }, domain, CHART_HEIGHT, coords.length, PADDING_Y).baselineY;
+  const zeroLine = barGeometry({ label: "0", dateKey: "0", value: 0, x: 0, y: 0 }, domain, CHART_HEIGHT, points.length, PADDING_Y).baselineY;
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const active = coords.find((point) => point.dateKey === activeKey) ?? null;
   const selected = active ?? coords.at(-1) ?? null;
   const activeMetricLabel = metrics.find((item) => item.key === metric)?.label ?? metric;
   const tooltipX = active ? Math.max(PADDING_X, Math.min(active.x > 540 ? active.x - 178 : active.x + 14, CHART_WIDTH - 170)) : 0;
   const tooltipY = active ? Math.max(8, Math.min(active.y - 58, CHART_HEIGHT - 80)) : 0;
-  const path = coords.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
 
   return (
     <div className="rounded-md border border-white/10 bg-white/5 p-4">
@@ -267,9 +273,11 @@ export function HistoricalChartExplorer({
             {chartType === "bar" && domain.min < 0 && domain.max > 0 ? (
               <line x1={PADDING_X} x2={CHART_WIDTH - 28} y1={zeroLine} y2={zeroLine} className="stroke-white/25" strokeDasharray="4 4" />
             ) : null}
-            {chartType === "line" ? <path d={path} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" /> : null}
+            {chartType === "line" ? paths.map((path, index) => (
+              <path key={`line-segment-${index}`} d={path} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+            )) : null}
             {chartType === "bar" ? coords.map((point) => {
-              const bar = barGeometry(point, domain, CHART_HEIGHT, coords.length, PADDING_Y);
+              const bar = barGeometry(point, domain, CHART_HEIGHT, points.length, PADDING_Y);
               return (
                 <rect
                   key={`bar-${point.dateKey}`}

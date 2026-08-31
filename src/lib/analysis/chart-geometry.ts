@@ -52,6 +52,53 @@ export function chartCoordinates<T extends ChartDatum>(
   }));
 }
 
+export type GapAwareChartDatum = {
+  label: string;
+  dateKey: string;
+  value: number | null | undefined;
+};
+
+export type GapAwareChartCoordinate<T extends GapAwareChartDatum = GapAwareChartDatum> = T & {
+  value: number;
+  x: number;
+  y: number;
+  sourceIndex: number;
+};
+
+export function gapAwareLineGeometry<T extends GapAwareChartDatum>(
+  points: T[],
+  domain: ChartDomain,
+  width: number,
+  height: number,
+  paddingX = 28,
+  paddingY = 18,
+): { coordinates: Array<GapAwareChartCoordinate<T>>; paths: string[] } {
+  const coordinates: Array<GapAwareChartCoordinate<T>> = [];
+  const paths: string[] = [];
+  let commands: string[] = [];
+
+  const flush = () => {
+    if (commands.length >= 2) paths.push(commands.join(" "));
+    commands = [];
+  };
+
+  points.forEach((point, sourceIndex) => {
+    if (typeof point.value !== "number" || !Number.isFinite(point.value)) {
+      flush();
+      return;
+    }
+    const value = point.value;
+    const x = paddingX + (sourceIndex / Math.max(points.length - 1, 1)) * (width - paddingX * 2);
+    const y = yForChartValue(value, domain, height, paddingY);
+    const coordinate = { ...point, value, x, y, sourceIndex } as GapAwareChartCoordinate<T>;
+    coordinates.push(coordinate);
+    commands.push(`${commands.length ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`);
+  });
+  flush();
+
+  return { coordinates, paths };
+}
+
 export function barGeometry(
   point: ChartCoordinate,
   domain: ChartDomain,

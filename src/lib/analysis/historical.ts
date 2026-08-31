@@ -1,14 +1,30 @@
 import type {
+  DividendResearchContext,
   FinancialPeriod,
+  HistoricalCoverageContext,
   HistoricalFinancialPoint,
+  HistoricalPriceContext,
+  HistoricalPriceWindowStats,
   HistoricalResearchData,
+  HistoricalTtmEpsPoint,
+  HistoricalValuationContext,
+  MarketDividendEvent,
   MarketPricePoint,
 } from "./types";
 import { calculateCagr, calculateGrowth, isFiniteNumber, safeDivide } from "./math";
 import { deriveSimpleFreeCashFlow, shareBasisComparable, sortFinancialPeriods } from "./metrics";
+import {
+  buildHistoricalValuationContext,
+  buildHistoricalValuationSeries,
+  HISTORICAL_VALUATION_METHOD_VERSION,
+  trailingDividendPerShare,
+} from "./historical-valuation";
 
 const MAX_REFERENCE_PRICE_LAG_DAYS = 45;
 const MAX_PRICE_POINTS = 121;
+export const DIVIDEND_CONTEXT_METHOD_VERSION = "dividend-context-v1";
+export const HISTORICAL_COVERAGE_METHOD_VERSION = "historical-coverage-v1";
+const HISTORICAL_COVERAGE_REQUESTED_YEARS = 10 as const;
 
 function positive(value: number | null | undefined): number | null {
   return isFiniteNumber(value) && value > 0 ? value : null;
@@ -90,9 +106,7 @@ function pointForPeriod(
   const positiveFcf = positive(fcf);
   const dividends = dividendsPaid(period);
   const price = referencePrice(period, prices);
-  const positivePrice = positive(price);
-  const positiveEps = positive(period.epsDiluted);
-  const positiveNetIncome = positive(period.netIncome);
+  const positiveDilutedEps = positive(period.epsDiluted);
   const dividendPerShare = shareCount !== null && isFiniteNumber(dividends) ? dividends / shareCount : null;
   const priorDividends = prior ? dividendsPaid(prior) : null;
   const priorDividendPerShare = prior && priorShareCount !== null && isFiniteNumber(priorDividends)
@@ -108,10 +122,6 @@ function pointForPeriod(
   const netDebt = isFiniteNumber(period.totalDebt) && isFiniteNumber(period.cashAndEquivalents)
     ? period.totalDebt - period.cashAndEquivalents
     : null;
-  const priceEarnings = positivePrice !== null && positiveEps !== null
-    ? positivePrice / positiveEps
-    : null;
-
   return {
     fiscalYear: year,
     periodEndDate: period.periodEndDate ?? null,
@@ -145,15 +155,15 @@ function pointForPeriod(
     dividendsPaid: dividends,
     dividendPerShare,
     dividendGrowth: calculateGrowth(dividendPerShare, priorDividendPerShare),
-    payoutRatio: positiveNetIncome !== null && isFiniteNumber(dividends)
-      ? dividends / positiveNetIncome
+    payoutRatio: positiveDilutedEps !== null && isFiniteNumber(dividendPerShare)
+      ? dividendPerShare / positiveDilutedEps
       : null,
     freeCashFlowPayoutRatio: positiveFcf !== null && isFiniteNumber(dividends) ? dividends / positiveFcf : null,
     referencePrice: price,
-    priceEarnings,
-    dividendYield: positivePrice !== null && isFiniteNumber(dividendPerShare)
-      ? dividendPerShare / positivePrice
-      : null,
+    // Historical valuation is intentionally not derived from annual EPS or annualized cash dividends.
+    // Correct TTM valuation lives in HistoricalResearchData.valuation.
+    priceEarnings: null,
+    dividendYield: null,
     provenance: period.provenance,
   };
 }
@@ -168,6 +178,283 @@ function cagrForYears(
   const prior = points.find((point) => point.fiscalYear === latest.fiscalYear - years);
   if (!prior) return null;
   return calculateCagr(selector(prior), selector(latest), years);
+}
+
+function growthForYears(
+  points: HistoricalFinancialPoint[],
+  years: number,
+  selector: (point: HistoricalFinancialPoint) => number | null,
+): number | null {
+  const latest = points.at(-1);
+  if (!latest) return null;
+  const prior = points.find((point) => point.fiscalYear === latest.fiscalYear - years);
+  if (!prior) return null;
+  return calculateGrowth(selector(latest), selector(prior));
+}
+
+function parsedPriceDate(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(value.includes("T") ? value : value + "T00:00:00Z");
+  return Number.isFinite(time) ? time : null;
+}
+
+function priceSpanYears(firstDate: string | null, lastDate: string | null): number {
+  const first = parsedPriceDate(firstDate);
+  const last = parsedPriceDate(lastDate);
+  if (first === null || last === null || last < first) return 0;
+  return (last - first) / (365.2425 * 86_400_000);
+}
+
+function historicalPriceWindow(
+  prices: MarketPricePoint[],
+  currentPrice: number | null,
+  endDate: string | null,
+  years: 1 | 3 | 5 | 10 | null,
+): HistoricalPriceWindowStats {
+  const endMs = parsedPriceDate(endDate) ?? parsedPriceDate(prices.at(-1)?.date);
+  const startMs = endMs !== null && years !== null
+    ? (() => {
+        const date = new Date(endMs);
+        date.setUTCFullYear(date.getUTCFullYear() - years);
+        return date.getTime();
+      })()
+    : null;
+  const selected = prices.filter((point) => {
+    const time = parsedPriceDate(point.date);
+    if (time === null || !isFiniteNumber(point.close) || point.close <= 0) return false;
+    if (endMs !== null && time > endMs) return false;
+    return startMs === null || time >= startMs;
+  });
+  const values = selected.map((point) => point.close);
+  const firstDate = selected.at(0)?.date ?? null;
+  const lastDate = selected.at(-1)?.date ?? null;
+  const spanYears = priceSpanYears(firstDate, lastDate);
+  const minimumObservations = years === null ? 2 : Math.max(3, years * 2);
+  const sufficientHistory = years === null
+    ? selected.length >= minimumObservations
+    : spanYears >= years - 0.1 && selected.length >= minimumObservations;
+  const low = values.length ? Math.min(...values) : null;
+  const high = values.length ? Math.max(...values) : null;
+  return {
+    requestedYears: years,
+    firstDate,
+    lastDate,
+    spanYears,
+    sufficientHistory,
+    observationCount: selected.length,
+    low,
+    high,
+    currentVsLow: currentPrice !== null && low !== null ? currentPrice / low - 1 : null,
+    currentVsHigh: currentPrice !== null && high !== null ? currentPrice / high - 1 : null,
+  };
+}
+
+function buildHistoricalPriceContext(
+  prices: MarketPricePoint[],
+  options: HistoricalResearchOptions,
+): HistoricalPriceContext {
+  const latestPrice = prices.at(-1) ?? null;
+  const currentPrice = positive(options.currentPrice) ?? positive(latestPrice?.close);
+  const currentPriceDate = parsedPriceDate(options.currentPriceDate) !== null
+    ? options.currentPriceDate ?? null
+    : latestPrice?.date ?? null;
+  const oneYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 1);
+  const threeYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 3);
+  const fiveYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 5);
+  const tenYear = historicalPriceWindow(prices, currentPrice, currentPriceDate, 10);
+  const maximum = historicalPriceWindow(prices, currentPrice, currentPriceDate, null);
+  const providerHigh = positive(options.yearHigh);
+  const providerLow = positive(options.yearLow);
+  const useProviderRange = providerHigh !== null && providerLow !== null && providerHigh >= providerLow;
+  const useHistoryRange = !useProviderRange && oneYear.sufficientHistory && oneYear.high !== null && oneYear.low !== null;
+  const yearHigh = useProviderRange ? providerHigh : useHistoryRange ? oneYear.high : null;
+  const yearLow = useProviderRange ? providerLow : useHistoryRange ? oneYear.low : null;
+  return {
+    currentPrice,
+    currentPriceDate,
+    yearHigh,
+    yearLow,
+    distanceToYearHigh: currentPrice !== null && yearHigh !== null ? currentPrice / yearHigh - 1 : null,
+    distanceFromYearLow: currentPrice !== null && yearLow !== null ? currentPrice / yearLow - 1 : null,
+    yearRangeSource: useProviderRange ? "provider" : useHistoryRange ? "price_history" : null,
+    oneYear,
+    threeYear,
+    fiveYear,
+    tenYear,
+    maximum,
+  };
+}
+
+function eventCoverageYears(events: MarketDividendEvent[]): number {
+  if (events.length < 2) return 0;
+  const first = parsedPriceDate(events[0]?.date);
+  const last = parsedPriceDate(events.at(-1)?.date);
+  if (first === null || last === null || last < first) return 0;
+  return (last - first) / (365.2425 * 86_400_000);
+}
+
+function inferPaymentFrequency(
+  events: MarketDividendEvent[] | undefined,
+  annualPayer: boolean,
+): DividendResearchContext["paymentFrequency"] {
+  if (events === undefined) return "unknown";
+  if (!events.length) return annualPayer ? "unknown" : "none";
+  if (events.length < 2) return "unknown";
+  const gaps = events.slice(1).map((event, index) => {
+    const current = parsedPriceDate(event.date);
+    const prior = parsedPriceDate(events[index]?.date);
+    return current !== null && prior !== null ? (current - prior) / 86_400_000 : null;
+  }).filter((value): value is number => isFiniteNumber(value) && value > 0).sort((a, b) => a - b);
+  if (!gaps.length) return "unknown";
+  const middle = Math.floor(gaps.length / 2);
+  const median = gaps.length % 2 ? gaps[middle] : (gaps[middle - 1] + gaps[middle]) / 2;
+  if (median >= 20 && median <= 45) return "monthly";
+  if (median >= 60 && median <= 120) return "quarterly";
+  if (median >= 130 && median <= 220) return "semiannual";
+  if (median >= 280 && median <= 430) return "annual";
+  return "irregular";
+}
+
+function consecutiveDividendIncreaseStreak(points: HistoricalFinancialPoint[]): number | null {
+  if (points.length < 2) return null;
+  let streak = 0;
+  for (let index = points.length - 1; index > 0; index -= 1) {
+    const current = positive(points[index]?.dividendPerShare);
+    const prior = positive(points[index - 1]?.dividendPerShare);
+    if (current === null || prior === null) return streak > 0 ? streak : null;
+    if (current / prior - 1 > 0.005) streak += 1;
+    else break;
+  }
+  return streak;
+}
+
+function dividendSafety(points: HistoricalFinancialPoint[]): DividendResearchContext["safety"] {
+  const latest = points.at(-1);
+  const epsPayout = latest?.payoutRatio;
+  const fcfPayout = latest?.freeCashFlowPayoutRatio;
+  if (!isFiniteNumber(epsPayout) || !isFiniteNumber(fcfPayout) || epsPayout < 0 || fcfPayout < 0) return "insufficient";
+  if (epsPayout > 1 || fcfPayout > 1) return "not_covered";
+  if (epsPayout <= 0.75 && fcfPayout <= 0.75) return "covered";
+  return "stretched";
+}
+
+function buildDividendResearchContext(
+  points: HistoricalFinancialPoint[],
+  prices: MarketPricePoint[],
+  options: HistoricalResearchOptions,
+): DividendResearchContext {
+  const latestPrice = prices.at(-1) ?? null;
+  const currentPrice = positive(options.currentPrice) ?? positive(latestPrice?.close);
+  const currentDate = (parsedPriceDate(options.currentPriceDate) !== null
+    ? options.currentPriceDate
+    : latestPrice?.date)?.slice(0, 10) ?? null;
+  const endMs = parsedPriceDate(currentDate);
+  const events = options.dividendEvents === undefined ? undefined : [...options.dividendEvents]
+    .filter((event) => {
+      const time = parsedPriceDate(event.date);
+      return time !== null && (endMs === null || time <= endMs) && isFiniteNumber(event.amount) && event.amount > 0;
+    })
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const trailing = currentDate
+    ? trailingDividendPerShare(currentDate, options.dividendEvents)
+    : { amount: null, paymentCount: 0 };
+  const latestPayment = events?.at(-1) ?? null;
+  const latestAnnual = points.at(-1);
+  const annualPayer = positive(latestAnnual?.dividendPerShare) !== null;
+  const hasEvents = Boolean(events?.length);
+  const annualHistoryYears = points.filter((point) => isFiniteNumber(point.dividendPerShare)).length;
+  const currentDividendYield = currentPrice !== null && trailing.amount !== null ? trailing.amount / currentPrice : null;
+  const status: DividendResearchContext["status"] = hasEvents && currentDividendYield !== null && annualHistoryYears > 0
+    ? "available"
+    : hasEvents || annualPayer
+      ? "partial"
+      : options.dividendEvents !== undefined
+        ? "nonpayer"
+        : "unavailable";
+  return {
+    methodVersion: DIVIDEND_CONTEXT_METHOD_VERSION,
+    status,
+    trailingDividendsPerShare: trailing.amount,
+    currentDividendYield,
+    paymentCountTtm: trailing.paymentCount,
+    paymentFrequency: inferPaymentFrequency(events, annualPayer),
+    latestPaymentDate: latestPayment?.date ?? null,
+    latestPaymentAmount: latestPayment?.amount ?? null,
+    latestPaymentCurrency: latestPayment?.currency ?? null,
+    increaseStreakYears: consecutiveDividendIncreaseStreak(points),
+    safety: dividendSafety(points),
+    annualHistoryYears,
+    eventCoverageYears: eventCoverageYears(events ?? []),
+  };
+}
+
+function buildHistoricalCoverageContext(
+  points: HistoricalFinancialPoint[],
+  priceContext: HistoricalPriceContext,
+  valuationContext: HistoricalValuationContext,
+  dividendContext: DividendResearchContext,
+): HistoricalCoverageContext {
+  const financialObservationCount = new Set(points.map((point) => point.fiscalYear)).size;
+  const financialAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, financialObservationCount);
+  const financialStatus = financialObservationCount === 0
+    ? "unavailable" as const
+    : financialAvailableYears >= HISTORICAL_COVERAGE_REQUESTED_YEARS
+      ? "full" as const
+      : "partial" as const;
+
+  const priceObservationCount = priceContext.maximum.observationCount;
+  const priceAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, Math.max(0, priceContext.maximum.spanYears));
+  const priceStatus = priceObservationCount === 0
+    ? "unavailable" as const
+    : priceContext.tenYear.sufficientHistory
+      ? "full" as const
+      : "partial" as const;
+
+  const valuationObservationCount = valuationContext.maximum.observationCount;
+  const valuationAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, Math.max(0, valuationContext.maximum.spanYears));
+  const valuationStatus = valuationObservationCount === 0
+    ? "unavailable" as const
+    : valuationContext.tenYear.sufficientHistory
+      ? "full" as const
+      : "partial" as const;
+
+  const dividendAvailableYears = Math.min(HISTORICAL_COVERAGE_REQUESTED_YEARS, dividendContext.annualHistoryYears);
+  const dividendStatus = dividendContext.status === "nonpayer"
+    ? "not_applicable" as const
+    : dividendContext.annualHistoryYears === 0 && dividendContext.eventCoverageYears === 0
+      ? "unavailable" as const
+      : dividendAvailableYears >= HISTORICAL_COVERAGE_REQUESTED_YEARS && dividendContext.eventCoverageYears >= 9.5
+        ? "full" as const
+        : "partial" as const;
+
+  return {
+    methodVersion: HISTORICAL_COVERAGE_METHOD_VERSION,
+    financials: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: financialAvailableYears,
+      observationCount: financialObservationCount,
+      status: financialStatus,
+    },
+    price: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: priceAvailableYears,
+      observationCount: priceObservationCount,
+      status: priceStatus,
+    },
+    valuation: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: valuationAvailableYears,
+      observationCount: valuationObservationCount,
+      status: valuationStatus,
+    },
+    dividend: {
+      requestedYears: HISTORICAL_COVERAGE_REQUESTED_YEARS,
+      availableYears: dividendAvailableYears,
+      observationCount: dividendContext.annualHistoryYears,
+      status: dividendStatus,
+      eventCoverageYears: dividendContext.eventCoverageYears,
+    },
+  };
 }
 
 function dividendStreakStats(points: HistoricalFinancialPoint[]) {
@@ -186,9 +473,20 @@ function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   return { increased, unchanged, cut };
 }
 
+export type HistoricalResearchOptions = {
+  ttmEpsHistory?: HistoricalTtmEpsPoint[];
+  dividendEvents?: MarketDividendEvent[];
+  currentPriceEarnings?: number | null;
+  currentPrice?: number | null;
+  currentPriceDate?: string | null;
+  yearHigh?: number | null;
+  yearLow?: number | null;
+};
+
 export function buildHistoricalResearchData(
   annualPeriods: FinancialPeriod[],
   priceHistory: MarketPricePoint[] = [],
+  options: HistoricalResearchOptions = {},
 ): HistoricalResearchData {
   const sortedPeriods = sortFinancialPeriods(annualPeriods)
     .filter((period) => fiscalYear(period) !== null)
@@ -202,16 +500,40 @@ export function buildHistoricalResearchData(
     return point ? [point] : [];
   });
   const dividendStats = dividendStreakStats(points);
+  const priceContext = buildHistoricalPriceContext(sortedPrices, options);
+  const dividendContext = buildDividendResearchContext(points, sortedPrices, options);
+  const valuation = buildHistoricalValuationSeries({
+    prices: sortedPrices,
+    ttmEps: options.ttmEpsHistory ?? [],
+    dividendEvents: options.dividendEvents,
+  });
+  const valuationContext = buildHistoricalValuationContext({
+    series: valuation,
+    currentPriceEarnings: options.currentPriceEarnings,
+    prices: sortedPrices,
+    dividendEvents: options.dividendEvents,
+  });
+  const coverage = buildHistoricalCoverageContext(points, priceContext, valuationContext, dividendContext);
 
   return {
     financials: points.slice(-10),
     price: sortedPrices,
+    priceContext,
+    dividendContext,
+    coverage,
+    valuation,
+    valuationContext,
+    valuationMethodVersion: HISTORICAL_VALUATION_METHOD_VERSION,
     revenueCagr3y: cagrForYears(points, 3, (point) => point.revenue),
     revenueCagr5y: cagrForYears(points, 5, (point) => point.revenue),
     revenueCagr10y: cagrForYears(points, 10, (point) => point.revenue),
     epsCagr3y: cagrForYears(points, 3, (point) => point.eps),
     epsCagr5y: cagrForYears(points, 5, (point) => point.eps),
     epsCagr10y: cagrForYears(points, 10, (point) => point.eps),
+    freeCashFlowGrowth1y: growthForYears(points, 1, (point) => point.freeCashFlow),
+    freeCashFlowCagr3y: cagrForYears(points, 3, (point) => point.freeCashFlow),
+    freeCashFlowCagr5y: cagrForYears(points, 5, (point) => point.freeCashFlow),
+    freeCashFlowCagr10y: cagrForYears(points, 10, (point) => point.freeCashFlow),
     dividendCagr3y: cagrForYears(points, 3, (point) => point.dividendPerShare),
     dividendCagr5y: cagrForYears(points, 5, (point) => point.dividendPerShare),
     dividendCagr10y: cagrForYears(points, 10, (point) => point.dividendPerShare),

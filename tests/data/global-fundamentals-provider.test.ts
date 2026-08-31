@@ -155,7 +155,7 @@ describe("global fundamentals provider orchestration", () => {
 
   it("fails analysis when fundamentals are unavailable even if market data is available", async () => {
     mocks.getMarketDataProviderChain.mockReturnValue(["stooq"]);
-    mocks.yahoo.mockResolvedValueOnce({
+    mocks.yahoo.mockResolvedValue({
       ok: false,
       reason: "upstream_error",
       message: "Yahoo fundamentals unavailable.",
@@ -194,6 +194,7 @@ describe("global fundamentals provider orchestration", () => {
         expect.objectContaining({ provider: "Stooq", capability: "market_data", status: "available" }),
       ]));
     }
+    expect(mocks.yahoo).toHaveBeenCalledTimes(2);
     expect(mocks.fetchStooqMarketData).toHaveBeenCalledOnce();
   });
 
@@ -551,7 +552,7 @@ describe("global fundamentals provider orchestration", () => {
   });
 
   it("falls back to Yahoo when a CIK-backed SEC request is unavailable", async () => {
-    mocks.sec.mockResolvedValueOnce({
+    mocks.sec.mockResolvedValue({
       ok: false, reason: "upstream_error", message: "SEC temporarily unavailable",
       diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "upstream_error"),
     });
@@ -565,7 +566,7 @@ describe("global fundamentals provider orchestration", () => {
       analysisType: "summary", investmentProfile: "balanced",
     });
     expect(result.ok).toBe(true);
-    expect(mocks.sec).toHaveBeenCalledTimes(1);
+    expect(mocks.sec).toHaveBeenCalledTimes(2);
     expect(mocks.yahoo).toHaveBeenCalledTimes(1);
   });
 

@@ -19,7 +19,14 @@ import { searchCompanyCatalog } from "./company-search";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
-import { providerDiagnostic, type AdapterResult, type MarketDataProvider, type ProviderFailureReason } from "./providers";
+import {
+  executeProviderWithRetry,
+  providerDiagnostic,
+  type AdapterResult,
+  type MarketDataProvider,
+  type ProviderFailureReason,
+  type ProviderRetryExecution,
+} from "./providers";
 import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "./twelve-data";
 import { yahooMarketDataProvider } from "./yahoo-market";
 import { fetchYahooFundamentalsResult, yahooCompanySearchProvider, yahooSymbolForCompany } from "./yahoo-fundamentals";
@@ -405,30 +412,38 @@ function mergeFundamentals(
 
 async function resolveConfiguredFundamentals(company: CompanySearchResult): Promise<FundamentalsResolution> {
   const diagnostics: ProviderDiagnostic[] = [];
-  const fetchSec = async (): Promise<AdapterResult<CompanyFundamentals> | null> => {
+  const fetchSec = async (): Promise<ProviderRetryExecution<CompanyFundamentals> | null> => {
     if (!company.cik) return null;
-    try {
-      return await fetchCompanyFundamentalsResult(company);
-    } catch {
-      return { ok: false, reason: "upstream_error", message: "SEC fundamentals failed unexpectedly.", diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "upstream_error") };
-    }
+    return executeProviderWithRetry({
+      operation: () => fetchCompanyFundamentalsResult(company),
+      exceptionResult: () => ({
+        ok: false,
+        reason: "upstream_error",
+        message: "SEC fundamentals failed unexpectedly.",
+        diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "upstream_error"),
+      }),
+    });
   };
-  const fetchYahoo = async (): Promise<AdapterResult<CompanyFundamentals>> => {
-    try {
-      return await fetchYahooFundamentalsResult(company);
-    } catch {
-      return { ok: false, reason: "upstream_error", message: "Yahoo fundamentals failed unexpectedly.", diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "unavailable", "upstream_error") };
-    }
-  };
-  const [secResult, yahooResult] = await Promise.all([fetchSec(), fetchYahoo()]);
-  if (secResult) {
-    diagnostics.push(secResult.ok && !hasUsableFinancialPeriods(secResult.data)
+  const fetchYahoo = async (): Promise<ProviderRetryExecution<CompanyFundamentals>> => executeProviderWithRetry({
+    operation: () => fetchYahooFundamentalsResult(company),
+    exceptionResult: () => ({
+      ok: false,
+      reason: "upstream_error",
+      message: "Yahoo fundamentals failed unexpectedly.",
+      diagnostic: providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "unavailable", "upstream_error"),
+    }),
+  });
+  const [secExecution, yahooExecution] = await Promise.all([fetchSec(), fetchYahoo()]);
+  const secResult = secExecution?.result ?? null;
+  const yahooResult = yahooExecution.result;
+  if (secExecution) {
+    diagnostics.push(...secExecution.attempts.map((attempt) => attempt.ok && !hasUsableFinancialPeriods(attempt.data)
       ? providerDiagnostic("SEC Companyfacts", "fundamentals", "partial", "empty_response")
-      : secResult.diagnostic);
+      : attempt.diagnostic));
   }
-  diagnostics.push(yahooResult.ok && !hasUsableFinancialPeriods(yahooResult.data)
+  diagnostics.push(...yahooExecution.attempts.map((attempt) => attempt.ok && !hasUsableFinancialPeriods(attempt.data)
     ? providerDiagnostic("Yahoo Finance fundamentals", "fundamentals", "partial", "empty_response")
-    : yahooResult.diagnostic);
+    : attempt.diagnostic));
 
   const validSec = secResult?.ok && fundamentalsMatchCompany(company, secResult.data) && hasUsableFinancialPeriods(secResult.data)
     ? secResult.data
@@ -599,23 +614,24 @@ async function resolveMarketDataFromProviders(
   const diagnostics: ProviderDiagnostic[] = [];
   let lastResult: AdapterResult<MarketSnapshot> = unavailableMarketData();
   for (const provider of providers) {
-    let result: AdapterResult<MarketSnapshot>;
-    try {
-      result = await provider.fetchMarketData(company);
-    } catch {
-      result = {
-        ok: false,
-        reason: "upstream_error",
-        message: "The configured market-data provider failed unexpectedly.",
-        diagnostic: providerDiagnostic(provider.id, "market_data", "unavailable", "upstream_error"),
-      };
-      console.error("Market data provider failed unexpectedly", {
-        resolvedProvider: provider.id,
-        symbol: company.canonicalTicker ?? company.ticker,
-        reason: "upstream_error",
-      });
-    }
-    diagnostics.push(result.diagnostic);
+    const execution = await executeProviderWithRetry({
+      operation: () => provider.fetchMarketData(company),
+      exceptionResult: () => {
+        console.error("Market data provider failed unexpectedly", {
+          resolvedProvider: provider.id,
+          symbol: company.canonicalTicker ?? company.ticker,
+          reason: "upstream_error",
+        });
+        return {
+          ok: false,
+          reason: "upstream_error",
+          message: "The configured market-data provider failed unexpectedly.",
+          diagnostic: providerDiagnostic(provider.id, "market_data", "unavailable", "upstream_error"),
+        };
+      },
+    });
+    diagnostics.push(...execution.attempts.map((attempt) => attempt.diagnostic));
+    const result = execution.result;
     if (result.ok) {
       return {
         result,
@@ -649,23 +665,24 @@ async function resolveMarketDataFromCandidates(
       continue;
     }
 
-    let result: AdapterResult<MarketSnapshot>;
-    try {
-      result = await candidate.provider.fetchMarketData(company);
-    } catch {
-      result = {
-        ok: false,
-        reason: "upstream_error",
-        message: "The configured market-data provider failed unexpectedly.",
-        diagnostic: providerDiagnostic(candidate.label, "market_data", "unavailable", "upstream_error"),
-      };
-      console.error("Market data provider failed unexpectedly", {
-        resolvedProvider: candidate.provider.id,
-        symbol: company.canonicalTicker ?? company.ticker,
-        reason: "upstream_error",
-      });
-    }
-    diagnostics.push(result.diagnostic);
+    const execution = await executeProviderWithRetry({
+      operation: () => candidate.provider!.fetchMarketData(company),
+      exceptionResult: () => {
+        console.error("Market data provider failed unexpectedly", {
+          resolvedProvider: candidate.provider!.id,
+          symbol: company.canonicalTicker ?? company.ticker,
+          reason: "upstream_error",
+        });
+        return {
+          ok: false,
+          reason: "upstream_error",
+          message: "The configured market-data provider failed unexpectedly.",
+          diagnostic: providerDiagnostic(candidate.label, "market_data", "unavailable", "upstream_error"),
+        };
+      },
+    });
+    diagnostics.push(...execution.attempts.map((attempt) => attempt.diagnostic));
+    const result = execution.result;
     lastResult = result;
     lastConfiguredResult = result;
     if (result.ok) {

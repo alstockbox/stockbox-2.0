@@ -223,7 +223,7 @@ describe("configured market provider routing", () => {
     ];
 
     await expect(fetchMarketDataFromProviders(company, providers)).resolves.toEqual(fallbackResult);
-    expect(primaryFetch).toHaveBeenCalledOnce();
+    expect(primaryFetch).toHaveBeenCalledTimes(2);
     expect(fallbackFetch).toHaveBeenCalledOnce();
   });
 
