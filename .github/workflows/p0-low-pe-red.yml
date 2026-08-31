@@ -23,7 +23,21 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply guarded low PE P0 patch
-        run: node scripts/release/apply-low-pe-p0-v2.mjs
+        run: |
+          set +e
+          node scripts/release/apply-low-pe-p0-v2.mjs > /tmp/low-pe-patch.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/low-pe-patch.log
+          if [ "$status" -eq 0 ]; then
+            echo "Expected v2 to stop at the isolated export guard, but it completed unexpectedly."
+            exit 1
+          fi
+          grep -Fq "export: append discount quality section: expected exactly one match, found 0" /tmp/low-pe-patch.log
+          grep -Fq "discountQuality: evaluateHistoricalDiscountQuality({" src/lib/analysis/engine.ts
+          grep -Fq "Historical Discount Quality" src/components/analysis/historical-research.tsx
+          grep -Fq "discountQuality?: HistoricalDiscountQuality;" src/lib/analysis/types.ts
+          node scripts/release/apply-low-pe-export-p0.mjs
       - name: Install dependencies
         run: npm ci
       - name: Targeted low PE tests
@@ -42,6 +56,7 @@ jobs:
           git config user.email "release-bot@users.noreply.github.com"
           rm -f scripts/release/apply-low-pe-p0.mjs
           rm -f scripts/release/apply-low-pe-p0-v2.mjs
+          rm -f scripts/release/apply-low-pe-export-p0.mjs
           rm -f .github/workflows/p0-low-pe-red.yml
           git add -A
           if git diff --cached --quiet; then
