@@ -114,8 +114,12 @@ function sample(
   value: number | null | undefined,
   allowZero = false,
 ): HistoricalValuationSample | null {
-  const valid = allowZero ? finiteNonNegative(value) : finitePositive(value);
-  return valid ? { year: point.fiscalYear, value } : null;
+  if (allowZero) {
+    if (!finiteNonNegative(value)) return null;
+    return { year: point.fiscalYear, value };
+  }
+  if (!finitePositive(value)) return null;
+  return { year: point.fiscalYear, value };
 }
 
 export function buildHistoricalValuationSummary(input: {
