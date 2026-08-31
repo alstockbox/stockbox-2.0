@@ -90,6 +90,7 @@ function input(): AnalysisInput {
       name: "Discount Fixture",
       sector: "Technology",
       industry: "Software",
+      analysisArchetype: "standard",
       annual: [],
       annualPeriods,
       historicalTtmEps: history.eps,
