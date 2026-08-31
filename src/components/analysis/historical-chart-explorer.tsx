@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { HistoricalFinancialPoint, HistoricalResearchData, MarketPricePoint } from "@/lib/analysis/types";
 import { barGeometry, chartDomain, gapAwareLineGeometry, yForChartValue } from "@/lib/analysis/chart-geometry";
+import { currencyUnit } from "@/lib/analysis/currency-units";
 import type { Locale } from "@/lib/i18n/types";
 
 type SeriesKind = "currency" | "percent" | "number";
@@ -11,6 +12,7 @@ type PeriodKey = "1y" | "3y" | "5y" | "10y" | "max";
 type ValueMode = "absolute" | "growth";
 type ChartType = "line" | "bar";
 type ChartPoint = { label: string; dateKey: string; value: number | null; kind: SeriesKind; currency?: string | null };
+type CurrencyPricePoint = MarketPricePoint & { currency?: string | null };
 const CHART_WIDTH = 720;
 const CHART_HEIGHT = 240;
 const PADDING_X = 78;
@@ -78,10 +80,19 @@ function formatValue(point: ChartPoint | null, locale: Locale, fallback: string)
     return new Intl.NumberFormat(localeTag(locale), { style: "percent", maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(point.value);
   }
   if (point.kind === "currency") {
+    const unit = currencyUnit(point.currency);
+    if (!unit) {
+      return new Intl.NumberFormat(localeTag(locale), { notation: "compact", maximumFractionDigits: 1 }).format(point.value);
+    }
     try {
-      return new Intl.NumberFormat(localeTag(locale), { style: "currency", currency: point.currency || "USD", notation: "compact", maximumFractionDigits: 1 }).format(point.value);
+      return new Intl.NumberFormat(localeTag(locale), {
+        style: "currency",
+        currency: unit.economicCurrency,
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(point.value * unit.quoteToEconomicScale);
     } catch {
-      return new Intl.NumberFormat(localeTag(locale), { maximumFractionDigits: 1 }).format(point.value);
+      return new Intl.NumberFormat(localeTag(locale), { notation: "compact", maximumFractionDigits: 1 }).format(point.value);
     }
   }
   return new Intl.NumberFormat(localeTag(locale), { notation: "compact", maximumFractionDigits: 1 }).format(point.value);
@@ -107,11 +118,13 @@ function financialPoint(point: HistoricalFinancialPoint, metric: MetricKey): Cha
 }
 
 function pricePoint(point: MarketPricePoint): ChartPoint {
+  const currency = (point as CurrencyPricePoint).currency ?? null;
   return {
     label: point.date.slice(0, 7),
     dateKey: point.date,
     value: point.close,
     kind: "currency",
+    currency,
   };
 }
 
