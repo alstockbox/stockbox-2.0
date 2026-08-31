@@ -5,6 +5,10 @@
       "schedule": "17 * * * *"
     },
     {
+      "path": "/api/investor/briefs/run",
+      "schedule": "15 7 * * 1"
+    },
+    {
       "path": "/api/affiliate/payouts/run",
       "schedule": "0 7 1 * *"
     }
