@@ -204,7 +204,7 @@ export async function getAlertsIntelligence(ticker?: string) {
     .from("user_alerts")
     .select("id,ticker,kind,metric_key,operator,threshold,enabled,created_at")
     .order("created_at", { ascending: false });
-  let eventsQuery = supabase
+  const eventsQuery = supabase
     .from("alert_events")
     .select("id,alert_id,metric_key,prior_value,trigger_value,threshold,payload,status,triggered_at,acknowledged_at")
     .order("triggered_at", { ascending: false })
