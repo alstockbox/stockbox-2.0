@@ -8,6 +8,8 @@ import { determineMonitoringRefresh, type MonitoringRefreshDecision } from "./mo
 
 const JOB_KIND = "investor_monitoring_refresh";
 const DEFAULT_BATCH_SIZE = 5;
+const STALE_LOCK_MINUTES = 30;
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 type MonitoringJobPayload = {
   userId: string;
@@ -62,8 +64,11 @@ async function markJobComplete(jobId: string) {
 
 async function markJobFailure(job: BackgroundJobRow, error: string) {
   const supabase = createAdminClient();
-  if (!supabase) return;
+  if (!supabase) return { exhausted: true, retryAt: null as string | null };
   const exhausted = job.attempts >= job.max_attempts;
+  const retryAt = exhausted
+    ? null
+    : new Date(Date.now() + Math.min(6, Math.max(1, job.attempts)) * 60 * 60 * 1000).toISOString();
   await supabase.from("background_jobs").update(exhausted ? {
     status: "failed",
     locked_at: null,
@@ -72,8 +77,9 @@ async function markJobFailure(job: BackgroundJobRow, error: string) {
     status: "queued",
     locked_at: null,
     last_error: error.slice(0, 500),
-    available_at: new Date(Date.now() + Math.min(6, Math.max(1, job.attempts)) * 60 * 60 * 1000).toISOString(),
+    available_at: retryAt,
   }).eq("id", job.id);
+  return { exhausted, retryAt };
 }
 
 async function latestAnalysisForUserTicker(userId: string, ticker: string) {
@@ -90,6 +96,27 @@ async function latestAnalysisForUserTicker(userId: string, ticker: string) {
   return data;
 }
 
+async function advanceMonitoringState(input: {
+  userId: string;
+  ticker: string;
+  status: "NO_NEW_DATA" | "PROVIDER_UNAVAILABLE" | "FAILED";
+  reason: string;
+  nextCheckAt: string;
+  errorClass?: string | null;
+}) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+  const now = new Date().toISOString();
+  await supabase.from("monitoring_state").update({
+    last_checked_at: now,
+    next_check_at: input.nextCheckAt,
+    refresh_reason: input.reason,
+    status: input.status,
+    last_error_class: input.errorClass ?? null,
+    updated_at: now,
+  }).eq("user_id", input.userId).eq("ticker", input.ticker);
+}
+
 async function processMonitoringJob(job: BackgroundJobRow) {
   const payload = job.payload;
   if (!payload?.userId || !payload?.ticker) throw new Error("invalid_monitoring_payload");
@@ -98,6 +125,13 @@ async function processMonitoringJob(job: BackgroundJobRow) {
   const lastAnalysisAt = latest?.created_at ? new Date(latest.created_at) : null;
   const decision = triggerDecision(payload.trigger ?? "scheduled", lastAnalysisAt);
   if (!decision.shouldRefresh) {
+    await advanceMonitoringState({
+      userId: payload.userId,
+      ticker: payload.ticker,
+      status: "NO_NEW_DATA",
+      reason: decision.reason,
+      nextCheckAt: new Date(Date.now() + CHECK_INTERVAL_MS).toISOString(),
+    });
     await markJobComplete(job.id);
     return { status: "NO_NEW_DATA" as const, ticker: payload.ticker, reason: decision.reason };
   }
@@ -128,6 +162,7 @@ async function processMonitoringJob(job: BackgroundJobRow) {
   const intelligence = await processPersistedAnalysisIntelligence({
     userId: payload.userId,
     report: analysis.data,
+    company: resolution.company,
   });
   await markJobComplete(job.id);
   return {
@@ -139,6 +174,43 @@ async function processMonitoringJob(job: BackgroundJobRow) {
   };
 }
 
+export async function recoverStaleInvestorMonitoringJobs() {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false as const, recovered: 0, failed: 0, error: "supabase_not_configured" };
+  const staleBefore = new Date(Date.now() - STALE_LOCK_MINUTES * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const { data: stale, error } = await supabase
+    .from("background_jobs")
+    .select("id,attempts,max_attempts")
+    .eq("kind", JOB_KIND)
+    .eq("status", "processing")
+    .lt("locked_at", staleBefore)
+    .limit(100);
+  if (error) return { ok: false as const, recovered: 0, failed: 0, error: error.message };
+
+  let recovered = 0;
+  let failed = 0;
+  for (const job of stale ?? []) {
+    const exhausted = Number(job.attempts ?? 0) >= Number(job.max_attempts ?? 0);
+    const { error: updateError } = await supabase.from("background_jobs").update(exhausted ? {
+      status: "failed",
+      locked_at: null,
+      last_error: "stale_monitoring_lock_exhausted",
+    } : {
+      status: "queued",
+      locked_at: null,
+      available_at: now,
+      last_error: "stale_monitoring_lock_recovered",
+    }).eq("id", job.id).eq("status", "processing");
+    if (!updateError) {
+      if (exhausted) failed += 1;
+      else recovered += 1;
+    }
+  }
+  return { ok: true as const, recovered, failed };
+}
+
 export async function enqueueDueInvestorMonitoring(limit = 100) {
   const supabase = createAdminClient();
   if (!supabase) return { ok: false as const, queued: 0, error: "supabase_not_configured" };
@@ -146,6 +218,7 @@ export async function enqueueDueInvestorMonitoring(limit = 100) {
   const { data: due, error } = await supabase
     .from("monitoring_state")
     .select("user_id,ticker,next_check_at")
+    .not("next_check_at", "is", null)
     .lte("next_check_at", now)
     .order("next_check_at", { ascending: true })
     .limit(Math.max(1, Math.min(limit, 500)));
@@ -183,7 +256,17 @@ export async function runInvestorMonitoringWorker(batchSize = DEFAULT_BATCH_SIZE
       results.push(await processMonitoringJob(job));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await markJobFailure(job, message);
+      const failure = await markJobFailure(job, message);
+      if (job.payload?.userId && job.payload?.ticker) {
+        await advanceMonitoringState({
+          userId: job.payload.userId,
+          ticker: job.payload.ticker,
+          status: failure.exhausted ? "FAILED" : "PROVIDER_UNAVAILABLE",
+          reason: failure.exhausted ? "monitoring_retry_exhausted" : "monitoring_retry_scheduled",
+          nextCheckAt: failure.retryAt ?? new Date(Date.now() + CHECK_INTERVAL_MS).toISOString(),
+          errorClass: message.split(":", 1)[0].slice(0, 80),
+        });
+      }
       results.push({ status: "FAILED", ticker: job.payload?.ticker ?? null, error: message.slice(0, 160) });
     }
   }
@@ -191,8 +274,10 @@ export async function runInvestorMonitoringWorker(batchSize = DEFAULT_BATCH_SIZE
 }
 
 export async function runInvestorMonitoringCycle(input?: { enqueueLimit?: number; batchSize?: number }) {
+  const recovered = await recoverStaleInvestorMonitoringJobs();
+  if (!recovered.ok) return { ok: false as const, recovered, scheduled: null, worker: null };
   const scheduled = await enqueueDueInvestorMonitoring(input?.enqueueLimit ?? 100);
-  if (!scheduled.ok) return { ok: false as const, scheduled, worker: null };
+  if (!scheduled.ok) return { ok: false as const, recovered, scheduled, worker: null };
   const worker = await runInvestorMonitoringWorker(input?.batchSize ?? DEFAULT_BATCH_SIZE);
-  return { ok: worker.ok, scheduled, worker };
+  return { ok: worker.ok, recovered, scheduled, worker };
 }
