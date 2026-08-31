@@ -26,6 +26,9 @@ const RISK_FREE_SERIES: Record<string, RiksbankRiskFreeSeries> = {
   JPY: { currency: "JPY", seriesId: "JPGVB10Y", label: "Japanese Government Bond 10Y" },
 };
 
+const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const latestObservationCache = new Map<string, { expiresAt: number; observation: { date: string; value: number } }>();
+
 export function riskFreeSeriesForCurrency(currency: string | null | undefined): RiksbankRiskFreeSeries | null {
   const normalized = currency?.trim().toUpperCase();
   return normalized ? RISK_FREE_SERIES[normalized] ?? null : null;
@@ -67,6 +70,38 @@ export function parseRiksbankLatestObservation(payload: unknown): { date: string
   return visit(payload);
 }
 
+function success(series: RiksbankRiskFreeSeries, endpoint: string, observation: { date: string; value: number }): AdapterResult<ResearchLayerPayload<RiksbankMacroData>> {
+  const accessedAt = new Date().toISOString();
+  const source = {
+    name: `Sveriges Riksbank — ${series.label}`,
+    url: endpoint,
+    accessedAt,
+    freshness: "Latest published official observation from the Riksbank SWEA API; StockBox caches the observation for up to six hours to respect public API limits.",
+    provider: "riksbank-swea",
+    capability: "macro" as const,
+    dataAsOf: observation.date,
+    version: "riksbank-swea-adapter-v1",
+  };
+  return {
+    ok: true,
+    data: {
+      data: {
+        currency: series.currency,
+        seriesId: series.seriesId,
+        seriesLabel: series.label,
+        observedYieldPercent: observation.value,
+        riskFreeRate: observation.value / 100,
+        observationDate: observation.date,
+      },
+      dataAsOf: observation.date,
+      coverage: 1,
+      confidence: 95,
+      evidence: [{ id: `riksbank-${series.seriesId}-${observation.date}`, kind: "reported_fact", sourceTier: "official_regulator", title: series.label, source, dataAsOf: observation.date }],
+    },
+    diagnostic: providerDiagnostic("riksbank-swea", "macro", "available"),
+  };
+}
+
 export async function fetchRiksbankMacroContext(
   company: Pick<CompanySearchResult, "currency">,
   options: { apiKey?: string | null; fetcher?: typeof fetch } = {},
@@ -81,8 +116,13 @@ export async function fetchRiksbankMacroContext(
     };
   }
 
-  const fetcher = options.fetcher ?? fetch;
   const endpoint = `https://api.riksbank.se/swea/v1/Observations/Latest/${encodeURIComponent(series.seriesId)}`;
+  if (!options.fetcher) {
+    const cached = latestObservationCache.get(series.seriesId);
+    if (cached && cached.expiresAt > Date.now()) return success(series, endpoint, cached.observation);
+  }
+
+  const fetcher = options.fetcher ?? fetch;
   const headers: HeadersInit = { Accept: "application/json" };
   if (options.apiKey?.trim()) headers["Ocp-Apim-Subscription-Key"] = options.apiKey.trim();
 
@@ -98,35 +138,8 @@ export async function fetchRiksbankMacroContext(
     if (!observation) {
       return { ok: false, reason: "empty_response", message: "Riksbank returned no usable observation.", diagnostic: providerDiagnostic("riksbank-swea", "macro", "unavailable", "empty_observation") };
     }
-    const accessedAt = new Date().toISOString();
-    const source = {
-      name: `Sveriges Riksbank — ${series.label}`,
-      url: endpoint,
-      accessedAt,
-      freshness: "Latest published official observation from the Riksbank SWEA API.",
-      provider: "riksbank-swea",
-      capability: "macro" as const,
-      dataAsOf: observation.date,
-      version: "riksbank-swea-adapter-v1",
-    };
-    return {
-      ok: true,
-      data: {
-        data: {
-          currency: series.currency,
-          seriesId: series.seriesId,
-          seriesLabel: series.label,
-          observedYieldPercent: observation.value,
-          riskFreeRate: observation.value / 100,
-          observationDate: observation.date,
-        },
-        dataAsOf: observation.date,
-        coverage: 1,
-        confidence: 95,
-        evidence: [{ id: `riksbank-${series.seriesId}-${observation.date}`, kind: "reported_fact", sourceTier: "official_regulator", title: series.label, source, dataAsOf: observation.date }],
-      },
-      diagnostic: providerDiagnostic("riksbank-swea", "macro", "available"),
-    };
+    if (!options.fetcher) latestObservationCache.set(series.seriesId, { expiresAt: Date.now() + CACHE_TTL_MS, observation });
+    return success(series, endpoint, observation);
   } catch (error) {
     const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout" : "upstream_error";
     return { ok: false, reason, message: "Riksbank API request failed.", diagnostic: providerDiagnostic("riksbank-swea", "macro", "unavailable", reason) };
