@@ -61,7 +61,7 @@ export type ArchetypeClassificationDiagnostics = {
 
 export type MetricValueKind = "reported" | "derived" | "estimated" | "fallback";
 
-export type FinancialPeriodBasis = "FY" | "TTM_REPORTED" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M";
+export type FinancialPeriodBasis = "FY" | "TTM_REPORTED" | "TTM_Q1_3M" | "TTM_Q2_6M" | "TTM_Q3_9M" | "TTM_FROM_QUARTERS";
 
 export type MetricProvenance = {
   source: string;
@@ -162,6 +162,29 @@ export type MarketPricePoint = {
   close: number;
 };
 
+export type MarketDividendEvent = {
+  date: string;
+  amount: number;
+  currency?: string | null;
+  provider?: string;
+};
+
+export type MarketSplitEvent = {
+  date: string;
+  numerator: number | null;
+  denominator: number | null;
+  splitRatio: number | null;
+  provider?: string;
+};
+
+export type HistoricalTtmEpsPoint = {
+  periodEndDate: string;
+  epsDiluted: number;
+  currency: string | null;
+  basis: "TTM_FROM_QUARTERS";
+  provenance: MetricProvenance;
+};
+
 export type MarketSnapshot = {
   ticker: string;
   price: number | null;
@@ -182,6 +205,9 @@ export type MarketSnapshot = {
   provider?: string;
   historyLength?: number;
   priceHistory?: MarketPricePoint[];
+  priceHistoryBasis?: "adjusted_close" | "close";
+  dividendEvents?: MarketDividendEvent[];
+  splitEvents?: MarketSplitEvent[];
   performance: Partial<Record<"1D" | "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y", number>>;
 };
 
@@ -254,6 +280,7 @@ export type CompanyFundamentals = {
   annualPeriods?: FinancialPeriod[];
   trailingTwelveMonths?: FinancialPeriod;
   priorTrailingTwelveMonths?: FinancialPeriod;
+  historicalTtmEps?: HistoricalTtmEpsPoint[];
   specialized?: SpecializedCompanyData;
   diagnostics?: AnalysisDiagnostics;
   reportedMarketCap?: number | null;
@@ -429,9 +456,55 @@ export type HistoricalFinancialPoint = {
   provenance?: Record<string, MetricProvenance>;
 };
 
+export type HistoricalValuationPoint = {
+  date: string;
+  priceDate: string | null;
+  referencePrice: number | null;
+  ttmEps: number | null;
+  priceEarnings: number | null;
+  priceEarningsStatus: "available" | "not_meaningful" | "unavailable";
+  trailingDividendsPerShare: number | null;
+  dividendPaymentCount: number;
+  dividendYield: number | null;
+  epsProvenance?: MetricProvenance;
+};
+
+export type HistoricalValuationWindowStats = {
+  requestedYears: 3 | 5 | 10 | null;
+  firstDate: string | null;
+  lastDate: string | null;
+  spanYears: number;
+  sufficientHistory: boolean;
+  observationCount: number;
+  peObservationCount: number;
+  priceEarningsMedian: number | null;
+  priceEarningsAverage: number | null;
+  dividendYieldObservationCount: number;
+  dividendYieldAverage: number | null;
+};
+
+export type HistoricalValuationContext = {
+  methodVersion: string;
+  currentPriceEarnings: number | null;
+  currentDividendYield: number | null;
+  currentTrailingDividendsPerShare: number | null;
+  currentDividendPaymentCount: number;
+  currentPeVsReferenceMedian: number | null;
+  referenceWindow: "5Y" | "MAX";
+  referencePriceEarningsMedian: number | null;
+  availableSince: string | null;
+  threeYear: HistoricalValuationWindowStats;
+  fiveYear: HistoricalValuationWindowStats;
+  tenYear: HistoricalValuationWindowStats;
+  maximum: HistoricalValuationWindowStats;
+};
+
 export type HistoricalResearchData = {
   financials: HistoricalFinancialPoint[];
   price: MarketPricePoint[];
+  valuation?: HistoricalValuationPoint[];
+  valuationContext?: HistoricalValuationContext;
+  valuationMethodVersion?: string;
   revenueCagr3y: number | null;
   revenueCagr5y: number | null;
   revenueCagr10y: number | null;

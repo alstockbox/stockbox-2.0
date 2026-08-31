@@ -4,6 +4,7 @@ import type {
   CompanyFundamentals,
   CompanySearchResult,
   FinancialPeriod,
+  HistoricalTtmEpsPoint,
   MetricProvenance,
   Sector,
   SpecializedCompanyData,
@@ -93,6 +94,7 @@ const REQUEST_TYPES = [
   ...BANK_FLOW_FIELDS.flatMap((field) => [`annual${field}`, `trailing${field}`, `quarterly${field}`]),
   ...BANK_BALANCE_FIELDS.flatMap((field) => [`annual${field}`, `quarterly${field}`]),
   ...INSURER_FLOW_FIELDS.flatMap((field) => [`annual${field}`, `trailing${field}`]),
+  "quarterlyDilutedEPS",
   "trailingMarketCap",
   "trailingEnterpriseValue",
   "trailingPeRatio",
@@ -420,6 +422,37 @@ function hasQuarterlyCadence(facts: YahooValue[]): boolean {
     if (!Number.isFinite(gapDays) || gapDays < 70 || gapDays > 115) return false;
   }
   return true;
+}
+
+function historicalTtmEps(values: YahooValue[]): HistoricalTtmEpsPoint[] {
+  const facts = quarterlyFlowFacts(values, "DilutedEPS");
+  const points: HistoricalTtmEpsPoint[] = [];
+  for (let index = 3; index < facts.length; index += 1) {
+    const window = facts.slice(index - 3, index + 1);
+    if (window.length !== 4 || !hasQuarterlyCadence(window)) continue;
+    const currencies = [...new Set(window.map((fact) => fact.currencyCode?.trim().toUpperCase()).filter((value): value is string => Boolean(value)))];
+    if (currencies.length > 1) continue;
+    const latestFact = window[3];
+    const epsDiluted = window.reduce((sum, fact) => sum + fact.value, 0);
+    if (!Number.isFinite(epsDiluted)) continue;
+    points.push({
+      periodEndDate: latestFact.asOfDate,
+      epsDiluted,
+      currency: currencies[0] ?? null,
+      basis: "TTM_FROM_QUARTERS",
+      provenance: {
+        source: "Yahoo Finance fundamentals timeseries",
+        provider: PROVIDER_ID,
+        unit: currencies[0] ?? undefined,
+        periodEnd: latestFact.asOfDate,
+        periodBasis: "TTM_FROM_QUARTERS",
+        inputs: window.map((fact) => `${fact.concept}@${fact.asOfDate}`),
+        valueKind: "derived",
+        note: "Diluted TTM EPS derived only from four consecutive Yahoo 3M diluted-EPS facts with 70-115 day quarterly cadence.",
+      },
+    });
+  }
+  return points.slice(-41);
 }
 
 function latestFourQuarterFlowFact(values: YahooValue[], field: string, absoluteValue = false): FlowMetricFact | null {
@@ -1034,6 +1067,7 @@ export async function fetchYahooFundamentalsResult(
   if (!seriesResult.ok) return seriesResult;
 
   const values = seriesResult.data;
+  const historicalTtmEpsPoints = historicalTtmEps(values);
   const dates = annualDates(values);
   const annualPeriods = dates.map((date) => buildPeriod(values, "annual", date, "annual", date));
   const reportedTrailingDates = trailingDates(values);
@@ -1087,6 +1121,7 @@ export async function fetchYahooFundamentalsResult(
       annualPeriods,
       trailingTwelveMonths,
       priorTrailingTwelveMonths,
+      historicalTtmEps: historicalTtmEpsPoints,
       reportedMarketCap: marketCapFact?.value ?? null,
       reportedMarketCapDate: marketCapFact?.asOfDate ?? null,
       reportedMarketCapCurrency: marketCapFact?.currencyCode ?? null,

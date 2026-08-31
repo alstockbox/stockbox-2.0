@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type {
   AnalysisReport,
   HistoricalFinancialPoint,
+  HistoricalValuationPoint,
   UiMode,
 } from "@/lib/analysis/types";
 import type { Locale } from "@/lib/i18n/types";
@@ -128,6 +129,9 @@ function extraCopyFor(locale: Locale) {
     latestYield: "Senaste direktavkastning", latestDps: "Senaste utdelning/aktie",
     payout: "Payout", fcfPayout: "FCF payout", historicalPe: "Historiskt P/E",
     referencePrice: "Referenspris", dividendYield: "Direktavkastning", dividendPerShare: "Utdelning/aktie",
+    currentPe: "P/E nu", historicalPeMedian: "Historisk median P/E", peVsHistory: "Mot historisk median",
+    tenYearPeMedian: "10 års median P/E", currentYield: "Direktavkastning nu", historicalYieldAverage: "Historiskt snitt yield",
+    ttmEps: "TTM EPS", ttmDividend: "TTM utdelning/aktie", valuationDate: "Datum", insufficientHistory: "Otillräcklig historik",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -138,6 +142,9 @@ function extraCopyFor(locale: Locale) {
     latestYield: "Latest dividend yield", latestDps: "Latest dividend / share",
     payout: "Payout", fcfPayout: "FCF payout", historicalPe: "Historical P/E",
     referencePrice: "Reference price", dividendYield: "Dividend yield", dividendPerShare: "Dividend / share",
+    currentPe: "Current P/E", historicalPeMedian: "Historical median P/E", peVsHistory: "Vs historical median",
+    tenYearPeMedian: "10Y median P/E", currentYield: "Current dividend yield", historicalYieldAverage: "Historical yield average",
+    ttmEps: "TTM EPS", ttmDividend: "TTM dividend / share", valuationDate: "Date", insufficientHistory: "Insufficient history",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -161,9 +168,9 @@ function TableShell({ children }: { children: ReactNode }) {
 const headClass = "whitespace-nowrap border-b border-white/10 px-3 py-2 font-semibold text-[#e1cb95]";
 const cellClass = "whitespace-nowrap border-b border-white/5 px-3 py-2 text-[#c9d2df]";
 
-function peLabel(point: HistoricalFinancialPoint, notMeaningful: string, unavailable: string, locale: Locale) {
+function peLabel(point: HistoricalValuationPoint, notMeaningful: string, unavailable: string, locale: Locale) {
   if (isNumber(point.priceEarnings)) return formatNumber(point.priceEarnings, locale, unavailable, 1);
-  if (isNumber(point.eps) && point.eps <= 0) return notMeaningful;
+  if (point.priceEarningsStatus === "not_meaningful") return notMeaningful;
   return unavailable;
 }
 
@@ -235,6 +242,7 @@ function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: 
   const copy = copyFor(locale);
   const extra = extraCopyFor(locale);
   const latest = latestFinancial(historical.financials);
+  const valuation = historical.valuationContext;
   return (
     <Card className="border-[#b99b5f]/25 bg-[#b99b5f]/5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -242,8 +250,8 @@ function DividendSnapshot({ report, locale }: { report: AnalysisReport; locale: 
         <Badge>{historical.financials.length} {extra.years}</Badge>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label={extra.latestDps} value={formatMoney(latest?.dividendPerShare ?? null, latest?.currency ?? report.reportingCurrency, locale, copy.unavailable, false)} />
-        <Stat label={extra.latestYield} value={formatPercent(latest?.dividendYield ?? null, locale, copy.unavailable)} />
+        <Stat label={extra.latestDps} value={formatMoney(valuation?.currentTrailingDividendsPerShare ?? null, latest?.currency ?? report.reportingCurrency, locale, copy.unavailable, false)} />
+        <Stat label={extra.latestYield} value={formatPercent(valuation?.currentDividendYield ?? null, locale, copy.unavailable)} />
         <Stat label={extra.payout} value={formatPercent(latest?.payoutRatio ?? null, locale, copy.unavailable)} />
         <Stat label={extra.fcfPayout} value={formatPercent(latest?.freeCashFlowPayoutRatio ?? null, locale, copy.unavailable)} />
         <Stat label={extra.dividendCagr3y} value={formatPercent(historical.dividendCagr3y, locale, copy.unavailable)} />
@@ -261,6 +269,11 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
   if (!historical) return null;
   const copy = copyFor(locale);
   const extra = extraCopyFor(locale);
+  const valuation = historical.valuationContext;
+  const referenceLabel = valuation?.referenceWindow === "5Y"
+    ? `5Y ${extra.historicalPeMedian}`
+    : `MAX ${extra.historicalPeMedian}${valuation?.availableSince ? ` (${valuation.availableSince.slice(0, 4)}-)` : ""}`;
+  const yieldWindow = valuation?.fiveYear.sufficientHistory ? valuation.fiveYear : valuation?.maximum;
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -277,6 +290,25 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
         <Stat label={extra.epsCagr3y} value={formatPercent(historical.epsCagr3y, locale, copy.unavailable)} />
         <Stat label={extra.epsCagr10y} value={formatPercent(historical.epsCagr10y, locale, copy.unavailable)} />
       </div>
+      {valuation ? (
+        <div className="mt-5 border-t border-white/10 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.valuationHistory}</h3>
+            <Badge>{valuation.methodVersion}</Badge>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Stat label={extra.currentPe} value={formatNumber(valuation.currentPriceEarnings, locale, copy.unavailable, 1)} />
+            <Stat label={referenceLabel} value={formatNumber(valuation.referencePriceEarningsMedian, locale, copy.unavailable, 1)} />
+            <Stat label={extra.peVsHistory} value={formatPercent(valuation.currentPeVsReferenceMedian, locale, copy.unavailable)} />
+            <Stat label={extra.tenYearPeMedian} value={valuation.tenYear.sufficientHistory ? formatNumber(valuation.tenYear.priceEarningsMedian, locale, copy.unavailable, 1) : extra.insufficientHistory} />
+            <Stat label={extra.currentYield} value={formatPercent(valuation.currentDividendYield, locale, copy.unavailable)} />
+            <Stat label={valuation?.fiveYear.sufficientHistory ? `5Y ${extra.historicalYieldAverage}` : `MAX ${extra.historicalYieldAverage}`} value={formatPercent(yieldWindow?.dividendYieldAverage ?? null, locale, copy.unavailable)} />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-[#9aa7b8]">
+            {valuation.maximum.observationCount} TTM observations{valuation.availableSince ? ` · ${valuation.availableSince}–${valuation.maximum.lastDate ?? ""}` : ""}. {extra.reportedDerived}
+          </p>
+        </div>
+      ) : null}
       <div className="mt-5 border-t border-white/10 pt-4">
         <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.priceHistory}</h3>
         <div className="mt-2">
@@ -344,23 +376,28 @@ function ValuationHistory({ report, locale }: { report: AnalysisReport; locale: 
   if (!historical) return null;
   const copy = copyFor(locale);
   const extra = extraCopyFor(locale);
+  const points = historical.valuation ?? [];
   return (
     <Card>
-      <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.valuationHistory}</h2>
-      <TableShell>
-        <thead><tr>
-          {[copy.fiscalYear, extra.referencePrice, extra.historicalPe, extra.dividendYield, extra.dividendPerShare, extra.payout, extra.fcfPayout].map((label) => <th key={label} className={headClass}>{label}</th>)}
-        </tr></thead>
-        <tbody>{historical.financials.map((point) => <tr key={point.fiscalYear}>
-          <td className={cellClass}>{point.fiscalYear}</td>
-          <td className={cellClass}>{formatMoney(point.referencePrice, point.currency ?? report.reportingCurrency, locale, copy.unavailable, false)}</td>
-          <td className={cellClass}>{peLabel(point, copy.notMeaningful, copy.unavailable, locale)}</td>
-          <td className={cellClass}>{formatPercent(point.dividendYield, locale, copy.unavailable)}</td>
-          <td className={cellClass}>{formatMoney(point.dividendPerShare, point.currency ?? report.reportingCurrency, locale, copy.unavailable, false)}</td>
-          <td className={cellClass}>{formatPercent(point.payoutRatio, locale, copy.unavailable)}</td>
-          <td className={cellClass}>{formatPercent(point.freeCashFlowPayoutRatio, locale, copy.unavailable)}</td>
-        </tr>)}</tbody>
-      </TableShell>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-[#f4efe5]">{copy.valuationHistory}</h2>
+        {historical.valuationMethodVersion ? <Badge>{historical.valuationMethodVersion}</Badge> : null}
+      </div>
+      {!points.length ? <p className="mt-3 text-sm text-[#9aa7b8]">{extra.insufficientHistory}</p> : (
+        <TableShell>
+          <thead><tr>
+            {[extra.valuationDate, extra.referencePrice, extra.ttmEps, extra.historicalPe, extra.ttmDividend, extra.dividendYield].map((label) => <th key={label} className={headClass}>{label}</th>)}
+          </tr></thead>
+          <tbody>{points.map((point) => <tr key={point.date}>
+            <td className={cellClass}>{point.date}</td>
+            <td className={cellClass}>{formatMoney(point.referencePrice, report.reportingCurrency, locale, copy.unavailable, false)}</td>
+            <td className={cellClass}>{formatNumber(point.ttmEps, locale, copy.unavailable)}</td>
+            <td className={cellClass}>{peLabel(point, copy.notMeaningful, copy.unavailable, locale)}</td>
+            <td className={cellClass}>{formatMoney(point.trailingDividendsPerShare, report.reportingCurrency, locale, copy.unavailable, false)}</td>
+            <td className={cellClass}>{formatPercent(point.dividendYield, locale, copy.unavailable)}</td>
+          </tr>)}</tbody>
+        </TableShell>
+      )}
     </Card>
   );
 }
@@ -381,12 +418,11 @@ function DividendHistory({ report, locale }: { report: AnalysisReport; locale: L
       </div>
       <TableShell>
         <thead><tr>
-          {[copy.fiscalYear, extra.dividendPerShare, extra.dividendYield, extra.payout, extra.fcfPayout].map((label) => <th key={label} className={headClass}>{label}</th>)}
+          {[copy.fiscalYear, extra.dividendPerShare, extra.payout, extra.fcfPayout].map((label) => <th key={label} className={headClass}>{label}</th>)}
         </tr></thead>
         <tbody>{historical.financials.map((point) => <tr key={point.fiscalYear}>
           <td className={cellClass}>{point.fiscalYear}</td>
           <td className={cellClass}>{formatMoney(point.dividendPerShare, point.currency ?? report.reportingCurrency, locale, copy.unavailable, false)}</td>
-          <td className={cellClass}>{formatPercent(point.dividendYield, locale, copy.unavailable)}</td>
           <td className={cellClass}>{formatPercent(point.payoutRatio, locale, copy.unavailable)}</td>
           <td className={cellClass}>{formatPercent(point.freeCashFlowPayoutRatio, locale, copy.unavailable)}</td>
         </tr>)}</tbody>

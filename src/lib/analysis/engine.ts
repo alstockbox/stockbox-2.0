@@ -667,7 +667,11 @@ export function presentAnalysisReport(
     reportingCurrency: canonicalInput.company.reportingCurrency ?? canonicalInput.company.currency ?? null,
     market: legacyInput.market ?? undefined,
     historical: canonicalInput.annualPeriods.length || legacyInput.market?.priceHistory?.length
-      ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [])
+      ? buildHistoricalResearchData(canonicalInput.annualPeriods, legacyInput.market?.priceHistory ?? [], {
+          ttmEpsHistory: legacyInput.fundamentals?.historicalTtmEps,
+          dividendEvents: legacyInput.market?.dividendEvents,
+          currentPriceEarnings: result.metrics.valuation.priceEarnings,
+        })
       : undefined,
     forwardEstimates: canonicalInput.estimates,
     dataAsOf: result.diagnostics.latestFinancialPeriodEnd,

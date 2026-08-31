@@ -2,10 +2,17 @@ import type {
   FinancialPeriod,
   HistoricalFinancialPoint,
   HistoricalResearchData,
+  HistoricalTtmEpsPoint,
+  MarketDividendEvent,
   MarketPricePoint,
 } from "./types";
 import { calculateCagr, calculateGrowth, isFiniteNumber, safeDivide } from "./math";
 import { deriveSimpleFreeCashFlow, shareBasisComparable, sortFinancialPeriods } from "./metrics";
+import {
+  buildHistoricalValuationContext,
+  buildHistoricalValuationSeries,
+  HISTORICAL_VALUATION_METHOD_VERSION,
+} from "./historical-valuation";
 
 const MAX_REFERENCE_PRICE_LAG_DAYS = 45;
 const MAX_PRICE_POINTS = 121;
@@ -90,8 +97,6 @@ function pointForPeriod(
   const positiveFcf = positive(fcf);
   const dividends = dividendsPaid(period);
   const price = referencePrice(period, prices);
-  const positivePrice = positive(price);
-  const positiveEps = positive(period.epsDiluted);
   const positiveNetIncome = positive(period.netIncome);
   const dividendPerShare = shareCount !== null && isFiniteNumber(dividends) ? dividends / shareCount : null;
   const priorDividends = prior ? dividendsPaid(prior) : null;
@@ -108,10 +113,6 @@ function pointForPeriod(
   const netDebt = isFiniteNumber(period.totalDebt) && isFiniteNumber(period.cashAndEquivalents)
     ? period.totalDebt - period.cashAndEquivalents
     : null;
-  const priceEarnings = positivePrice !== null && positiveEps !== null
-    ? positivePrice / positiveEps
-    : null;
-
   return {
     fiscalYear: year,
     periodEndDate: period.periodEndDate ?? null,
@@ -150,10 +151,10 @@ function pointForPeriod(
       : null,
     freeCashFlowPayoutRatio: positiveFcf !== null && isFiniteNumber(dividends) ? dividends / positiveFcf : null,
     referencePrice: price,
-    priceEarnings,
-    dividendYield: positivePrice !== null && isFiniteNumber(dividendPerShare)
-      ? dividendPerShare / positivePrice
-      : null,
+    // Historical valuation is intentionally not derived from annual EPS or annualized cash dividends.
+    // Correct TTM valuation lives in HistoricalResearchData.valuation.
+    priceEarnings: null,
+    dividendYield: null,
     provenance: period.provenance,
   };
 }
@@ -186,9 +187,16 @@ function dividendStreakStats(points: HistoricalFinancialPoint[]) {
   return { increased, unchanged, cut };
 }
 
+export type HistoricalResearchOptions = {
+  ttmEpsHistory?: HistoricalTtmEpsPoint[];
+  dividendEvents?: MarketDividendEvent[];
+  currentPriceEarnings?: number | null;
+};
+
 export function buildHistoricalResearchData(
   annualPeriods: FinancialPeriod[],
   priceHistory: MarketPricePoint[] = [],
+  options: HistoricalResearchOptions = {},
 ): HistoricalResearchData {
   const sortedPeriods = sortFinancialPeriods(annualPeriods)
     .filter((period) => fiscalYear(period) !== null)
@@ -202,10 +210,24 @@ export function buildHistoricalResearchData(
     return point ? [point] : [];
   });
   const dividendStats = dividendStreakStats(points);
+  const valuation = buildHistoricalValuationSeries({
+    prices: sortedPrices,
+    ttmEps: options.ttmEpsHistory ?? [],
+    dividendEvents: options.dividendEvents,
+  });
+  const valuationContext = buildHistoricalValuationContext({
+    series: valuation,
+    currentPriceEarnings: options.currentPriceEarnings,
+    prices: sortedPrices,
+    dividendEvents: options.dividendEvents,
+  });
 
   return {
     financials: points.slice(-10),
     price: sortedPrices,
+    valuation,
+    valuationContext,
+    valuationMethodVersion: HISTORICAL_VALUATION_METHOD_VERSION,
     revenueCagr3y: cagrForYears(points, 3, (point) => point.revenue),
     revenueCagr5y: cagrForYears(points, 5, (point) => point.revenue),
     revenueCagr10y: cagrForYears(points, 10, (point) => point.revenue),

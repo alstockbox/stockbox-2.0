@@ -64,7 +64,8 @@ describe("historical financial CSV export", () => {
 
     expect(csv.split("\n")[0]).toContain("fiscalYear,periodEndDate,currency,revenue");
     expect(csv).toContain("2025,2025-12-31,USD,100");
-    expect(csv).toContain("referencePrice,priceEarnings,dividendYield");
-    expect(csv).toMatch(/40,,0\.01$/);
+    expect(csv.split("\n")[0]).toContain("freeCashFlowPayoutRatio,referencePrice");
+    expect(csv.split("\n")[0]).not.toContain("priceEarnings");
+    expect(csv.split("\n")[0]).not.toContain("dividendYield");
   });
 });

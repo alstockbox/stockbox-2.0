@@ -30,8 +30,6 @@ const historicalHeaders = [
   "payoutRatio",
   "freeCashFlowPayoutRatio",
   "referencePrice",
-  "priceEarnings",
-  "dividendYield",
 ] as const;
 
 type HistoricalHeader = typeof historicalHeaders[number];
@@ -46,5 +44,20 @@ export function historicalFinancialsCsv(historical: HistoricalResearchData): str
   const rows = historical.financials.map((point) =>
     historicalHeaders.map((header: HistoricalHeader) => csvCell(point[header])).join(",")
   );
-  return [historicalHeaders.join(","), ...rows].join("\n");
+  const valuationHeaders = [
+    "date", "priceDate", "referencePrice", "ttmEps", "priceEarnings", "priceEarningsStatus",
+    "trailingDividendsPerShare", "dividendPaymentCount", "dividendYield",
+  ] as const;
+  const valuationRows = (historical.valuation ?? []).map((point) =>
+    valuationHeaders.map((header) => csvCell(point[header])).join(",")
+  );
+  const valuationSection = valuationRows.length
+    ? [
+        "",
+        `historicalValuationMethodVersion,${csvCell(historical.valuationMethodVersion)}`,
+        valuationHeaders.join(","),
+        ...valuationRows,
+      ]
+    : [];
+  return [historicalHeaders.join(","), ...rows, ...valuationSection].join("\n");
 }
