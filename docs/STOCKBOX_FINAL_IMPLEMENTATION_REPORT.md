@@ -2,13 +2,13 @@
 
 Release-hardening branch: `stockbox/p0-release-hardening-20260831`  
 Prepared: 2026-08-31  
-Scope: the existing StockBox application and its real analysis, data, comparison, export, runtime, security, profile and historical-research surfaces.
+Scope: the existing StockBox application and its real analysis, data, comparison, export, runtime, security, profile, historical-research and observability surfaces.
 
 ## 1. Overall status
-- Production readiness: High for the implemented repository scope. The release branch builds, passes the full automated regression suite, typecheck, lint, production-runtime smoke, security-header/auth-route smoke and live public-market-provider smoke. The Defensive profile database constraint is applied and verified in `stockbox-production`. A fresh Vercel preview is temporarily blocked by Hobby-plan deployment rate limiting, and Supabase Auth still reports Leaked Password Protection as disabled.
+- Production readiness: High for the implemented repository scope. The release branch has passed full automated regression, typecheck, lint, production build, production-runtime smoke, security-header/auth-route smoke and live public-market-provider smoke during release hardening. The Defensive profile database constraint is applied and verified in `stockbox-production`. A fresh Vercel preview is temporarily blocked by Hobby-plan deployment rate limiting, and Supabase Auth still reports Leaked Password Protection as disabled.
 - P0 completion: Complete for the repository/provider capabilities available in this build. The release-blocking historical methodology, Simple Mode, coverage, profile differentiation, comparison semantics, low-P/E context, chart gaps, export parity and Defensive persistence issues identified during the audit were implemented and regression-tested.
-- P1 completion: Partial. Core historical dashboards, multi-period context, dividend context, payout/FCF/ROIC history, comparison and export foundations are present, but some richer historical/specialized features remain provider- or scope-limited.
-- Known blockers: No known repository-level P0 code blocker remains after the final hardening pass. External launch limitations are the Vercel deployment-rate limit, Supabase Auth leaked-password protection setting, provider/licensing constraints and live payment-flow verification documented below.
+- P1 completion: Strong partial completion. Historical context, dividend context, profile-aware comparison, archetype-specific scoring, provider/runtime health, persistent provider diagnostics and historical-coverage observability are implemented. Remaining P1/P2 items are primarily provider/licensing/FX/estimates depth or post-deploy optimization.
+- Known blockers: No known repository-level P0 code blocker remains after the hardening pass. External launch limitations are the Vercel deployment-rate limit, Supabase Auth leaked-password protection setting, provider/licensing constraints and intentional live payment-flow verification documented below.
 
 ## 2. What was implemented
 - Replaced annual fiscal-year EPS-based historical P/E behavior with a versioned TTM historical valuation pipeline (`historical-valuation-v2`).
@@ -37,6 +37,10 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Added gap-aware chart geometry and updated both historical line-chart surfaces so missing/non-finite observations create visual gaps instead of a line that falsely bridges missing periods.
 - Extended historical CSV export to carry valuation context, coverage, price context, dividend context, methodology versions and discount-quality evidence while preserving nulls as blanks.
 - Preserved print/PDF report export via the existing report print surface and print stylesheet; new report sections are rendered from the same report model.
+- Added persistent analysis-provider observability using the existing `provider_health` table instead of introducing a duplicate monitoring store.
+- Added sanitized, low-cardinality analytics events for degraded providers, partial historical coverage and unavailable historical valuation; raw provider errors/report payloads are not emitted.
+- Wired provider diagnostics into successful and hard-failed analysis paths without allowing telemetry failure to block customer analysis.
+- Reused the existing Admin runtime-health aggregation, which groups provider calls/successes/latency samples/latest issues from `provider_health`.
 
 ## 3. Existing features discovered and improved
 - StockBox already had deterministic scoring, coverage-aware contributors and a sound missing-data approach. This was preserved rather than replaced.
@@ -46,6 +50,8 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Existing historical tables/charts, comparison page, report view, portfolio/history/batch infrastructure and print/PDF flow were reused instead of duplicating product surfaces.
 - Existing profile scoring weights were real, but discoverability and presentation did not make the differences obvious. The hardening work fixed the UX/presentation layer and added Defensive rather than discarding the existing scoring model.
 - Existing comparison correctly avoided a simple lowest-P/E winner in several places; the hardening work formalized direction/context semantics and profile emphasis.
+- Existing archetype classification/scoring already contains specialized treatment for banks, insurers, REITs/property companies, asset managers, utilities, cyclicals, software-growth companies, pre-revenue biotech and holding companies. Unsupported generic metrics are de-emphasized or marked unsuitable instead of being blindly scored.
+- Existing provider infrastructure already supplied explicit capabilities/failure reasons, fallback chains, timeouts, data caching and an admin-protected live market-provider probe. The hardening work connected analysis-level diagnostics to persistent operational telemetry rather than duplicating those systems.
 
 ## 4. Backend changes
 - Added versioned historical valuation construction and context aggregation.
@@ -56,13 +62,15 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Added profile-presentation configuration reusable by report and comparison surfaces.
 - Extended comparison domain logic with metric direction, profile lens, warnings and dividend metrics.
 - Extended historical export generation with normalized context metadata.
+- Added analysis observability helpers that batch normalized provider diagnostics into `provider_health` and emit sanitized degradation/coverage signals.
+- Kept observability non-blocking: monitoring write failures cannot turn a valid analysis into a failed customer request.
 - Kept financial calculation logic in the analysis layer rather than moving financial math into React components.
 
 ## 5. Database changes
 - Added `supabase/migrations/20260831215457_add_defensive_investment_profile.sql` to permit/persist the Defensive investment-profile value.
 - Applied the matching `add_defensive_investment_profile` migration to Supabase project `stockbox-production`; Supabase recorded migration version `20260831215457`.
 - Verified the live `profiles_investment_profile_check` constraint contains `long_term`, `short_term`, `growth`, `value`, `quality`, `dividend`, `defensive` and `balanced`.
-- No duplicate historical-financial warehouse schema was introduced in this hardening branch. Existing report/history architecture continues to carry the normalized analysis payload.
+- No duplicate historical-financial warehouse or monitoring schema was introduced. Existing report/history architecture continues to carry the normalized analysis payload and existing `provider_health`, `error_logs` and `usage_events` tables are reused.
 - Supabase security advisor after the DDL change reported an Auth WARN that Leaked Password Protection is disabled. RLS-without-policy findings are INFO-level and restrictive-by-default; they were not automatically loosened.
 
 ## 6. Frontend changes
@@ -74,6 +82,7 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Comparison shows profile-lens context and comparability warnings.
 - Historical charts preserve gaps and do not visually interpolate missing observations.
 - Pro-only explainability/raw-number/valuation surfaces stay out of Simple Mode even when the underlying analysis request is Deep or Research.
+- The existing Admin operations page automatically benefits from the new provider-health writes and can aggregate provider/operation calls, successes, latency samples and latest issues.
 
 ## 7. Calculation methodology (P/E, dividend yield, CAGR, FCF, payout, ROIC, valuation context)
 ### Historical P/E
@@ -124,20 +133,23 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - SEC/filing-derived fundamentals remain the preferred audited fundamental source where supported.
 - Yahoo fundamentals/market adapters provide broader security/market coverage and normalized market events.
 - Yahoo market data uses adjusted close when available and carries dividend/split events into the normalized market snapshot.
+- Yahoo market requests use bounded timeouts and a 15-minute Next data-cache revalidation window; Yahoo fundamentals are documented/cached on a roughly 30-minute cadence and SEC company facts on a longer roughly 12-hour cadence.
 - Stooq and Twelve Data remain available as configured market-data alternatives/fallbacks.
+- Provider failures use normalized failure classes such as timeout, rate-limited, upstream error, empty response and unsupported symbol rather than arbitrary raw errors.
 - Live release smoke on 2026-08-31 resolved AAPL, MSFT, NVDA and SPY through `yahoo-chart` successfully. All four had current price date 2026-08-31, 500 returned history rows, and usable 3M/1Y momentum history.
 - Provider availability is runtime-dependent; a successful smoke is evidence of current reachability, not a guarantee of future third-party uptime.
 - Data coverage is exposed separately from score confidence so partial provider history cannot masquerade as a full historical record.
+- Runtime analysis now persists normalized provider diagnostics for historical failure-rate inspection and sends sanitized partial/unavailable signals to analytics when configured.
 
 ## 9. DATA-BLOCKED items
 - Special-dividend classification: cash dividend events can be consumed, but the current provider event payload does not reliably identify every payment as ordinary versus special. StockBox must not invent that classification. Possible fix: add a licensed provider with explicit ordinary/special dividend metadata, then extend the normalized dividend-event type.
-- Historical 10Y P/E: true 10Y valuation requires enough contemporaneous historical TTM diluted EPS plus price history. Where TTM history is shorter, StockBox now reports actual coverage/MAX instead of pretending it has 10Y.
+- Historical 10Y P/E: true 10Y valuation requires enough contemporaneous historical TTM diluted EPS plus price history. Where TTM history is shorter, StockBox reports actual coverage/MAX instead of pretending it has 10Y.
 - Historical 10Y dividend yield: true historical yield requires historical dividend-event coverage. A provider with shorter event history produces partial coverage, not reconstructed fake 10Y yield.
 - Analyst estimate revisions/catalysts: only usable when a verified estimates provider supplies comparable revision history. Missing revisions remain unavailable and are not inferred by the LLM.
 - Cross-currency comparison normalization: current comparison warns when currencies are not directly comparable and avoids false winner logic. A full FX-normalized historical comparison requires an authoritative timestamped FX series and is P1/P2 work.
 - Commercial provider licensing/redistribution rights cannot be established by application code. The owner must ensure every production provider’s terms permit the intended commercial use, caching and redistribution/display pattern.
 - Live Stripe end-to-end purchase/webhook/customer-portal verification requires an intentional real transaction and live account state. Automated CI does not create a real charge merely to make a release report look complete.
-- Vercel preview deployment is temporarily capacity-blocked: the connected Hobby team is currently returning `Deployment rate limited — retry in 24 hours.` A fresh preview cannot be produced until quota resets or build capacity is increased.
+- Vercel preview deployment is temporarily capacity-blocked: the connected Hobby team is returning `Deployment rate limited — retry in 24 hours.` A fresh preview cannot be produced until quota resets or build capacity is increased.
 
 ## 10. Tests run
 - Targeted historical valuation P0 tests: positive/negative/non-meaningful P/E behavior, TTM basis, no-look-ahead pricing, window coverage and valuation context.
@@ -151,13 +163,12 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Targeted chart-gap tests proving missing observations split paths and keep original time-axis spacing.
 - Historical CSV export tests proving context/method versions are exported and null values are not converted to `undefined`/`NaN`.
 - PDF/print-export tests verifying the client print action and dedicated print stylesheet.
-- Full `npm test` regression suite after each release-critical hardening block.
-- `npm run typecheck` after each release-critical hardening block.
-- `npm run lint` after each release-critical hardening block.
-- `npm run build` production build after each release-critical hardening block.
+- Observability TDD: the new provider/history observability contract was first executed red with three expected failures, then passed green after the implementation. It verifies low-cardinality property whitelisting, raw-payload exclusion, provider-health persistence wiring and historical degradation events.
+- Full `npm test` regression suite after release-critical hardening blocks.
+- `npm run typecheck`, `npm run lint` and `npm run build` production gates during release hardening.
 - Production runtime smoke: built app started with `next start`; public routes, protected routes, auth redirects, provider-health endpoint, sample-report state and required security headers passed.
-- Live market-data smoke: AAPL/MSFT/NVDA/SPY all resolved successfully via Yahoo on 2026-08-31.
-- Dependency install audit during provider smoke reported 0 npm vulnerabilities at install time.
+- Live market-data smoke: AAPL/MSFT/NVDA/SPY resolved successfully via Yahoo on 2026-08-31.
+- Dependency install audit during provider/observability smoke reported 0 npm vulnerabilities at install time.
 - Production Supabase migration list verified the Defensive migration is recorded as version `20260831215457`.
 - Production constraint query verified `defensive` is accepted by `profiles_investment_profile_check`.
 - Supabase security and performance advisors were run after the production DDL change; no migration-specific DDL failure was reported.
@@ -165,7 +176,7 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 ## 11. Regression status (auth/payments/quotas/affiliate/admin/batch/portfolio/PDF/history)
 - Auth/login/signup/reset/account code paths: no intentional behavioral rewrite in this hardening branch; full regression suite passed and runtime unauthenticated redirects passed.
 - Protected settings/admin/affiliate routes: runtime smoke confirmed unauthenticated protection/redirect behavior.
-- Payments/subscriptions/cancel/renew/upgrades: no intentional payment-state redesign in this hardening branch; existing automated regression suite passed. Live Stripe transaction/webhook verification is still an owner launch check because creating a real charge is intentionally not automated without a real purchase action.
+- Payments/subscriptions/cancel/renew/upgrades: no intentional payment-state redesign in this hardening branch; existing automated regression suite passed. Live Stripe transaction/webhook verification remains an owner launch check because creating a real charge is intentionally not automated without a real purchase action.
 - Usage/quotas: preserved; regression suite passed.
 - Affiliate/admin/RBAC: preserved; regression suite passed; runtime unauthenticated admin/affiliate protection passed.
 - Batch analysis: preserved; route smoke passed and regression suite passed.
@@ -174,26 +185,28 @@ Scope: the existing StockBox application and its real analysis, data, comparison
 - Comparison: materially improved and regression-tested.
 - PDF/print: preserved and tested; same report model includes the newly surfaced historical context.
 - CSV historical export: extended and regression-tested.
+- Observability: analysis/provider/history degradation telemetry is additive and non-blocking; it reuses existing admin-only database access patterns and does not alter customer authorization or entitlement logic.
 
 ## 12. Remaining P1/P2 work
 - Add a commercially licensed dividend source with explicit special-dividend metadata if special-dividend classification is required.
 - Add authoritative FX normalization for multi-currency comparisons if StockBox should rank unlike reporting currencies numerically rather than warn/defer.
 - Expand estimates/revision history when a verified estimates provider supports it.
-- Continue specialized sector modules for banks, insurers, REIT/property, holding/investment companies, biotech, mining/energy and other non-standard archetypes where generic metrics are inappropriate.
-- Add richer precomputed/cached historical aggregation if production telemetry shows historical page latency or provider load warrants it.
-- Add production telemetry dashboards/alerts for provider failure rate, partial history, calculation errors, cache misses and analysis failures if not already handled by the deployment observability stack.
+- Extend archetype-specific logic only for remaining edge cases where current bank/insurer/REIT/property/asset-manager/utility/cyclical/software-growth/biotech/holding-company handling is insufficient; do not duplicate the existing specialization system.
+- Add richer precomputed historical aggregation only if production telemetry shows historical page latency or provider load warrants it.
+- If operational needs justify it, enrich provider diagnostics with per-attempt latency/status-code and explicit cache-hit/cache-miss counters. Current analysis diagnostics support failure-rate/degradation tracking; latency fields remain null unless the underlying adapter supplies timings.
+- Add alert thresholds/delivery for provider degradation if production failure-rate telemetry demonstrates a need; the data collection and Admin aggregation foundation now exists.
 - Consider a server-generated PDF artifact if product requirements move beyond the current browser print/PDF experience.
-- Continue UI polish/device-specific visual QA on real production data and multiple viewport sizes after deployment.
+- Continue device-specific visual QA on real production data after a fresh deployment is available.
 
 ## 13. Manual owner actions (only true owner manual steps)
-- Review and merge the release-hardening PR after checking the final diff.
-- In Supabase Auth settings, enable Leaked Password Protection; the current production security advisor reports it disabled. Remediation: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+- Enable Supabase Auth Leaked Password Protection in the production project; the Supabase advisor currently reports it disabled.
 - Confirm production environment variables/secrets for Supabase, Stripe and any optional paid data providers are present in the deployment environment.
-- Vercel is currently rate-limiting new deployments on the connected Hobby team; deploy after quota becomes available or increase Vercel build capacity.
+- Wait for the Vercel Hobby build quota to reset or increase Vercel build capacity before requiring a fresh preview/production build from Vercel.
+- Review and merge the release-hardening PR after the final diff/check status is satisfactory.
 - Perform one intentional real production Stripe purchase, customer-portal/cancellation flow and webhook delivery check using the intended live configuration; verify usage entitlement changes once.
 - Perform one authenticated production analysis, save/history check, comparison, PDF/print and CSV export after deployment.
 - Verify production provider licensing/redistribution/caching terms for the commercial launch configuration.
-- Watch provider-health/error telemetry immediately after release and keep missing/partial data visible rather than substituting fabricated values.
+- Watch Admin/provider-health/error telemetry immediately after release and keep missing/partial data visible rather than substituting fabricated values.
 
 ## 14. Release recommendation exactly one:
 - READY TO RELEASE WITH MINOR KNOWN LIMITATIONS
