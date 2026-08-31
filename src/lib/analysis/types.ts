@@ -499,12 +499,46 @@ export type HistoricalValuationContext = {
   maximum: HistoricalValuationWindowStats;
 };
 
+export type HistoricalDiscountSignalStatus = "healthy" | "warning" | "severe" | "unavailable" | "not_applicable";
+
+export type HistoricalDiscountSignal = {
+  key: "growth" | "freeCashFlow" | "roic" | "margins" | "leverage" | "dilution" | "cashConversion" | "earningsStability";
+  label: string;
+  status: HistoricalDiscountSignalStatus;
+  detail: string;
+  value: number | null;
+  weight: number;
+};
+
+export type HistoricalDiscountQualityClassification =
+  | "STRONG"
+  | "REASONABLE"
+  | "MIXED"
+  | "QUESTIONABLE"
+  | "MISLEADING"
+  | "INSUFFICIENT DATA";
+
+export type HistoricalDiscountQuality = {
+  methodVersion: string;
+  status: "discount" | "not_discount" | "insufficient";
+  classification: HistoricalDiscountQualityClassification | null;
+  discountToReferenceMedian: number | null;
+  referenceWindow: "5Y" | "MAX" | null;
+  coverage: number;
+  evaluatedSignalCount: number;
+  applicableSignalCount: number;
+  deteriorationScore: number | null;
+  signals: HistoricalDiscountSignal[];
+  summary: string;
+};
+
 export type HistoricalResearchData = {
   financials: HistoricalFinancialPoint[];
   price: MarketPricePoint[];
   valuation?: HistoricalValuationPoint[];
   valuationContext?: HistoricalValuationContext;
   valuationMethodVersion?: string;
+  discountQuality?: HistoricalDiscountQuality;
   revenueCagr3y: number | null;
   revenueCagr5y: number | null;
   revenueCagr10y: number | null;

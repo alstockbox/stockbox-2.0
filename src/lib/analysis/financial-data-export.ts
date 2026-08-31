@@ -59,5 +59,26 @@ export function historicalFinancialsCsv(historical: HistoricalResearchData): str
         ...valuationRows,
       ]
     : [];
-  return [historicalHeaders.join(","), ...rows, ...valuationSection].join("\n");
+  const quality = historical.discountQuality;
+  const discountQualitySection = quality
+    ? [
+        "",
+        "historicalDiscountQuality",
+        ["methodVersion", csvCell(quality.methodVersion)].join(","),
+        ["status", csvCell(quality.status)].join(","),
+        ["classification", csvCell(quality.classification)].join(","),
+        ["discountToReferenceMedian", csvCell(quality.discountToReferenceMedian)].join(","),
+        ["referenceWindow", csvCell(quality.referenceWindow)].join(","),
+        ["evidenceCoverage", csvCell(quality.coverage)].join(","),
+        ["deteriorationScore", csvCell(quality.deteriorationScore)].join(","),
+        ["evaluatedSignalCount", csvCell(quality.evaluatedSignalCount)].join(","),
+        ["applicableSignalCount", csvCell(quality.applicableSignalCount)].join(","),
+        ["summary", csvCell(quality.summary)].join(","),
+        "signalKey,signalLabel,signalStatus,signalValue,signalWeight,signalDetail",
+        ...quality.signals.map((signal) => [
+          signal.key, signal.label, signal.status, signal.value, signal.weight, signal.detail,
+        ].map(csvCell).join(",")),
+      ]
+    : [];
+  return [historicalHeaders.join(","), ...rows, ...valuationSection, ...discountQualitySection].join("\n");
 }

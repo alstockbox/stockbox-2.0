@@ -132,6 +132,9 @@ function extraCopyFor(locale: Locale) {
     currentPe: "P/E nu", historicalPeMedian: "Historisk median P/E", peVsHistory: "Mot historisk median",
     tenYearPeMedian: "10 års median P/E", currentYield: "Direktavkastning nu", historicalYieldAverage: "Historiskt snitt yield",
     ttmEps: "TTM EPS", ttmDividend: "TTM utdelning/aktie", valuationDate: "Datum", insufficientHistory: "Otillräcklig historik",
+    discountQuality: "Historisk rabattkvalitet", discountVsHistoricalMedian: "Rabatt mot historisk median",
+    evidenceCoverage: "Evidenstäckning", deteriorationScore: "Försämringspoäng", notApplicable: "Ej tillämpligt",
+    signalEvidence: "Deterministiska signaler",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
@@ -145,6 +148,9 @@ function extraCopyFor(locale: Locale) {
     currentPe: "Current P/E", historicalPeMedian: "Historical median P/E", peVsHistory: "Vs historical median",
     tenYearPeMedian: "10Y median P/E", currentYield: "Current dividend yield", historicalYieldAverage: "Historical yield average",
     ttmEps: "TTM EPS", ttmDividend: "TTM dividend / share", valuationDate: "Date", insufficientHistory: "Insufficient history",
+    discountQuality: "Historical Discount Quality", discountVsHistoricalMedian: "Discount vs historical median",
+    evidenceCoverage: "Evidence coverage", deteriorationScore: "Deterioration score", notApplicable: "Not applicable",
+    signalEvidence: "Deterministic signals",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
   };
 }
@@ -318,6 +324,51 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
     </Card>
   );
 }
+function HistoricalDiscountQualityCard({ report, locale }: { report: AnalysisReport; locale: Locale }) {
+  const quality = report.historical?.discountQuality;
+  if (!quality) return null;
+  const copy = copyFor(locale);
+  const extra = extraCopyFor(locale);
+  const warnings = quality.signals.filter((signal) => signal.status === "warning" || signal.status === "severe");
+  const summary = locale === "sv"
+    ? quality.status === "not_discount"
+      ? "Nuvarande P/E ligger inte under den valda historiska medianen, så rabattkvalitet är inte tillämplig."
+      : quality.classification === "INSUFFICIENT DATA"
+        ? "Det finns inte tillräckligt med jämförbar evidens för att bedöma kvaliteten på den historiska P/E-rabatten."
+        : warnings.length
+          ? String(warnings.length) + " försämringssignal" + (warnings.length === 1 ? "" : "er") + " sänker kvaliteten på den historiska P/E-rabatten."
+          : "Ingen materiell försämringssignal hittades i den jämförbara evidensen som används av den versionerade regelmotorn."
+    : quality.summary;
+  return (
+    <Card className="border-[#b99b5f]/20 bg-[#b99b5f]/[0.03]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-[#f4efe5]">{extra.discountQuality}</h2>
+        <Badge>{quality.methodVersion}</Badge>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">
+        {locale === "sv" ? "Låg P/E klassas inte automatiskt som billig. StockBox testar om fundamenta har försämrats med en versionerad regelmotor." : "A low P/E is not treated as automatically cheap. StockBox tests whether fundamentals have deteriorated using a versioned rule set."}
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label={copy.classification} value={quality.classification ?? extra.notApplicable} />
+        <Stat label={extra.discountVsHistoricalMedian} value={formatPercent(quality.discountToReferenceMedian, locale, copy.unavailable)} />
+        <Stat label={extra.evidenceCoverage} value={formatPercent(quality.coverage, locale, copy.unavailable)} />
+        <Stat label={extra.deteriorationScore} value={formatPercent(quality.deteriorationScore, locale, copy.unavailable)} />
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[#c9d2df]">{summary}</p>
+      {warnings.length ? (
+        <div className="mt-3 flex flex-wrap gap-2" aria-label={extra.signalEvidence}>
+          {warnings.map((signal) => (
+            <Badge key={signal.key}>{signal.label}: {signal.status}</Badge>
+          ))}
+        </div>
+      ) : null}
+      <p className="mt-3 text-xs text-[#7f8da0]">
+        {quality.evaluatedSignalCount}/{quality.applicableSignalCount} {extra.signalEvidence.toLowerCase()} · {quality.referenceWindow ?? copy.unavailable}
+      </p>
+    </Card>
+  );
+}
+
 function GrowthHistory({ report, locale }: { report: AnalysisReport; locale: Locale }) {
   const historical = report.historical;
   if (!historical) return null;
@@ -446,6 +497,7 @@ export function HistoricalResearchView({
     <div className="space-y-5">
       {dividendProfile ? <DividendSnapshot report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />
+      <HistoricalDiscountQualityCard report={report} locale={locale} />
       {mode === "pro" ? (
         <>
           <GrowthDashboard report={report} locale={locale} />
