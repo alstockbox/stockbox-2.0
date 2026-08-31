@@ -48,13 +48,13 @@ describe("analysis observability P1", () => {
 
   it("wires provider health persistence and historical degradation signals into the analysis route", () => {
     const route = read("src/app/api/analysis/route.ts");
-    const repositories = read("src/lib/db/repositories.ts");
+    const observability = read("src/lib/analytics/analysis-observability.ts");
 
-    expect(route).toContain("recordProviderDiagnostics");
-    expect(route).toContain('captureServerEvent("provider_degraded"');
-    expect(route).toContain('captureServerEvent("historical_coverage_partial"');
-    expect(route).toContain('captureServerEvent("historical_valuation_unavailable"');
-    expect(repositories).toContain("export async function recordProviderDiagnostics");
-    expect(repositories).toContain('.from("provider_health")');
+    expect(route).toContain("recordAnalysisObservability");
+    expect(observability).toContain("export async function recordProviderDiagnostics");
+    expect(observability).toContain('.from("provider_health")');
+    expect(observability).toContain('captureServerEvent("provider_degraded"');
+    expect(observability).toContain('captureServerEvent("historical_coverage_partial"');
+    expect(observability).toContain('captureServerEvent("historical_valuation_unavailable"');
   });
 });
