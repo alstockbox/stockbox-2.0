@@ -1,4 +1,4 @@
-import type { CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
+import type { CompanySearchResult, MarketPricePoint, MarketSnapshot } from "@/lib/analysis/types";
 import {
   providerDiagnostic,
   type AdapterResult,
@@ -9,6 +9,7 @@ import {
 
 type PriceRow = { date: string; close: number; volume: number | null };
 type StooqSymbol = { symbol: string; currency: string | null };
+type CurrencyPricePoint = MarketPricePoint & { currency?: string | null; provider?: string };
 type ResponseFormat = "csv" | "html" | "text" | "empty" | "unknown";
 type CsvFailureReason =
   | "unexpected_columns"
@@ -124,6 +125,19 @@ function parseStooqCsvResult(csv: string, now = new Date()): CsvParseResult {
 export function parseStooqCsv(csv: string, now = new Date()): PriceRow[] | null {
   const parsed = parseStooqCsvResult(csv, now);
   return parsed.ok ? parsed.rows : null;
+}
+
+function monthlyPriceHistory(rows: PriceRow[], currency: string | null): MarketPricePoint[] {
+  const byMonth = new Map<string, CurrencyPricePoint>();
+  for (const row of rows) {
+    byMonth.set(row.date.slice(0, 7), {
+      date: row.date,
+      close: row.close,
+      currency,
+      provider: STOOQ_PROVIDER_ID,
+    });
+  }
+  return [...byMonth.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
 function responseFormat(body: string, contentType: string | null): ResponseFormat {
@@ -284,6 +298,8 @@ export async function fetchStooqMarketData(
               yearLow: Math.min(...year.map((row) => row.close)),
               provider: STOOQ_PROVIDER_ID,
               historyLength: rows.length,
+              priceHistory: monthlyPriceHistory(rows, mapped.currency),
+              priceHistoryBasis: "close",
               performance: {
                 "1D": performance(rows, 1) ?? undefined,
                 "1W": performance(rows, 5) ?? undefined,
