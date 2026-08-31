@@ -11,8 +11,9 @@ export type BolagsverketDocument = {
 export type BolagsverketCredentials = {
   clientId: string;
   clientSecret: string;
-  tokenUrl?: string | null;
-  baseUrl?: string | null;
+  tokenUrl: string;
+  baseUrl: string;
+  scope?: string | null;
 };
 
 export type BolagsverketFilingsData = {
@@ -47,14 +48,13 @@ export function parseBolagsverketDocumentList(payload: unknown): BolagsverketDoc
 }
 
 async function getToken(credentials: BolagsverketCredentials, fetcher: typeof fetch): Promise<string | null> {
-  const tokenUrl = credentials.tokenUrl?.trim() || "https://portal.api.bolagsverket.se/oauth2/token";
   const body = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: credentials.clientId,
     client_secret: credentials.clientSecret,
-    scope: "vardefulla-datamangder:read",
   });
-  const response = await fetcher(tokenUrl, {
+  if (credentials.scope?.trim()) body.set("scope", credentials.scope.trim());
+  const response = await fetcher(credentials.tokenUrl.trim(), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -72,13 +72,14 @@ export async function fetchBolagsverketAnnualReportEvidence(
 ): Promise<AdapterResult<ResearchLayerPayload<BolagsverketFilingsData>>> {
   const org = (organizationNumber ?? "").replace(/\D/g, "");
   if (org.length !== 10) return { ok: false, reason: "unsupported_symbol", message: "Bolagsverket annual-report lookup requires a Swedish 10-digit organization number.", diagnostic: providerDiagnostic("bolagsverket-hvd", "filings_events", "unsupported", "missing_organization_number") };
-  if (!credentials?.clientId?.trim() || !credentials.clientSecret?.trim()) return { ok: false, reason: "not_configured", message: "Bolagsverket valuable-datasets credentials are not configured.", diagnostic: providerDiagnostic("bolagsverket-hvd", "filings_events", "unavailable", "missing_credentials") };
+  if (!credentials?.clientId?.trim() || !credentials.clientSecret?.trim() || !credentials.tokenUrl?.trim() || !credentials.baseUrl?.trim()) {
+    return { ok: false, reason: "not_configured", message: "Bolagsverket valuable-datasets credentials and environment-specific API endpoints are not configured.", diagnostic: providerDiagnostic("bolagsverket-hvd", "filings_events", "unavailable", "missing_credentials_or_endpoints") };
+  }
   const fetcher = options.fetcher ?? fetch;
   try {
     const token = await getToken(credentials, fetcher);
     if (!token) return { ok: false, reason: "not_configured", message: "Bolagsverket OAuth token could not be obtained.", diagnostic: providerDiagnostic("bolagsverket-hvd", "filings_events", "unavailable", "oauth_failed") };
-    const baseUrl = credentials.baseUrl?.trim() || "https://gw.api.bolagsverket.se/vardefulla-datamangder/v1";
-    const endpoint = `${baseUrl.replace(/\/$/, "")}/dokumentlista`;
+    const endpoint = `${credentials.baseUrl.trim().replace(/\/$/, "")}/dokumentlista`;
     const response = await fetcher(endpoint, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-Request-Id": crypto.randomUUID() },
@@ -99,7 +100,7 @@ export async function fetchBolagsverketAnnualReportEvidence(
         name: "Bolagsverket — Värdefulla datamängder / digital årsredovisning",
         url: publicSourceUrl,
         accessedAt,
-        freshness: "Official Bolagsverket document metadata for digitally filed annual reports.",
+        freshness: "Official Bolagsverket document metadata for digitally filed annual reports; endpoint URLs are configured from the credentials supplied for the target environment.",
         provider: "bolagsverket-hvd",
         capability: "filings_events",
         dataAsOf: document.reportingPeriodEnd ?? document.registeredAt,
