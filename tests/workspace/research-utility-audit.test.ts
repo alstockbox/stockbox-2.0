@@ -41,6 +41,9 @@ describe("research utility launch improvements", () => {
     expect(chart).toContain("strokeDasharray");
     expect(chart).toContain("barGeometry");
     expect(chart).toContain("<title>{`${point.label}:");
+    expect(chart).toContain("onTouchStart");
+    expect(chart).toContain("activeMetricLabel");
+    expect(chart).toContain('fontSize="15"');
   });
 
   it("supports comparing two or three saved reports without changing the underlying reports", () => {

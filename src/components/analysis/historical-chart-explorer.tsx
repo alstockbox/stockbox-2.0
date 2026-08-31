@@ -152,6 +152,14 @@ export function HistoricalChartExplorer({
   const [period, setPeriod] = useState<PeriodKey>("5y");
   const [valueMode, setValueMode] = useState<ValueMode>("absolute");
   const [chartType, setChartType] = useState<ChartType>("line");
+  const metrics: Array<{ key: MetricKey; label: string }> = [
+    { key: "price", label: copy.price },
+    { key: "revenue", label: copy.revenue },
+    { key: "freeCashFlow", label: copy.freeCashFlow },
+    { key: "operatingMargin", label: copy.operatingMargin },
+    { key: "eps", label: copy.eps },
+    { key: "sharesOutstanding", label: copy.sharesOutstanding },
+  ];
   const points = useMemo(() => {
     const base = pointsFor(historical, metric, period);
     return valueMode === "growth" && metric !== "operatingMargin" ? growthPoints(base) : base;
@@ -162,25 +170,19 @@ export function HistoricalChartExplorer({
   const ticks = tickValues(domain.min, domain.max);
   const zeroLine = barGeometry({ label: "0", dateKey: "0", value: 0, x: 0, y: 0 }, domain, CHART_HEIGHT, coords.length, PADDING_Y).baselineY;
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const active = coords.find((point) => point.dateKey === activeKey) ?? coords.at(-1) ?? null;
+  const active = coords.find((point) => point.dateKey === activeKey) ?? null;
+  const selected = active ?? coords.at(-1) ?? null;
+  const activeMetricLabel = metrics.find((item) => item.key === metric)?.label ?? metric;
   const tooltipX = active ? Math.max(PADDING_X, Math.min(active.x > 540 ? active.x - 178 : active.x + 14, CHART_WIDTH - 170)) : 0;
-  const tooltipY = active ? Math.max(8, Math.min(active.y - 48, CHART_HEIGHT - 70)) : 0;
+  const tooltipY = active ? Math.max(8, Math.min(active.y - 58, CHART_HEIGHT - 80)) : 0;
   const path = coords.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-  const metrics: Array<{ key: MetricKey; label: string }> = [
-    { key: "price", label: copy.price },
-    { key: "revenue", label: copy.revenue },
-    { key: "freeCashFlow", label: copy.freeCashFlow },
-    { key: "operatingMargin", label: copy.operatingMargin },
-    { key: "eps", label: copy.eps },
-    { key: "sharesOutstanding", label: copy.sharesOutstanding },
-  ];
 
   return (
     <div className="rounded-md border border-white/10 bg-white/5 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-[#f4efe5]">{copy.title}</h3>
-          <p className="mt-1 text-xs text-[#9aa7b8]">{copy.selected}: {active ? `${active.label} · ${formatValue(active, locale, copy.unavailable)}` : copy.unavailable}</p>
+          <p className="mt-1 text-xs text-[#9aa7b8]">{copy.selected}: {selected ? `${selected.label} · ${formatValue(selected, locale, copy.unavailable)}` : copy.unavailable}</p>
           <p className="mt-1 text-xs text-[#7f8da0]">
             {copy.range}: {numeric.length ? `${formatValue({ ...numeric[0], value: domain.min }, locale, copy.unavailable)} - ${formatValue({ ...numeric[0], value: domain.max }, locale, copy.unavailable)}` : copy.unavailable}
           </p>
@@ -288,12 +290,24 @@ export function HistoricalChartExplorer({
                 <circle
                   cx={point.x}
                   cy={point.y}
-                  r={active?.dateKey === point.dateKey ? 7 : 5}
-                  className="cursor-pointer fill-[#f4efe5] stroke-[#081421]"
-                  strokeWidth="3"
+                  r="15"
+                  className="cursor-pointer fill-transparent"
                   tabIndex={0}
                   role="button"
                   aria-label={`${point.label}: ${formatValue(point, locale, copy.unavailable)}`}
+                  onMouseEnter={() => setActiveKey(point.dateKey)}
+                  onMouseLeave={() => setActiveKey(null)}
+                  onClick={() => setActiveKey(point.dateKey)}
+                  onTouchStart={() => setActiveKey(point.dateKey)}
+                  onFocus={() => setActiveKey(point.dateKey)}
+                  onBlur={() => setActiveKey(null)}
+                />
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={active?.dateKey === point.dateKey ? 5 : 3.5}
+                  className="pointer-events-none fill-[#f4efe5] stroke-[#081421]"
+                  strokeWidth="2"
                   onMouseEnter={() => setActiveKey(point.dateKey)}
                   onClick={() => setActiveKey(point.dateKey)}
                   onTouchStart={() => setActiveKey(point.dateKey)}
@@ -306,11 +320,14 @@ export function HistoricalChartExplorer({
             {active ? (
               <g pointerEvents="none">
                 <line x1={active.x} x2={active.x} y1={PADDING_Y} y2={CHART_HEIGHT - PADDING_Y} className="stroke-white/15" />
-                <rect x={tooltipX} y={tooltipY} width="164" height="56" rx="6" className="fill-[#07111f] stroke-[#b99b5f]/50" />
-                <text x={tooltipX + 12} y={tooltipY + 21} className="fill-[#9aa7b8]" fontSize="11" fontWeight="600">
+                <rect x={tooltipX} y={tooltipY} width="164" height="68" rx="6" className="fill-[#07111f] stroke-[#b99b5f]/50" />
+                <text x={tooltipX + 12} y={tooltipY + 19} className="fill-[#9aa7b8]" fontSize="11" fontWeight="600">
                   {active.label}
                 </text>
-                <text x={tooltipX + 12} y={tooltipY + 42} className="fill-[#f4efe5]" fontSize="15" fontWeight="700">
+                <text x={tooltipX + 12} y={tooltipY + 38} className="fill-[#c9d2df]" fontSize="11" fontWeight="600">
+                  {activeMetricLabel}
+                </text>
+                <text x={tooltipX + 12} y={tooltipY + 58} className="fill-[#f4efe5]" fontSize="15" fontWeight="700">
                   {formatValue(active, locale, copy.unavailable)}
                 </text>
               </g>
