@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { AnalysisResearchWorkspace } from "@/components/analysis/research-workspace";
 import { EarningsEstimateIntelligence } from "@/components/analysis/earnings-estimate-intelligence";
 import { InsiderIntelligence } from "@/components/analysis/insider-intelligence";
 import { InvestorValuationSummary } from "@/components/analysis/investor-valuation-summary";
@@ -30,5 +31,5 @@ export default async function AnalysisPage({ params }: { params: Promise<{ id: s
     getEarningsEstimateIntelligence(report.ticker),
     getInsiderIntelligence(report.ticker, report.companyName),
   ]);
-  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><ProfileComparison report={report} /><EarningsEstimateIntelligence data={earningsEstimateIntelligence} /><RealPeerIntelligence data={peerIntelligence} /><InsiderIntelligence data={insiderIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
+  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><ProfileComparison report={report} /><AnalysisResearchWorkspace ticker={report.ticker} analysisId={id} /><EarningsEstimateIntelligence data={earningsEstimateIntelligence} /><RealPeerIntelligence data={peerIntelligence} /><InsiderIntelligence data={insiderIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
 }
