@@ -35,7 +35,7 @@ describe("comparison model", () => {
 
     expect(text).toMatch(/META.*higher operating margin/i);
     expect(text).toMatch(/META.*higher revenue growth/i);
-    expect(text).not.toMatch(/GOOGL.*lower P\/E/i);
+    expect(text).not.toMatch(/GOOGL has the lower P\/E/i);
     expect(text).toMatch(/P\/E differs/i);
     expect(text).toMatch(/not treated as better/i);
   });
