@@ -28,8 +28,8 @@ function replaceCount(path, from, to, expected, label) {
 
 replaceOnce(
   "src/lib/analysis/types.ts",
-  '  | "dividend";\n',
-  '  | "dividend"\n  | "defensive";\n',
+  '  | "dividend"\n  | "balanced";\n',
+  '  | "dividend"\n  | "defensive"\n  | "balanced";\n',
   "InvestmentProfile union",
 );
 
