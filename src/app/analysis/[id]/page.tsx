@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { EarningsEstimateIntelligence } from "@/components/analysis/earnings-estimate-intelligence";
 import { InvestorValuationSummary } from "@/components/analysis/investor-valuation-summary";
+import { ProfileComparison } from "@/components/analysis/profile-comparison";
 import { RealPeerIntelligence } from "@/components/analysis/real-peer-intelligence";
 import { ReportView } from "@/components/analysis/report-view";
 import { Container, Section } from "@/components/ui/card";
@@ -26,5 +27,5 @@ export default async function AnalysisPage({ params }: { params: Promise<{ id: s
     getPeerIntelligence(report.ticker),
     getEarningsEstimateIntelligence(report.ticker),
   ]);
-  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><EarningsEstimateIntelligence data={earningsEstimateIntelligence} /><RealPeerIntelligence data={peerIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
+  return <Section><Container><div className="space-y-5"><InvestorValuationSummary report={report} locale={locale} /><ProfileComparison report={report} /><EarningsEstimateIntelligence data={earningsEstimateIntelligence} /><RealPeerIntelligence data={peerIntelligence} /><ReportView report={report} previousReport={previousReport ?? null} locale={locale} /></div></Container></Section>;
 }
