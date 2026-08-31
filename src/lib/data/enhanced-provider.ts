@@ -31,7 +31,7 @@ function uniqueDiagnostics(diagnostics: ProviderDiagnostic[]): ProviderDiagnosti
 }
 
 function isDeepResearch(args: AnalyzeCompanyArgs): boolean {
-  return args.options.analysisType === "deep" || args.options.analysisType === "research";
+  return args.analysisType === "deep" || args.analysisType === "research";
 }
 
 async function safeOfficialBundle(args: AnalyzeCompanyArgs): Promise<OfficialResearchBundle | null> {
@@ -49,7 +49,7 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
   if (!bundle) return analyzeCoreCompany(args);
 
   const macro = bundle.macro?.data;
-  const report = await runWithOfficialAnalysisContext(
+  const result = await runWithOfficialAnalysisContext(
     {
       riskFreeRate: macro?.riskFreeRate ?? null,
       riskFreeSource: macro ? `Sveriges Riksbank — ${macro.seriesLabel}` : null,
@@ -58,11 +58,25 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     () => analyzeCoreCompany({ ...args, company: bundle.company }),
   );
 
+  if (!result.ok) {
+    return {
+      ...result,
+      sources: uniqueSources([...result.sources, ...bundle.sources]),
+      providerDiagnostics: uniqueDiagnostics([...result.providerDiagnostics, ...bundle.diagnostics]),
+    };
+  }
+
+  const report = result.data;
   report.sources = uniqueSources([...report.sources, ...bundle.sources]);
   report.providerDiagnostics = uniqueDiagnostics([
     ...(report.providerDiagnostics ?? []),
     ...bundle.diagnostics,
   ]);
   augmentWithOfficialResearch(report, bundle);
-  return report;
+
+  return {
+    ...result,
+    data: report,
+    sources: uniqueSources([...result.sources, ...bundle.sources]),
+  };
 }
