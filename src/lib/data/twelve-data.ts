@@ -1,4 +1,4 @@
-import type { CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
+import type { CompanySearchResult, MarketPricePoint, MarketSnapshot } from "@/lib/analysis/types";
 import {
   providerDiagnostic,
   type AdapterResult,
@@ -21,6 +21,7 @@ export const TWELVE_DATA_CAPABILITIES: ProviderCapabilities = {
 };
 
 type JsonObject = Record<string, unknown>;
+type CurrencyPricePoint = MarketPricePoint & { currency?: string | null; provider?: string };
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
@@ -86,6 +87,19 @@ function rows(payload: JsonObject): PriceRow[] {
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function monthlyPriceHistory(values: PriceRow[], currency: string | null): MarketPricePoint[] {
+  const byMonth = new Map<string, CurrencyPricePoint>();
+  for (const row of values) {
+    byMonth.set(row.date.slice(0, 7), {
+      date: row.date,
+      close: row.close,
+      currency,
+      provider: PROVIDER_ID,
+    });
+  }
+  return [...byMonth.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function change(values: PriceRow[], periods: number): number | null {
   const current = values.at(-1);
   const prior = values.at(-1 - periods);
@@ -112,7 +126,7 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
       const symbol = company.canonicalTicker ?? company.ticker;
       const [quoteResult, historyResult, statisticsResult] = await Promise.all([
         request("/quote", { symbol }, apiKey),
-        request("/time_series", { symbol, interval: "1day", outputsize: "400", order: "ASC" }, apiKey),
+        request("/time_series", { symbol, interval: "1day", outputsize: "5000", order: "ASC" }, apiKey),
         request("/statistics", { symbol }, apiKey),
       ]);
       if (!quoteResult.ok && !historyResult.ok) return quoteResult;
@@ -130,12 +144,13 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
       const statistics = statisticsResult.ok ? statisticsResult.data : {};
       const sharesOutstanding = nestedNumber(statistics, "stock_statistics", "shares_outstanding");
       const marketCap = numberValue(quote.market_cap) ?? (sharesOutstanding !== null ? sharesOutstanding * price : null);
+      const currency = textValue(quote.currency) ?? company.currency ?? null;
       return {
         ok: true,
         data: {
           ticker: company.ticker,
           price,
-          currency: textValue(quote.currency) ?? company.currency ?? null,
+          currency,
           date: quoteDate ?? latest?.date ?? null,
           volume: numberValue(quote.volume) ?? latest?.volume ?? null,
           yearHigh: numberValue(fiftyTwoWeek.high) ?? (year.length ? Math.max(...year.map((row) => row.close)) : null),
@@ -145,6 +160,8 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
           beta: nestedNumber(statistics, "stock_price_summary", "beta"),
           provider: PROVIDER_ID,
           historyLength: history.length,
+          priceHistory: monthlyPriceHistory(history, currency),
+          priceHistoryBasis: "close",
           performance: {
             "1D": change(history, 1) ?? undefined,
             "1W": change(history, 5) ?? undefined,
