@@ -1,6 +1,23 @@
 import type { AnalysisReport, CompanySearchResult } from "@/lib/analysis/types";
+import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
+import { searchCompanies } from "@/lib/data/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildCompanyMetricSnapshot } from "./snapshot";
+
+async function resolveMetadata(report: AnalysisReport, supplied?: CompanySearchResult | null) {
+  if (supplied) return supplied;
+  try {
+    const candidates = await searchCompanies(report.ticker);
+    const resolution = resolveCanonicalCompanySelection({
+      ticker: report.ticker,
+      canonicalTicker: report.ticker,
+      name: report.companyName,
+    }, candidates);
+    return resolution.ok ? resolution.company : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function upsertCompanyMetricCatalog(input: {
   report: AnalysisReport;
@@ -9,13 +26,14 @@ export async function upsertCompanyMetricCatalog(input: {
   const supabase = createAdminClient();
   if (!supabase) return { ok: false as const, error: "supabase_not_configured" };
   const snapshot = buildCompanyMetricSnapshot(input.report);
+  const company = await resolveMetadata(input.report, input.company);
   const sector = input.report.engine?.scores.sector ?? null;
   const marketCap = input.report.engine?.metrics.valuation.marketCap ?? input.report.market?.marketCap ?? null;
   const { error } = await supabase.from("company_latest_metrics").upsert({
     ticker: input.report.ticker,
     company_name: input.report.companyName,
-    exchange: input.company?.exchange ?? input.company?.mic ?? null,
-    country: input.company?.country ?? null,
+    exchange: company?.exchange ?? company?.mic ?? null,
+    country: company?.country ?? null,
     sector,
     industry: null,
     market_cap: marketCap,
