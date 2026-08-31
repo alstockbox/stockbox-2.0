@@ -59,7 +59,7 @@ export async function AppNav() {
         <Brand />
 
         {!user ? (
-          <nav className="ml-6 hidden flex-1 items-center gap-1 md:flex" aria-label="Marketing">
+          <nav className="ml-6 hidden flex-1 items-center gap-1 lg:flex" aria-label="Marketing">
             {marketingNavItems.map((item) => (
               <Link key={item.href} href={item.href} className="rounded-md px-3 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
                 {locale === "sv" ? item.sv : item.en}
@@ -77,7 +77,7 @@ export async function AppNav() {
           </nav>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <details className={user ? "relative xl:hidden" : "relative md:hidden"}>
+          <details className={user ? "relative xl:hidden" : "relative lg:hidden"}>
             <summary className="cursor-pointer list-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-[#f4efe5]">
               {accountLabels.menu}
             </summary>
@@ -111,7 +111,7 @@ export async function AppNav() {
               </div>
             </details>
           ) : (
-            <div className="hidden items-center gap-2 md:flex">
+            <div className="hidden items-center gap-2 lg:flex">
               <Link className="text-sm text-[#c9d2df] hover:text-white" href="/auth/login">{copy.login}</Link>
               <Link className="rounded-md bg-[#b99b5f] px-3 py-2 text-sm font-semibold text-[#07111f]" href="/auth/signup">{locale === "sv" ? "Analysera gratis" : "Analyze free"}</Link>
             </div>

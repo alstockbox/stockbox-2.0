@@ -7,6 +7,13 @@ const settings = readFileSync(join(process.cwd(), "src/app/settings/page.tsx"), 
 const security = readFileSync(join(process.cwd(), "src/app/settings/security/page.tsx"), "utf8");
 
 describe("release navigation and settings", () => {
+  it("keeps signed-out navigation compact through tablet widths", () => {
+    const nav = readFileSync(join(process.cwd(), "src/components/app-shell/nav.tsx"), "utf8");
+    expect(nav).toContain('nav className="ml-6 hidden flex-1 items-center gap-1 lg:flex"');
+    expect(nav).toContain('user ? "relative xl:hidden" : "relative lg:hidden"');
+    expect(nav).toContain('div className="hidden items-center gap-2 lg:flex"');
+  });
+
   it("keeps account controls inside one profile menu", () => {
     expect(nav).toContain("<details");
     expect(nav).toContain('href="/settings"');
@@ -24,7 +31,7 @@ describe("release navigation and settings", () => {
   });
 
   it("keeps the authenticated menu available until the xl workspace navigation takes over", () => {
-    expect(nav).toContain('user ? "relative xl:hidden" : "relative md:hidden"');
+    expect(nav).toContain('user ? "relative xl:hidden" : "relative lg:hidden"');
     expect(nav).toContain('hidden flex-1 items-center gap-0.5 xl:flex');
   });
 

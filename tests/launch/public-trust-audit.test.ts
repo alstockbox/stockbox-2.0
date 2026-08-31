@@ -30,7 +30,7 @@ describe("public launch trust layer", () => {
     expect(nav).toContain('href: "/pricing"');
     expect(nav).toContain('href: "/history"');
     expect(nav).toContain('href: "/compare"');
-    expect(nav).toContain("md:hidden");
+    expect(nav).toContain("lg:hidden");
   });
 
   it("uses the official logo rather than the SB placeholder", () => {
