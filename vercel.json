@@ -5,6 +5,10 @@
       "schedule": "17 * * * *"
     },
     {
+      "path": "/api/investor/screeners/run",
+      "schedule": "42 6 * * *"
+    },
+    {
       "path": "/api/investor/briefs/run",
       "schedule": "15 7 * * 1"
     },
