@@ -17,6 +17,7 @@ import {
   type HistoricalTrendClassification,
 } from "@/lib/analysis/historical-dashboard";
 import { HistoricalChartExplorer } from "./historical-chart-explorer";
+import { chartDomain, gapAwareLineGeometry } from "@/lib/analysis/chart-geometry";
 
 const isNumber = (value: number | null | undefined): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -101,19 +102,21 @@ function LineChart({ points, label, unavailable }: { points: ChartPoint[]; label
   const height = 180;
   const paddingX = 24;
   const paddingY = 18;
-  const min = Math.min(...values.map((point) => point.value));
-  const max = Math.max(...values.map((point) => point.value));
-  const range = max - min || Math.max(Math.abs(max) * 0.1, 1);
-  const coords = values.map((point, index) => ({
-    ...point,
-    x: paddingX + (index / (values.length - 1)) * (width - paddingX * 2),
-    y: height - paddingY - ((point.value - min) / range) * (height - paddingY * 2),
-  }));
-  const path = coords.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const domain = chartDomain(values.map((point, index) => ({ label: point.label, dateKey: String(index), value: point.value })));
+  const { coordinates: coords, paths } = gapAwareLineGeometry(
+    points.map((point, index) => ({ ...point, dateKey: String(index) })),
+    domain,
+    width,
+    height,
+    paddingX,
+    paddingY,
+  );
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="h-44 w-full text-[#e1cb95]">
-        <path d={path} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+        {paths.map((path, index) => (
+          <path key={`${label}-segment-${index}`} d={path} fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+        ))}
       </svg>
       <div className="flex justify-between text-xs text-[#9aa7b8]">
         <span>{coords[0]?.label}</span><span>{coords.at(-1)?.label}</span>
