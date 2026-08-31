@@ -42,6 +42,7 @@ const envSchema = z.object({
   BOLAGSVERKET_CLIENT_SECRET: z.string().optional().or(z.literal("")),
   BOLAGSVERKET_TOKEN_URL: z.string().url().optional().or(z.literal("")),
   BOLAGSVERKET_BASE_URL: z.string().url().optional().or(z.literal("")),
+  BOLAGSVERKET_SCOPE: z.string().optional().or(z.literal("")),
   MARKET_DATA_PROVIDER: marketDataProviderSchema,
   MARKET_DATA_FALLBACK_PROVIDERS: providerListSchema,
   GLOBAL_SYMBOL_SEARCH_PROVIDER: z.enum(["twelve_data", "disabled"]).default("disabled"),
