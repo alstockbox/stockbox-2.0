@@ -61,22 +61,30 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
   if (!result.ok) {
     return {
       ...result,
-      sources: uniqueSources([...result.sources, ...bundle.sources]),
-      providerDiagnostics: uniqueDiagnostics([...result.providerDiagnostics, ...bundle.diagnostics]),
+      sources: uniqueSources([...(result.sources ?? []), ...bundle.sources]),
+      providerDiagnostics: uniqueDiagnostics([...(result.providerDiagnostics ?? []), ...bundle.diagnostics]),
     };
   }
 
   const report = result.data;
-  report.sources = uniqueSources([...report.sources, ...bundle.sources]);
+  report.sources = uniqueSources([...(report.sources ?? []), ...bundle.sources]);
   report.providerDiagnostics = uniqueDiagnostics([
     ...(report.providerDiagnostics ?? []),
     ...bundle.diagnostics,
   ]);
-  augmentWithOfficialResearch(report, bundle);
+
+  // Enrichment must never invalidate a core analysis. This also keeps historical/test reports
+  // that predate the research fields compatible with the current provider contract.
+  try {
+    augmentWithOfficialResearch(report, bundle);
+  } catch {
+    // Provider diagnostics and source provenance above remain available even if an optional
+    // research presentation layer cannot be attached to an older report shape.
+  }
 
   return {
     ...result,
     data: report,
-    sources: uniqueSources([...result.sources, ...bundle.sources]),
+    sources: uniqueSources([...(result.sources ?? []), ...bundle.sources]),
   };
 }
