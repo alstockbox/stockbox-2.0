@@ -9,7 +9,7 @@ export async function AppFooter() {
   const sv = locale === "sv";
   const groups = [
     [sv ? "Produkt" : "Product", [["/product", sv ? "Produkt" : "Product"], ["/sample-analysis", sv ? "Exempelanalys" : "Sample analysis"], ["/pricing", sv ? "Priser" : "Pricing"], ["/docs/methodology", sv ? "Metodik" : "Methodology"]]],
-    [sv ? "Aktieanalys" : "Stock analysis", [["/aktier", sv ? "Publika analyser" : "Public analyses"], ["/aktieanalys", "Aktieanalys"], ["/ai-aktieanalys", "AI aktieanalys"], ["/fundamental-analys", "Fundamental analys"], ["/nyckeltal/pe-tal", "P/E-tal"]]],
+    [sv ? "Aktieanalys" : "Stock analysis", [["/aktier", sv ? "Publika analyser" : "Public analyses"], ["/aktieanalys", "Aktieanalys"], ["/ai-aktieanalys", "AI aktieanalys"], ["/fundamental-analys", "Fundamental analys"], ["/nyckeltal", sv ? "Nyckeltal" : "Key metrics"], ["/nyckeltal/pe-tal", "P/E-tal"]]],
     [sv ? "Företag" : "Company", [["/about", sv ? "Om StockBox" : "About"], ["/contact", sv ? "Kontakt" : "Contact"]]],
     [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"], ["/changelog", "Changelog"]]],
     [sv ? "Juridik" : "Legal", [["/legal/terms", sv ? "Villkor" : "Terms"], ["/legal/privacy", sv ? "Integritet" : "Privacy"], ["/withdraw", sv ? "Ångra avtal" : "Exercise withdrawal right"]]],
