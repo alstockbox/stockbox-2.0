@@ -8,7 +8,7 @@ function source(path: string) {
 
 describe("investor research memory", () => {
   it("stores private theses, assumptions, invalidation triggers and evidence", () => {
-    const migration = source("supabase/migrations/20260901143000_investor_research_memory.sql");
+    const migration = source("supabase/migrations/20260901153843_investor_research_memory.sql");
     expect(migration).toContain("create table if not exists public.investment_theses");
     expect(migration).toContain("invalidation_triggers jsonb");
     expect(migration).toContain("create table if not exists public.thesis_evidence_events");

@@ -7,6 +7,10 @@
     {
       "path": "/api/affiliate/payouts/run",
       "schedule": "0 7 1 * *"
+    },
+    {
+      "path": "/api/jobs/batch/run",
+      "schedule": "15 4 * * *"
     }
   ]
 }

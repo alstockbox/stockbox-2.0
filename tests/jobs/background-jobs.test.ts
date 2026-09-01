@@ -23,7 +23,7 @@ describe("durable background jobs", () => {
 
   it("enforces one active job per kind and dedupe key in the database", () => {
     const migration = readFileSync(
-      resolve(process.cwd(), "supabase/migrations/20260901141000_background_job_durability.sql"),
+      resolve(process.cwd(), "supabase/migrations/20260901153822_background_job_durability.sql"),
       "utf8",
     );
     expect(migration).toContain("background_jobs_active_dedupe_idx");

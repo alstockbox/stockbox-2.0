@@ -58,9 +58,11 @@ describe("material analysis changes", () => {
   });
 
   it("has a private persisted change-event schema", () => {
-    const migration = readFileSync(resolve(process.cwd(), "supabase/migrations/20260901144500_analysis_change_events.sql"), "utf8");
+    const migration = readFileSync(resolve(process.cwd(), "supabase/migrations/20260901154107_analysis_change_events_store.sql"), "utf8");
     expect(migration).toContain("create table if not exists public.analysis_change_events");
     expect(migration).toContain("analysis_change_events_select_own");
     expect(migration).toContain("analysis_change_events_dedupe_idx");
+    expect(migration).not.toContain("analyses_capture_stockbox_changes");
+    expect(migration).not.toContain("capture_stockbox_analysis_changes");
   });
 });
