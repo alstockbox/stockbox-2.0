@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     template: "%s | StockBox",
   },
   description:
-    "StockBox är ett källbaserat verktyg för aktieanalys och equity research med värdering, tillväxt, lönsamhet, risk, synliga källor, datatäckning och konfidens.",
+    "StockBox är ett datadrivet verktyg för aktieanalys och equity research med värdering, tillväxt, lönsamhet, risk, synliga källor, datatäckning och konfidens.",
   icons: {
     icon: "/images/stockbox-logo.png",
     shortcut: "/images/stockbox-logo.png",
@@ -59,7 +59,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         applicationCategory: "FinanceApplication",
         operatingSystem: "Web",
         url: baseUrl,
-        description: "Source-backed stock analysis and equity research with visible data provenance, coverage and confidence.",
+        description: "Data-driven stock analysis and equity research with visible data provenance, coverage and confidence.",
         offers: { "@type": "Offer", price: "0", priceCurrency: "SEK" },
       },
     ],
