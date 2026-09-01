@@ -60,6 +60,25 @@ describe("peer benchmark comparison", () => {
     expect(comparison.rows.filter((row) => row.status !== "unavailable").every((row) => row.note.includes("not a live peer median"))).toBe(true);
   });
 
+  it("does not compare holding companies on generic P/E, EV/EBITDA or revenue benchmarks", () => {
+    const comparison = buildPeerBenchmarkComparison({
+      engine: {
+        analysisArchetype: "holding_company",
+        metrics: {
+          valuation: { priceEarnings: 4.8, evEbitda: 14.9, evSales: 4.2, freeCashFlowYield: 0.015 },
+          growth: { revenueGrowthYoY: 0.282 },
+          margins: { operatingMargin: 0.8 },
+          ratios: { returnOnInvestedCapital: 0.2, netDebtToEbitda: 2, interestCoverage: 6 },
+        },
+        scores: { sector: "financials", methodology: { benchmarkVersion: "fixture" } },
+      },
+    } as never);
+
+    expect(comparison.status).toBe("unavailable");
+    expect(comparison.rows).toEqual([]);
+    expect(comparison.missingReasons.join(" ")).toMatch(/NAV|SOTP/i);
+  });
+
   it("fails closed when traceable engine metrics are unavailable", () => {
     const comparison = buildPeerBenchmarkComparison({
       ticker: "MISS",

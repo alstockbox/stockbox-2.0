@@ -63,6 +63,7 @@ export const YAHOO_MARKET_CAPABILITIES: ProviderCapabilities = {
 
 type JsonObject = Record<string, unknown>;
 type PriceRow = { date: string; close: number; volume: number | null };
+type CurrencyPricePoint = MarketPricePoint & { currency?: string | null; provider?: string };
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
@@ -167,10 +168,15 @@ function parseSplitEvents(result: JsonObject): MarketSplitEvent[] {
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
 
-function monthlyPriceHistory(rows: PriceRow[]): MarketPricePoint[] {
-  const byMonth = new Map<string, MarketPricePoint>();
+function monthlyPriceHistory(rows: PriceRow[], currency: string | null): MarketPricePoint[] {
+  const byMonth = new Map<string, CurrencyPricePoint>();
   for (const row of rows) {
-    byMonth.set(row.date.slice(0, 7), { date: row.date, close: row.close });
+    byMonth.set(row.date.slice(0, 7), {
+      date: row.date,
+      close: row.close,
+      currency,
+      provider: PROVIDER_ID,
+    });
   }
   return [...byMonth.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
@@ -396,7 +402,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         betaObservationCount: betaEstimate?.observations ?? null,
         provider: PROVIDER_ID,
         historyLength: history.length,
-        priceHistory: monthlyPriceHistory(history),
+        priceHistory: monthlyPriceHistory(history, marketCurrency),
         priceHistoryBasis: "adjusted_close",
         dividendEvents,
         splitEvents,

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { HistoricalResearchView } from "../../src/components/analysis/historical-research";
-import type { AnalysisReport, HistoricalFinancialPoint } from "../../src/lib/analysis/types";
+import type { AnalysisArchetype, AnalysisReport, HistoricalFinancialPoint } from "../../src/lib/analysis/types";
 
 function point(year: number, overrides: Partial<HistoricalFinancialPoint> = {}): HistoricalFinancialPoint {
   return {
@@ -19,7 +19,7 @@ function point(year: number, overrides: Partial<HistoricalFinancialPoint> = {}):
     ...overrides,
   };
 }
-function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
+function report(profile: AnalysisReport["investmentProfile"], archetype: AnalysisArchetype = "standard"): AnalysisReport {
   const financials = [
     point(2024),
     point(2025, { eps: -1, payoutRatio: null }),
@@ -27,13 +27,14 @@ function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
   ];
   return {
     investmentProfile: profile,
+    analysisArchetype: archetype,
     reportingCurrency: "USD",
     historical: {
       financials,
       price: [
-        { date: "2024-12-31", close: 20 },
-        { date: "2025-12-31", close: 22 },
-        { date: "2026-08-31", close: 25 },
+        { date: "2024-12-31", close: 20, currency: "USD" },
+        { date: "2025-12-31", close: 22, currency: "USD" },
+        { date: "2026-08-31", close: 25, currency: "USD" },
       ],
       valuationMethodVersion: "historical-valuation-v2",
       valuation: [
@@ -58,7 +59,7 @@ function report(profile: AnalysisReport["investmentProfile"]): AnalysisReport {
       dividendCagr3y: 0.05, dividendCagr5y: 0.04, dividendCagr10y: 0.03,
       dividendYearsIncreased: 8, dividendYearsUnchanged: 1, dividendYearsCut: 1,
     },
-  } as AnalysisReport;
+  } as unknown as AnalysisReport;
 }
 
 describe("historical research view", () => {
@@ -85,6 +86,18 @@ describe("historical research view", () => {
     expect(html).toContain("Balance sheet history");
     expect(html).toContain("Historical P/E");
     expect(html).toContain("Not meaningful");
+  });
+
+  it("does not present operating-company growth, margins or P/E history as holding-company research", () => {
+    const html = renderToStaticMarkup(createElement(HistoricalResearchView, {
+      report: report("balanced", "holding_company"), mode: "pro", locale: "en",
+    }));
+    expect(html).toContain("Interactive chart view");
+    expect(html).toContain("Balance sheet history");
+    expect(html).not.toContain("Growth dashboard");
+    expect(html).not.toContain("Margin analysis");
+    expect(html).not.toContain("Growth &amp; profitability history");
+    expect(html).not.toContain("Historical P/E");
   });
 
   it("gives the dividend profile a dedicated historical snapshot", () => {

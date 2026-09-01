@@ -18,6 +18,7 @@ import {
 } from "@/lib/analysis/historical-dashboard";
 import { HistoricalChartExplorer } from "./historical-chart-explorer";
 import { chartDomain, gapAwareLineGeometry } from "@/lib/analysis/chart-geometry";
+import { currencyUnit } from "@/lib/analysis/currency-units";
 
 const isNumber = (value: number | null | undefined): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -84,11 +85,13 @@ function formatMoney(
   compact = true,
 ) {
   if (!isNumber(value)) return unavailable;
+  const unit = currencyUnit(currency);
+  if (!unit) return formatNumber(value, locale, unavailable, compact ? 1 : 2);
   try {
     return new Intl.NumberFormat(localeTag(locale), {
-      style: "currency", currency: currency || "USD", notation: compact ? "compact" : "standard",
+      style: "currency", currency: unit.economicCurrency, notation: compact ? "compact" : "standard",
       maximumFractionDigits: compact ? 1 : 2,
-    }).format(value);
+    }).format(value * unit.quoteToEconomicScale);
   } catch {
     return formatNumber(value, locale, unavailable);
   }
@@ -151,6 +154,7 @@ function extraCopyFor(locale: Locale) {
     historicalCoverage: "Historisk täckning", financialsCoverage: "Finansiell historik", priceCoverage: "Prishistorik", valuationCoverage: "Värderingshistorik", dividendCoverage: "Utdelningshistorik",
     coverageSeparate: "Täckning är separat från modellens konfidens", fullCoverage: "Full täckning", partialCoverage: "Otillräcklig historik", unavailableCoverage: "Saknas", notApplicableCoverage: "Ej tillämpligt", nmNegativeEarnings: "N/M — negativt resultat", observations: "observationer",
     years: "år", reportedDerived: "Rapporterade och deterministiskt härledda värden. Saknade eller olämpliga mått lämnas tomma.",
+    holdingCompanyHistoricalNote: "För holding- och investmentbolag undertrycks generisk omsättnings-, marginal- och P/E-historik. Pris, balansräkning och verifierad utdelningshistorik kan visas, medan värdering kräver NAV/SOTP-data.",
   } : {
     revenueCagr3y: "Revenue CAGR 3Y", revenueCagr10y: "Revenue CAGR 10Y",
     epsCagr3y: "EPS CAGR 3Y", epsCagr10y: "EPS CAGR 10Y",
@@ -177,6 +181,7 @@ function extraCopyFor(locale: Locale) {
     historicalCoverage: "Historical coverage", financialsCoverage: "Financials", priceCoverage: "Price history", valuationCoverage: "Valuation history", dividendCoverage: "Dividend history",
     coverageSeparate: "Coverage is separate from model confidence", fullCoverage: "Full coverage", partialCoverage: "Insufficient history", unavailableCoverage: "Unavailable", notApplicableCoverage: "Not applicable", nmNegativeEarnings: "N/M — negative earnings", observations: "observations",
     years: "years", reportedDerived: "Reported and deterministically derived values. Missing or unsuitable metrics remain unavailable.",
+    holdingCompanyHistoricalNote: "For holding and investment companies, generic revenue, margin and P/E history is intentionally suppressed. Price, balance-sheet and verified dividend history may still be shown, while valuation requires NAV/SOTP data.",
   };
 }
 function Stat({ label, value }: { label: string; value: string }) {
@@ -539,7 +544,8 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
   if (!historical) return null;
   const copy = copyFor(locale);
   const extra = extraCopyFor(locale);
-  const valuation = historical.valuationContext;
+  const holdingCompany = report.analysisArchetype === "holding_company";
+  const valuation = holdingCompany ? undefined : historical.valuationContext;
   const referenceLabel = valuation?.referenceWindow === "5Y"
     ? `5Y ${extra.historicalPeMedian}`
     : `MAX ${extra.historicalPeMedian}${valuation?.availableSince ? ` (${valuation.availableSince.slice(0, 4)}-)` : ""}`;
@@ -553,13 +559,15 @@ function HistoricalOverview({ report, locale }: { report: AnalysisReport; locale
           <Badge>{historical.financials.length} {extra.years}</Badge>
         </div>
       </div>
-      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{extra.reportedDerived}</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label={extra.revenueCagr3y} value={formatPercent(historical.revenueCagr3y, locale, copy.unavailable)} />
-        <Stat label={extra.revenueCagr10y} value={formatPercent(historical.revenueCagr10y, locale, copy.unavailable)} />
-        <Stat label={extra.epsCagr3y} value={formatPercent(historical.epsCagr3y, locale, copy.unavailable)} />
-        <Stat label={extra.epsCagr10y} value={formatPercent(historical.epsCagr10y, locale, copy.unavailable)} />
-      </div>
+      <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{holdingCompany ? extra.holdingCompanyHistoricalNote : extra.reportedDerived}</p>
+      {!holdingCompany ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat label={extra.revenueCagr3y} value={formatPercent(historical.revenueCagr3y, locale, copy.unavailable)} />
+          <Stat label={extra.revenueCagr10y} value={formatPercent(historical.revenueCagr10y, locale, copy.unavailable)} />
+          <Stat label={extra.epsCagr3y} value={formatPercent(historical.epsCagr3y, locale, copy.unavailable)} />
+          <Stat label={extra.epsCagr10y} value={formatPercent(historical.epsCagr10y, locale, copy.unavailable)} />
+        </div>
+      ) : null}
       {valuation ? (
         <div className="mt-5 border-t border-white/10 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -757,23 +765,24 @@ export function HistoricalResearchView({
   const historical = report.historical;
   if (!historical || (!historical.financials.length && !historical.price.length)) return null;
   const dividendProfile = report.investmentProfile === "dividend";
+  const holdingCompany = report.analysisArchetype === "holding_company";
   const dividendStatus = historical.dividendContext?.status;
   const showDividendSnapshot = dividendProfile || (mode === "simple" && (dividendStatus === "available" || dividendStatus === "partial"));
   return (
     <div className="space-y-5">
-      {mode === "simple" ? <HistoricalSnapshot report={report} locale={locale} /> : null}
+      {mode === "simple" && !holdingCompany ? <HistoricalSnapshot report={report} locale={locale} /> : null}
       {mode === "simple" ? <PriceContextCard report={report} locale={locale} /> : null}
       {showDividendSnapshot ? <DividendSnapshot report={report} locale={locale} /> : null}
-      <HistoricalDiscountQualityCard report={report} locale={locale} />
+      {!holdingCompany ? <HistoricalDiscountQualityCard report={report} locale={locale} /> : null}
       <HistoricalOverview report={report} locale={locale} />
       {mode === "simple" ? <HistoricalCoverageCard report={report} locale={locale} /> : null}
       {mode === "pro" ? (
         <>
-          <GrowthDashboard report={report} locale={locale} />
-          <MarginDashboard report={report} locale={locale} />
-          <GrowthHistory report={report} locale={locale} />
+          {!holdingCompany ? <GrowthDashboard report={report} locale={locale} /> : null}
+          {!holdingCompany ? <MarginDashboard report={report} locale={locale} /> : null}
+          {!holdingCompany ? <GrowthHistory report={report} locale={locale} /> : null}
           <BalanceHistory report={report} locale={locale} />
-          <ValuationHistory report={report} locale={locale} />
+          {!holdingCompany ? <ValuationHistory report={report} locale={locale} /> : null}
           {dividendProfile ? <DividendHistory report={report} locale={locale} /> : null}
         </>
       ) : null}

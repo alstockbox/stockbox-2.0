@@ -31,7 +31,7 @@ describe("Simple Mode creator readability P0", () => {
   it("puts the master historical snapshot first in Simple Mode and coverage after decision context", () => {
     const renderStart = historicalView.indexOf('export function HistoricalResearchView');
     const source = historicalView.slice(renderStart);
-    const snapshot = source.indexOf('{mode === "simple" ? <HistoricalSnapshot');
+    const snapshot = source.indexOf('{mode === "simple" && !holdingCompany ? <HistoricalSnapshot');
     const price = source.indexOf('{mode === "simple" ? <PriceContextCard');
     const dividend = source.indexOf('{showDividendSnapshot ? <DividendSnapshot');
     const discountQuality = source.indexOf('<HistoricalDiscountQualityCard');
