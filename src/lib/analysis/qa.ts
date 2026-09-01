@@ -1,6 +1,64 @@
 import type { AnalysisReport, BatchQaResult, FinancialAnalysisInput, QaFlag } from "./types";
 import { SCORE_COVERAGE_POLICY } from "./config";
 import { summarizeSourceConflicts } from "./source-conflicts";
+import { economicCurrencyCode } from "./currency-units";
+
+type HistoricalCurrencyState = "aligned" | "mismatch" | "unknown" | "not_applicable";
+
+type CurrencyAwareHistoricalPoint = {
+  currency?: string | null;
+};
+
+function historicalPriceCurrencyState(report: AnalysisReport): HistoricalCurrencyState {
+  const history = report.historical?.price ?? [];
+  if (!history.length) return "not_applicable";
+
+  const marketCurrency = economicCurrencyCode(report.market?.currency);
+  if (!marketCurrency) return "unknown";
+
+  let hasUnknown = false;
+  const observedCurrencies = new Set<string>();
+  for (const point of history) {
+    const currency = economicCurrencyCode((point as CurrencyAwareHistoricalPoint).currency);
+    if (!currency) {
+      hasUnknown = true;
+      continue;
+    }
+    observedCurrencies.add(currency);
+  }
+
+  if (observedCurrencies.size > 1) return "mismatch";
+  const observed = [...observedCurrencies][0];
+  if (observed && observed !== marketCurrency) return "mismatch";
+  if (hasUnknown || !observed) return "unknown";
+  return "aligned";
+}
+
+function applyHistoricalCurrencyQa(report: AnalysisReport): HistoricalCurrencyState {
+  const state = historicalPriceCurrencyState(report);
+  if (state === "not_applicable" || state === "aligned") return state;
+
+  const ceiling = state === "mismatch" ? 0 : 25;
+  if (report.confidenceBreakdown) {
+    report.confidenceBreakdown.currencyAlignment = Math.min(
+      report.confidenceBreakdown.currencyAlignment,
+      ceiling,
+    );
+  }
+  if (report.engine?.scores.confidenceBreakdown) {
+    report.engine.scores.confidenceBreakdown.currencyAlignment = Math.min(
+      report.engine.scores.confidenceBreakdown.currencyAlignment,
+      ceiling,
+    );
+  }
+  if (report.engine?.confidenceBreakdown) {
+    report.engine.confidenceBreakdown.currencyAlignment = Math.min(
+      report.engine.confidenceBreakdown.currencyAlignment,
+      ceiling,
+    );
+  }
+  return state;
+}
 
 export function buildBatchQaResult(input: {
   batchId: string;
@@ -20,6 +78,7 @@ export function buildBatchQaResult(input: {
     sourceConflicts: engine.sourceConflicts.length ? engine.sourceConflicts : analysisInput.sourceConflicts,
   });
   const flags = new Set<QaFlag>();
+  const historicalCurrency = applyHistoricalCurrencyQa(report);
   if (report.dataStatus === "stale") flags.add("STALE_DATA");
   if ((report.dataCoverage ?? 0) < SCORE_COVERAGE_POLICY.overallMinimum) flags.add("LOW_COVERAGE");
   if (input.expectedEntityId && analysisInput.company.entityId !== input.expectedEntityId) flags.add("ENTITY_MISMATCH");
@@ -27,7 +86,10 @@ export function buildBatchQaResult(input: {
   if (!analysisInput.company.currency && !analysisInput.market?.currency) flags.add("UNSUPPORTED_MARKET");
   if (engine.diagnostics.ttmStatus === "annual_fallback") flags.add("TTM_FALLBACK");
   if (engine.reconciliation.some((check) => check.code.includes("period") && check.status === "warning")) flags.add("PERIOD_MISMATCH");
-  if (engine.reconciliation.some((check) => check.code.includes("currency") && check.status === "warning")) flags.add("CURRENCY_MISMATCH");
+  if (
+    historicalCurrency === "mismatch"
+    || engine.reconciliation.some((check) => check.code.includes("currency") && check.status === "warning")
+  ) flags.add("CURRENCY_MISMATCH");
   if (engine.reconciliation.some((check) => check.status === "warning")) flags.add("RECONCILIATION_FAIL");
   const diagnostics = report.providerDiagnostics ?? [];
   const coreCapabilities = ["fundamentals", "market_data"] as const;
