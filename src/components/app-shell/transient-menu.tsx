@@ -53,7 +53,9 @@ export function TransientMenu({
       onMouseLeave={() => {
         if (canHover()) closeMenu();
       }}
-      onFocusCapture={() => setOpen(true)}
+      onFocusCapture={() => {
+        if (canHover()) setOpen(true);
+      }}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) closeMenu();
       }}
