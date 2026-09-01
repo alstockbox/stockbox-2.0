@@ -20,9 +20,15 @@ describe("public stock SEO performance and previews", () => {
     const image = read("src/app/aktier/[slug]/opengraph-image.tsx");
     expect(image).toContain("ImageResponse");
     expect(image).toContain("StockBox Score");
-    expect(image).toContain("snapshot.companyName");
-    expect(image).toContain("snapshot.ticker");
+    expect(image).toContain("snapshot?.companyName");
+    expect(image).toContain("snapshot?.ticker");
     expect(image).toContain("1200");
     expect(image).toContain("630");
+  });
+
+  it("provides a route-specific Twitter image instead of inheriting the global logo", () => {
+    const twitter = read("src/app/aktier/[slug]/twitter-image.tsx");
+    expect(twitter).toContain('from "./opengraph-image"');
+    expect(twitter).toContain("default");
   });
 });
