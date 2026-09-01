@@ -5,7 +5,7 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
-import { analyzeCompany, searchCompanies, supportsUniversalSecurityAnalysis } from "@/lib/data/universal-security-provider";
+import { analyzeCompany, searchCompanies, supportsUniversalSecurityAnalysis } from "@/lib/data/universal-security-live-provider";
 import {
   completeAnalysisReservation,
   getAnalysisReplay,
