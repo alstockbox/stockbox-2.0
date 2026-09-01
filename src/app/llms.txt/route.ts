@@ -19,6 +19,7 @@ Canonical website: ${base}
 - Guide hub: ${base}/guider
 - How to analyze a stock: ${base}/guider/hur-analyserar-man-en-aktie
 - How to value a stock: ${base}/guider/hur-varderar-man-en-aktie
+- How to analyze investment companies: ${base}/guider/analysera-investmentbolag
 
 ## Financial metric knowledge
 - Key metric hub: ${base}/nyckeltal
