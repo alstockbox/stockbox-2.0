@@ -1,5 +1,4 @@
 import type { MetadataRoute } from "next";
-import { listPublicStockSnapshots } from "@/lib/seo/public-snapshots";
 
 const staticEntries: Array<{
   path: string;
@@ -31,22 +30,11 @@ const staticEntries: Array<{
   { path: "/legal/withdrawal-form", changeFrequency: "yearly", priority: 0.2 },
 ];
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+export default function sitemap(): MetadataRoute.Sitemap {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
-  const snapshots = await listPublicStockSnapshots(5000);
-
-  const staticUrls: MetadataRoute.Sitemap = staticEntries.map((entry) => ({
+  return staticEntries.map((entry) => ({
     url: `${base}${entry.path}`,
     changeFrequency: entry.changeFrequency,
     priority: entry.priority,
   }));
-
-  const stockUrls: MetadataRoute.Sitemap = snapshots.map((snapshot) => ({
-    url: `${base}/aktier/${snapshot.slug}`,
-    lastModified: new Date(snapshot.updatedAt),
-    changeFrequency: "weekly",
-    priority: 0.8,
-  }));
-
-  return [...staticUrls, ...stockUrls];
 }
