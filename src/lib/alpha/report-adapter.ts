@@ -59,6 +59,7 @@ export function buildAlphaSignalInputFromReport(report: AnalysisReport): AlphaSi
     market: {
       price: report.market?.price ?? null,
       marketCap: report.market?.marketCap ?? engine?.metrics?.valuation?.marketCap ?? null,
+      marketCapCurrency: report.market?.marketCapCurrency ?? report.market?.currency ?? report.reportingCurrency ?? null,
       volume: report.market?.volume ?? null,
       yearHigh: report.market?.yearHigh ?? null,
       yearLow: report.market?.yearLow ?? null,
