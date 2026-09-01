@@ -8,11 +8,17 @@ Canonical website: ${base}
 
 ## Public research
 - Aktieanalys guide: ${base}/aktieanalys
+- Aktieanalys tools guide: ${base}/aktieanalys-verktyg
 - AI aktieanalys: ${base}/ai-aktieanalys
 - Fundamental analys: ${base}/fundamental-analys
 - Public stock analyses: ${base}/aktier
 - Methodology: ${base}/docs/methodology
 - Data sources: ${base}/data-sources
+
+## Investor guides
+- Guide hub: ${base}/guider
+- How to analyze a stock: ${base}/guider/hur-analyserar-man-en-aktie
+- How to value a stock: ${base}/guider/hur-varderar-man-en-aktie
 
 ## Financial metric knowledge
 - Key metric hub: ${base}/nyckeltal
