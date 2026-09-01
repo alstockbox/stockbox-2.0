@@ -1,9 +1,9 @@
-name: Official Data Integration CI
+name: StockBox Verification CI
 
 on:
   push:
     branches:
-      - work/official-data-max-v2
+      - "work/**"
   pull_request:
     branches:
       - main
