@@ -9,6 +9,8 @@ import {
   slugifyStockPage,
 } from "./public-stock";
 
+export const PUBLIC_STOCK_SITEMAP_PAGE_SIZE = 1000;
+
 export type PublicStockSnapshot = {
   slug: string;
   ticker: string;
@@ -151,6 +153,48 @@ export async function listPublicStockSnapshots(limit = 500): Promise<PublicStock
     .eq("is_indexable", true)
     .order("updated_at", { ascending: false })
     .limit(safeLimit);
+
+  if (error || !data) return [];
+  return (data as unknown as PublicStockSnapshotRow[]).map(fromRow);
+}
+
+export async function countPublicStockSnapshots(): Promise<number> {
+  const supabase = createAdminClient();
+  if (!supabase) return 0;
+
+  const { count, error } = await supabase
+    .from("public_stock_snapshots")
+    .select("slug", { count: "exact", head: true })
+    .eq("is_indexable", true);
+
+  if (error || typeof count !== "number") return 0;
+  return count;
+}
+
+export async function getPublicStockSnapshotSitemapIds(): Promise<number[]> {
+  const count = await countPublicStockSnapshots();
+  const pageCount = Math.ceil(count / PUBLIC_STOCK_SITEMAP_PAGE_SIZE);
+  return Array.from({ length: pageCount }, (_, id) => id);
+}
+
+export async function listPublicStockSnapshotsPage(
+  page: number,
+  pageSize = PUBLIC_STOCK_SITEMAP_PAGE_SIZE,
+): Promise<PublicStockSnapshot[]> {
+  const supabase = createAdminClient();
+  if (!supabase) return [];
+
+  const safePage = Math.max(0, Math.trunc(page));
+  const safePageSize = Math.max(1, Math.min(PUBLIC_STOCK_SITEMAP_PAGE_SIZE, Math.trunc(pageSize)));
+  const from = safePage * safePageSize;
+  const to = from + safePageSize - 1;
+
+  const { data, error } = await supabase
+    .from("public_stock_snapshots")
+    .select(publicSnapshotFields)
+    .eq("is_indexable", true)
+    .order("slug", { ascending: true })
+    .range(from, to);
 
   if (error || !data) return [];
   return (data as unknown as PublicStockSnapshotRow[]).map(fromRow);
