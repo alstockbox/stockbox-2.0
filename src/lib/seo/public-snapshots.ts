@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -136,6 +137,8 @@ export async function getPublicStockSnapshotBySlug(slug: string): Promise<Public
   if (error || !data) return null;
   return fromRow(data as unknown as PublicStockSnapshotRow);
 }
+
+export const getCachedPublicStockSnapshotBySlug = cache(getPublicStockSnapshotBySlug);
 
 export async function listPublicStockSnapshots(limit = 500): Promise<PublicStockSnapshot[]> {
   const supabase = createAdminClient();
