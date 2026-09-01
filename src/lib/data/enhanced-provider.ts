@@ -1,11 +1,14 @@
-import type { AnalysisReport, AnalysisSource, ProviderDiagnostic } from "@/lib/analysis/types";
+import type { AnalysisReport, AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
+import { applyVerifiedMarketHistoryEnrichment } from "@/lib/analysis/market-history-enrichment";
 import { augmentWithOfficialResearch } from "@/lib/analysis/official-research-augment";
+import { enforceReportHistoricalCurrencyIntegrity } from "@/lib/analysis/report-currency-integrity";
 import { getServerEnv } from "@/lib/env/server";
 import { applyTwelveDataEstimateSnapshot } from "./estimate-report-augment";
 import { analyzeCompany as analyzeCoreCompany, searchCompanies } from "./provider";
 import { runWithOfficialAnalysisContext } from "./official-analysis-context";
 import { fetchOfficialResearchBundle, type OfficialResearchBundle } from "./official-research";
 import { fetchTwelveDataEstimateSnapshot } from "./twelve-data-estimates";
+import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
 export * from "./provider";
@@ -36,6 +39,46 @@ function uniqueDiagnostics(diagnostics: ProviderDiagnostic[]): ProviderDiagnosti
 
 function isDeepResearch(args: AnalyzeCompanyArgs): boolean {
   return args.analysisType === "deep" || args.analysisType === "research";
+}
+
+function wantsHistoricalEnrichment(args: AnalyzeCompanyArgs): boolean {
+  return args.analysisType === "numbers"
+    || args.analysisType === "deep"
+    || args.analysisType === "research"
+    || args.investmentProfile === "dividend";
+}
+
+function needsHistoricalEnrichment(report: AnalysisReport): boolean {
+  if (!report.market || !report.historical) return false;
+  const coverage = report.historical.coverage;
+  if (!coverage) return true;
+  return coverage.price.status !== "full" || coverage.dividend.status !== "full";
+}
+
+async function enrichVerifiedHistory(
+  report: AnalysisReport,
+  company: CompanySearchResult,
+  args: AnalyzeCompanyArgs,
+): Promise<void> {
+  // Repair legacy/cached history that lost quote-currency metadata before any secondary history
+  // can be rendered. Explicit currency conflicts fail closed.
+  enforceReportHistoricalCurrencyIntegrity(report);
+  if (!wantsHistoricalEnrichment(args) || !needsHistoricalEnrichment(report)) return;
+
+  const longHistory = await fetchYahooLongHistory(company);
+  report.providerDiagnostics = uniqueDiagnostics([
+    ...(report.providerDiagnostics ?? []),
+    longHistory.diagnostic,
+  ]);
+  if (!longHistory.ok) return;
+
+  const applied = applyVerifiedMarketHistoryEnrichment(report, longHistory.data);
+  if (applied.applied) {
+    report.sources = uniqueSources([...(report.sources ?? []), longHistory.source]);
+  }
+
+  // Re-run the integrity gate after secondary history has been normalized into the primary quote unit.
+  enforceReportHistoricalCurrencyIntegrity(report);
 }
 
 async function safeOfficialBundle(args: AnalyzeCompanyArgs): Promise<OfficialResearchBundle | null> {
@@ -80,17 +123,14 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
 
   const resolvedCompany = bundle?.company ?? args.company;
   const macro = bundle?.macro?.data;
-  const runCore = () => analyzeCoreCompany({ ...args, company: resolvedCompany });
-  const result = bundle
-    ? await runWithOfficialAnalysisContext(
-        {
-          riskFreeRate: macro?.riskFreeRate ?? null,
-          riskFreeSource: macro ? `Sveriges Riksbank — ${macro.seriesLabel}` : null,
-          riskFreeAsOf: macro?.observationDate ?? null,
-        },
-        runCore,
-      )
-    : await runCore();
+  const result = await runWithOfficialAnalysisContext(
+    {
+      riskFreeRate: macro?.riskFreeRate ?? null,
+      riskFreeSource: macro ? `Sveriges Riksbank — ${macro.seriesLabel}` : null,
+      riskFreeAsOf: macro?.observationDate ?? null,
+    },
+    () => analyzeCoreCompany({ ...args, company: resolvedCompany }),
+  );
 
   const enrichmentSources = bundle?.sources ?? [];
   const enrichmentDiagnostics = uniqueDiagnostics([
@@ -113,9 +153,9 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     ...enrichmentDiagnostics,
   ]);
 
-  // Enrichment must never invalidate a core analysis. This also keeps historical/test reports
-  // that predate the research fields compatible with the current provider contract.
   if (bundle) {
+    // Enrichment must never invalidate a core analysis. This also keeps historical/test reports
+    // that predate the research fields compatible with the current provider contract.
     try {
       augmentWithOfficialResearch(report, bundle);
     } catch {
@@ -132,6 +172,14 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
       // Keep the estimates diagnostic visible if presentation enrichment cannot be attached.
       // Missing estimate presentation must never corrupt or fail the core analysis.
     }
+  }
+
+  try {
+    await enrichVerifiedHistory(report, resolvedCompany, args);
+  } catch {
+    // Long-history enrichment is additive. Currency integrity has already been enforced before
+    // secondary data can be rendered, and a history-provider outage must not fail the analysis.
+    enforceReportHistoricalCurrencyIntegrity(report);
   }
 
   refreshAdminQa(report);
