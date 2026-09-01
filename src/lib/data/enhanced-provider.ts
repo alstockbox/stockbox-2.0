@@ -1,6 +1,6 @@
 import type { AnalysisReport, AnalysisSource, ProviderDiagnostic } from "@/lib/analysis/types";
 import { augmentWithOfficialResearch } from "@/lib/analysis/official-research-augment";
-import { getEstimatesProvider, getServerEnv } from "@/lib/env/server";
+import { getServerEnv } from "@/lib/env/server";
 import { applyTwelveDataEstimateSnapshot } from "./estimate-report-augment";
 import { analyzeCompany as analyzeCoreCompany, searchCompanies } from "./provider";
 import { runWithOfficialAnalysisContext } from "./official-analysis-context";
@@ -50,7 +50,7 @@ async function safeOfficialBundle(args: AnalyzeCompanyArgs): Promise<OfficialRes
 
 async function safeEstimateSnapshot(args: AnalyzeCompanyArgs): Promise<EstimateResult | null> {
   const env = getServerEnv();
-  if (getEstimatesProvider(env) !== "twelve_data") return null;
+  if (env.ESTIMATES_PROVIDER !== "twelve_data") return null;
   try {
     return await fetchTwelveDataEstimateSnapshot(args.company, env.TWELVE_DATA_API_KEY ?? "");
   } catch {
