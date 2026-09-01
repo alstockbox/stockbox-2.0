@@ -2,7 +2,7 @@ begin;
 
 create table if not exists public.public_stock_snapshots (
   slug text primary key check (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'),
-  ticker text not null unique,
+  ticker text not null,
   company_name text not null,
   source_analysis_id uuid unique references public.analyses(id) on delete set null,
   report jsonb not null,
@@ -15,6 +15,9 @@ create table if not exists public.public_stock_snapshots (
   published_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create unique index if not exists public_stock_snapshots_ticker_unique_idx
+  on public.public_stock_snapshots (ticker);
 
 create index if not exists public_stock_snapshots_indexable_updated_idx
   on public.public_stock_snapshots (is_indexable, updated_at desc);
