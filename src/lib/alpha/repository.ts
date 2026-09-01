@@ -5,6 +5,7 @@ import { createAdminClient } from "../supabase/admin";
 import { ALPHA_MODEL_VERSION } from "./engine";
 import {
   rankHiddenGems,
+  type AlphaPredictionOrigin,
   type AlphaPredictionSnapshot,
   type HiddenGem,
   type HiddenGemsFilters,
@@ -26,7 +27,9 @@ type AnalysisRow = {
 
 type PredictionRow = {
   id: string;
-  analysis_id: string;
+  origin_type: AlphaPredictionOrigin;
+  analysis_id: string | null;
+  universe_security_id: string | null;
   ticker: string;
   company_name: string;
   sector: string | null;
@@ -68,6 +71,7 @@ function isReport(value: unknown): value is AnalysisReport {
 function dbRow(analysisId: string, report: AnalysisReport) {
   const record = buildAlphaPredictionRecord(analysisId, report);
   return {
+    origin_type: "analysis" as const,
     analysis_id: record.analysisId,
     ticker: record.ticker,
     company_name: record.companyName,
@@ -100,7 +104,9 @@ function dbRow(analysisId: string, report: AnalysisReport) {
 function snapshot(row: PredictionRow): AlphaPredictionSnapshot {
   return {
     id: row.id,
+    originType: row.origin_type,
     analysisId: row.analysis_id,
+    universeSecurityId: row.universe_security_id,
     ticker: row.ticker,
     companyName: row.company_name,
     sector: row.sector,
@@ -204,7 +210,7 @@ export async function getAlphaPredictionSnapshots(limit = 600): Promise<AlphaPre
   const boundedLimit = Math.min(2000, Math.max(1, Math.floor(limit)));
   const result = await supabase
     .from("alpha_predictions")
-    .select("id,analysis_id,ticker,company_name,sector,archetype,market_cap,market_cap_currency,market_cap_band,fundamental_score,alpha_score,breakout_score,classification,confidence,scores,risk,probabilities,strongest_signals,risk_signals,model_version,prediction_as_of")
+    .select("id,origin_type,analysis_id,universe_security_id,ticker,company_name,sector,archetype,market_cap,market_cap_currency,market_cap_band,fundamental_score,alpha_score,breakout_score,classification,confidence,scores,risk,probabilities,strongest_signals,risk_signals,model_version,prediction_as_of")
     .order("prediction_as_of", { ascending: false })
     .limit(boundedLimit);
 
