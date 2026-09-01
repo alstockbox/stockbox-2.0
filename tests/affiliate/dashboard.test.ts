@@ -21,6 +21,6 @@ describe("affiliate dashboard", () => {
   it("adds an affiliate navigation entry for ambassadors", () => {
     const source = readFileSync(join(process.cwd(), "src/components/app-shell/nav.tsx"), "utf8");
     expect(source).toContain('href="/affiliate"');
-    expect(source).toContain('user?.role === "affiliate_ambassador"');
+    expect(source).toMatch(/user(?:\?\.|\.)role === "affiliate_ambassador"/);
   });
 });
