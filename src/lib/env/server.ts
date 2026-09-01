@@ -18,6 +18,11 @@ const providerListSchema = z.preprocess(
   z.array(z.enum(["twelve_data", "stooq", "yahoo"])).default([]),
 );
 
+const optionalExternalUrlSchema = z.preprocess(
+  (value) => typeof value === "string" ? value.trim() || undefined : value,
+  z.string().url().optional(),
+).catch(undefined);
+
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   NEXT_PUBLIC_SITE_NAME: z.string().default("StockBox"),
@@ -40,8 +45,8 @@ const envSchema = z.object({
   OPENFIGI_API_KEY: z.string().optional().or(z.literal("")),
   BOLAGSVERKET_CLIENT_ID: z.string().optional().or(z.literal("")),
   BOLAGSVERKET_CLIENT_SECRET: z.string().optional().or(z.literal("")),
-  BOLAGSVERKET_TOKEN_URL: z.string().url().optional().or(z.literal("")),
-  BOLAGSVERKET_BASE_URL: z.string().url().optional().or(z.literal("")),
+  BOLAGSVERKET_TOKEN_URL: optionalExternalUrlSchema,
+  BOLAGSVERKET_BASE_URL: optionalExternalUrlSchema,
   BOLAGSVERKET_SCOPE: z.string().optional().or(z.literal("")),
   MARKET_DATA_PROVIDER: marketDataProviderSchema,
   MARKET_DATA_FALLBACK_PROVIDERS: providerListSchema,
