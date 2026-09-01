@@ -52,13 +52,20 @@ create table public.alpha_scan_runs (
   metadata jsonb not null default '{}'::jsonb
 );
 
-alter table public.alpha_predictions alter column analysis_id drop not null;
-alter table public.alpha_predictions add column universe_security_id uuid references public.alpha_universe_securities(id) on delete cascade;
-alter table public.alpha_predictions add column scan_run_id uuid references public.alpha_scan_runs(id) on delete set null;
+alter table public.alpha_predictions
+  add column origin_type text not null default 'analysis' check (origin_type in ('analysis', 'universe'));
+alter table public.alpha_predictions
+  add column universe_security_id uuid references public.alpha_universe_securities(id) on delete restrict;
+alter table public.alpha_predictions
+  add column scan_run_id uuid references public.alpha_scan_runs(id) on delete set null;
 
 alter table public.alpha_predictions
   add constraint alpha_predictions_origin_check
-  check (analysis_id is not null or universe_security_id is not null);
+  check (
+    (origin_type = 'analysis' and universe_security_id is null)
+    or
+    (origin_type = 'universe' and analysis_id is null and universe_security_id is not null)
+  );
 
 create unique index alpha_predictions_universe_model_asof_uidx
   on public.alpha_predictions (universe_security_id, model_version, prediction_as_of)
@@ -87,6 +94,8 @@ comment on table public.alpha_universe_memberships is
   'Point-in-time source membership observations. source_as_of is the StockBox observation instant; source_timestamp_raw preserves an unzoned source timestamp when the provider does not document a timezone.';
 comment on table public.alpha_scan_runs is
   'Bounded scanner execution ledger used to audit market-universe Alpha generation.';
+comment on column public.alpha_predictions.origin_type is
+  'Immutable source class for the prediction. User-analysis deletion may null analysis_id without deleting the prediction or changing its origin.';
 
 alter table public.alpha_universe_securities enable row level security;
 alter table public.alpha_universe_memberships enable row level security;
