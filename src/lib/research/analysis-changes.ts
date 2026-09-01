@@ -232,17 +232,17 @@ export async function recordMaterialAnalysisChangesForPersistedAnalysis(input: {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!previousResult.data) return { changes: 0, thesisEvents: 0 };
+  const previousRow = previousResult.data as { id: string; report: AnalysisReport } | null;
+  if (!previousRow) return { changes: 0, thesisEvents: 0 };
 
-  const previous = previousResult.data.report as AnalysisReport;
-  const changes = deriveMaterialAnalysisChanges(previous, input.report);
+  const changes = deriveMaterialAnalysisChanges(previousRow.report, input.report);
   if (!changes.length) return { changes: 0, thesisEvents: 0 };
 
   const rows = changes.map((change) => ({
     user_id: input.userId,
     ticker: input.report.ticker,
     analysis_id: input.analysisId,
-    previous_analysis_id: previousResult.data.id,
+    previous_analysis_id: previousRow.id,
     change_kind: change.kind,
     severity: change.severity,
     direction: change.direction,
