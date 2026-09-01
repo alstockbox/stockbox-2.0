@@ -9,14 +9,15 @@ export async function AppFooter() {
   const sv = locale === "sv";
   const groups = [
     [sv ? "Produkt" : "Product", [["/product", sv ? "Produkt" : "Product"], ["/sample-analysis", sv ? "Exempelanalys" : "Sample analysis"], ["/pricing", sv ? "Priser" : "Pricing"], ["/docs/methodology", sv ? "Metodik" : "Methodology"]]],
+    [sv ? "Aktieanalys" : "Stock analysis", [["/aktier", sv ? "Publika analyser" : "Public analyses"], ["/aktieanalys", "Aktieanalys"], ["/ai-aktieanalys", "AI aktieanalys"], ["/fundamental-analys", "Fundamental analys"], ["/nyckeltal/pe-tal", "P/E-tal"]]],
     [sv ? "Företag" : "Company", [["/about", sv ? "Om StockBox" : "About"], ["/contact", sv ? "Kontakt" : "Contact"]]],
     [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"], ["/changelog", "Changelog"]]],
     [sv ? "Juridik" : "Legal", [["/legal/terms", sv ? "Villkor" : "Terms"], ["/legal/privacy", sv ? "Integritet" : "Privacy"], ["/withdraw", sv ? "Ångra avtal" : "Exercise withdrawal right"]]],
   ] as const;
   return <footer className="border-t border-white/10 bg-[#050b13] px-4 py-10 text-sm text-[#9aa7b8] sm:px-6 lg:px-8">
-    <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[1.3fr_2fr]">
+    <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[1.1fr_2.4fr]">
       <div><div className="flex items-center gap-2"><StockBoxMark className="h-8 w-8" /><span className="serif text-xl font-semibold text-[#f4efe5]">StockBox</span></div><p className="mt-4 max-w-sm leading-6">{sv ? "Databaserad, modellstyrd aktieresearch med synliga källor för din egen analys — inte individanpassad finansiell rådgivning." : "Data-driven, model-based equity research with visible sources for your own analysis — not individualized financial advice."}</p></div>
-      <nav className="grid grid-cols-2 gap-6 sm:grid-cols-4" aria-label="Footer">
+      <nav className="grid grid-cols-2 gap-6 sm:grid-cols-3 xl:grid-cols-5" aria-label="Footer">
         {groups.map(([heading, links]) => <div key={heading}><p className="font-semibold text-[#f4efe5]">{heading}</p><div className="mt-3 space-y-2">{links.map(([href, label]) => <Link key={href} href={href} className="block hover:text-white">{label}</Link>)}</div></div>)}
       </nav>
     </div>
