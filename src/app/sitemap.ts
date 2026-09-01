@@ -13,6 +13,7 @@ const staticEntries: Array<{
   { path: "/guider", changeFrequency: "monthly", priority: 0.85 },
   { path: "/guider/hur-analyserar-man-en-aktie", changeFrequency: "monthly", priority: 0.9 },
   { path: "/guider/hur-varderar-man-en-aktie", changeFrequency: "monthly", priority: 0.9 },
+  { path: "/guider/analysera-investmentbolag", changeFrequency: "monthly", priority: 0.9 },
   { path: "/nyckeltal", changeFrequency: "monthly", priority: 0.9 },
   { path: "/nyckeltal/pe-tal", changeFrequency: "monthly", priority: 0.85 },
   { path: "/nyckeltal/ev-ebitda", changeFrequency: "monthly", priority: 0.85 },
