@@ -33,10 +33,14 @@ describe("canonical watchlist fan-out", () => {
     const search = vi.fn(async () => [company]);
     const fetchBundle = vi.fn(async () => ({
       company,
+      organizationNumber: null,
+      identity: { gleif: null, openFigi: null },
+      macro: null,
       insider: null,
       positioning: null,
       bolagsverket: null,
-      warnings: [],
+      diagnostics: [],
+      sources: [],
     }));
 
     await loadSignalsForWatchlistGroup(rows, {
