@@ -9,6 +9,12 @@ import {
   type HiddenGem,
   type HiddenGemsFilters,
 } from "./hidden-gems";
+import {
+  evaluateAlphaOutcome,
+  summarizeAlphaOutcomes,
+  type AlphaCalibrationSummary,
+  type AlphaOutcomeHorizonDays,
+} from "./outcomes";
 import { buildAlphaPredictionRecord } from "./prediction-snapshot";
 import type { AlphaDimensionScores, AlphaProbabilityCurve, AlphaRisk } from "./types";
 import type { MarketCapBand } from "./market-cap";
@@ -40,6 +46,13 @@ type PredictionRow = {
   risk_signals: string[];
   model_version: string;
   prediction_as_of: string;
+};
+
+type OutcomePredictionRow = {
+  id: string;
+  price_at_prediction: number | null;
+  prediction_as_of: string;
+  probabilities: AlphaProbabilityCurve;
 };
 
 function isReport(value: unknown): value is AnalysisReport {
@@ -108,6 +121,13 @@ function snapshot(row: PredictionRow): AlphaPredictionSnapshot {
     modelVersion: row.model_version,
     predictionAsOf: row.prediction_as_of,
   };
+}
+
+function horizonKey(days: AlphaOutcomeHorizonDays): keyof AlphaProbabilityCurve {
+  if (days === 30) return "oneMonth";
+  if (days === 90) return "threeMonths";
+  if (days === 180) return "sixMonths";
+  return "twelveMonths";
 }
 
 export async function syncRecentAlphaPredictions(limit = 300): Promise<{
@@ -190,6 +210,96 @@ export async function getAlphaPredictionSnapshots(limit = 600): Promise<AlphaPre
 
   if (result.error || !result.data) return [];
   return (result.data as PredictionRow[]).map(snapshot);
+}
+
+export async function recordAlphaPredictionOutcome(input: {
+  predictionId: string;
+  horizonDays: AlphaOutcomeHorizonDays;
+  priceEnd: number;
+  marketDataAsOf: string;
+  benchmarkSymbol?: string | null;
+  benchmarkReturn?: number | null;
+}): Promise<{ ok: boolean; reason?: "unavailable" | "prediction_not_found" | "not_evaluable" | "write_failed" }> {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, reason: "unavailable" };
+
+  const predictionResult = await supabase
+    .from("alpha_predictions")
+    .select("id,price_at_prediction,prediction_as_of,probabilities")
+    .eq("id", input.predictionId)
+    .maybeSingle();
+
+  if (predictionResult.error || !predictionResult.data) {
+    return { ok: false, reason: "prediction_not_found" };
+  }
+
+  const prediction = predictionResult.data as OutcomePredictionRow;
+  if (prediction.price_at_prediction === null) {
+    return { ok: false, reason: "not_evaluable" };
+  }
+  const probabilities = prediction.probabilities?.[horizonKey(input.horizonDays)];
+  if (!probabilities || typeof probabilities.up25 !== "number") {
+    return { ok: false, reason: "not_evaluable" };
+  }
+
+  const evaluated = evaluateAlphaOutcome({
+    predictionId: prediction.id,
+    predictionAsOf: prediction.prediction_as_of,
+    horizonDays: input.horizonDays,
+    priceStart: prediction.price_at_prediction,
+    priceEnd: input.priceEnd,
+    marketDataAsOf: input.marketDataAsOf,
+    predictedUp25: probabilities.up25,
+    benchmarkSymbol: input.benchmarkSymbol,
+    benchmarkReturn: input.benchmarkReturn,
+  });
+  if (!evaluated) return { ok: false, reason: "not_evaluable" };
+
+  const writeResult = await supabase.from("alpha_prediction_outcomes").upsert({
+    prediction_id: evaluated.predictionId,
+    horizon_days: evaluated.horizonDays,
+    price_start: evaluated.priceStart,
+    price_end: evaluated.priceEnd,
+    observed_return: evaluated.observedReturn,
+    benchmark_symbol: evaluated.benchmarkSymbol,
+    benchmark_return: evaluated.benchmarkReturn,
+    market_data_as_of: evaluated.marketDataAsOf,
+    evaluated_at: new Date().toISOString(),
+  }, { onConflict: "prediction_id,horizon_days", ignoreDuplicates: false });
+
+  return writeResult.error ? { ok: false, reason: "write_failed" } : { ok: true };
+}
+
+export async function getAlphaTrackRecord(horizonDays: AlphaOutcomeHorizonDays = 180): Promise<AlphaCalibrationSummary> {
+  const supabase = createAdminClient();
+  if (!supabase) return summarizeAlphaOutcomes([]);
+
+  const outcomeResult = await supabase
+    .from("alpha_prediction_outcomes")
+    .select("prediction_id,observed_return")
+    .eq("horizon_days", horizonDays)
+    .order("evaluated_at", { ascending: false })
+    .limit(2000);
+  if (outcomeResult.error || !outcomeResult.data?.length) return summarizeAlphaOutcomes([]);
+
+  const predictionIds = outcomeResult.data.map((row) => String(row.prediction_id));
+  const predictionResult = await supabase
+    .from("alpha_predictions")
+    .select("id,probabilities")
+    .in("id", predictionIds);
+  if (predictionResult.error || !predictionResult.data) return summarizeAlphaOutcomes([]);
+
+  const probabilityById = new Map(
+    predictionResult.data.map((row) => [String(row.id), (row.probabilities as AlphaProbabilityCurve)?.[horizonKey(horizonDays)]?.up25]),
+  );
+  const outcomes = outcomeResult.data.flatMap((row) => {
+    const observedReturn = Number(row.observed_return);
+    const predictedUp25 = probabilityById.get(String(row.prediction_id));
+    if (!Number.isFinite(observedReturn) || typeof predictedUp25 !== "number" || !Number.isFinite(predictedUp25)) return [];
+    return [{ observedReturn, predictedUp25, hitUp25: observedReturn >= 0.25 }];
+  });
+
+  return summarizeAlphaOutcomes(outcomes);
 }
 
 export async function getHiddenGems(filters: HiddenGemsFilters): Promise<{
