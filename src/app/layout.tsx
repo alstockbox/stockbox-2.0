@@ -81,6 +81,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       { "@type": "WebSite", "@id": `${baseUrl}/#website`, name: "StockBox", url: baseUrl, publisher: { "@id": `${baseUrl}/#organization` } },
       {
         "@type": "SoftwareApplication",
+        "@id": `${baseUrl}/#software`,
         name: "StockBox",
         applicationCategory: "FinanceApplication",
         operatingSystem: "Web",
