@@ -50,6 +50,7 @@ function predictionRow(universe: AlphaUniverseCandidate, scanRunId: string, repo
   const input = buildAlphaSignalInputFromReport(report);
   const alpha = computeAlphaIntelligence(input);
   return {
+    origin_type: "universe",
     analysis_id: null,
     universe_security_id: universe.id,
     scan_run_id: scanRunId,
