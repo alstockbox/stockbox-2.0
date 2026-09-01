@@ -14,6 +14,11 @@ create table public.alpha_universe_securities (
   eligible boolean not null default true,
   first_seen_at timestamptz not null,
   last_seen_at timestamptz not null,
+  last_scan_attempt_at timestamptz,
+  last_alpha_scanned_at timestamptz,
+  scan_failure_count integer not null default 0 check (scan_failure_count >= 0),
+  last_scan_status text check (last_scan_status in ('success', 'failed', 'skipped')),
+  last_scan_error_class text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (source, source_key)
@@ -64,6 +69,8 @@ create index alpha_universe_active_ticker_idx
 create index alpha_universe_cik_idx
   on public.alpha_universe_securities (cik)
   where cik is not null;
+create index alpha_universe_scan_queue_idx
+  on public.alpha_universe_securities (eligible, last_alpha_scanned_at asc nulls first, scan_failure_count asc, ticker asc);
 create index alpha_universe_last_seen_idx
   on public.alpha_universe_securities (last_seen_at desc);
 create index alpha_universe_membership_active_idx
@@ -75,7 +82,7 @@ create index alpha_predictions_universe_time_idx
   where universe_security_id is not null;
 
 comment on table public.alpha_universe_securities is
-  'Server-owned security identities used by the StockBox Alpha market scanner. Source coverage must be stated explicitly.';
+  'Server-owned security identities and retry state used by the StockBox Alpha market scanner. Source coverage must be stated explicitly.';
 comment on table public.alpha_universe_memberships is
   'Point-in-time source membership observations. source_as_of is the StockBox observation instant; source_timestamp_raw preserves an unzoned source timestamp when the provider does not document a timezone.';
 comment on table public.alpha_scan_runs is
