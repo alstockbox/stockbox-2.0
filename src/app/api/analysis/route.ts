@@ -5,8 +5,7 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
-import { analyzeCompany, searchCompanies } from "@/lib/data/enhanced-provider";
-import { canAttemptConfiguredFundamentals } from "@/lib/data/security-classification";
+import { analyzeCompany, searchCompanies, supportsUniversalSecurityAnalysis } from "@/lib/data/universal-security-provider";
 import {
   completeAnalysisReservation,
   getAnalysisReplay,
@@ -140,9 +139,9 @@ export async function POST(request: Request) {
   }
   const canonicalCompany = resolution.company;
 
-  if (!canAttemptConfiguredFundamentals(canonicalCompany)) {
+  if (!supportsUniversalSecurityAnalysis(canonicalCompany)) {
     return Response.json(
-      { error: "Live fundamentals are not available for this security." },
+      { error: "Live analysis is not available for this security type yet." },
       { status: 422 }
     );
   }
