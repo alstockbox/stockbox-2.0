@@ -9,6 +9,7 @@ create table public.alpha_universe_securities (
   exchange text,
   country text,
   currency text,
+  cik text,
   security_type text not null default 'common_stock',
   eligible boolean not null default true,
   first_seen_at timestamptz not null,
@@ -23,6 +24,7 @@ create table public.alpha_universe_memberships (
   universe_security_id uuid not null references public.alpha_universe_securities(id) on delete cascade,
   source_dataset text not null,
   source_as_of timestamptz not null,
+  source_timestamp_raw text,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   unique (universe_security_id, source_dataset, source_as_of)
@@ -59,6 +61,9 @@ create unique index alpha_predictions_universe_model_asof_uidx
 
 create index alpha_universe_active_ticker_idx
   on public.alpha_universe_securities (eligible, ticker);
+create index alpha_universe_cik_idx
+  on public.alpha_universe_securities (cik)
+  where cik is not null;
 create index alpha_universe_last_seen_idx
   on public.alpha_universe_securities (last_seen_at desc);
 create index alpha_universe_membership_active_idx
@@ -72,7 +77,7 @@ create index alpha_predictions_universe_time_idx
 comment on table public.alpha_universe_securities is
   'Server-owned security identities used by the StockBox Alpha market scanner. Source coverage must be stated explicitly.';
 comment on table public.alpha_universe_memberships is
-  'Point-in-time source membership observations. Historical rows are retained when securities leave a source universe.';
+  'Point-in-time source membership observations. source_as_of is the StockBox observation instant; source_timestamp_raw preserves an unzoned source timestamp when the provider does not document a timezone.';
 comment on table public.alpha_scan_runs is
   'Bounded scanner execution ledger used to audit market-universe Alpha generation.';
 
