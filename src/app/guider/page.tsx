@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 const guides = [
   ["Hur analyserar man en aktie?", "/guider/hur-analyserar-man-en-aktie", "En steg-för-steg-process från bolagsidentitet och rapportdata till värdering, risker och slutsats."],
   ["Hur värderar man en aktie?", "/guider/hur-varderar-man-en-aktie", "Så kombinerar du multiplar, kassaflöde, tillväxt och kvalitet utan att fastna i ett enda P/E-tal."],
+  ["Analysera investmentbolag", "/guider/analysera-investmentbolag", "Så bedömer du substansvärde, NAV-rabatt eller premie, NAV-tillväxt, skuldsättning och portföljkvalitet."],
   ["Aktieanalysverktyg", "/aktieanalys-verktyg", "Vad ett seriöst analysverktyg bör visa om data, beräkningar, risk, källor, saknade datapunkter och uppdateringsdatum."],
   ["Nyckeltal för aktier", "/nyckeltal", "Fördjupa dig i P/E, EV/EBITDA, ROIC och fritt kassaflöde och när respektive mått är användbart."],
 ] as const;
