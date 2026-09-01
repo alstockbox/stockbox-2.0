@@ -1,0 +1,22 @@
+name: Temporary Analysis Lens RED
+
+on:
+  push:
+    branches:
+      - work/temporary-analysis-lens
+
+permissions:
+  contents: read
+
+jobs:
+  red-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run temporary lens contract
+        run: npx vitest run tests/analysis/temporary-analysis-lens.test.ts
