@@ -6,7 +6,16 @@ export {
   resolveMarketCapBand,
   sizePotentialForBand,
 } from "./market-cap";
+export { rankHiddenGems } from "./hidden-gems";
 export type { MarketCapBand } from "./market-cap";
+export type {
+  AlphaPredictionSnapshot,
+  HiddenGem,
+  HiddenGemsCategory,
+  HiddenGemsFilters,
+  HiddenGemsHorizon,
+  HiddenGemsRiskBand,
+} from "./hidden-gems";
 export type {
   AlphaClassification,
   AlphaDimensionScores,
