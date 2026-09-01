@@ -29,7 +29,7 @@ function row(estimates: ForwardEstimates | undefined, key: keyof ForwardEstimate
     value,
     status,
     note: status === "available"
-      ? "Forward estimate supplied by the configured estimates input."
+      ? "Forward estimate supplied by the configured estimates provider."
       : "No configured estimates provider supplied this field; StockBox does not infer it from historical data.",
   };
 }
@@ -42,7 +42,11 @@ export function buildAnalystExpectationsSummary(report: AnalysisReport): Analyst
   ];
   const availableRows = rows.filter((item) => item.status === "available");
   const provider = report.providerDiagnostics?.find((item) => item.capability === "estimates");
-  const estimateAvailability = report.confidenceBreakdown?.estimateAvailability ?? null;
+  const observedAvailability = availableRows.length
+    ? Math.round((availableRows.length / rows.length) * 100)
+    : null;
+  const engineAvailability = report.confidenceBreakdown?.estimateAvailability ?? null;
+  const estimateAvailability = observedAvailability ?? engineAvailability;
   return {
     status: availableRows.length ? "available" : "unavailable",
     rows,
