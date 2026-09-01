@@ -1,15 +1,46 @@
 import type { MetadataRoute } from "next";
+import { listPublicStockSnapshots } from "@/lib/seo/public-snapshots";
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const paths = [
-    "", "/product", "/pricing", "/about", "/contact", "/data-sources", "/faq",
-    "/sample-analysis", "/docs/methodology", "/changelog", "/legal/privacy", "/legal/terms", "/withdraw", "/legal/withdrawal-form",
-  ];
-  return paths.map((path) => ({
-    url: `${base}${path}`,
-    lastModified: new Date(),
-    changeFrequency: path === "" ? "weekly" : "monthly",
-    priority: path === "" ? 1 : path === "/sample-analysis" || path === "/pricing" ? 0.8 : 0.6,
+const staticEntries: Array<{
+  path: string;
+  changeFrequency: "daily" | "weekly" | "monthly" | "yearly";
+  priority: number;
+}> = [
+  { path: "", changeFrequency: "weekly", priority: 1 },
+  { path: "/aktieanalys", changeFrequency: "monthly", priority: 0.95 },
+  { path: "/ai-aktieanalys", changeFrequency: "monthly", priority: 0.9 },
+  { path: "/fundamental-analys", changeFrequency: "monthly", priority: 0.9 },
+  { path: "/nyckeltal/pe-tal", changeFrequency: "monthly", priority: 0.85 },
+  { path: "/aktier", changeFrequency: "daily", priority: 0.9 },
+  { path: "/product", changeFrequency: "monthly", priority: 0.7 },
+  { path: "/pricing", changeFrequency: "monthly", priority: 0.8 },
+  { path: "/about", changeFrequency: "yearly", priority: 0.5 },
+  { path: "/contact", changeFrequency: "yearly", priority: 0.4 },
+  { path: "/data-sources", changeFrequency: "monthly", priority: 0.75 },
+  { path: "/faq", changeFrequency: "monthly", priority: 0.65 },
+  { path: "/sample-analysis", changeFrequency: "monthly", priority: 0.8 },
+  { path: "/docs/methodology", changeFrequency: "monthly", priority: 0.8 },
+  { path: "/changelog", changeFrequency: "weekly", priority: 0.5 },
+  { path: "/legal/privacy", changeFrequency: "yearly", priority: 0.2 },
+  { path: "/legal/terms", changeFrequency: "yearly", priority: 0.2 },
+];
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
+  const snapshots = await listPublicStockSnapshots(5000);
+
+  const staticUrls: MetadataRoute.Sitemap = staticEntries.map((entry) => ({
+    url: `${base}${entry.path}`,
+    changeFrequency: entry.changeFrequency,
+    priority: entry.priority,
   }));
+
+  const stockUrls: MetadataRoute.Sitemap = snapshots.map((snapshot) => ({
+    url: `${base}/aktier/${snapshot.slug}`,
+    lastModified: new Date(snapshot.updatedAt),
+    changeFrequency: "weekly",
+    priority: 0.8,
+  }));
+
+  return [...staticUrls, ...stockUrls];
 }
