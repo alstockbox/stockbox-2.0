@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { SeoBreadcrumbs, SeoJsonLd, breadcrumbJsonLd } from "@/components/seo/seo-shell";
-import { getPublicStockSnapshotBySlug } from "@/lib/seo/public-snapshots";
+import { getCachedPublicStockSnapshotBySlug } from "@/lib/seo/public-snapshots";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,7 @@ function number(value: number | null | undefined) {
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const snapshot = await getPublicStockSnapshotBySlug(slug);
+  const snapshot = await getCachedPublicStockSnapshotBySlug(slug);
   if (!snapshot) return { title: "Aktieanalys hittades inte", robots: { index: false, follow: false } };
   const title = `${snapshot.companyName} aktieanalys – värdering, P/E & StockBox Score`;
   return {
@@ -43,7 +43,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function PublicStockPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const snapshot = await getPublicStockSnapshotBySlug(slug);
+  const snapshot = await getCachedPublicStockSnapshotBySlug(slug);
   if (!snapshot) notFound();
 
   const report = snapshot.report;
