@@ -13,8 +13,9 @@ import {
   sizePotentialForBand,
   type MarketCapBand,
 } from "./market-cap";
+import { getAlphaWeightProfile, type AlphaWeightProfile } from "./weights";
 
-export const ALPHA_MODEL_VERSION = "alpha-1.1.0";
+export const ALPHA_MODEL_VERSION = "alpha-1.2.0";
 
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -195,18 +196,20 @@ function computeSmallCapAsymmetry(coreOpportunity: number, liquidityRisk: number
   return round1(clamp(0.78 * coreOpportunity + 0.22 * sizeBonus - 0.14 * liquidityRisk));
 }
 
-function weightedSignal(scores: Omit<AlphaDimensionScores, "smallCapAsymmetry" | "breakoutProbability">, smallCapAsymmetry: number): number {
-  return (
-    scores.growthAcceleration * 0.17 +
-    scores.earningsInflection * 0.16 +
-    scores.undervaluation * 0.16 +
-    scores.quality * 0.14 +
-    scores.catalyst * 0.11 +
-    scores.momentum * 0.10 +
-    scores.estimateRevisions * 0.07 +
-    scores.sentimentShift * 0.03 +
-    smallCapAsymmetry * 0.06
-  );
+function weightedSignal(
+  scores: Omit<AlphaDimensionScores, "breakoutProbability">,
+  profile: AlphaWeightProfile,
+): number {
+  const weights = profile.weights;
+  return scores.growthAcceleration * weights.growthAcceleration
+    + scores.earningsInflection * weights.earningsInflection
+    + scores.undervaluation * weights.undervaluation
+    + scores.quality * weights.quality
+    + scores.catalyst * weights.catalyst
+    + scores.momentum * weights.momentum
+    + scores.estimateRevisions * weights.estimateRevisions
+    + scores.sentimentShift * weights.sentimentShift
+    + scores.smallCapAsymmetry * weights.smallCapAsymmetry;
 }
 
 function sigmoid(value: number): number {
@@ -283,6 +286,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
   const revisionCoverage = input.estimateRevision ? clamp01(input.estimateRevision.confidence) : 0;
   const sentimentCoverage = input.sentimentShift ? clamp01(input.sentimentShift.confidence) : 0;
   const marketCapBand = resolveMarketCapBand(input.market.marketCap, input.market.marketCapCurrency);
+  const weightProfile = getAlphaWeightProfile(input.archetype);
 
   const financialRisk = computeFinancialRisk(input);
   const undervaluation = computeUndervaluation(input);
@@ -306,7 +310,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
   );
   const smallCapAsymmetry = computeSmallCapAsymmetry(coreOpportunity, liquidityRisk, marketCapBand);
 
-  const baseScores = {
+  const weightedScores: Omit<AlphaDimensionScores, "breakoutProbability"> = {
     undervaluation,
     quality,
     growthAcceleration,
@@ -315,8 +319,9 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
     momentum,
     estimateRevisions,
     sentimentShift,
+    smallCapAsymmetry,
   };
-  const signal = weightedSignal(baseScores, smallCapAsymmetry);
+  const signal = weightedSignal(weightedScores, weightProfile);
   const overallRisk = round1(0.38 * financialRisk + 0.24 * dilutionRisk + 0.20 * liquidityRisk + 0.18 * hypeRisk);
   const risk: AlphaRisk = { financialRisk, dilutionRisk, liquidityRisk, hypeRisk, overall: overallRisk };
 
@@ -328,16 +333,17 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
     sentiment: roundProbability(sentimentCoverage),
   };
   const essentialCoverage = 0.58 * fundamentalCoverage + 0.22 * forwardAvailable + 0.20 * dataQuality;
-  const confidence = roundProbability(clamp01(0.55 * dataQuality + 0.45 * essentialCoverage));
+  const rawConfidence = clamp01(0.55 * dataQuality + 0.45 * essentialCoverage);
+  const confidence = roundProbability(rawConfidence * (0.55 + 0.45 * weightProfile.support));
 
   const riskPenalty = 0.20 * overallRisk + 0.07 * hypeRisk;
   const lowCoveragePenalty = Math.max(0, 0.55 - essentialCoverage) * 22;
-  const alphaScore = round1(clamp(signal - riskPenalty - lowCoveragePenalty + 12));
+  const specializationPenalty = (1 - weightProfile.support) * 10;
+  const alphaScore = round1(clamp(signal - riskPenalty - lowCoveragePenalty - specializationPenalty + 12));
   const breakoutProbability = round1(clamp(0.72 * alphaScore + 0.18 * momentum + 0.10 * catalyst - 0.08 * hypeRisk));
 
   const scores: AlphaDimensionScores = {
-    ...baseScores,
-    smallCapAsymmetry,
+    ...weightedScores,
     breakoutProbability,
   };
 
@@ -361,6 +367,8 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
       independentFromFundamentalScore: true,
       probabilitiesAreModelImplied: true,
       marketCapPolicyVersion: MARKET_CAP_POLICY_VERSION,
+      weightProfile: weightProfile.name,
+      archetypeSupport: weightProfile.support,
     },
   };
 }
