@@ -7,7 +7,11 @@ create table public.alpha_predictions (
   company_name text not null,
   sector text,
   archetype text,
+  price_at_prediction numeric(30,10),
+  price_currency text,
   market_cap numeric(30,4),
+  market_cap_currency text,
+  market_cap_band text not null check (market_cap_band in ('micro', 'small', 'mid', 'large', 'mega', 'unknown')),
   fundamental_score numeric(5,2),
   alpha_score numeric(5,2) not null check (alpha_score between 0 and 100),
   breakout_score numeric(5,2) not null check (breakout_score between 0 and 100),
@@ -19,6 +23,7 @@ create table public.alpha_predictions (
   strongest_signals jsonb not null default '[]'::jsonb,
   risk_signals jsonb not null default '[]'::jsonb,
   coverage jsonb not null default '{}'::jsonb,
+  methodology jsonb not null default '{}'::jsonb,
   model_version text not null,
   source_report_model_version text,
   prediction_as_of timestamptz not null,
@@ -48,7 +53,7 @@ create index alpha_predictions_breakout_idx
 create index alpha_predictions_ticker_time_idx
   on public.alpha_predictions (ticker, prediction_as_of desc);
 create index alpha_predictions_market_cap_idx
-  on public.alpha_predictions (market_cap, prediction_as_of desc);
+  on public.alpha_predictions (market_cap_band, market_cap, prediction_as_of desc);
 create index alpha_prediction_outcomes_horizon_idx
   on public.alpha_prediction_outcomes (horizon_days, evaluated_at desc);
 
@@ -58,6 +63,8 @@ comment on table public.alpha_prediction_outcomes is
   'Realized point-in-time Alpha prediction outcomes. Rows are written only after the relevant horizon has elapsed.';
 comment on column public.alpha_predictions.probabilities is
   'Model-implied ranking probabilities, not guaranteed investment outcomes.';
+comment on column public.alpha_predictions.price_at_prediction is
+  'Observed market price captured with the prediction so future outcome measurement does not reconstruct the entry price with hindsight.';
 
 alter table public.alpha_predictions enable row level security;
 alter table public.alpha_prediction_outcomes enable row level security;
