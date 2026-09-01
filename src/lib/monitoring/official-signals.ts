@@ -60,9 +60,23 @@ function insiderSignal(bundle: OfficialResearchBundle): MonitoringSignal | null 
 }
 
 function shortInterestSignal(bundle: OfficialResearchBundle): MonitoringSignal | null {
-  const position = bundle.positioning?.data;
-  if (!position) return null;
+  if (!bundle.positioning) return null;
+  const position = bundle.positioning.data;
+  if (!position) {
+    const normalized = { status: "not_listed_in_current_register", dataAsOf: bundle.positioning.dataAsOf };
+    return {
+      kind: "short_interest",
+      hash: stableHash(normalized),
+      title: `Short-interest register state changed for ${bundle.company.ticker}`,
+      body: "FI currently has no matching issuer row in the aggregate short-position register. This must not be interpreted as 0% short interest.",
+      severity: "info",
+      dataAsOf: bundle.positioning.dataAsOf,
+      payload: normalized,
+      sources: evidenceSources(bundle.positioning),
+    };
+  }
   const normalized = {
+    status: "reported",
     issuerName: position.issuerName,
     lei: position.lei,
     positionDate: position.positionDate,
