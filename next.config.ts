@@ -52,8 +52,10 @@ const privateIndexingPaths = [
 
 const swedishSeoPaths = [
   "/aktieanalys",
+  "/aktieanalys-verktyg",
   "/ai-aktieanalys",
   "/fundamental-analys",
+  "/guider/:path*",
   "/nyckeltal/:path*",
   "/aktier/:path*",
 ] as const;
