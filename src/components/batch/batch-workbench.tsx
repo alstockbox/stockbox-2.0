@@ -15,7 +15,7 @@ import {
   Square,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { captureClientEvent } from "@/lib/analytics/client";
 import type {
   AnalysisReport,
@@ -34,12 +34,14 @@ import { Card } from "@/components/ui/card";
 import { SetupNotice } from "@/components/ui/setup-notice";
 type BatchStatus =
   | "ready"
+  | "ambiguous"
   | "not_found"
   | "unsupported"
   | "lookup_failed"
   | "running"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 type BatchRow = {
   input: string;
@@ -56,13 +58,28 @@ type ResolvePayload = {
   entitlement?: { plan: string; rowLimit: number };
 };
 
-type AnalysisPayload =
-  | { ok: true; data: AnalysisReport; persisted: boolean; warnings: string[] }
-  | { ok: false; error: string; warnings?: string[] }
-  | { error: string; entitlement?: unknown };
+type DurableBatchItemPayload = {
+  input_ticker: string;
+  canonical_ticker?: string;
+  company_name?: string;
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled";
+  report?: AnalysisReport | null;
+  last_error?: string | null;
+};
+
+type DurableBatchPayload = {
+  error?: string;
+  run?: { status: "queued" | "processing" | "completed" | "partial" | "failed" | "cancelled" };
+  items?: DurableBatchItemPayload[];
+};
+
+const LAST_BATCH_STORAGE_KEY = "stockbox:last-batch-id";
+
 const terminalStatuses = new Set<BatchStatus>([
   "completed",
   "failed",
+  "cancelled",
+  "ambiguous",
   "not_found",
   "unsupported",
   "lookup_failed",
@@ -88,11 +105,21 @@ function statusLabel(status: BatchStatus, copy: ReturnType<typeof getP0Copy>["ba
     running: copy.statusAnalyzing,
     completed: copy.statusCompleted,
     failed: copy.statusFailed,
+    cancelled: copy.statusCancelled,
+    ambiguous: copy.statusAmbiguous,
     not_found: copy.statusNotFound,
     unsupported: copy.statusUnsupported,
     lookup_failed: copy.statusLookupFailed,
   }[status];
 }
+
+function localizedBatchError(message: string | null | undefined, fallback: string, monthlyLimit: string, rateLimited: string): string {
+  if (!message) return fallback;
+  if (message.includes("Monthly analysis limit reached")) return monthlyLimit;
+  if (message.includes("Too many requests")) return rateLimited;
+  return message;
+}
+
 function StatusIcon({ status }: { status: BatchStatus }) {
   if (status === "completed") {
     return <CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" />;
@@ -122,11 +149,12 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const [isRunning, setIsRunning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cancelled = useRef(false);
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
   const parsed = useMemo(() => parseBatchInput(input), [input]);
   const completedRows = rows.filter((row) => row.status === "completed");
   const failedRows = rows.filter((row) => row.status === "failed");
   const processedCount = rows.filter((row) => terminalStatuses.has(row.status)).length;
+  const issueCount = rows.filter((row) => terminalStatuses.has(row.status) && !["completed", "cancelled"].includes(row.status)).length;
   const progress = rows.length ? Math.round((processedCount / rows.length) * 100) : 0;
   const readyCount = rows.filter((row) => row.status === "ready").length;
   const rankByInput = useMemo(() => rankBatchResults(rows.map((row) => ({
@@ -135,12 +163,6 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     confidence: row.report?.score.confidence ?? null,
     coverage: row.report?.dataCoverage ?? null,
   }))), [rows]);
-
-  function updateRow(symbol: string, patch: Partial<BatchRow>) {
-    setRows((current) =>
-      current.map((row) => row.input === symbol ? { ...row, ...patch } : row),
-    );
-  }
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -228,7 +250,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
       });
       const payload = (await response.json()) as ResolvePayload;
       if (!response.ok || !payload.items) {
-        setError(locale === "en" ? (payload.error ?? copy.validationFailed) : copy.validationFailed);
+        setError(response.status === 429 ? copy.rateLimited : (locale === "en" ? (payload.error ?? copy.validationFailed) : copy.validationFailed));
         setEntitlement(payload.entitlement);
         return;
       }
@@ -241,79 +263,130 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     }
   }
 
+  const refreshDurableBatch = useCallback(async (batchId: string) => {
+    const response = await fetch(`/api/batch/runs/${encodeURIComponent(batchId)}`, { cache: "no-store" });
+    const payload = (await response.json()) as DurableBatchPayload;
+    if (!response.ok || !payload.run || !payload.items) {
+      if (response.status === 404) {
+        window.localStorage.removeItem(LAST_BATCH_STORAGE_KEY);
+        setCurrentBatchId(null);
+      }
+      if (!response.ok) setError(payload.error ?? copy.connectionInterrupted);
+      return;
+    }
+
+    const itemByInput = new Map(payload.items.map((item) => [item.input_ticker.toUpperCase(), item]));
+    const rowForItem = (item: DurableBatchItemPayload, existing?: BatchRow): BatchRow => {
+      const status: BatchStatus = item.status === "completed"
+        ? "completed"
+        : item.status === "failed"
+          ? "failed"
+          : item.status === "cancelled"
+            ? "cancelled"
+            : "running";
+      return {
+        ...existing,
+        input: item.input_ticker,
+        status,
+        report: item.report ?? existing?.report,
+        error: item.last_error ? localizedBatchError(item.last_error, copy.connectionInterrupted, copy.monthlyLimit, copy.rateLimited) : (item.status === "cancelled" ? copy.stopAfterCurrent : undefined),
+      };
+    };
+    setRows((current) => {
+      if (!current.length) return payload.items!.map((item) => rowForItem(item));
+      return current.map((row) => {
+        const item = itemByInput.get(row.input.toUpperCase());
+        return item ? rowForItem(item, row) : row;
+      });
+    });
+
+    const terminal = ["completed", "partial", "failed", "cancelled"].includes(payload.run.status);
+    setIsRunning(!terminal);
+    if (terminal) {
+      const completedCount = payload.items.filter((item) => item.status === "completed").length;
+      const failedCount = payload.items.filter((item) => item.status === "failed").length;
+      captureClientEvent("batch_completed", { count: payload.items.length, completedCount, failedCount });
+    }
+  }, [copy.connectionInterrupted, copy.monthlyLimit, copy.rateLimited, copy.stopAfterCurrent]);
+
+  useEffect(() => {
+    if (currentBatchId) return undefined;
+    const savedBatchId = window.localStorage.getItem(LAST_BATCH_STORAGE_KEY);
+    if (!savedBatchId) return undefined;
+    const restore = window.setTimeout(() => {
+      setCurrentBatchId(savedBatchId);
+      void refreshDurableBatch(savedBatchId);
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, [currentBatchId, refreshDurableBatch]);
+
+  useEffect(() => {
+    if (!currentBatchId || !isRunning) return undefined;
+    const initialPoll = window.setTimeout(() => void refreshDurableBatch(currentBatchId), 0);
+    const interval = window.setInterval(() => void refreshDurableBatch(currentBatchId), 2_000);
+    return () => {
+      window.clearTimeout(initialPoll);
+      window.clearInterval(interval);
+    };
+  }, [currentBatchId, isRunning, refreshDurableBatch]);
+
   async function executeBatch(candidates: BatchRow[]) {
     if (!candidates.length || isRunning) return;
-    cancelled.current = false;
     setError(null);
     setIsRunning(true);
-    captureClientEvent("batch_started", { count: candidates.length, analysisType });
-    let completedCount = 0;
-    let failedCount = 0;
 
-    for (const candidate of candidates) {
-      if (cancelled.current) break;
-      if (!candidate.company) continue;
-      const idempotencyKey = candidate.idempotencyKey ?? crypto.randomUUID();
-      updateRow(candidate.input, { status: "running", error: undefined, idempotencyKey });
-      try {
-        const response = await fetch("/api/analysis", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            company: candidate.company,
-            analysisType,
-            investmentProfile,
-            idempotencyKey: idempotencyKey,
-          }),
-        });
-        const payload = (await response.json()) as AnalysisPayload;
-        if (response.ok && "ok" in payload && payload.ok && payload.persisted) {
-          completedCount += 1;
-          updateRow(candidate.input, {
-            status: "completed",
-            report: payload.data,
-            error: undefined,
-          });
-          continue;
-        }
-
-        if (response.status === 429) {
-          const limitMessage = "entitlement" in payload && payload.entitlement
-            ? copy.monthlyLimit
-            : copy.rateLimited;
-          failedCount += 1;
-          updateRow(candidate.input, { status: "failed", error: limitMessage });
-          setError(limitMessage);
-          break;
-        }
-
-        const message =
-          locale === "en" && "error" in payload
-            ? payload.error
-            : copy.saveFailed;
-        failedCount += 1;
-        updateRow(candidate.input, { status: "failed", error: message });
-      } catch {
-        failedCount += 1;
-        updateRow(candidate.input, {
-          status: "failed",
-          error: copy.connectionInterrupted,
-        });
+    if (currentBatchId && candidates.every((candidate) => candidate.status === "failed")) {
+      setRows((current) => current.map((row) => row.status === "failed" ? { ...row, status: "running", error: undefined } : row));
+      const retryResponse = await fetch(`/api/batch/runs/${encodeURIComponent(currentBatchId)}/retry`, { method: "POST" });
+      if (!retryResponse.ok) {
+        const payload = await retryResponse.json().catch(() => ({})) as { error?: string };
+        setError(payload.error ?? copy.connectionInterrupted);
+        setIsRunning(false);
+        return;
       }
+      captureClientEvent("batch_started", { count: candidates.length, analysisType, retry: true });
+      await refreshDurableBatch(currentBatchId);
+      return;
     }
-    captureClientEvent("batch_completed", { count: candidates.length, completedCount, failedCount });
-    setIsRunning(false);
+
+    const runnable = candidates.filter((candidate): candidate is BatchRow & { company: CompanySearchResult } => Boolean(candidate.company));
+    const response = await fetch("/api/batch/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        analysisType,
+        investmentProfile,
+        items: runnable.map((candidate) => ({ input: candidate.input, company: candidate.company })),
+      }),
+    });
+    const payload = await response.json().catch(() => ({})) as { batchId?: string; error?: string };
+    if (!response.ok || !payload.batchId) {
+      setError(response.status === 429 ? copy.rateLimited : localizedBatchError(payload.error, copy.connectionInterrupted, copy.monthlyLimit, copy.rateLimited));
+      setIsRunning(false);
+      return;
+    }
+    setCurrentBatchId(payload.batchId);
+    window.localStorage.setItem(LAST_BATCH_STORAGE_KEY, payload.batchId);
+    setRows((current) => current.map((row) => runnable.some((candidate) => candidate.input === row.input)
+      ? { ...row, status: "running", error: undefined }
+      : row));
+    captureClientEvent("batch_started", { count: runnable.length, analysisType, durable: true });
+    await refreshDurableBatch(payload.batchId);
   }
 
-  function stopBatch() {
-    cancelled.current = true;
+  async function stopBatch() {
+    if (!currentBatchId) return;
+    await fetch(`/api/batch/runs/${encodeURIComponent(currentBatchId)}/cancel`, { method: "POST" });
     setError(copy.stopAfterCurrent);
+    await refreshDurableBatch(currentBatchId);
   }
 
   function resetBatch() {
     if (isRunning) return;
     setRows([]);
     setEntitlement(undefined);
+    setCurrentBatchId(null);
+    window.localStorage.removeItem(LAST_BATCH_STORAGE_KEY);
     setError(null);
   }
 
@@ -637,7 +710,7 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[#9aa7b8]">
               <span>{processedCount}/{rows.length} {copy.processed}</span>
               <span className="text-emerald-200">{completedRows.length} {copy.completed}</span>
-              <span className="text-red-200">{rows.length - readyCount - completedRows.length - (isRunning ? 1 : 0)} {copy.issues}</span>
+              <span className="text-red-200">{issueCount} {copy.issues}</span>
             </div>
           </div>
 

@@ -18,6 +18,7 @@ import {
 } from "@/lib/db/repositories";
 import { sendStrongResearchAlert } from "@/lib/notifications/admin-alerts";
 import { getServerEnv } from "@/lib/env/server";
+import { recordMaterialAnalysisChangesForPersistedAnalysis } from "@/lib/research/analysis-changes";
 import { publicDiagnosticCode, sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse, RATE_LIMITS } from "@/lib/security/rate-limit";
 
@@ -297,6 +298,12 @@ export async function POST(request: Request) {
       { status: 503 }
     );
   }
+
+  await recordMaterialAnalysisChangesForPersistedAnalysis({
+    userId: user.id,
+    analysisId: result.data.id,
+    report: result.data,
+  }).catch(() => undefined);
 
   const researchView = researchViewForReport(result.data);
   await recordUsageEvent({

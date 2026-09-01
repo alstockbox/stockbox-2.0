@@ -20,7 +20,7 @@ import { ValuationScenarioLab } from "./valuation-scenario-lab";
 import { ResearchQuestionPanel } from "./research-question-panel";
 import { buildPeerBenchmarkComparison, type PeerBenchmarkRow } from "@/lib/analysis/peer-benchmark";
 import { buildAnalystExpectationsSummary } from "@/lib/analysis/analyst-expectations";
-import { orderScoreDimensions, profilePresentationFor } from "@/lib/analysis/profile-presentation";
+import { orderScoreDimensions } from "@/lib/analysis/profile-presentation";
 import { applyAnalysisLens } from "@/lib/analysis/analysis-lens";
 import { AnalysisLensControl } from "./analysis-lens-control";
 
@@ -436,7 +436,6 @@ function ReportViewWithLens({ report: sourceReport, mode = "pro", locale = "en",
   const [analysisLens, setAnalysisLens] = useState<InvestmentProfile>(sourceReport.investmentProfile);
   const report = useMemo(() => applyAnalysisLens(sourceReport, analysisLens), [sourceReport, analysisLens]);
   const copy = getP0Copy(locale).report;
-  const profilePresentation = profilePresentationFor(report.investmentProfile, locale);
   const profileDimensions = orderScoreDimensions(report.score.dimensions, report.investmentProfile);
   const extended = report.analysisType === "deep" || report.analysisType === "research";
   const showExplainability = mode === "pro";

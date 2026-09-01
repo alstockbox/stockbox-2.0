@@ -36,18 +36,14 @@ describe("P0 localization", () => {
   });
 
 
-  it("classifies batch rate limits before the generic save-failure fallback", () => {
+  it("localizes durable batch rate limits and monthly quota failures", () => {
     const svBatch = getP0Copy("sv").batch as unknown as Record<string, string>;
-    expect(svBatch.rateLimited).toContain("analysanrop");
+    expect(svBatch.rateLimited).toContain("batchanrop");
 
     const source = readFileSync(resolve(process.cwd(), "src/components/batch/batch-workbench.tsx"), "utf8");
-    const rateLimitBranch = source.indexOf("if (response.status === 429)");
-    const genericFailure = source.indexOf("const message =");
-    expect(rateLimitBranch).toBeGreaterThan(-1);
-    expect(genericFailure).toBeGreaterThan(-1);
-    expect(rateLimitBranch).toBeLessThan(genericFailure);
-    expect(source).toContain("copy.rateLimited");
-    expect(source).toContain('"entitlement" in payload');
+    expect(source).toContain("response.status === 429 ? copy.rateLimited");
+    expect(source).toContain('message.includes("Too many requests")');
+    expect(source).toContain('message.includes("Monthly analysis limit reached")');
     expect(source).toContain("copy.monthlyLimit");
   });
 

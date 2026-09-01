@@ -18,6 +18,26 @@ describe("server environment parsing", () => {
     }
   );
 
+  it.each(["not-a-url", "://broken", "   "])(
+    "fails closed for an invalid optional Bolagsverket URL without crashing the app: %s",
+    (url) => {
+      const env = parseServerEnv({
+        BOLAGSVERKET_TOKEN_URL: url,
+        BOLAGSVERKET_BASE_URL: url,
+      });
+      expect(env.BOLAGSVERKET_TOKEN_URL).toBeUndefined();
+      expect(env.BOLAGSVERKET_BASE_URL).toBeUndefined();
+    },
+  );
+
+  it("preserves valid optional Bolagsverket URLs", () => {
+    const env = parseServerEnv({
+      BOLAGSVERKET_TOKEN_URL: "https://auth.example.test/oauth/token",
+      BOLAGSVERKET_BASE_URL: "https://api.example.test",
+    });
+    expect(env.BOLAGSVERKET_TOKEN_URL).toBe("https://auth.example.test/oauth/token");
+    expect(env.BOLAGSVERKET_BASE_URL).toBe("https://api.example.test");
+  });
   it("keeps a valid custom PostHog host", () => {
     const env = parseServerEnv({ NEXT_PUBLIC_POSTHOG_HOST: "https://eu.posthog.com" });
     expect(env.NEXT_PUBLIC_POSTHOG_HOST).toBe("https://eu.posthog.com");
