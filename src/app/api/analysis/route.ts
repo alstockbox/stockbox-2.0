@@ -141,7 +141,7 @@ export async function POST(request: Request) {
 
   if (!supportsUniversalSecurityAnalysis(canonicalCompany)) {
     return Response.json(
-      { error: "Live analysis is not available for this security type yet." },
+      { error: "Live fundamentals are not available for this security." },
       { status: 422 }
     );
   }
