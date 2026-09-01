@@ -20,6 +20,7 @@ const staticEntries: Array<{
   { path: "/nyckeltal/roic", changeFrequency: "monthly", priority: 0.85 },
   { path: "/nyckeltal/fritt-kassaflode", changeFrequency: "monthly", priority: 0.85 },
   { path: "/aktier", changeFrequency: "daily", priority: 0.9 },
+  { path: "/research-standard", changeFrequency: "monthly", priority: 0.8 },
   { path: "/product", changeFrequency: "monthly", priority: 0.7 },
   { path: "/pricing", changeFrequency: "monthly", priority: 0.8 },
   { path: "/about", changeFrequency: "yearly", priority: 0.5 },
