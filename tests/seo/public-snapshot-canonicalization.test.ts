@@ -33,8 +33,10 @@ describe("public stock canonicalization", () => {
     })).toBe("mycronic-ab");
   });
 
-  it("enforces one public snapshot row per normalized ticker", () => {
-    expect(migration()).toContain("ticker text not null unique");
+  it("enforces one public snapshot row per normalized ticker idempotently", () => {
+    const sql = migration();
+    expect(sql).toContain("create unique index if not exists public_stock_snapshots_ticker_unique_idx");
+    expect(sql).toContain("on public.public_stock_snapshots (ticker)");
   });
 
   it("upserts published snapshots by ticker instead of creating competing URLs", () => {
