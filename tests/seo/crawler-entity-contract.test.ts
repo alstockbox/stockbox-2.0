@@ -15,9 +15,9 @@ describe("crawler and entity SEO contract", () => {
 
   it("allows full search snippets and large image previews on public pages", () => {
     const layout = read("src/app/layout.tsx");
-    expect(layout).toContain("maxImagePreview: \"large\"");
-    expect(layout).toContain("maxSnippet: -1");
-    expect(layout).toContain("maxVideoPreview: -1");
+    expect(layout).toContain('"max-image-preview": "large"');
+    expect(layout).toContain('"max-snippet": -1');
+    expect(layout).toContain('"max-video-preview": -1');
   });
 
   it("exposes public stocks as a machine-readable ItemList", () => {
