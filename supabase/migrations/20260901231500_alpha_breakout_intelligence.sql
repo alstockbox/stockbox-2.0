@@ -28,12 +28,9 @@ create table public.alpha_predictions (
   source_report_model_version text,
   prediction_as_of timestamptz not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (analysis_id, model_version)
 );
-
-create unique index alpha_predictions_analysis_model_uidx
-  on public.alpha_predictions (analysis_id, model_version)
-  where analysis_id is not null;
 
 create table public.alpha_prediction_outcomes (
   id uuid primary key default gen_random_uuid(),
