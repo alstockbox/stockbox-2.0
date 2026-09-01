@@ -1,3 +1,4 @@
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getServerEnv } from "@/lib/env/server";
@@ -26,6 +27,13 @@ export async function POST(request: Request) {
   if (!published.ok) {
     return Response.json({ error: published.error }, { status: published.status });
   }
+
+  revalidateTag(`public-stock-snapshot:${published.snapshot.slug}`, "max");
+  revalidateTag("public-stock-list", "max");
+  revalidatePath(`/aktier/${published.snapshot.slug}`);
+  revalidatePath("/aktier");
+  revalidatePath("/robots.txt");
+  revalidatePath("/sitemap.xml");
 
   const baseUrl = getServerEnv().NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
   await notifyIndexNow([
