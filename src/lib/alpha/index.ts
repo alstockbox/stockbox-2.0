@@ -1,4 +1,5 @@
 export { ALPHA_MODEL_VERSION, computeAlphaIntelligence } from "./engine";
+export { buildAlphaSignalInputFromReport } from "./report-adapter";
 export type {
   AlphaClassification,
   AlphaDimensionScores,
