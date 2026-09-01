@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POSTHOG_HOST,
+  getEstimatesProvider,
   getMarketDataProvider,
   getMarketDataProviderChain,
   getSecUserAgent,
@@ -53,6 +54,14 @@ describe("server environment parsing", () => {
 
   it("keeps Yahoo as the default chain when no market-data provider is configured", () => {
     expect(getMarketDataProviderChain(parseServerEnv({}))).toEqual(["yahoo"]);
+  });
+
+  it("keeps analyst estimates disabled unless explicitly enabled", () => {
+    expect(getEstimatesProvider(parseServerEnv({ TWELVE_DATA_API_KEY: "key" }))).toBe("disabled");
+  });
+
+  it("enables Twelve Data analyst estimates only when explicitly configured", () => {
+    expect(getEstimatesProvider(parseServerEnv({ ESTIMATES_PROVIDER: "twelve_data" }))).toBe("twelve_data");
   });
 
   it("enables Basic checkout without requiring a webhook secret", () => {
