@@ -36,7 +36,14 @@ export type AlphaCalibrationSummary = {
   brierUp25: number | null;
 };
 
+export type MaturedOutcomeWindow = {
+  horizonDays: AlphaOutcomeHorizonDays;
+  predictionFrom: string;
+  predictionTo: string;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+const OUTCOME_HORIZONS: AlphaOutcomeHorizonDays[] = [30, 90, 180, 365];
 
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
@@ -44,6 +51,17 @@ function finitePositive(value: number): boolean {
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+export function selectMaturedOutcomeWindows(now: string, maxLagDays = 7): MaturedOutcomeWindow[] {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) throw new Error("Outcome scheduling requires a valid current timestamp.");
+  const lagDays = Math.max(0, Math.floor(maxLagDays));
+  return OUTCOME_HORIZONS.map((horizonDays) => ({
+    horizonDays,
+    predictionFrom: new Date(nowMs - (horizonDays + lagDays) * DAY_MS).toISOString(),
+    predictionTo: new Date(nowMs - horizonDays * DAY_MS).toISOString(),
+  }));
 }
 
 export function evaluateAlphaOutcome(input: AlphaOutcomeInput): EvaluatedAlphaOutcome | null {
