@@ -152,7 +152,7 @@ export async function getPersistedPublicStockSnapshotBySlug(slug: string): Promi
     ["public-stock-snapshot", normalizedSlug],
     {
       revalidate: PUBLIC_STOCK_CACHE_SECONDS,
-      tags: [PUBLIC_STOCK_LIST_TAG, `public-stock-snapshot:${normalizedSlug}`],
+      tags: [`public-stock-snapshot:${normalizedSlug}`],
     },
   );
 
