@@ -15,6 +15,9 @@ describe("mobile analysis and transient menu UX", () => {
     expect(transientMenu).toContain('event.key === "Escape"');
     expect(transientMenu).toContain("onMouseLeave");
     expect(transientMenu).toContain("closeMenu");
+    expect(transientMenu).toContain('window.matchMedia("(hover: hover) and (pointer: fine)")');
+    expect(transientMenu).toMatch(/onFocusCapture=\{\(\) => \{[\s\S]*if \(canHover\(\)\) setOpen\(true\)/);
+    expect(transientMenu).toMatch(/onClick=\{\(\) => \{[\s\S]*if \(!canHover\(\)\) setOpen/);
   });
 
   it("keeps search choices available after selection but collapses them when Analyze starts", () => {
