@@ -17,8 +17,9 @@ import {
 const PROVIDER_ID = "twelve-data";
 const BASE_URL = "https://api.twelvedata.com";
 const TWELVE_DATA_REQUEST_TIMEOUT_MS = 10_000;
-const MAX_DAILY_HISTORY_POINTS = "5000";
-const CORPORATE_ACTIONS_START_DATE = "1970-01-01";
+const DAILY_HISTORY_POINTS = "400";
+const MAX_MONTHLY_HISTORY_POINTS = "5000";
+const MAX_HISTORY_START_DATE = "1970-01-01";
 
 export const TWELVE_DATA_CAPABILITIES: ProviderCapabilities = {
   supportedCountries: ["global"],
@@ -29,7 +30,6 @@ export const TWELVE_DATA_CAPABILITIES: ProviderCapabilities = {
 };
 
 type JsonObject = Record<string, unknown>;
-
 type RequestCapability = "search" | "market_data";
 
 function object(value: unknown): JsonObject | null {
@@ -172,35 +172,44 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
     source: () => ({
       name: "Twelve Data market data",
       url: "https://twelvedata.com/docs",
-      freshness: "Provider quote, adjusted daily history and corporate actions, cached up to 15 minutes.",
+      freshness: "Provider quote, adjusted price history and corporate actions, cached up to 15 minutes.",
     }),
     async fetchMarketData(company): Promise<AdapterResult<MarketSnapshot>> {
       if (!apiKey.trim()) return failure("not_configured", "Twelve Data is not configured.", "market_data");
       const symbol = company.canonicalTicker ?? company.ticker;
-      const [quoteResult, historyResult, statisticsResult, dividendsResult, splitsResult] = await Promise.all([
+      const [quoteResult, dailyHistoryResult, maxHistoryResult, statisticsResult, dividendsResult, splitsResult] = await Promise.all([
         request("/quote", { symbol }, apiKey),
         request("/time_series", {
           symbol,
           interval: "1day",
-          outputsize: MAX_DAILY_HISTORY_POINTS,
+          outputsize: DAILY_HISTORY_POINTS,
           order: "ASC",
           adjust: "all",
         }, apiKey),
+        request("/time_series", {
+          symbol,
+          interval: "1month",
+          outputsize: MAX_MONTHLY_HISTORY_POINTS,
+          order: "ASC",
+          start_date: MAX_HISTORY_START_DATE,
+          adjust: "all",
+        }, apiKey),
         request("/statistics", { symbol }, apiKey),
-        request("/dividends", { symbol, start_date: CORPORATE_ACTIONS_START_DATE, adjust: "true" }, apiKey),
-        request("/splits", { symbol, start_date: CORPORATE_ACTIONS_START_DATE }, apiKey),
+        request("/dividends", { symbol, start_date: MAX_HISTORY_START_DATE, adjust: "true" }, apiKey),
+        request("/splits", { symbol, start_date: MAX_HISTORY_START_DATE }, apiKey),
       ]);
-      if (!quoteResult.ok && !historyResult.ok) return quoteResult;
+      if (!quoteResult.ok && !dailyHistoryResult.ok && !maxHistoryResult.ok) return quoteResult;
       const quote = quoteResult.ok ? quoteResult.data : {};
-      const history = historyResult.ok ? rows(historyResult.data) : [];
-      const latest = history.at(-1);
+      const dailyHistory = dailyHistoryResult.ok ? rows(dailyHistoryResult.data) : [];
+      const maxHistory = maxHistoryResult.ok ? rows(maxHistoryResult.data) : [];
+      const latest = dailyHistory.at(-1) ?? maxHistory.at(-1);
       const price = numberValue(quote.close) ?? latest?.close ?? null;
       if (price === null) return failure("empty_response", "Twelve Data returned no usable market price.", "market_data");
       if (price <= 0 || price > 1_000_000_000) return failure("impossible_price", "Twelve Data returned an invalid market price.", "market_data");
       const quoteDate = validDate(quote.datetime);
       const fiftyTwoWeek = object(quote.fifty_two_week) ?? {};
-      const year = history.slice(-252);
-      const yearStart = history.find((row) => row.date.startsWith((quoteDate ?? latest?.date ?? "").slice(0, 4)));
+      const year = dailyHistory.slice(-252);
+      const yearStart = dailyHistory.find((row) => row.date.startsWith((quoteDate ?? latest?.date ?? "").slice(0, 4)));
       const statistics = statisticsResult.ok ? statisticsResult.data : {};
       const sharesOutstanding = nestedNumber(statistics, "stock_statistics", "shares_outstanding")
         ?? nestedNumber(statistics, "statistics", "stock_statistics", "shares_outstanding");
@@ -211,6 +220,7 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
         ?? nestedNumber(statistics, "statistics", "stock_price_summary", "beta");
       const currency = textValue(quote.currency) ?? company.currency ?? null;
       const corporateActionsAvailable = dividendsResult.ok || splitsResult.ok;
+      const priceHistory = maxHistory.length ? monthlyPriceHistory(maxHistory) : monthlyPriceHistory(dailyHistory);
       return {
         ok: true,
         data: {
@@ -226,32 +236,34 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
           beta,
           betaMethod: beta !== null ? "provider_statistics" : null,
           provider: PROVIDER_ID,
-          historyLength: history.length,
-          priceHistory: monthlyPriceHistory(history),
+          historyLength: priceHistory.length,
+          priceHistory,
           priceHistoryBasis: "adjusted_close",
           dividendEvents: dividendsResult.ok ? dividendEvents(dividendsResult.data, currency) : [],
           splitEvents: splitsResult.ok ? splitEvents(splitsResult.data) : [],
           performance: {
-            "1D": change(history, 1) ?? undefined,
-            "1W": change(history, 5) ?? undefined,
-            "1M": change(history, 21) ?? undefined,
-            "3M": change(history, 63) ?? undefined,
-            "6M": change(history, 126) ?? undefined,
+            "1D": change(dailyHistory, 1) ?? undefined,
+            "1W": change(dailyHistory, 5) ?? undefined,
+            "1M": change(dailyHistory, 21) ?? undefined,
+            "3M": change(dailyHistory, 63) ?? undefined,
+            "6M": change(dailyHistory, 126) ?? undefined,
             YTD: latest && yearStart ? latest.close / yearStart.close - 1 : undefined,
-            "1Y": change(history, 252) ?? undefined,
+            "1Y": change(dailyHistory, 252) ?? undefined,
           },
         },
         diagnostic: providerDiagnostic(
           "Twelve Data",
           "market_data",
-          historyResult.ok && statisticsResult.ok && corporateActionsAvailable ? "available" : "partial",
-          !historyResult.ok
-            ? "price_history_unavailable"
-            : !statisticsResult.ok
-              ? "statistics_unavailable"
-              : !corporateActionsAvailable
-                ? "corporate_actions_unavailable"
-                : undefined,
+          dailyHistoryResult.ok && maxHistoryResult.ok && statisticsResult.ok && corporateActionsAvailable ? "available" : "partial",
+          !dailyHistoryResult.ok
+            ? "daily_price_history_unavailable"
+            : !maxHistoryResult.ok
+              ? "max_price_history_unavailable"
+              : !statisticsResult.ok
+                ? "statistics_unavailable"
+                : !corporateActionsAvailable
+                  ? "corporate_actions_unavailable"
+                  : undefined,
         ),
       };
     },
