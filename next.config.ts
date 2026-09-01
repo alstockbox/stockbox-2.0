@@ -30,6 +30,26 @@ const contentSecurityPolicy = [
   "upgrade-insecure-requests",
 ].join("; ");
 
+const privateIndexingPaths = [
+  "/admin/:path*",
+  "/api/:path*",
+  "/auth/:path*",
+  "/dashboard/:path*",
+  "/settings/:path*",
+  "/affiliate/:path*",
+  "/watchlist/:path*",
+  "/portfolio/:path*",
+  "/analysis/:path*",
+  "/history/:path*",
+  "/compare/:path*",
+  "/batch/:path*",
+  "/analyze/:path*",
+  "/shared/:path*",
+  "/redeem/:path*",
+  "/r/:path*",
+  "/onboarding/:path*",
+] as const;
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   typedRoutes: true,
@@ -52,6 +72,10 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      ...privateIndexingPaths.map((source) => ({
+        source,
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      })),
       {
         source: "/(.*)",
         headers: [
