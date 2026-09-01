@@ -7,6 +7,10 @@ export type IndexNowPayload = {
   urlList: string[];
 };
 
+export function isValidIndexNowKey(key: string) {
+  return /^[A-Za-z0-9-]{8,128}$/.test(key);
+}
+
 export function buildIndexNowPayload(
   urls: string[],
   baseUrl: string,
@@ -34,7 +38,7 @@ export function buildIndexNowPayload(
   return {
     host: base.host,
     key,
-    keyLocation: new URL("/api/indexnow/key", base).toString(),
+    keyLocation: new URL("/indexnow-key.txt", base).toString(),
     urlList,
   };
 }
@@ -42,18 +46,21 @@ export function buildIndexNowPayload(
 export async function notifyIndexNow(urls: string[]): Promise<void> {
   const env = getServerEnv();
   const key = env.INDEXNOW_KEY?.trim();
-  if (!key) return;
+  if (!key || !isValidIndexNowKey(key)) return;
 
   const payload = buildIndexNowPayload(urls, env.NEXT_PUBLIC_APP_URL, key);
   if (payload.urlList.length === 0) return;
 
   try {
-    await fetch("https://api.indexnow.org/indexnow", {
+    const response = await fetch("https://api.indexnow.org/indexnow", {
       method: "POST",
       headers: { "content-type": "application/json; charset=utf-8" },
       body: JSON.stringify(payload),
       cache: "no-store",
     });
+    if (!response.ok && response.status !== 202) {
+      console.warn("IndexNow notification was not accepted", { status: response.status });
+    }
   } catch {
     // Search-engine notification is best-effort and must never block publication.
   }
