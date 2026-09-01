@@ -77,6 +77,7 @@ const envSchema = z.object({
     .url()
     .default(DEFAULT_POSTHOG_HOST)
     .catch(DEFAULT_POSTHOG_HOST),
+  INDEXNOW_KEY: z.string().trim().optional().or(z.literal("")),
   ADMIN_EMAILS: z.string().optional().or(z.literal(""))
 });
 
