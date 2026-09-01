@@ -166,6 +166,7 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const keyStatistics = object(summary?.defaultKeyStatistics);
   const fundPerformance = object(summary?.fundPerformance);
   const risk = object(summary?.risk);
+  const riskOverviewStatistics = object(fundPerformance?.riskOverviewStatistics);
   const fees = object(fundProfile?.feesExpensesInvestment);
   const equityHoldings = object(topHoldings?.equityHoldings);
   const holdings = (Array.isArray(topHoldings?.holdings) ? topHoldings.holdings : []).flatMap((entry) => {
@@ -188,7 +189,7 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const price = firstNumber(quote?.regularMarketPrice);
   const averageDailyDollarVolume = averageVolume !== null && price !== null ? averageVolume * price : null;
   const inceptionTimestamp = firstNumber(fundProfile?.fundInceptionDate, keyStatistics?.fundInceptionDate, quote?.fundInceptionDate);
-  const sharpeRatio3y = firstNumber(risk?.sharpeRatio3y, risk?.threeYearSharpeRatio, fundPerformance?.riskOverviewStatistics?.sharpeRatio3y);
+  const sharpeRatio3y = firstNumber(risk?.sharpeRatio3y, risk?.threeYearSharpeRatio, riskOverviewStatistics?.sharpeRatio3y);
   const volatility3y = firstNumber(risk?.standardDeviation3y, risk?.threeYearStandardDeviation);
   const weightedForwardPe = firstNumber(equityHoldings?.priceToEarnings, equityHoldings?.forwardPE);
   const weightedPriceBook = firstNumber(equityHoldings?.priceToBook);
