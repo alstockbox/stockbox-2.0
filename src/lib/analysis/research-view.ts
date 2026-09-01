@@ -28,6 +28,39 @@ export function researchViewForReport(report: AnalysisReport): OverallResearchVi
   });
 }
 
+function localizedConstraintReason(reason: string | undefined, locale: Locale): string | null {
+  if (!reason) return null;
+  if (locale !== "sv") return reason;
+  const translations: Record<string, string> = {
+    "Directional ratings require adequate valuation coverage.": "En riktad rating kräver tillräcklig värderingstäckning.",
+    "Buy requires positive valuation support.": "Buy kräver positivt värderingsstöd vid aktuell kurs.",
+    "Strong Buy requires meaningful valuation support.": "Strong Buy kräver tydligt positivt värderingsstöd.",
+    "Sell requires negative valuation support.": "Sell kräver negativt värderingsstöd vid aktuell kurs.",
+    "Strong Sell requires meaningful downside support.": "Strong Sell kräver tydligt negativt nedsidestöd.",
+    "Buy and Sell require confidence of at least 55.": "Buy och Sell kräver minst 55% konfidens.",
+    "Critical unresolved red flags prevent Buy ratings.": "Kritiska olösta varningsflaggor blockerar Buy-rating.",
+    "Unresolved high-severity red flags prevent Strong Buy.": "Olösta varningsflaggor med hög allvarlighetsgrad blockerar Strong Buy.",
+  };
+  return translations[reason] ?? reason;
+}
+
+export function legacyRatingContext(input: {
+  view: OverallResearchView;
+  rating?: string | null;
+  constraints?: string[] | null;
+  locale: Locale;
+}): string | null {
+  const { view, rating, constraints, locale } = input;
+  if (!rating || rating === "No Rating" || view === "Insufficient data") return null;
+  const reason = localizedConstraintReason(constraints?.[0], locale);
+  const strongViewWithHold = rating === "Hold" && (view === "Strong" || view === "Solid");
+  if (!strongViewWithHold) return null;
+
+  return locale === "sv"
+    ? `Den separata legacy-ratingen kan samtidigt vara Hold. Den är en pris- och värderingssignal, inte samma sak som Research View.${reason ? ` Orsak: ${reason}` : ""}`
+    : `The separate legacy model rating can still be Hold. It is a price-and-valuation signal, not the same thing as the Research View.${reason ? ` Reason: ${reason}` : ""}`;
+}
+
 export function researchViewCopy(report: AnalysisReport, locale: Locale) {
   const view = researchViewForReport(report);
   const score = report.score.personalizedScore ?? report.score.score;
@@ -55,14 +88,20 @@ export function researchViewCopy(report: AnalysisReport, locale: Locale) {
         };
   }
   const localized = localizedResearchView(view, locale).toLowerCase();
+  const ratingContext = legacyRatingContext({
+    view,
+    rating: report.recommendation,
+    constraints: report.engine?.recommendation?.constraintsApplied,
+    locale,
+  });
   return locale === "sv"
     ? {
         oneSentence: `${report.companyName} har en ${localized} övergripande researchvy med StockBox Score ${Math.round(score)}/100 och ${confidence}% konfidens.`,
-        summary: `Den ${localized} researchvyn kombinerar StockBox versionsstyrda dimensioner samtidigt som bolagskvalitet, värdering, risk och datakonfidens hålls synliga var för sig.`,
+        summary: `Den ${localized} researchvyn kombinerar StockBox versionsstyrda dimensioner samtidigt som bolagskvalitet, värdering, risk och datakonfidens hålls synliga var för sig.${ratingContext ? ` ${ratingContext}` : ""}`,
       }
     : {
         oneSentence: `${report.companyName} has a ${localized} overall research view with a StockBox Score of ${Math.round(score)}/100 and ${confidence}% confidence.`,
-        summary: `The ${localized} research view combines the versioned StockBox dimensions while keeping business quality, valuation, risk and data confidence visible separately.`,
+        summary: `The ${localized} research view combines the versioned StockBox dimensions while keeping business quality, valuation, risk and data confidence visible separately.${ratingContext ? ` ${ratingContext}` : ""}`,
       };
 }
 
