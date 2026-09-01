@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { buildAnalysis, type AnalysisInput, type AnalysisReport } from "../../src/lib/analysis";
+import {
+  buildAnalysis,
+  buildBatchQaResult,
+  toFinancialAnalysisInput,
+  type AnalysisInput,
+  type AnalysisReport,
+  type MarketPricePoint,
+} from "../../src/lib/analysis";
 import { durableCompounderInput } from "./fixtures";
 
 function inputWithHistory(historyCurrency?: string): AnalysisInput {
+  const priceHistory = [
+    { date: "2025-08-29", close: 230, currency: historyCurrency },
+    { date: "2026-08-28", close: 300, currency: historyCurrency },
+  ] as unknown as MarketPricePoint[];
+
   return {
     company: {
       ticker: "BOX.ST",
@@ -24,10 +36,7 @@ function inputWithHistory(historyCurrency?: string): AnalysisInput {
       marketCap: 30_600,
       marketCapCurrency: "SEK",
       sharesOutstanding: 102,
-      priceHistory: [
-        { date: "2025-08-29", close: 230, currency: historyCurrency },
-        { date: "2026-08-28", close: 300, currency: historyCurrency },
-      ],
+      priceHistory,
       priceHistoryBasis: "close",
       performance: { "1Y": 0.3043 },
     },
@@ -64,21 +73,34 @@ function inputWithHistory(historyCurrency?: string): AnalysisInput {
   };
 }
 
-function currencyAlignment(input: AnalysisInput): number | undefined {
+function qaFor(input: AnalysisInput) {
   const report = buildAnalysis(input) as AnalysisReport;
-  return report.confidenceBreakdown?.currencyAlignment;
+  const analysisInput = toFinancialAnalysisInput(input);
+  const qa = buildBatchQaResult({
+    batchId: "currency-history-p0",
+    rerunKey: "currency-history-p0",
+    report,
+    analysisInput,
+  });
+  return { report, qa };
 }
 
 describe("historical market currency alignment P0", () => {
   it("keeps full alignment when current quote and every historical price use SEK", () => {
-    expect(currencyAlignment(inputWithHistory("SEK"))).toBe(100);
+    const { report, qa } = qaFor(inputWithHistory("SEK"));
+    expect(qa.flags).not.toContain("CURRENCY_MISMATCH");
+    expect(report.confidenceBreakdown?.currencyAlignment).toBe(100);
   });
 
   it("fails currency alignment when an SEK listing carries USD historical prices", () => {
-    expect(currencyAlignment(inputWithHistory("USD"))).toBe(0);
+    const { report, qa } = qaFor(inputWithHistory("USD"));
+    expect(qa.flags).toContain("CURRENCY_MISMATCH");
+    expect(report.confidenceBreakdown?.currencyAlignment).toBe(0);
   });
 
   it("does not claim 100% alignment when rendered price history has no currency evidence", () => {
-    expect(currencyAlignment(inputWithHistory(undefined))).toBeLessThan(100);
+    const { report, qa } = qaFor(inputWithHistory(undefined));
+    expect(qa.flags).not.toContain("CURRENCY_MISMATCH");
+    expect(report.confidenceBreakdown?.currencyAlignment).toBeLessThanOrEqual(25);
   });
 });
