@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/monitoring/run",
+      "schedule": "30 5 * * *"
+    },
+    {
       "path": "/api/affiliate/payouts/run",
       "schedule": "0 7 1 * *"
     }
