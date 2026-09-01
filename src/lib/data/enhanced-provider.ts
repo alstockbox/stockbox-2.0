@@ -1,4 +1,4 @@
-import type { AnalysisSource, ProviderDiagnostic } from "@/lib/analysis/types";
+import type { AnalysisReport, AnalysisSource, ProviderDiagnostic } from "@/lib/analysis/types";
 import { augmentWithOfficialResearch } from "@/lib/analysis/official-research-augment";
 import { getEstimatesProvider, getServerEnv } from "@/lib/env/server";
 import { applyTwelveDataEstimateSnapshot } from "./estimate-report-augment";
@@ -60,7 +60,7 @@ async function safeEstimateSnapshot(args: AnalyzeCompanyArgs): Promise<EstimateR
   }
 }
 
-function refreshAdminQa(report: AnalyzeCompanyResult extends { ok: true; data: infer T } ? T : never) {
+function refreshAdminQa(report: AnalysisReport) {
   if (!report.adminQa) return;
   report.adminQa.providerAttempts = uniqueDiagnostics([
     ...report.adminQa.providerAttempts,
