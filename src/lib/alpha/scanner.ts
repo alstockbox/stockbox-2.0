@@ -1,8 +1,7 @@
 import "server-only";
 
 import type { AnalysisReport, CompanySearchResult } from "../analysis/types";
-import { analyzeCompany, searchCompanies } from "../data/enhanced-provider";
-import { canAttemptConfiguredFundamentals } from "../data/security-classification";
+import { analyzeCompany } from "../data/enhanced-provider";
 import { createAdminClient } from "../supabase/admin";
 import { ALPHA_MODEL_VERSION, computeAlphaIntelligence } from "./engine";
 import { buildAlphaSignalInputFromReport } from "./report-adapter";
@@ -21,23 +20,26 @@ export type AlphaUniverseScanResult = {
   failures: Array<{ ticker: string; reason: string }>;
 };
 
-function exactCompany(candidates: CompanySearchResult[], universe: AlphaUniverseCandidate): CompanySearchResult | null {
-  const ticker = universe.ticker.trim().toUpperCase();
-  const matches = candidates.filter((candidate) => {
-    const symbols = [candidate.ticker, candidate.canonicalTicker]
-      .filter((value): value is string => Boolean(value))
-      .map((value) => value.trim().toUpperCase());
-    return symbols.includes(ticker);
-  });
-
-  const eligible = matches.filter((candidate) => {
-    if (candidate.securityType && candidate.securityType !== "Common Stock") return false;
-    if (universe.country && candidate.country && candidate.country.toUpperCase() !== universe.country.toUpperCase()) return false;
-    return canAttemptConfiguredFundamentals(candidate);
-  });
-
-  if (eligible.length !== 1) return null;
-  return eligible[0] ?? null;
+function companyFromUniverse(universe: AlphaUniverseCandidate): CompanySearchResult {
+  return {
+    ticker: universe.ticker,
+    canonicalTicker: universe.ticker,
+    name: universe.companyName,
+    exchange: universe.exchange ?? undefined,
+    country: universe.country ?? "US",
+    currency: universe.currency ?? "USD",
+    cik: universe.cik ?? undefined,
+    entityId: universe.cik ? `sec:${universe.cik}` : `listing:${universe.country ?? "US"}:${universe.ticker}`,
+    securityType: "Common Stock",
+    primarySecurity: true,
+    providerCapabilities: {
+      fundamentals: true,
+      marketData: true,
+      providerIds: universe.cik
+        ? ["nasdaq-trader", "sec-companyfacts", "yahoo-fundamentals"]
+        : ["nasdaq-trader", "yahoo-fundamentals"],
+    },
+  };
 }
 
 function predictionRow(
@@ -140,20 +142,12 @@ export async function runAlphaUniverseScan(options: {
     return { ok: false, runId, requested, candidates: candidates.length, analyzed, predictions, skipped, failed: candidates.length, failures: [{ ticker: "*", reason: "supabase_unavailable" }] };
   }
 
-  // Intentionally sequential: the existing provider layer has its own retries and external rate limits.
-  // Scanner throughput is scaled by more cron invocations, not by uncontrolled provider concurrency.
+  // Sequential by design. Provider retries already exist in the analysis stack and uncontrolled
+  // concurrency would make SEC/Yahoo rate behavior less predictable and less reproducible.
   for (const universe of candidates) {
     try {
-      const search = await searchCompanies(universe.ticker);
-      const company = exactCompany(search, universe);
-      if (!company) {
-        skipped += 1;
-        failures.push({ ticker: universe.ticker, reason: "identity_or_fundamentals_unavailable" });
-        continue;
-      }
-
       const analysis = await analyzeCompany({
-        company,
+        company: companyFromUniverse(universe),
         analysisType: "research",
         investmentProfile: "balanced",
       });
