@@ -1,5 +1,8 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { AlertCircle, BarChart3, CalendarClock, CheckCircle2, Compass, Database, Eye, FileText, ShieldAlert, TrendingDown, TrendingUp } from "lucide-react";
-import type { AnalysisReport, Flag, Metrics, ScoreContributor, UiMode } from "@/lib/analysis/types";
+import type { AnalysisReport, Flag, InvestmentProfile, Metrics, ScoreContributor, UiMode } from "@/lib/analysis/types";
 import { formatCompactCurrency, formatNumber, formatPercent } from "@/lib/utils/format";
 import { StockBoxLogo } from "@/components/brand/stockbox-logo";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +21,8 @@ import { ResearchQuestionPanel } from "./research-question-panel";
 import { buildPeerBenchmarkComparison, type PeerBenchmarkRow } from "@/lib/analysis/peer-benchmark";
 import { buildAnalystExpectationsSummary } from "@/lib/analysis/analyst-expectations";
 import { orderScoreDimensions, profilePresentationFor } from "@/lib/analysis/profile-presentation";
+import { applyAnalysisLens } from "@/lib/analysis/analysis-lens";
+import { AnalysisLensControl } from "./analysis-lens-control";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
   return {
@@ -421,7 +426,15 @@ function ScoreDriverList({
   );
 }
 
-export function ReportView({ report, mode = "pro", locale = "en", previousReport = null }: { report: AnalysisReport; mode?: UiMode; locale?: Locale; previousReport?: AnalysisReport | null }) {
+type ReportViewProps = { report: AnalysisReport; mode?: UiMode; locale?: Locale; previousReport?: AnalysisReport | null };
+
+export function ReportView(props: ReportViewProps) {
+  return <ReportViewWithLens key={`${props.report.id}:${props.report.investmentProfile}`} {...props} />;
+}
+
+function ReportViewWithLens({ report: sourceReport, mode = "pro", locale = "en", previousReport = null }: ReportViewProps) {
+  const [analysisLens, setAnalysisLens] = useState<InvestmentProfile>(sourceReport.investmentProfile);
+  const report = useMemo(() => applyAnalysisLens(sourceReport, analysisLens), [sourceReport, analysisLens]);
   const copy = getP0Copy(locale).report;
   const profilePresentation = profilePresentationFor(report.investmentProfile, locale);
   const profileDimensions = orderScoreDimensions(report.score.dimensions, report.investmentProfile);
@@ -470,6 +483,15 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
           <p className="mt-2 text-sm leading-6 text-[#c9d2df]">{copy.staleCopy}</p>
         </Card>
       ) : null}
+      <section aria-label={locale === "sv" ? "Investeringslins" : "Investment lens"}>
+        <AnalysisLensControl
+          value={analysisLens}
+          defaultProfile={sourceReport.investmentProfile}
+          lensScore={report.score.personalizedScore}
+          locale={locale}
+          onChange={setAnalysisLens}
+        />
+      </section>
       <Card className="p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -506,10 +528,6 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
                {report.modelVersion ? <span>{report.modelVersion}</span> : null}
             </div>
           ) : null}
-        </div>
-        <div className="mt-4 rounded-md border border-[#b99b5f]/20 bg-[#b99b5f]/5 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#e1cb95]">{locale === "sv" ? "Investeringslins" : "Investment lens"} · {report.investmentProfile.replaceAll("_", " ")}</p>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-[#c9d2df]">{profilePresentation.description}</p>
         </div>
         <div className="mt-6 border-t border-white/10 pt-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -570,7 +588,7 @@ export function ReportView({ report, mode = "pro", locale = "en", previousReport
           {report.score.score !== null && report.score.personalizedScore !== null ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <Meter value={report.score.score} label={copy.generalScore} />
-              <Meter value={report.score.personalizedScore} label={copy.personalizedScore} />
+              <Meter value={report.score.personalizedScore} label={locale === "sv" ? "Lins-poäng" : "Lens score"} />
             </div>
           ) : (
             <p className="mt-5 text-sm text-[#e1cb95]">{copy.belowRatingThreshold}</p>
