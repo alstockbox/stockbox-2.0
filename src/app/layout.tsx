@@ -7,6 +7,7 @@ import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
 import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
+import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfair", display: "swap" });
@@ -74,6 +75,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <main id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
         <BrowserAnalytics gaId={env.NEXT_PUBLIC_GA_ID || undefined} metaPixelId={env.NEXT_PUBLIC_META_PIXEL_ID || undefined} locale={locale} />
+        <Analytics />
       </body>
     </html>
   );
