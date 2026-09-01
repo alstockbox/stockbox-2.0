@@ -6,7 +6,11 @@ import { createAdminClient } from "../supabase/admin";
 import { ALPHA_MODEL_VERSION, computeAlphaIntelligence } from "./engine";
 import { buildAlphaSignalInputFromReport } from "./report-adapter";
 import { selectScannerCandidates } from "./scan-policy";
-import { getUniverseCandidates, type AlphaUniverseCandidate } from "./universe-repository";
+import {
+  getUniverseCandidates,
+  recordUniverseScanState,
+  type AlphaUniverseCandidate,
+} from "./universe-repository";
 
 export type AlphaUniverseScanResult = {
   ok: boolean;
@@ -42,11 +46,7 @@ function companyFromUniverse(universe: AlphaUniverseCandidate): CompanySearchRes
   };
 }
 
-function predictionRow(
-  universe: AlphaUniverseCandidate,
-  scanRunId: string,
-  report: AnalysisReport,
-) {
+function predictionRow(universe: AlphaUniverseCandidate, scanRunId: string, report: AnalysisReport) {
   const input = buildAlphaSignalInputFromReport(report);
   const alpha = computeAlphaIntelligence(input);
   return {
@@ -112,6 +112,20 @@ async function finishRun(runId: string, result: Omit<AlphaUniverseScanResult, "o
   }).eq("id", runId);
 }
 
+async function mark(
+  universe: AlphaUniverseCandidate,
+  status: "success" | "failed" | "skipped",
+  reason?: string,
+) {
+  await recordUniverseScanState({
+    id: universe.id,
+    status,
+    attemptedAt: new Date().toISOString(),
+    errorClass: reason ?? null,
+    previousFailureCount: universe.failureCount,
+  });
+}
+
 export async function runAlphaUniverseScan(options: {
   limit?: number;
   refreshAfterHours?: number;
@@ -142,8 +156,6 @@ export async function runAlphaUniverseScan(options: {
     return { ok: false, runId, requested, candidates: candidates.length, analyzed, predictions, skipped, failed: candidates.length, failures: [{ ticker: "*", reason: "supabase_unavailable" }] };
   }
 
-  // Sequential by design. Provider retries already exist in the analysis stack and uncontrolled
-  // concurrency would make SEC/Yahoo rate behavior less predictable and less reproducible.
   for (const universe of candidates) {
     try {
       const analysis = await analyzeCompany({
@@ -154,6 +166,7 @@ export async function runAlphaUniverseScan(options: {
       if (!analysis.ok) {
         failed += 1;
         failures.push({ ticker: universe.ticker, reason: "analysis_unavailable" });
+        await mark(universe, "failed", "analysis_unavailable");
         continue;
       }
       analyzed += 1;
@@ -163,12 +176,15 @@ export async function runAlphaUniverseScan(options: {
       if (write.error) {
         failed += 1;
         failures.push({ ticker: universe.ticker, reason: "prediction_persistence_failed" });
+        await mark(universe, "failed", "prediction_persistence_failed");
         continue;
       }
       predictions += 1;
+      await mark(universe, "success");
     } catch {
       failed += 1;
       failures.push({ ticker: universe.ticker, reason: "scanner_exception" });
+      await mark(universe, "failed", "scanner_exception");
     }
   }
 
