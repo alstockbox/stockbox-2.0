@@ -1,0 +1,67 @@
+name: StockBox Alpha Intelligence Automation
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+    - cron: "7,22,37,52 * * * *"
+    - cron: "45 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stockbox-alpha-intelligence
+  cancel-in-progress: false
+
+jobs:
+  universe:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '15 4 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CRON_SECRET: ${{ secrets.STOCKBOX_CRON_SECRET }}
+      STOCKBOX_APP_URL: ${{ secrets.STOCKBOX_APP_URL }}
+    steps:
+      - name: Refresh official US universe
+        if: env.CRON_SECRET != ''
+        run: |
+          set -euo pipefail
+          BASE_URL="${STOCKBOX_APP_URL:-https://www.getstockbox.app}"
+          curl --fail-with-body --silent --show-error --retry 2 --retry-delay 5 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/alpha/universe"
+
+  scanner:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '7,22,37,52 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CRON_SECRET: ${{ secrets.STOCKBOX_CRON_SECRET }}
+      STOCKBOX_APP_URL: ${{ secrets.STOCKBOX_APP_URL }}
+    steps:
+      - name: Run bounded Alpha scan batch
+        if: env.CRON_SECRET != ''
+        run: |
+          set -euo pipefail
+          BASE_URL="${STOCKBOX_APP_URL:-https://www.getstockbox.app}"
+          curl --fail-with-body --silent --show-error --retry 1 --retry-delay 5 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/alpha/scan?limit=2"
+
+  outcomes:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '45 5 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CRON_SECRET: ${{ secrets.STOCKBOX_CRON_SECRET }}
+      STOCKBOX_APP_URL: ${{ secrets.STOCKBOX_APP_URL }}
+    steps:
+      - name: Collect matured Alpha outcomes
+        if: env.CRON_SECRET != ''
+        run: |
+          set -euo pipefail
+          BASE_URL="${STOCKBOX_APP_URL:-https://www.getstockbox.app}"
+          curl --fail-with-body --silent --show-error --retry 2 --retry-delay 5 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/alpha/outcomes?limit=50"
