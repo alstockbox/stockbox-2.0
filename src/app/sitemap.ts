@@ -23,6 +23,8 @@ const staticEntries: Array<{
   { path: "/changelog", changeFrequency: "weekly", priority: 0.5 },
   { path: "/legal/privacy", changeFrequency: "yearly", priority: 0.2 },
   { path: "/legal/terms", changeFrequency: "yearly", priority: 0.2 },
+  { path: "/withdraw", changeFrequency: "yearly", priority: 0.2 },
+  { path: "/legal/withdrawal-form", changeFrequency: "yearly", priority: 0.2 },
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
