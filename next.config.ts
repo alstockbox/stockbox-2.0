@@ -50,6 +50,14 @@ const privateIndexingPaths = [
   "/onboarding/:path*",
 ] as const;
 
+const swedishSeoPaths = [
+  "/aktieanalys",
+  "/ai-aktieanalys",
+  "/fundamental-analys",
+  "/nyckeltal/:path*",
+  "/aktier/:path*",
+] as const;
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   typedRoutes: true,
@@ -75,6 +83,10 @@ const nextConfig: NextConfig = {
       ...privateIndexingPaths.map((source) => ({
         source,
         headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      })),
+      ...swedishSeoPaths.map((source) => ({
+        source,
+        headers: [{ key: "Content-Language", value: "sv-SE" }],
       })),
       {
         source: "/(.*)",
