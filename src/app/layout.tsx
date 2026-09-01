@@ -20,6 +20,13 @@ export const metadata: Metadata = {
   },
   description:
     "StockBox är ett datadrivet verktyg för aktieanalys och equity research med värdering, tillväxt, lönsamhet, risk, synliga källor, datatäckning och konfidens.",
+  robots: {
+    googleBot: {
+      maxImagePreview: "large",
+      maxSnippet: -1,
+      maxVideoPreview: -1,
+    },
+  },
   icons: {
     icon: "/images/stockbox-logo.png",
     shortcut: "/images/stockbox-logo.png",
@@ -40,6 +47,12 @@ export const metadata: Metadata = {
       },
     ],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "StockBox | Aktieanalys & data-driven stock analysis",
+    description: "Datadriven aktieanalys med StockBox Score, synliga källor, datatäckning och konfidens.",
+    images: ["/images/stockbox-logo.png"],
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#07111f" };
@@ -51,7 +64,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": "Organization", "@id": `${baseUrl}/#organization`, name: "StockBox", url: baseUrl, logo: `${baseUrl}/images/stockbox-logo.png` },
+      {
+        "@type": "Organization",
+        "@id": `${baseUrl}/#organization`,
+        name: "StockBox",
+        url: baseUrl,
+        logo: `${baseUrl}/images/stockbox-logo.png`,
+        sameAs: ["https://www.youtube.com/@Getstockbox", "https://www.tiktok.com/@alstockbox"],
+      },
       { "@type": "WebSite", "@id": `${baseUrl}/#website`, name: "StockBox", url: baseUrl, publisher: { "@id": `${baseUrl}/#organization` } },
       {
         "@type": "SoftwareApplication",
