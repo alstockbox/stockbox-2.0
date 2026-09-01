@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateAlphaOutcome, summarizeAlphaOutcomes } from "../../src/lib/alpha/outcomes";
+import {
+  evaluateAlphaOutcome,
+  selectMaturedOutcomeWindows,
+  summarizeAlphaOutcomes,
+} from "../../src/lib/alpha/outcomes";
 
 describe("Alpha point-in-time outcomes", () => {
   it("refuses to score a horizon before it has elapsed", () => {
@@ -31,6 +35,15 @@ describe("Alpha point-in-time outcomes", () => {
     expect(outcome?.observedReturn).toBeCloseTo(0.30, 8);
     expect(outcome?.excessReturn).toBeCloseTo(0.22, 8);
     expect(outcome?.hitUp25).toBe(true);
+  });
+
+  it("selects only prediction windows whose horizon has matured but is still inside the observation lag", () => {
+    const windows = selectMaturedOutcomeWindows("2026-09-01T12:00:00.000Z", 7);
+    const ninety = windows.find((window) => window.horizonDays === 90)!;
+
+    expect(ninety.predictionFrom).toBe("2026-05-27T12:00:00.000Z");
+    expect(ninety.predictionTo).toBe("2026-06-03T12:00:00.000Z");
+    expect(windows).toHaveLength(4);
   });
 
   it("summarizes calibration separately from raw return", () => {
