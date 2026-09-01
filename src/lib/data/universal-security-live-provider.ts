@@ -73,12 +73,13 @@ async function enrichWithOfficialInvestmentCompanyNav(
     (item) => `${item.provider ?? item.name}|${item.url}|${item.dataAsOf ?? ""}`,
   );
 
-  if (analysis.score.score !== null) {
-    report.score.score = analysis.score.score;
-    report.score.personalizedScore = analysis.score.score;
+  const securityScore = analysis.score.score;
+  if (typeof securityScore === "number" && Number.isFinite(securityScore)) {
+    report.score.score = securityScore;
+    report.score.personalizedScore = securityScore;
     report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
-    report.dataCoverage = Math.max(report.dataCoverage, analysis.score.coverage);
-    report.recommendation = recommendationForScore(analysis.score.score, analysis.score.coverage);
+    report.dataCoverage = Math.max(report.dataCoverage ?? 0, analysis.score.coverage);
+    report.recommendation = recommendationForScore(securityScore, analysis.score.coverage);
   }
 
   report.score.missingData = [...new Set([
