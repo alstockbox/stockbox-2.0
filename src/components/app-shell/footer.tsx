@@ -12,7 +12,7 @@ export async function AppFooter() {
     [sv ? "Aktieanalys" : "Stock analysis", [["/aktier", sv ? "Publika analyser" : "Public analyses"], ["/aktieanalys", "Aktieanalys"], ["/aktieanalys-verktyg", sv ? "Aktieanalysverktyg" : "Stock analysis tools"], ["/ai-aktieanalys", "AI aktieanalys"], ["/fundamental-analys", "Fundamental analys"], ["/nyckeltal", sv ? "Nyckeltal" : "Key metrics"]]],
     [sv ? "Guider" : "Guides", [["/guider", sv ? "Alla guider" : "All guides"], ["/guider/hur-analyserar-man-en-aktie", sv ? "Analysera en aktie" : "How to analyze a stock"], ["/guider/hur-varderar-man-en-aktie", sv ? "Värdera en aktie" : "How to value a stock"], ["/nyckeltal/pe-tal", "P/E-tal"]]],
     [sv ? "Företag" : "Company", [["/about", sv ? "Om StockBox" : "About"], ["/contact", sv ? "Kontakt" : "Contact"]]],
-    [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"], ["/changelog", "Changelog"], ["/legal/terms", sv ? "Villkor" : "Terms"], ["/legal/privacy", sv ? "Integritet" : "Privacy"]]],
+    [sv ? "Resurser" : "Resources", [["/data-sources", sv ? "Datakällor" : "Data sources"], ["/faq", "FAQ"], ["/changelog", "Changelog"], ["/legal/terms", sv ? "Villkor" : "Terms"], ["/legal/privacy", sv ? "Integritet" : "Privacy"], ["/withdraw", sv ? "Ångra avtal" : "Exercise withdrawal right"]]],
   ] as const;
   return <footer className="border-t border-white/10 bg-[#050b13] px-4 py-10 text-sm text-[#9aa7b8] sm:px-6 lg:px-8">
     <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[1.1fr_2.4fr]">
