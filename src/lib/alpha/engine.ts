@@ -6,8 +6,15 @@ import type {
   AlphaSignalInput,
   AlphaUpsideProbability,
 } from "./types";
+import {
+  capLiquidityRiskForBand,
+  MARKET_CAP_POLICY_VERSION,
+  resolveMarketCapBand,
+  sizePotentialForBand,
+  type MarketCapBand,
+} from "./market-cap";
 
-export const ALPHA_MODEL_VERSION = "alpha-1.0.0";
+export const ALPHA_MODEL_VERSION = "alpha-1.1.0";
 
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -68,8 +75,8 @@ function computeFinancialRisk(input: AlphaSignalInput): number {
   return round1(average([
     scoreAscending(debtToEquity, 0.1, 3.0),
     scoreAscending(netDebtToEbitda, 0.5, 6.0),
-    scoreDescending(interestCoverage, 10, 0.5),
-    scoreDescending(currentRatio, 2.0, 0.6),
+    scoreDescending(interestCoverage, 0.5, 10),
+    scoreDescending(currentRatio, 0.6, 2.0),
   ], 45));
 }
 
@@ -163,14 +170,8 @@ function computeDilutionRisk(input: AlphaSignalInput): number {
   return round1(scoreAscending(latest.shareGrowth, 0, 0.30) ?? 35);
 }
 
-function computeLiquidityRisk(input: AlphaSignalInput): number {
-  const capRisk = !finite(input.market.marketCap)
-    ? 45
-    : input.market.marketCap <= 100_000_000 ? 85
-    : input.market.marketCap <= 300_000_000 ? 65
-    : input.market.marketCap <= 1_000_000_000 ? 40
-    : input.market.marketCap <= 5_000_000_000 ? 20
-    : 8;
+function computeLiquidityRisk(input: AlphaSignalInput, band: MarketCapBand): number {
+  const capRisk = capLiquidityRiskForBand(band);
   const volumeRisk = !finite(input.market.volume)
     ? 45
     : input.market.volume < 20_000 ? 90
@@ -187,14 +188,8 @@ function computeHypeRisk(momentum: number, growth: number, quality: number, unde
   return round1(clamp(0.62 * excessiveMomentum + 0.38 * weakFundamentals));
 }
 
-function computeSmallCapAsymmetry(input: AlphaSignalInput, coreOpportunity: number, liquidityRisk: number): number {
-  const cap = input.market.marketCap;
-  const sizePotential = !finite(cap) ? 20
-    : cap <= 300_000_000 ? 100
-    : cap <= 1_000_000_000 ? 82
-    : cap <= 3_000_000_000 ? 62
-    : cap <= 10_000_000_000 ? 35
-    : 10;
+function computeSmallCapAsymmetry(coreOpportunity: number, liquidityRisk: number, band: MarketCapBand): number {
+  const sizePotential = sizePotentialForBand(band);
   const qualityGate = clamp((coreOpportunity - 40) / 60, 0, 1);
   const sizeBonus = sizePotential * qualityGate;
   return round1(clamp(0.78 * coreOpportunity + 0.22 * sizeBonus - 0.14 * liquidityRisk));
@@ -287,6 +282,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
   const catalystCoverage = input.catalyst ? clamp01((input.catalyst.sourceCount / 2) * input.catalyst.confidence) : 0;
   const revisionCoverage = input.estimateRevision ? clamp01(input.estimateRevision.confidence) : 0;
   const sentimentCoverage = input.sentimentShift ? clamp01(input.sentimentShift.confidence) : 0;
+  const marketCapBand = resolveMarketCapBand(input.market.marketCap, input.market.marketCapCurrency);
 
   const financialRisk = computeFinancialRisk(input);
   const undervaluation = computeUndervaluation(input);
@@ -298,7 +294,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
   const estimateRevisions = computeEstimateRevisions(input);
   const sentimentShift = computeSentimentShift(input);
   const dilutionRisk = computeDilutionRisk(input);
-  const liquidityRisk = computeLiquidityRisk(input);
+  const liquidityRisk = computeLiquidityRisk(input, marketCapBand);
   const hypeRisk = computeHypeRisk(momentum, growthAcceleration, quality, undervaluation);
 
   const coreOpportunity = (
@@ -308,7 +304,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
     quality * 0.18 +
     catalyst * 0.15
   );
-  const smallCapAsymmetry = computeSmallCapAsymmetry(input, coreOpportunity, liquidityRisk);
+  const smallCapAsymmetry = computeSmallCapAsymmetry(coreOpportunity, liquidityRisk, marketCapBand);
 
   const baseScores = {
     undervaluation,
@@ -350,6 +346,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
     companyName: input.companyName,
     modelVersion: ALPHA_MODEL_VERSION,
     generatedAt: input.analysisDate,
+    marketCapBand,
     alphaScore,
     classification: classification(alphaScore, confidence, risk),
     confidence,
@@ -363,6 +360,7 @@ export function computeAlphaIntelligence(input: AlphaSignalInput): AlphaIntellig
       purpose: "ranking",
       independentFromFundamentalScore: true,
       probabilitiesAreModelImplied: true,
+      marketCapPolicyVersion: MARKET_CAP_POLICY_VERSION,
     },
   };
 }
