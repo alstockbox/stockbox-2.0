@@ -16,6 +16,17 @@ describe("public stock cross-request SEO cache", () => {
     expect(snapshots).toContain('cache(getPersistedPublicStockSnapshotBySlug)');
   });
 
+  it("keeps an individual stock cache independent from the global listing tag", () => {
+    const snapshots = read("src/lib/seo/public-snapshots.ts");
+    const start = snapshots.indexOf("const getPersistedSnapshot = unstable_cache");
+    const end = snapshots.indexOf("return getPersistedSnapshot();", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const stockCacheBlock = snapshots.slice(start, end);
+    expect(stockCacheBlock).toContain('`public-stock-snapshot:${normalizedSlug}`');
+    expect(stockCacheBlock).not.toContain("PUBLIC_STOCK_LIST_TAG");
+  });
+
   it("invalidates the affected stock and listing caches after publication", () => {
     const route = read("src/app/api/admin/seo/publish/route.ts");
     expect(route).toContain('revalidateTag');
