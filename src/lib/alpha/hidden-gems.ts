@@ -17,9 +17,11 @@ export type HiddenGemsCategory =
 
 export type HiddenGemsHorizon = keyof AlphaProbabilityCurve;
 export type HiddenGemsRiskBand = "low" | "medium" | "high";
+export type AlphaPredictionOrigin = "analysis" | "universe";
 
 export type AlphaPredictionSnapshot = {
   id: string;
+  originType?: AlphaPredictionOrigin;
   analysisId: string | null;
   universeSecurityId?: string | null;
   ticker: string;
