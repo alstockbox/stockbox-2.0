@@ -160,7 +160,7 @@ export default async function HiddenGemsPage({
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
           <Card><Sparkles className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{sv ? "Aktiv ranking" : "Active ranking"}</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{categoryLabel(category, sv)}</p></Card>
           <Card><TrendingUp className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{sv ? "Horisont" : "Horizon"}</p><p className="number mt-1 text-2xl font-semibold text-[#f4efe5]">{horizonLabel(horizon)}</p></Card>
-          <Card><ShieldAlert className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{sv ? "Modellprincip" : "Model principle"}</p><p className="mt-1 text-sm font-semibold text-[#f4efe5]">{sv ? "Risk-gated · point-in-time" : "Risk-gated · point-in-time"}</p></Card>
+          <Card><ShieldAlert className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{sv ? "Modellprincip" : "Model principle"}</p><p className="mt-1 text-sm font-semibold text-[#f4efe5]">Risk-gated · point-in-time</p></Card>
         </div>
 
         <div className="mt-8 overflow-hidden rounded-xl border border-white/10 bg-[#081522]/65">
@@ -185,8 +185,12 @@ export default async function HiddenGemsPage({
                     <tr key={row.id} className="border-b border-white/8 last:border-0 hover:bg-white/[0.035]">
                       <td className="number px-4 py-4 text-[#9aa7b8]">{index + 1}</td>
                       <td className="px-4 py-4">
-                        <Link href={`/analysis/${row.analysisId}`} className="font-semibold text-[#e1cb95] hover:text-white">{row.ticker}</Link>
-                        <p className="mt-1 max-w-[240px] truncate text-xs text-[#9aa7b8]">{row.companyName} · {row.marketCapBand}</p>
+                        {row.analysisId ? (
+                          <Link href={`/analysis/${row.analysisId}`} className="font-semibold text-[#e1cb95] hover:text-white">{row.ticker}</Link>
+                        ) : (
+                          <span className="font-semibold text-[#e1cb95]">{row.ticker}</span>
+                        )}
+                        <p className="mt-1 max-w-[240px] truncate text-xs text-[#9aa7b8]">{row.companyName} · {row.marketCapBand}{row.analysisId ? "" : (sv ? " · scanner" : " · scanner")}</p>
                       </td>
                       <td className="number px-4 py-4 font-semibold text-[#f4efe5]">{score(row.alphaScore)}/100</td>
                       <td className="number px-4 py-4 text-[#c9d2df]">{score(row.fundamentalScore)}{row.fundamentalScore === null ? "" : "/100"}</td>
@@ -205,8 +209,8 @@ export default async function HiddenGemsPage({
               <h2 className="text-lg font-semibold text-[#f4efe5]">{sv ? "Ingen ranking tillgänglig ännu" : "No ranking available yet"}</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">
                 {sv
-                  ? "Hidden Gems använder endast verkliga sparade StockBox-analyser. Kör analyser för att bygga universumet; saknas Alpha-migrationen visas inga fabricerade resultat."
-                  : "Hidden Gems uses real saved StockBox analyses only. Run analyses to build the universe; if the Alpha migration is unavailable, no fabricated results are shown."}
+                  ? "Hidden Gems visar bara verkliga point-in-time Alpha-snapshots från sparade analyser eller den serverägda scannern. Om datalagret inte är aktiverat visas inga fabricerade resultat."
+                  : "Hidden Gems only shows real point-in-time Alpha snapshots from saved analyses or the server-owned scanner. If the data layer is not active, no fabricated results are shown."}
               </p>
               <ButtonLink href="/analyze" className="mt-5">{sv ? "Analysera bolag" : "Analyze companies"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
             </div>
@@ -216,8 +220,8 @@ export default async function HiddenGemsPage({
         <div className="mt-6 rounded-lg border border-amber-200/15 bg-amber-200/[0.035] px-4 py-3 text-xs leading-5 text-[#9aa7b8]">
           <strong className="text-[#e1cb95]">{sv ? "Viktigt:" : "Important:"}</strong>{" "}
           {sv
-            ? "Sannolikheterna är modellimplicerade ranking-signaler, inte garanterade prognoser. Nuvarande Hidden Gems-universum består av bolag med sparade StockBox-analyser och ska inte beskrivas som hela marknaden förrän en point-in-time universumsscanner är inkopplad."
-            : "Probabilities are model-implied ranking signals, not guaranteed forecasts. The current Hidden Gems universe contains companies with saved StockBox analyses and must not be described as the entire market until a point-in-time universe scanner is connected."}
+            ? "Sannolikheterna är modellimplicerade ranking-signaler, inte garanterade prognoser. Den automatiska universumskällan täcker amerikanska börsnoterade instrument från Nasdaq Traders officiella symbolkatalog och filtreras till scanner-berättigade stamaktier. Nordic/global fullmarknadstäckning ska inte påstås förrän en motsvarande tillförlitlig källa är inkopplad."
+            : "Probabilities are model-implied ranking signals, not guaranteed forecasts. The automated universe source covers US-listed instruments from Nasdaq Trader's official symbol directory and is filtered to scanner-eligible common equities. Nordic/global full-market coverage must not be claimed until an equivalent reliable source is connected."}
         </div>
       </Container>
     </Section>
