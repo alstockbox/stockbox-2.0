@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseNasdaqTraderDirectory,
+  parseSecTickerExchangeDirectory,
   type AlphaUniverseSecurity,
 } from "../../src/lib/alpha/universe";
 
@@ -37,11 +38,11 @@ describe("Nasdaq Trader official security universe", () => {
     expect(byTicker(other.securities, "NYSEC")?.exchange).toBe("NYSE");
   });
 
-  it("preserves source creation time and stable source-specific identity keys", () => {
+  it("preserves the source-reported local creation timestamp without inventing a timezone", () => {
     const first = parseNasdaqTraderDirectory(nasdaqText, "nasdaq_listed");
     const second = parseNasdaqTraderDirectory(nasdaqText, "nasdaq_listed");
 
-    expect(first.sourceAsOf).toBe("2026-09-01T21:30:00.000Z");
+    expect(first.sourceTimestampRaw).toBe("0901202621:30");
     expect(first.securities[0]?.sourceKey).toBe("nasdaq_trader:nasdaq_listed:GOOD");
     expect(second.securities[0]?.sourceKey).toBe(first.securities[0]?.sourceKey);
   });
@@ -52,5 +53,26 @@ describe("Nasdaq Trader official security universe", () => {
       "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\nGOOD|Good Systems|Q|N|N|100|N|N",
       "nasdaq_listed",
     )).toThrow(/creation time/i);
+  });
+});
+
+describe("SEC ticker/CIK identity enrichment", () => {
+  it("maps current exchange-listed ticker identities to zero-padded CIKs", () => {
+    const directory = parseSecTickerExchangeDirectory({
+      fields: ["cik", "name", "ticker", "exchange"],
+      data: [
+        [1234, "GOOD SYSTEMS INC", "GOOD", "Nasdaq"],
+        [987654, "NYSE COMPANY INC", "NYSEC", "NYSE"],
+        [44, "NO TICKER", null, "Nasdaq"],
+      ],
+    });
+
+    expect(directory.get("GOOD")?.cik).toBe("0000001234");
+    expect(directory.get("NYSEC")?.cik).toBe("0000987654");
+    expect(directory.has("NO TICKER")).toBe(false);
+  });
+
+  it("fails closed on an incompatible SEC payload", () => {
+    expect(() => parseSecTickerExchangeDirectory({ fields: ["ticker"], data: [] })).toThrow(/SEC/i);
   });
 });
