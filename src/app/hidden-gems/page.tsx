@@ -181,26 +181,29 @@ export default async function HiddenGemsPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {result.rows.map((row, index) => (
-                    <tr key={row.id} className="border-b border-white/8 last:border-0 hover:bg-white/[0.035]">
-                      <td className="number px-4 py-4 text-[#9aa7b8]">{index + 1}</td>
-                      <td className="px-4 py-4">
-                        {row.analysisId ? (
-                          <Link href={`/analysis/${row.analysisId}`} className="font-semibold text-[#e1cb95] hover:text-white">{row.ticker}</Link>
-                        ) : (
-                          <span className="font-semibold text-[#e1cb95]">{row.ticker}</span>
-                        )}
-                        <p className="mt-1 max-w-[240px] truncate text-xs text-[#9aa7b8]">{row.companyName} · {row.marketCapBand}{row.analysisId ? "" : (sv ? " · scanner" : " · scanner")}</p>
-                      </td>
-                      <td className="number px-4 py-4 font-semibold text-[#f4efe5]">{score(row.alphaScore)}/100</td>
-                      <td className="number px-4 py-4 text-[#c9d2df]">{score(row.fundamentalScore)}{row.fundamentalScore === null ? "" : "/100"}</td>
-                      <td className="number px-4 py-4 text-[#f4efe5]">{score(row.breakoutScore)}/100</td>
-                      <td className="number px-4 py-4 text-[#e1cb95]">{pct(row.probabilities[horizon].up25)}</td>
-                      <td className="number px-4 py-4 text-[#c9d2df]">{score(row.risk.overall)}/100</td>
-                      <td className="number px-4 py-4 text-[#c9d2df]">{row.alphaChange === null ? "—" : `${row.alphaChange > 0 ? "+" : ""}${row.alphaChange}`}</td>
-                      <td className="px-4 py-4 text-xs text-[#c9d2df]">{row.strongestSignals[0] ?? (sv ? "Ingen stark signal" : "No strong signal")}</td>
-                    </tr>
-                  ))}
+                  {result.rows.map((row, index) => {
+                    const scannerOrigin = row.originType === "universe";
+                    return (
+                      <tr key={row.id} className="border-b border-white/8 last:border-0 hover:bg-white/[0.035]">
+                        <td className="number px-4 py-4 text-[#9aa7b8]">{index + 1}</td>
+                        <td className="px-4 py-4">
+                          {row.analysisId ? (
+                            <Link href={`/analysis/${row.analysisId}`} className="font-semibold text-[#e1cb95] hover:text-white">{row.ticker}</Link>
+                          ) : (
+                            <span className="font-semibold text-[#e1cb95]">{row.ticker}</span>
+                          )}
+                          <p className="mt-1 max-w-[240px] truncate text-xs text-[#9aa7b8]">{row.companyName} · {row.marketCapBand}{scannerOrigin ? " · scanner" : ""}</p>
+                        </td>
+                        <td className="number px-4 py-4 font-semibold text-[#f4efe5]">{score(row.alphaScore)}/100</td>
+                        <td className="number px-4 py-4 text-[#c9d2df]">{score(row.fundamentalScore)}{row.fundamentalScore === null ? "" : "/100"}</td>
+                        <td className="number px-4 py-4 text-[#f4efe5]">{score(row.breakoutScore)}/100</td>
+                        <td className="number px-4 py-4 text-[#e1cb95]">{pct(row.probabilities[horizon].up25)}</td>
+                        <td className="number px-4 py-4 text-[#c9d2df]">{score(row.risk.overall)}/100</td>
+                        <td className="number px-4 py-4 text-[#c9d2df]">{row.alphaChange === null ? "—" : `${row.alphaChange > 0 ? "+" : ""}${row.alphaChange}`}</td>
+                        <td className="px-4 py-4 text-xs text-[#c9d2df]">{row.strongestSignals[0] ?? (sv ? "Ingen stark signal" : "No strong signal")}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
