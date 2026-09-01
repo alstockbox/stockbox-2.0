@@ -11,9 +11,10 @@ import { getLocale } from "@/lib/i18n/server";
 import { getMarketingCopy } from "@/lib/i18n/marketing-copy";
 
 export const metadata: Metadata = {
-  title: "Data-driven stock analysis and equity research",
-  description: "Analyze stocks with data-driven fundamentals, valuation, growth, financial health, quality and risk. Sources remain visible and missing financial data is never fabricated.",
+  title: "Aktieanalys & data-driven stock analysis",
+  description: "Analysera svenska och internationella aktier med StockBox. Granska värdering, tillväxt, lönsamhet, finansiell hälsa, kvalitet, risk, källor och StockBox Score.",
   alternates: { canonical: "/" },
+  keywords: ["aktieanalys", "aktie analys", "AI aktieanalys", "analysera aktier", "fundamental analys", "stock analysis"],
 };
 
 const sampleDimensions = [["Valuation", 28], ["Growth", 36], ["Profitability", 85], ["Financial health", 69], ["Quality", 100], ["Risk", 56]] as const;
@@ -80,7 +81,7 @@ export default async function HomePage() {
             <p className="text-sm font-semibold text-[#e1cb95]">{sv ? "Så fungerar det" : "How it works"}</p>
             <h2 className="serif mt-2 text-3xl font-semibold text-[#f4efe5]">{sv ? "Sök, analysera, granska underlaget" : "Search, analyze, inspect the evidence"}</h2>
             <p className="mt-4 text-sm leading-7 text-[#9aa7b8]">{sv ? "Välj ett riktigt börsnoterat bolag. StockBox identifierar rätt värdepapper, bygger rapporten från tillgänglig verifierbar data och visar tydligt när täckningen inte räcker." : "Choose a real listed company. StockBox resolves the security, builds the report from available verifiable data and clearly shows when coverage is not sufficient."}</p>
-            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Datakällor" : "Data sources"}</Link><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Metodik" : "Methodology"}</Link><Link href="/faq" className="font-semibold text-[#e1cb95] hover:text-white">FAQ</Link></div>
+            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Datakällor" : "Data sources"}</Link><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Metodik" : "Methodology"}</Link><Link href="/aktieanalys" className="font-semibold text-[#e1cb95] hover:text-white">Aktieanalys</Link><Link href="/aktier" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Publika analyser" : "Public analyses"}</Link><Link href="/faq" className="font-semibold text-[#e1cb95] hover:text-white">FAQ</Link></div>
           </div>
           <AnalysisWorkbench financialConfigured={isFinancialProviderConfigured()} initialMode="simple" initialInvestmentProfile="balanced" locale={locale} />
         </Container>
