@@ -55,6 +55,7 @@ const swedishSeoPaths = [
   "/aktieanalys-verktyg",
   "/ai-aktieanalys",
   "/fundamental-analys",
+  "/research-standard",
   "/guider/:path*",
   "/nyckeltal/:path*",
   "/aktier/:path*",
