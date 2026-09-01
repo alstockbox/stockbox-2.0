@@ -83,9 +83,12 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
         description: snapshot.metaDescription,
         datePublished: snapshot.publishedAt,
         dateModified: snapshot.updatedAt,
+        inLanguage: "sv-SE",
+        isAccessibleForFree: true,
         publisher: { "@id": `${baseUrl.replace(/\/$/, "")}/#organization` },
         author: { "@id": `${baseUrl.replace(/\/$/, "")}/#organization` },
         about: { "@type": "Corporation", name: snapshot.companyName, tickerSymbol: snapshot.ticker },
+        citation: report.sources.map((source) => source.url),
         mainEntityOfPage: url,
       },
     ],
@@ -142,7 +145,12 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
               <dl className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {factGroups.map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 p-4"><dt className="text-xs text-[#9aa7b8]">{label}</dt><dd className="number mt-1 text-xl font-semibold text-[#f4efe5]">{value}</dd></div>)}
               </dl>
-              <p className="mt-5 text-xs leading-6 text-[#9aa7b8]">Ett lågt P/E-tal innebär inte automatiskt att en aktie är billig. <Link href="/nyckeltal/pe-tal" className="font-semibold text-[#e1cb95] hover:text-white">Läs StockBox guide till P/E-tal.</Link></p>
+              <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs leading-6 text-[#9aa7b8]">
+                <Link href="/nyckeltal/pe-tal" className="font-semibold text-[#e1cb95] hover:text-white">Förstå P/E-tal</Link>
+                <Link href="/nyckeltal/ev-ebitda" className="font-semibold text-[#e1cb95] hover:text-white">Förstå EV/EBITDA</Link>
+                <Link href="/nyckeltal/roic" className="font-semibold text-[#e1cb95] hover:text-white">Förstå ROIC</Link>
+                <Link href="/nyckeltal/fritt-kassaflode" className="font-semibold text-[#e1cb95] hover:text-white">Förstå fritt kassaflöde</Link>
+              </div>
             </Card>
           ) : null}
 
@@ -157,7 +165,7 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
             <h2 className="serif text-3xl font-semibold text-[#f4efe5]">Källor och metodik</h2>
             <p className="mt-3 text-sm leading-7 text-[#c9d2df]">StockBox bevarar datakällor och proveniens för rapporten. Den här sidan är en daterad snapshot och ska inte tolkas som realtidsdata.</p>
             {report.sources.length > 0 ? <ul className="mt-5 space-y-2 text-sm">{report.sources.map((source) => <li key={`${source.name}-${source.url}`}><a href={source.url} rel="nofollow noreferrer" className="font-semibold text-[#e1cb95] hover:text-white">{source.name}</a>{source.dataAsOf ? <span className="text-[#7f8b9b]"> · data {source.dataAsOf}</span> : null}</li>)}</ul> : null}
-            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">StockBox metodik</Link><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">Datakällor</Link><Link href="/fundamental-analys" className="font-semibold text-[#e1cb95] hover:text-white">Fundamental analys</Link></div>
+            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">StockBox metodik</Link><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">Datakällor</Link><Link href="/fundamental-analys" className="font-semibold text-[#e1cb95] hover:text-white">Fundamental analys</Link><Link href="/nyckeltal" className="font-semibold text-[#e1cb95] hover:text-white">Nyckeltalsguider</Link></div>
           </Card>
 
           <Card className="border-[#e1cb95]/25 p-6 sm:p-8">
