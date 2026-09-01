@@ -44,6 +44,8 @@ export type AlphaUniverseCandidate = {
   sourceKey: string;
   lastSeenAt: string;
   lastPredictionAt: string | null;
+  lastAttemptAt: string | null;
+  failureCount: number;
 };
 
 function universeRow(
@@ -84,10 +86,7 @@ async function fetchSecIdentities(): Promise<Map<string, SecTickerIdentity> | nu
   try {
     const response = await fetch(SEC_TICKER_EXCHANGE_URL, {
       cache: "no-store",
-      headers: {
-        "User-Agent": userAgent,
-        Accept: "application/json",
-      },
+      headers: { "User-Agent": userAgent, Accept: "application/json" },
     });
     if (!response.ok) return null;
     return parseSecTickerExchangeDirectory(await response.json());
@@ -162,10 +161,7 @@ async function persistDataset(
     if (deactivate.error) throw new Error(`Universe deactivation failed: ${deactivate.error.message}`);
   }
 
-  return {
-    written: rows.length,
-    cikEnriched: rows.filter((row) => Boolean(row.cik)).length,
-  };
+  return { written: rows.length, cikEnriched: rows.filter((row) => Boolean(row.cik)).length };
 }
 
 export async function refreshOfficialUsUniverse(): Promise<UniverseRefreshResult> {
@@ -222,47 +218,47 @@ export async function getUniverseCandidates(limit: number): Promise<AlphaUnivers
 
   const securities = await supabase
     .from("alpha_universe_securities")
-    .select("id,ticker,company_name,exchange,country,currency,cik,source,source_key,last_seen_at")
+    .select("id,ticker,company_name,exchange,country,currency,cik,source,source_key,last_seen_at,last_scan_attempt_at,last_alpha_scanned_at,scan_failure_count")
     .eq("eligible", true)
-    .order("last_seen_at", { ascending: false })
-    .limit(Math.max(bounded * 8, 500));
+    .order("last_alpha_scanned_at", { ascending: true, nullsFirst: true })
+    .order("scan_failure_count", { ascending: true })
+    .order("ticker", { ascending: true })
+    .limit(Math.max(bounded * 4, 200));
   if (securities.error || !securities.data?.length) return [];
 
-  const securityIds = securities.data.map((row) => String(row.id));
-  const predictions = await supabase
-    .from("alpha_predictions")
-    .select("universe_security_id,prediction_as_of")
-    .in("universe_security_id", securityIds)
-    .order("prediction_as_of", { ascending: false });
+  return securities.data.map((row) => ({
+    id: String(row.id),
+    ticker: String(row.ticker),
+    companyName: String(row.company_name),
+    exchange: row.exchange ? String(row.exchange) : null,
+    country: row.country ? String(row.country) : null,
+    currency: row.currency ? String(row.currency) : null,
+    cik: row.cik ? String(row.cik) : null,
+    source: String(row.source),
+    sourceKey: String(row.source_key),
+    lastSeenAt: String(row.last_seen_at),
+    lastPredictionAt: row.last_alpha_scanned_at ? String(row.last_alpha_scanned_at) : null,
+    lastAttemptAt: row.last_scan_attempt_at ? String(row.last_scan_attempt_at) : null,
+    failureCount: Number(row.scan_failure_count ?? 0),
+  }));
+}
 
-  const latestPrediction = new Map<string, string>();
-  for (const row of predictions.data ?? []) {
-    const id = row.universe_security_id ? String(row.universe_security_id) : null;
-    if (id && !latestPrediction.has(id)) latestPrediction.set(id, String(row.prediction_as_of));
-  }
-
-  return securities.data
-    .map((row) => ({
-      id: String(row.id),
-      ticker: String(row.ticker),
-      companyName: String(row.company_name),
-      exchange: row.exchange ? String(row.exchange) : null,
-      country: row.country ? String(row.country) : null,
-      currency: row.currency ? String(row.currency) : null,
-      cik: row.cik ? String(row.cik) : null,
-      source: String(row.source),
-      sourceKey: String(row.source_key),
-      lastSeenAt: String(row.last_seen_at),
-      lastPredictionAt: latestPrediction.get(String(row.id)) ?? null,
-    }))
-    .sort((left, right) => {
-      if (!left.lastPredictionAt && right.lastPredictionAt) return -1;
-      if (left.lastPredictionAt && !right.lastPredictionAt) return 1;
-      if (!left.lastPredictionAt && !right.lastPredictionAt) {
-        if (Boolean(left.cik) !== Boolean(right.cik)) return left.cik ? -1 : 1;
-        return left.ticker.localeCompare(right.ticker);
-      }
-      return left.lastPredictionAt!.localeCompare(right.lastPredictionAt!) || left.ticker.localeCompare(right.ticker);
-    })
-    .slice(0, bounded);
+export async function recordUniverseScanState(input: {
+  id: string;
+  status: "success" | "failed" | "skipped";
+  attemptedAt: string;
+  errorClass?: string | null;
+  previousFailureCount: number;
+}): Promise<void> {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+  const success = input.status === "success";
+  await supabase.from("alpha_universe_securities").update({
+    last_scan_attempt_at: input.attemptedAt,
+    last_alpha_scanned_at: success ? input.attemptedAt : undefined,
+    scan_failure_count: success ? 0 : input.status === "failed" ? input.previousFailureCount + 1 : input.previousFailureCount,
+    last_scan_status: input.status,
+    last_scan_error_class: success ? null : input.errorClass ?? null,
+    updated_at: input.attemptedAt,
+  }).eq("id", input.id);
 }
