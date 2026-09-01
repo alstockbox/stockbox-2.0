@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ButtonLink } from "@/components/ui/button";
@@ -27,7 +28,7 @@ export function SeoBreadcrumbs({ items }: { items: SeoBreadcrumb[] }) {
       {items.map((item, index) => (
         <span key={item.href} className="flex items-center gap-2">
           {index > 0 ? <span aria-hidden="true">/</span> : null}
-          <Link href={item.href} className="hover:text-[#f4efe5]">{item.label}</Link>
+          <Link href={item.href as Route} className="hover:text-[#f4efe5]">{item.label}</Link>
         </span>
       ))}
     </nav>
@@ -61,8 +62,8 @@ export function SeoHero({
         <h1 className="serif mt-4 text-4xl font-semibold leading-tight text-[#f4efe5] sm:text-5xl">{title}</h1>
         <p className="mt-5 max-w-3xl text-base leading-8 text-[#c9d2df] sm:text-lg">{lead}</p>
         <div className="mt-7 flex flex-wrap gap-3">
-          <ButtonLink href={primaryHref}>{primaryLabel}</ButtonLink>
-          <ButtonLink href={secondaryHref} variant="secondary">{secondaryLabel}</ButtonLink>
+          <ButtonLink href={primaryHref as Route}>{primaryLabel}</ButtonLink>
+          <ButtonLink href={secondaryHref as Route} variant="secondary">{secondaryLabel}</ButtonLink>
         </div>
       </Container>
     </Section>
