@@ -21,7 +21,7 @@ export type HiddenGemsRiskBand = "low" | "medium" | "high";
 export type AlphaPredictionSnapshot = {
   id: string;
   analysisId: string | null;
-  universeSecurityId: string | null;
+  universeSecurityId?: string | null;
   ticker: string;
   companyName: string;
   sector: string | null;
