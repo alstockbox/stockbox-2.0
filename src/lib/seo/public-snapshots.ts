@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -10,6 +11,8 @@ import {
 } from "./public-stock";
 
 export const PUBLIC_STOCK_SITEMAP_PAGE_SIZE = 1000;
+export const PUBLIC_STOCK_CACHE_SECONDS = 900;
+const PUBLIC_STOCK_LIST_TAG = "public-stock-list";
 
 export type PublicStockSnapshot = {
   slug: string;
@@ -140,25 +143,50 @@ export async function getPublicStockSnapshotBySlug(slug: string): Promise<Public
   return fromRow(data as unknown as PublicStockSnapshotRow);
 }
 
-export const getCachedPublicStockSnapshotBySlug = cache(getPublicStockSnapshotBySlug);
+export async function getPersistedPublicStockSnapshotBySlug(slug: string): Promise<PublicStockSnapshot | null> {
+  const normalizedSlug = slugifyStockPage(slug);
+  if (!normalizedSlug) return null;
 
-export async function listPublicStockSnapshots(limit = 500): Promise<PublicStockSnapshot[]> {
+  const getPersistedSnapshot = unstable_cache(
+    () => getPublicStockSnapshotBySlug(normalizedSlug),
+    ["public-stock-snapshot", normalizedSlug],
+    {
+      revalidate: PUBLIC_STOCK_CACHE_SECONDS,
+      tags: [PUBLIC_STOCK_LIST_TAG, `public-stock-snapshot:${normalizedSlug}`],
+    },
+  );
+
+  return getPersistedSnapshot();
+}
+
+export const getCachedPublicStockSnapshotBySlug = cache(getPersistedPublicStockSnapshotBySlug);
+
+async function listPublicStockSnapshotsUncached(limit: number): Promise<PublicStockSnapshot[]> {
   const supabase = createAdminClient();
   if (!supabase) return [];
-  const safeLimit = Math.max(1, Math.min(5000, Math.trunc(limit)));
 
   const { data, error } = await supabase
     .from("public_stock_snapshots")
     .select(publicSnapshotFields)
     .eq("is_indexable", true)
     .order("updated_at", { ascending: false })
-    .limit(safeLimit);
+    .limit(limit);
 
   if (error || !data) return [];
   return (data as unknown as PublicStockSnapshotRow[]).map(fromRow);
 }
 
-export async function countPublicStockSnapshots(): Promise<number> {
+export async function listPublicStockSnapshots(limit = 500): Promise<PublicStockSnapshot[]> {
+  const safeLimit = Math.max(1, Math.min(5000, Math.trunc(limit)));
+  const getPersistedList = unstable_cache(
+    () => listPublicStockSnapshotsUncached(safeLimit),
+    [PUBLIC_STOCK_LIST_TAG, String(safeLimit)],
+    { revalidate: PUBLIC_STOCK_CACHE_SECONDS, tags: [PUBLIC_STOCK_LIST_TAG] },
+  );
+  return getPersistedList();
+}
+
+async function countPublicStockSnapshotsUncached(): Promise<number> {
   const supabase = createAdminClient();
   if (!supabase) return 0;
 
@@ -171,24 +199,27 @@ export async function countPublicStockSnapshots(): Promise<number> {
   return count;
 }
 
+export async function countPublicStockSnapshots(): Promise<number> {
+  const getPersistedCount = unstable_cache(
+    countPublicStockSnapshotsUncached,
+    ["public-stock-count"],
+    { revalidate: PUBLIC_STOCK_CACHE_SECONDS, tags: [PUBLIC_STOCK_LIST_TAG] },
+  );
+  return getPersistedCount();
+}
+
 export async function getPublicStockSnapshotSitemapIds(): Promise<number[]> {
   const count = await countPublicStockSnapshots();
   const pageCount = Math.ceil(count / PUBLIC_STOCK_SITEMAP_PAGE_SIZE);
   return Array.from({ length: pageCount }, (_, id) => id);
 }
 
-export async function listPublicStockSnapshotsPage(
-  page: number,
-  pageSize = PUBLIC_STOCK_SITEMAP_PAGE_SIZE,
-): Promise<PublicStockSnapshot[]> {
+async function listPublicStockSnapshotsPageUncached(page: number, pageSize: number): Promise<PublicStockSnapshot[]> {
   const supabase = createAdminClient();
   if (!supabase) return [];
 
-  const safePage = Math.max(0, Math.trunc(page));
-  const safePageSize = Math.max(1, Math.min(PUBLIC_STOCK_SITEMAP_PAGE_SIZE, Math.trunc(pageSize)));
-  const from = safePage * safePageSize;
-  const to = from + safePageSize - 1;
-
+  const from = page * pageSize;
+  const to = from + pageSize - 1;
   const { data, error } = await supabase
     .from("public_stock_snapshots")
     .select(publicSnapshotFields)
@@ -198,6 +229,20 @@ export async function listPublicStockSnapshotsPage(
 
   if (error || !data) return [];
   return (data as unknown as PublicStockSnapshotRow[]).map(fromRow);
+}
+
+export async function listPublicStockSnapshotsPage(
+  page: number,
+  pageSize = PUBLIC_STOCK_SITEMAP_PAGE_SIZE,
+): Promise<PublicStockSnapshot[]> {
+  const safePage = Math.max(0, Math.trunc(page));
+  const safePageSize = Math.max(1, Math.min(PUBLIC_STOCK_SITEMAP_PAGE_SIZE, Math.trunc(pageSize)));
+  const getPersistedPage = unstable_cache(
+    () => listPublicStockSnapshotsPageUncached(safePage, safePageSize),
+    ["public-stock-sitemap-page", String(safePage), String(safePageSize)],
+    { revalidate: PUBLIC_STOCK_CACHE_SECONDS, tags: [PUBLIC_STOCK_LIST_TAG] },
+  );
+  return getPersistedPage();
 }
 
 export type PublishAnalysisSnapshotResult =
