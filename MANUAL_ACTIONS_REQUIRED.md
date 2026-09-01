@@ -34,3 +34,20 @@
 **EXPECTED VALUE:** Prevents an unverified commit from bypassing the same regression gates used for this release.
 
 **HOW TO VERIFY:** GitHub should reject a direct unverified change to `main`, and the protection/ruleset page must show the required StockBox CI check for `main`.
+
+## 3. Complete Vercel deployment after Hobby build-rate reset
+
+**ACTION:** Retry the StockBox Vercel preview/production deployment after the Hobby build-rate window resets, or upgrade the Vercel team if immediate additional builds are required.
+
+**WHY:** Vercel returned `Deployment rate limited — retry in 24 hours` for the final release commit. GitHub CI and the local production build are green; no Vercel build for this SHA was executed, so deployment must not be claimed as verified.
+
+**EXACT STEPS:**
+1. After the Vercel Hobby build-rate window resets, redeploy the final `main` commit from the Vercel project `stockbox-2-0`.
+2. Wait until the deployment state is **READY**.
+3. Smoke-test `/`, `/auth/login`, `/auth/signup`, `/pricing`, `/batch`, `/dashboard`, `/history`, `/watchlist`, `/portfolio`, `/compare`, and `/research`.
+4. Confirm protected routes redirect/authenticate normally and `/api/jobs/batch/run` returns 401 without `CRON_SECRET` authorization.
+5. Check production runtime logs for new `error`/`fatal` entries, especially environment parsing and batch worker failures.
+
+**EXPECTED VALUE:** Moves the already verified release commit from source control into production without bypassing deployment verification.
+
+**HOW TO VERIFY:** Vercel shows the final `main` SHA as a READY production deployment, critical route smoke tests pass, and the post-deploy runtime error check shows no new release-caused error cluster.
