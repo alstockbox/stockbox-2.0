@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, CircleDashed, Search, Sparkles } from "lucide-react";
+import { CheckCircle2, CircleDashed, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type {
   AnalysisReport,
@@ -34,6 +34,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
   const copy = getP0Copy(locale).analyze;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CompanySearchResult[]>(commonCompanies.slice(0, 6));
+  const [showSearchResults, setShowSearchResults] = useState(true);
   const [selected, setSelected] = useState<CompanySearchResult | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
@@ -65,6 +66,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
       setReport(null);
     }
     setQuery(value);
+    setShowSearchResults(true);
     setError(null);
     setHighlightedIndex(-1);
     if (value.trim().length < 2) {
@@ -73,12 +75,25 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
     }
   }
 
+  function clearSearch() {
+    searchRequest.current += 1;
+    setQuery("");
+    setSelected(null);
+    setReport(null);
+    setError(null);
+    setResults(commonCompanies.slice(0, 6));
+    setHighlightedIndex(-1);
+    setIsSearching(false);
+    setShowSearchResults(false);
+  }
+
   function selectCompany(company: CompanySearchResult) {
     setSelected(company);
     setQuery(formattedCompanySelection(company));
     setReport(null);
     setError(null);
     setIsSearching(false);
+    setShowSearchResults(true);
     const selectionKey = securitySelectionKey(company);
     setHighlightedIndex(results.findIndex((result) => securitySelectionKey(result) === selectionKey));
   }
@@ -102,6 +117,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
         const payload = (await response.json()) as { companies: CompanySearchResult[] };
         if (requestId === searchRequest.current) {
           setResults(payload.companies);
+          setShowSearchResults(true);
           setHighlightedIndex(payload.companies.length ? 0 : -1);
         }
       } catch (searchError) {
@@ -128,11 +144,11 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
-      setResults([]);
+      setShowSearchResults(false);
       setHighlightedIndex(-1);
       return;
     }
-    if (!results.length) return;
+    if (!showSearchResults || !results.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((current) => current < results.length - 1 ? current + 1 : 0);
@@ -147,6 +163,7 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
 
   function runAnalysis() {
     if (!selected) return;
+    setShowSearchResults(false);
     setError(null);
     setLoadingStage(0);
     startTransition(async () => {
@@ -175,9 +192,9 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="p-5">
-        <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+    <div className="space-y-4 sm:space-y-6">
+      <Card className="p-4 sm:p-5">
+        <div className="grid gap-4 sm:gap-5 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <label className="text-sm font-semibold text-[#f4efe5]" htmlFor="company-search">
               {copy.searchCompany}
@@ -189,50 +206,69 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
                   id="company-search"
                   value={query}
                   onChange={(event) => updateQuery(event.target.value)}
+                  onFocus={() => {
+                    if (results.length) setShowSearchResults(true);
+                  }}
                   onKeyDown={handleSearchKeyDown}
                   role="combobox"
-                  aria-expanded={results.length > 0}
+                  aria-expanded={showSearchResults && results.length > 0}
                   aria-controls="company-search-results"
-                  aria-activedescendant={highlightedIndex >= 0 ? `company-result-${highlightedIndex}` : undefined}
+                  aria-activedescendant={showSearchResults && highlightedIndex >= 0 ? `company-result-${highlightedIndex}` : undefined}
                   placeholder={copy.placeholder}
-                  className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-3 text-sm text-[#f4efe5] placeholder:text-[#6f7b8c]"
+                  className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] pl-10 pr-11 text-sm text-[#f4efe5] placeholder:text-[#6f7b8c]"
                 />
+                {query || selected ? (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    aria-label={locale === "sv" ? "Rensa sökning" : "Clear search"}
+                    title={locale === "sv" ? "Rensa" : "Clear"}
+                    className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[#9aa7b8] transition hover:bg-white/8 hover:text-white"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
-              <Button type="button" onClick={runAnalysis} disabled={!canAnalyze}>
+              <Button type="button" onClick={runAnalysis} disabled={!canAnalyze} className="hidden sm:inline-flex">
                 <Sparkles className="h-4 w-4" aria-hidden="true" />
                 {isPending ? copy.analyzing : copy.analyze}
               </Button>
             </div>
-            <p className="mt-2 text-sm text-[#9aa7b8]">{helperText}</p>
-            <div id="company-search-results" role="listbox" className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((company, index) => (
-                <button
-                  key={securitySelectionKey(company)}
-                  id={`company-result-${index}`}
-                  type="button"
-                  role="option"
-                  aria-selected={selectedSecurityKey === securitySelectionKey(company)}
-                  onClick={() => selectCompany(company)}
-                  className={`rounded-md border p-3 text-left text-sm transition ${
-                    selectedSecurityKey === securitySelectionKey(company)
-                      ? "border-[#b99b5f]/60 bg-[#b99b5f]/15"
-                      : highlightedIndex === index
-                        ? "border-white/30 bg-white/10"
-                      : "border-white/10 bg-white/5 hover:bg-white/8"
-                  }`}
-                >
-                  <span className="block font-semibold text-[#f4efe5]">{company.canonicalTicker ?? company.ticker}</span>
-                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#9aa7b8]">{company.name}</span>
-                  <span className="mt-1 block text-xs text-[#6f7b8c]">{[company.exchange, company.securityType].filter(Boolean).join(" - ")}</span>
-                  <span className="mt-1 block text-xs text-[#7f8da0]">{compactAnalysisCapability(company)}</span>
-                </button>
-              ))}
-            </div>
+            <p className="mt-2 text-xs leading-5 text-[#9aa7b8] sm:text-sm">{helperText}</p>
+
+            {showSearchResults && results.length > 0 ? (
+              <div id="company-search-results" role="listbox" className="mt-3 grid max-h-[22rem] gap-2 overflow-y-auto pr-1 sm:max-h-none sm:grid-cols-2 sm:overflow-visible sm:pr-0 lg:grid-cols-3">
+                {results.map((company, index) => (
+                  <button
+                    key={securitySelectionKey(company)}
+                    id={`company-result-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selectedSecurityKey === securitySelectionKey(company)}
+                    onClick={() => selectCompany(company)}
+                    className={`rounded-md border p-2.5 text-left text-sm transition sm:p-3 ${
+                      selectedSecurityKey === securitySelectionKey(company)
+                        ? "border-[#b99b5f]/60 bg-[#b99b5f]/15"
+                        : highlightedIndex === index
+                          ? "border-white/30 bg-white/10"
+                          : "border-white/10 bg-white/5 hover:bg-white/8"
+                    }`}
+                  >
+                    <span className="block font-semibold text-[#f4efe5]">{company.canonicalTicker ?? company.ticker}</span>
+                    <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#9aa7b8]">{company.name}</span>
+                    <span className="mt-1 block text-xs text-[#6f7b8c]">{[company.exchange, company.securityType].filter(Boolean).join(" - ")}</span>
+                    <span className="mt-1 block text-xs text-[#7f8da0]">{compactAnalysisCapability(company)}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             {isSearching ? <p className="mt-3 text-sm text-[#9aa7b8]">{copy.searching}</p> : null}
             {!isSearching && query.trim().length >= 2 && !selected && results.length === 0 ? (
               <p className="mt-3 text-sm text-[#9aa7b8]">{copy.noMatch}</p>
             ) : null}
-            <div data-testid="primary-investment-profile" className="mt-5 rounded-lg border border-[#b99b5f]/25 bg-[#b99b5f]/5 p-4">
+
+            <div data-testid="primary-investment-profile" className="mt-4 rounded-lg border border-[#b99b5f]/25 bg-[#b99b5f]/5 p-3.5 sm:mt-5 sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm font-semibold text-[#f4efe5]" htmlFor="investment-profile-primary">{copy.investmentProfile}</label>
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[#e1cb95]">{copy.investmentProfile}</span>
@@ -252,43 +288,50 @@ export function AnalysisWorkbench({ financialConfigured, initialMode = "simple",
                 <option value="dividend">{copy.dividend}</option>
                 <option value="defensive">{copy.defensive}</option>
               </select>
-              <p className="mt-3 text-xs leading-5 text-[#aeb9c8]">{profilePresentation.description}</p>
+              <p className="mt-2 text-xs leading-5 text-[#aeb9c8] sm:mt-3">{profilePresentation.description}</p>
+            </div>
+
+            <div data-testid="mobile-analysis-cta" className="sticky bottom-3 z-20 mt-3 sm:hidden">
+              <Button type="button" onClick={runAnalysis} disabled={!canAnalyze} className="min-h-12 w-full shadow-xl shadow-black/30">
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+                {isPending ? copy.analyzing : copy.analyze}
+              </Button>
             </div>
           </div>
 
-          <details className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <details className="self-start rounded-lg border border-white/10 bg-white/[0.03] p-3.5 sm:p-4">
             <summary className="cursor-pointer text-sm font-semibold text-[#f4efe5]">{copy.advancedSettings}</summary>
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-            <label className="space-y-2 text-sm">
-              <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
-              <select
-                value={analysisType}
-                onChange={(event) => setAnalysisType(event.target.value as AnalysisType)}
-                className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
-              >
-                <option value="summary">{copy.summary}</option>
-                <option value="numbers">{copy.numbers}</option>
-                <option value="deep">{copy.deep}</option>
-                <option value="research">{copy.research}</option>
-              </select>
-            </label>
-            <fieldset className="space-y-2 text-sm">
-              <legend className="font-semibold text-[#f4efe5]">{copy.mode}</legend>
-              <div className="grid grid-cols-2 rounded-md border border-white/12 bg-[#07111f] p-1">
-                {(["simple", "pro"] as UiMode[]).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setMode(item)}
-                    className={`h-8 rounded text-xs font-semibold capitalize ${
-                      mode === item ? "bg-[#b99b5f] text-[#07111f]" : "text-[#c9d2df]"
-                    }`}
-                  >
-                    {item === "simple" ? copy.simple : copy.pro}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
+              <label className="space-y-2 text-sm">
+                <span className="font-semibold text-[#f4efe5]">{copy.reportType}</span>
+                <select
+                  value={analysisType}
+                  onChange={(event) => setAnalysisType(event.target.value as AnalysisType)}
+                  className="h-10 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-[#f4efe5]"
+                >
+                  <option value="summary">{copy.summary}</option>
+                  <option value="numbers">{copy.numbers}</option>
+                  <option value="deep">{copy.deep}</option>
+                  <option value="research">{copy.research}</option>
+                </select>
+              </label>
+              <fieldset className="space-y-2 text-sm">
+                <legend className="font-semibold text-[#f4efe5]">{copy.mode}</legend>
+                <div className="grid grid-cols-2 rounded-md border border-white/12 bg-[#07111f] p-1">
+                  {(["simple", "pro"] as UiMode[]).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setMode(item)}
+                      className={`h-8 rounded text-xs font-semibold capitalize ${
+                        mode === item ? "bg-[#b99b5f] text-[#07111f]" : "text-[#c9d2df]"
+                      }`}
+                    >
+                      {item === "simple" ? copy.simple : copy.pro}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
             </div>
           </details>
         </div>
