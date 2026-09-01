@@ -2,7 +2,7 @@
 
 Model version: `stockbox-analysis-engine-v2.7.0`
 Report schema: `stockbox-analysis-report-v5`
-Score policy: `stockbox-score-policy-v8`
+Score policy: `stockbox-score-policy-v9`
 DCF policy: `stockbox-dcf-assumptions-v4`
 Static benchmarks: `stockbox-static-benchmarks-v1`
 
@@ -48,7 +48,9 @@ The customer-facing conclusion is neutral research classification rather than BU
 - Weak: score below 42.
 - Insufficient data: no finite score, confidence below 40, or weighted data coverage below 0.55.
 
-The research view does not override missing-data, freshness, currency, archetype, specialist-coverage or source-conflict gates. Confidence measures trust in the method and underlying data, not whether a company is attractive. A legacy directional-rating field remains in the persisted report schema for historical compatibility and regression/calibration. Where surfaced to customers it is labeled Model rating and is presented as research output, not investment advice. Customer-facing alerts and analytics use the neutral overall Research view instead.
+The research view does not override missing-data, freshness, currency, archetype, specialist-coverage or source-conflict gates. Confidence measures trust in the method and underlying data, not whether a company is attractive.
+
+A legacy directional-rating field remains in the persisted report schema for historical compatibility, regression and calibration. It is not the primary customer conclusion and must not be interpreted as another version of the Research View. A Strong or Solid Research View can therefore coexist with a legacy Hold when current valuation support, valuation coverage, confidence or unresolved risk gates do not justify a directional Buy/Sell rating. When this combination is surfaced, the report explains that distinction and, where available, shows the applied rating constraint. Customer-facing alerts and analytics use the neutral overall Research View instead.
 
 Confidence measures method and data trust, not company quality. It incorporates coverage, financial and market freshness, source quality, reconciliation, valuation inputs and assumptions, entity confidence, currency state, archetype confidence, specialist coverage and source conflicts. Overall confidence is capped at 35 when the archetype is unresolved, at 45 when a bank/insurer/REIT has less than 30% specialist coverage, and at 60 while specialist coverage remains below 70%. A failed provider attempt does not lower core source quality when a complete fallback succeeds; fallback use remains visible in QA.
 
@@ -64,7 +66,7 @@ The live report displays the engine's per-share Bear/Base/Bull range only when d
 
 The result stores model, score-policy and benchmark versions plus a SHA-256 fingerprint of the sorted canonical input and those versions. `analysisDate` is injectable for deterministic reruns. Sources distinguish `dataAsOf` from `accessedAt` and include provider capability and adapter version. Research is attached once after the canonical result and source list exist, and signal evidence is capability- or metric-provenance-specific.
 
-Batch QA persists score, coverage, confidence, versions and fingerprint. Rerun comparison reports added/removed/matched entities, signed and absolute score changes, score availability, research-view transitions, coverage, confidence, archetype and flag changes. The legacy directional field remains available for historical regression compatibility and consistent Model rating display across canonical report/export surfaces. This does not imply benchmark calibration has already been completed.
+Batch QA persists score, coverage, confidence, versions and fingerprint. Rerun comparison reports added/removed/matched entities, signed and absolute score changes, score availability, research-view transitions, coverage, confidence, archetype and flag changes. The legacy directional field remains available for historical regression compatibility. This does not imply benchmark calibration has already been completed.
 
 ## Limitations
 
