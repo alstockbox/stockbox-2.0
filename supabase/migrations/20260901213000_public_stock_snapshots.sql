@@ -25,13 +25,7 @@ create index if not exists public_stock_snapshots_indexable_updated_idx
 alter table public.public_stock_snapshots enable row level security;
 
 drop policy if exists "Public can read indexable stock snapshots" on public.public_stock_snapshots;
-create policy "Public can read indexable stock snapshots"
-  on public.public_stock_snapshots
-  for select
-  to anon, authenticated
-  using (is_indexable = true);
-
-grant select on public.public_stock_snapshots to anon, authenticated;
+revoke select on public.public_stock_snapshots from anon, authenticated;
 revoke insert, update, delete on public.public_stock_snapshots from anon, authenticated;
 
 commit;
