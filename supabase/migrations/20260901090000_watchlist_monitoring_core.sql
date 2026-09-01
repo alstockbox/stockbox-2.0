@@ -4,7 +4,7 @@ alter table public.watchlists
   add column if not exists monitoring_enabled boolean not null default true,
   add column if not exists monitoring_frequency text not null default 'daily',
   add column if not exists last_checked_at timestamptz,
-  add column if not exists next_check_at timestamptz not null default now(),
+  add column if not exists next_check_at timestamptz default now(),
   add column if not exists last_monitor_error text;
 
 do $$
