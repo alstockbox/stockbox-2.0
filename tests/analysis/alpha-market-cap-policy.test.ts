@@ -4,8 +4,8 @@ import { resolveMarketCapBand, sizePotentialForBand } from "../../src/lib/alpha/
 describe("alpha market-cap policy", () => {
   it("does not compare raw market-cap numbers across currencies", () => {
     expect(resolveMarketCapBand(4_000_000_000, "SEK")).toBe("small");
-    expect(resolveMarketCapBand(4_000_000_000, "USD")).toBe("large");
-    expect(sizePotentialForBand("small")).toBeGreaterThan(sizePotentialForBand("large"));
+    expect(resolveMarketCapBand(4_000_000_000, "USD")).toBe("mid");
+    expect(sizePotentialForBand("small")).toBeGreaterThan(sizePotentialForBand("mid"));
   });
 
   it("fails closed to unknown when currency is not supported", () => {
