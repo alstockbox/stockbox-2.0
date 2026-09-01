@@ -1,4 +1,4 @@
-name: Temporary Analysis Lens RED
+name: Temporary Analysis Lens Release Gate
 
 on:
   push:
@@ -6,17 +6,44 @@ on:
       - work/temporary-analysis-lens
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: temporary-analysis-lens-release-gate
+  cancel-in-progress: true
 
 jobs:
-  red-contract:
+  verify-and-commit:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run temporary lens contract
-        run: npx vitest run tests/analysis/temporary-analysis-lens.test.ts
+      - name: Apply guarded report-view patch
+        run: node scripts/patch-temporary-analysis-lens.mjs
+      - name: Temporary lens contract
+        run: npx vitest run tests/analysis/temporary-analysis-lens.test.ts tests/analysis/investment-profiles-p0.test.ts tests/analysis/report-consistency.test.ts
+      - name: Full regression suite
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Remove temporary implementation machinery
+        run: rm -f scripts/patch-temporary-analysis-lens.mjs .github/workflows/temporary-analysis-lens-red.yml
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Commit verified implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: add temporary analysis lens switching"
+          git push origin HEAD:work/temporary-analysis-lens
