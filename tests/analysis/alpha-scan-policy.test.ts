@@ -19,7 +19,7 @@ function row(
 describe("Alpha universe scanner policy", () => {
   it("prioritizes never-scanned securities before stale securities", () => {
     const selected = selectScannerCandidates([
-      row("RECENT", "2026-08-31T12:00:00.000Z"),
+      row("RECENT", "2026-09-01T00:00:00.000Z"),
       row("NEVER", null),
       row("STALE", "2026-08-01T12:00:00.000Z"),
     ], {
