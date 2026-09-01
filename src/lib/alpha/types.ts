@@ -1,3 +1,5 @@
+import type { MarketCapBand } from "./market-cap";
+
 export type AlphaClassification = "exceptional" | "high_potential" | "watchlist" | "low_conviction";
 
 export type AlphaHistoryPoint = {
@@ -18,6 +20,7 @@ export type AlphaSignalInput = {
   market: {
     price: number | null;
     marketCap: number | null;
+    marketCapCurrency?: string | null;
     volume: number | null;
     yearHigh: number | null;
     yearLow: number | null;
@@ -100,6 +103,7 @@ export type AlphaIntelligenceResult = {
   companyName: string;
   modelVersion: string;
   generatedAt: string;
+  marketCapBand: MarketCapBand;
   alphaScore: number;
   classification: AlphaClassification;
   confidence: number;
@@ -119,5 +123,6 @@ export type AlphaIntelligenceResult = {
     purpose: "ranking";
     independentFromFundamentalScore: true;
     probabilitiesAreModelImplied: true;
+    marketCapPolicyVersion: string;
   };
 };
