@@ -146,7 +146,7 @@ export async function runAlphaUniverseScan(options: {
 
   let analyzed = 0;
   let predictions = 0;
-  let skipped = 0;
+  const skipped = 0;
   let failed = 0;
   const failures: AlphaUniverseScanResult["failures"] = [];
   const supabase = createAdminClient();
