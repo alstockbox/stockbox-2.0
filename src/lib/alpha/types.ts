@@ -124,5 +124,7 @@ export type AlphaIntelligenceResult = {
     independentFromFundamentalScore: true;
     probabilitiesAreModelImplied: true;
     marketCapPolicyVersion: string;
+    weightProfile: string;
+    archetypeSupport: number;
   };
 };
