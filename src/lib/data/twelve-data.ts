@@ -31,6 +31,7 @@ export const TWELVE_DATA_CAPABILITIES: ProviderCapabilities = {
 
 type JsonObject = Record<string, unknown>;
 type RequestCapability = "search" | "market_data";
+type CurrencyPricePoint = MarketPricePoint & { currency?: string | null; provider?: string };
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
@@ -112,12 +113,17 @@ function rows(payload: JsonObject): PriceRow[] {
   }).sort((left, right) => left.date.localeCompare(right.date));
 }
 
-function monthlyPriceHistory(values: PriceRow[]): MarketPricePoint[] {
-  const lastByMonth = new Map<string, PriceRow>();
-  for (const row of values) lastByMonth.set(row.date.slice(0, 7), row);
-  return [...lastByMonth.values()]
-    .sort((left, right) => left.date.localeCompare(right.date))
-    .map(({ date, close }) => ({ date, close }));
+function monthlyPriceHistory(values: PriceRow[], currency: string | null): MarketPricePoint[] {
+  const lastByMonth = new Map<string, CurrencyPricePoint>();
+  for (const row of values) {
+    lastByMonth.set(row.date.slice(0, 7), {
+      date: row.date,
+      close: row.close,
+      currency,
+      provider: PROVIDER_ID,
+    });
+  }
+  return [...lastByMonth.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
 function dividendEvents(payload: JsonObject, fallbackCurrency: string | null): MarketDividendEvent[] {
@@ -220,7 +226,9 @@ export function createTwelveDataMarketProvider(apiKey: string): MarketDataProvid
         ?? nestedNumber(statistics, "statistics", "stock_price_summary", "beta");
       const currency = textValue(quote.currency) ?? company.currency ?? null;
       const corporateActionsAvailable = dividendsResult.ok || splitsResult.ok;
-      const priceHistory = maxHistory.length ? monthlyPriceHistory(maxHistory) : monthlyPriceHistory(dailyHistory);
+      const priceHistory = maxHistory.length
+        ? monthlyPriceHistory(maxHistory, currency)
+        : monthlyPriceHistory(dailyHistory, currency);
       return {
         ok: true,
         data: {
