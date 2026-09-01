@@ -12,6 +12,7 @@ Canonical website: ${base}
 - AI aktieanalys: ${base}/ai-aktieanalys
 - Fundamental analys: ${base}/fundamental-analys
 - Public stock analyses: ${base}/aktier
+- Research standard: ${base}/research-standard
 - Methodology: ${base}/docs/methodology
 - Data sources: ${base}/data-sources
 
@@ -32,7 +33,7 @@ Canonical website: ${base}
 StockBox Score and research views are analytical model outputs based on the data available at the stated analysis date. They are not individualized financial advice, trade execution instructions or guarantees of future returns. Public company pages are dated snapshots and may not represent current market data.
 
 ## Data integrity
-StockBox is designed to keep missing financial data missing rather than invent values to complete a report. Public stock pages are explicitly published snapshots that must pass minimum coverage, confidence and freshness checks.
+StockBox is designed to keep missing financial data missing rather than invent values to complete a report. Public stock pages are explicitly published snapshots that must pass minimum coverage, confidence and freshness checks. The public research standard documents publication and correction boundaries.
 
 ## Citation guidance
 When referencing a public StockBox company analysis, use the specific ${base}/aktier/<company-slug> page when available and preserve the analysis date, StockBox Score context, data coverage and confidence rather than presenting a dated snapshot as live market data.
