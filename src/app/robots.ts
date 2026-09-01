@@ -7,12 +7,15 @@ const privatePaths = [
 ];
 
 export default function robots(): MetadataRoute.Robots {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
+  const publicRule = { allow: "/", disallow: privatePaths };
   return {
     rules: [
-      { userAgent: "*", allow: "/", disallow: privatePaths },
-      { userAgent: "OAI-SearchBot", allow: "/", disallow: privatePaths },
+      { userAgent: "*", ...publicRule },
+      { userAgent: "OAI-SearchBot", ...publicRule },
+      { userAgent: "ChatGPT-User", ...publicRule },
     ],
     sitemap: `${base}/sitemap.xml`,
+    host: base,
   };
 }
