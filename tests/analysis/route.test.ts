@@ -26,6 +26,14 @@ vi.mock("@/lib/data/provider", () => ({
   analyzeCompany: mocks.analyzeCompany,
   searchCompanies: mocks.searchCompanies
 }));
+vi.mock("@/lib/data/universal-security-provider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/data/universal-security-provider")>();
+  return {
+    ...actual,
+    analyzeCompany: mocks.analyzeCompany,
+    searchCompanies: mocks.searchCompanies
+  };
+});
 vi.mock("@/lib/db/repositories", () => ({
   completeAnalysisReservation: mocks.completeAnalysisReservation,
   getAnalysisReplay: mocks.getAnalysisReplay,
@@ -80,7 +88,7 @@ function companyRequest(company: Record<string, unknown>) {
   });
 }
 
-function unsupportedAnalysisRequest() {
+function etfAnalysisRequest() {
   return new Request("http://localhost/api/analysis", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -302,17 +310,17 @@ describe("analysis API authentication and entitlement enforcement", () => {
     expect(mocks.analyzeCompany).toHaveBeenCalledWith(expect.objectContaining({ company: expect.objectContaining({ canonicalTicker: "ATCO-B.ST" }) }));
   });
 
-  it("rejects unsupported securities before quota reservation or provider work", async () => {
-    const response = await POST(unsupportedAnalysisRequest());
+  it("allows ETF securities through quota reservation and universal analysis dispatch", async () => {
+    const response = await POST(etfAnalysisRequest());
     const payload = await response.json();
 
-    expect(response.status).toBe(422);
-    expect(payload).toEqual({
-      error: "Live fundamentals are not available for this security."
-    });
-    expect(mocks.reserveAnalysisEntitlement).not.toHaveBeenCalled();
-    expect(mocks.analyzeCompany).not.toHaveBeenCalled();
-    expect(mocks.persistAnalysis).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, persisted: true });
+    expect(mocks.reserveAnalysisEntitlement).toHaveBeenCalledOnce();
+    expect(mocks.analyzeCompany).toHaveBeenCalledWith(expect.objectContaining({
+      company: expect.objectContaining({ ticker: "SPY", securityType: "ETF/Fund" })
+    }));
+    expect(mocks.persistAnalysis).toHaveBeenCalledOnce();
   });
 
   it("rejects ADR requests even when a CIK is present and provider capabilities are omitted", async () => {
