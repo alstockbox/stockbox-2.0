@@ -41,6 +41,33 @@ export async function addWatchlistItemAction(formData: FormData) {
   revalidatePath("/watchlist");
 }
 
+export async function updateWatchlistMonitoringAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = z.object({
+    id: z.string().uuid(),
+    frequency: z.enum(["daily", "weekly"]),
+  }).safeParse({
+    id: formData.get("id"),
+    frequency: formData.get("frequency") ?? "daily",
+  });
+  if (!parsed.success) return;
+  const monitoringEnabled = formData.get("monitoringEnabled") === "on";
+  const alertPreferences = {
+    insider: formData.get("insiderAlerts") === "on",
+    shortInterest: formData.get("shortInterestAlerts") === "on",
+    filing: formData.get("filingAlerts") === "on",
+  };
+  const supabase = await createClient();
+  await supabase?.from("watchlists").update({
+    monitoring_enabled: monitoringEnabled,
+    monitoring_frequency: parsed.data.frequency,
+    alert_preferences: alertPreferences,
+    next_check_at: monitoringEnabled ? new Date().toISOString() : null,
+    last_monitor_error: null,
+  }).eq("id", parsed.data.id).eq("user_id", user.id);
+  revalidatePath("/watchlist");
+}
+
 export async function removeWatchlistItemAction(formData: FormData) {
   const user = await requireUser();
   const id = z.string().uuid().safeParse(formData.get("id"));
