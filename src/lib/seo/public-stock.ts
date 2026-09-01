@@ -26,8 +26,9 @@ export function normalizePercent(value: number | null | undefined): number | nul
 }
 
 export function sanitizePublicReport(report: AnalysisReport): AnalysisReport {
-  const { adminQa: _adminQa, ...publicReport } = report;
-  return publicReport as AnalysisReport;
+  const publicReport = { ...report };
+  delete publicReport.adminQa;
+  return publicReport;
 }
 
 export function evaluatePublicSnapshot(report: AnalysisReport): { eligible: boolean; reasons: string[] } {
