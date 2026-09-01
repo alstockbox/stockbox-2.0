@@ -30,7 +30,7 @@ replaceOnce(
 replaceOnce(
   "lens control placement",
   '      ) : null}\n      <Card className="p-6">',
-  '      ) : null}\n      <AnalysisLensControl\n        value={analysisLens}\n        defaultProfile={sourceReport.investmentProfile}\n        lensScore={report.score.personalizedScore}\n        locale={locale}\n        onChange={setAnalysisLens}\n      />\n      <Card className="p-6">',
+  '      ) : null}\n      <section aria-label={locale === "sv" ? "Investeringslins" : "Investment lens"}>\n        <AnalysisLensControl\n          value={analysisLens}\n          defaultProfile={sourceReport.investmentProfile}\n          lensScore={report.score.personalizedScore}\n          locale={locale}\n          onChange={setAnalysisLens}\n        />\n      </section>\n      <Card className="p-6">',
 );
 
 replaceOnce(
@@ -47,6 +47,7 @@ replaceOnce(
 
 if (!source.startsWith('"use client";')) throw new Error("postcondition: ReportView must be a client component");
 if (!source.includes("<AnalysisLensControl")) throw new Error("postcondition: lens control missing");
+if (!source.includes('"Investment lens"')) throw new Error("postcondition: accessible investment lens label missing");
 if (!source.includes("applyAnalysisLens(sourceReport, analysisLens)")) throw new Error("postcondition: lens derivation missing");
 if (source.includes("saveInvestmentProfile")) throw new Error("postcondition: report view must not persist profile changes");
 
