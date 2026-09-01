@@ -2,7 +2,7 @@ begin;
 
 create table public.alpha_predictions (
   id uuid primary key default gen_random_uuid(),
-  analysis_id uuid not null references public.analyses(id) on delete cascade,
+  analysis_id uuid references public.analyses(id) on delete set null,
   ticker text not null,
   company_name text not null,
   sector text,
@@ -28,9 +28,12 @@ create table public.alpha_predictions (
   source_report_model_version text,
   prediction_as_of timestamptz not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (analysis_id, model_version)
+  updated_at timestamptz not null default now()
 );
+
+create unique index alpha_predictions_analysis_model_uidx
+  on public.alpha_predictions (analysis_id, model_version)
+  where analysis_id is not null;
 
 create table public.alpha_prediction_outcomes (
   id uuid primary key default gen_random_uuid(),
@@ -58,7 +61,7 @@ create index alpha_prediction_outcomes_horizon_idx
   on public.alpha_prediction_outcomes (horizon_days, evaluated_at desc);
 
 comment on table public.alpha_predictions is
-  'Point-in-time StockBox Alpha model snapshots. Fundamental StockBox Score remains independent and is stored only for comparison.';
+  'Immutable point-in-time StockBox Alpha model snapshots. analysis_id is optional so deleting a user analysis does not erase the model track record.';
 comment on table public.alpha_prediction_outcomes is
   'Realized point-in-time Alpha prediction outcomes. Rows are written only after the relevant horizon has elapsed.';
 comment on column public.alpha_predictions.probabilities is
@@ -69,9 +72,6 @@ comment on column public.alpha_predictions.price_at_prediction is
 alter table public.alpha_predictions enable row level security;
 alter table public.alpha_prediction_outcomes enable row level security;
 
--- Alpha rankings are served only through authenticated server routes using the
--- service role. No direct anon/authenticated table policies are intentionally
--- created, which prevents clients from bypassing product entitlement logic.
 revoke all on public.alpha_predictions from anon, authenticated;
 revoke all on public.alpha_prediction_outcomes from anon, authenticated;
 
