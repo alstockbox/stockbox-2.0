@@ -130,27 +130,27 @@ export function applyTwelveDataEstimateSnapshot(
     if (signal.direction === "negative") report.research.negatives.push(signal);
   }
 
-  const module = report.research.modules.find((item) => item.id === "analyst_expectations");
-  if (module) {
+  const analystModule = report.research.modules.find((item) => item.id === "analyst_expectations");
+  if (analystModule) {
     const nextRevenue = percent(snapshot.forwardEstimates.nextYearRevenueGrowth);
     const nextEps = percent(snapshot.forwardEstimates.nextYearEpsGrowth);
-    module.status = snapshot.coverage >= 0.999 ? "available" : "partial";
-    module.coverage = snapshot.coverage;
-    module.confidence = confidence;
-    module.dataAsOf = source.dataAsOf ?? null;
-    module.findings = [
+    analystModule.status = snapshot.coverage >= 0.999 ? "available" : "partial";
+    analystModule.coverage = snapshot.coverage;
+    analystModule.confidence = confidence;
+    analystModule.dataAsOf = source.dataAsOf ?? null;
+    analystModule.findings = [
       ...(nextRevenue ? [{ statement: `Next-year revenue consensus growth is ${nextRevenue}.`, evidenceIds: [evidenceId], confidence }] : []),
       ...(nextEps ? [{ statement: `Next-year EPS consensus growth is ${nextEps}.`, evidenceIds: [evidenceId], confidence }] : []),
       ...(revision ? [{ statement: `EPS revisions for ${revision.period.replaceAll("_", " ")} are net ${revision.netLastMonth > 0 ? "+" : ""}${revision.netLastMonth} over the last month.`, evidenceIds: [evidenceId], confidence: 75 }] : []),
     ];
-    module.positiveSignals = revision && revision.netLastMonth > 0 ? [signal?.statement ?? "Positive net EPS revisions."] : [];
-    module.negativeSignals = revision && revision.netLastMonth < 0 ? [signal?.statement ?? "Negative net EPS revisions."] : [];
-    module.unknowns = [
+    analystModule.positiveSignals = revision && revision.netLastMonth > 0 ? [signal?.statement ?? "Positive net EPS revisions."] : [];
+    analystModule.negativeSignals = revision && revision.netLastMonth < 0 ? [signal?.statement ?? "Negative net EPS revisions."] : [];
+    analystModule.unknowns = [
       ...(nextRevenue ? [] : ["Next-year revenue consensus growth is unavailable or not meaningful."]),
       ...(nextEps ? [] : ["Next-year EPS consensus growth is unavailable or not meaningful."]),
       ...(revision ? [] : ["EPS revision counts are unavailable."]),
     ];
-    module.sources = [evidence];
+    analystModule.sources = [evidence];
   }
 
   recalculateResearchCoverage(report);
