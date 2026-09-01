@@ -135,6 +135,5 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     ...result,
     data: report,
     sources: report.sources,
-    providerDiagnostics: report.providerDiagnostics,
   };
 }
