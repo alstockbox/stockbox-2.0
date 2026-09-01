@@ -15,20 +15,20 @@ const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfa
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app"),
   title: {
-    default: "StockBox | Data-driven stock analysis",
+    default: "StockBox | Aktieanalys & data-driven stock analysis",
     template: "%s | StockBox",
   },
   description:
-    "StockBox turns filings, market data, scoring logic and research workflows into data-driven equity analysis with visible sources, coverage and confidence.",
+    "StockBox är ett källbaserat verktyg för aktieanalys och equity research med värdering, tillväxt, lönsamhet, risk, synliga källor, datatäckning och konfidens.",
   icons: {
     icon: "/images/stockbox-logo.png",
     shortcut: "/images/stockbox-logo.png",
     apple: "/images/stockbox-logo.png",
   },
   openGraph: {
-    title: "StockBox | Data-driven stock analysis",
+    title: "StockBox | Aktieanalys & data-driven stock analysis",
     description:
-      "Understand any stock faster with visible sources, deterministic calculations and honest missing-data handling.",
+      "Analysera aktier med verifierbara data, modellbaserade beräkningar, StockBox Score, synliga källor och ärlig hantering av saknad data.",
     type: "website",
     siteName: "StockBox",
     images: [
@@ -47,7 +47,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const locale = await getLocale();
   const navCopy = getP0Copy(locale).nav;
   const env = getServerEnv();
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app";
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -59,6 +59,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         applicationCategory: "FinanceApplication",
         operatingSystem: "Web",
         url: baseUrl,
+        description: "Source-backed stock analysis and equity research with visible data provenance, coverage and confidence.",
         offers: { "@type": "Offer", price: "0", priceCurrency: "SEK" },
       },
     ],
@@ -68,7 +69,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang={locale} className={`${inter.variable} ${playfair.variable}`}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
-        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#07111f]">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm font-semibold text-[#07111f]">
           {navCopy.skipMain}
         </a>
         <AppNav />
