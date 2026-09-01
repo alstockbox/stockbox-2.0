@@ -61,12 +61,38 @@ function fromRow(row: PublicStockSnapshotRow): PublicStockSnapshot {
   };
 }
 
+function tickerSlug(ticker: string) {
+  return slugifyStockPage(ticker.replace(/\./g, " dot "));
+}
+
+export function resolvePublicSnapshotSlug(input: {
+  companyName: string;
+  ticker: string;
+  requestedSlug?: string;
+  existingTickerSlug: string | null;
+  slugOwnerTicker: string | null;
+}) {
+  if (input.existingTickerSlug) return slugifyStockPage(input.existingTickerSlug);
+
+  const baseSlug = slugifyStockPage(input.requestedSlug?.trim() || input.companyName);
+  if (!baseSlug) throw new Error("Public snapshot rejected: valid_slug_required");
+
+  if (input.slugOwnerTicker && input.slugOwnerTicker.trim().toUpperCase() !== input.ticker.trim().toUpperCase()) {
+    const securitySuffix = tickerSlug(input.ticker);
+    if (!securitySuffix) throw new Error("Public snapshot rejected: valid_ticker_slug_required");
+    return `${baseSlug}-${securitySuffix}`;
+  }
+
+  return baseSlug;
+}
+
 export function buildPublicSnapshotRecord(input: {
   analysisId: string;
   report: AnalysisReport;
   slug?: string;
   metaDescription?: string;
   now?: string;
+  publishedAt?: string;
 }) {
   const eligibility = evaluatePublicSnapshot(input.report);
   if (!eligibility.eligible) {
@@ -89,7 +115,7 @@ export function buildPublicSnapshotRecord(input: {
     data_as_of: input.report.dataAsOf ?? input.report.generatedAt ?? null,
     meta_description: input.metaDescription?.trim() || buildStockMetaDescription(input.report),
     is_indexable: true,
-    published_at: now,
+    published_at: input.publishedAt ?? now,
     updated_at: now,
   };
 }
@@ -148,13 +174,44 @@ export async function publishAnalysisSnapshot(input: {
   if (sourceError) return { ok: false, status: 500, error: "Could not read the source analysis." };
   if (!source) return { ok: false, status: 404, error: "Source analysis was not found." };
 
+  const report = source.report as AnalysisReport;
+  const ticker = report.ticker.trim().toUpperCase();
+  const requestedBaseSlug = slugifyStockPage(input.slug?.trim() || report.companyName);
+  if (!requestedBaseSlug) return { ok: false, status: 422, error: "Public snapshot rejected: valid_slug_required" };
+
+  const { data: existingTickerSnapshot, error: existingTickerError } = await supabase
+    .from("public_stock_snapshots")
+    .select("slug,ticker,published_at")
+    .eq("ticker", ticker)
+    .maybeSingle();
+
+  if (existingTickerError) return { ok: false, status: 500, error: "Could not resolve the canonical stock snapshot." };
+
+  const { data: slugOwner, error: slugOwnerError } = existingTickerSnapshot
+    ? { data: null, error: null }
+    : await supabase
+        .from("public_stock_snapshots")
+        .select("ticker")
+        .eq("slug", requestedBaseSlug)
+        .maybeSingle();
+
+  if (slugOwnerError) return { ok: false, status: 500, error: "Could not resolve the public stock URL." };
+
   let record: ReturnType<typeof buildPublicSnapshotRecord>;
   try {
+    const resolvedSlug = resolvePublicSnapshotSlug({
+      companyName: report.companyName,
+      ticker,
+      requestedSlug: input.slug,
+      existingTickerSlug: existingTickerSnapshot?.slug ?? null,
+      slugOwnerTicker: slugOwner?.ticker ?? null,
+    });
     record = buildPublicSnapshotRecord({
       analysisId: source.id as string,
-      report: source.report as AnalysisReport,
-      slug: input.slug,
+      report,
+      slug: resolvedSlug,
       metaDescription: input.metaDescription,
+      publishedAt: existingTickerSnapshot?.published_at ?? undefined,
     });
   } catch (error) {
     return { ok: false, status: 422, error: error instanceof Error ? error.message : "Public snapshot failed quality validation." };
@@ -162,7 +219,7 @@ export async function publishAnalysisSnapshot(input: {
 
   const { data, error } = await supabase
     .from("public_stock_snapshots")
-    .upsert(record, { onConflict: "slug" })
+    .upsert(record, { onConflict: "ticker" })
     .select(publicSnapshotFields)
     .single();
 
