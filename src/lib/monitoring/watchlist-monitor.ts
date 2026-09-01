@@ -4,7 +4,7 @@ import { searchCompanies } from "@/lib/data/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deriveOfficialMonitoringSignals, type MonitoringSignal } from "./official-signals";
 
-type WatchlistRow = {
+export type WatchlistRow = {
   id: string;
   user_id: string;
   ticker: string;
@@ -20,6 +20,11 @@ export type MonitoringRunResult = {
   changed: number;
   notified: number;
   failed: number;
+};
+
+type MonitoringSignalLoaderDeps = {
+  searchCompanies: typeof searchCompanies;
+  fetchOfficialResearchBundle: typeof fetchOfficialResearchBundle;
 };
 
 function nextCheckIso(now: Date, frequency: WatchlistRow["monitoring_frequency"]): string {
@@ -43,19 +48,46 @@ function sourceMetadata(signal: MonitoringSignal) {
   }));
 }
 
-async function processWatchlistItem(row: WatchlistRow, now: Date): Promise<{ baselined: number; changed: number; notified: number }> {
-  const admin = createAdminClient();
-  if (!admin) throw new Error("Supabase admin client is unavailable.");
+export function groupWatchlistRowsByCanonicalTicker(rows: WatchlistRow[]): WatchlistRow[][] {
+  const groups = new Map<string, WatchlistRow[]>();
+  for (const row of rows) {
+    const key = row.ticker.trim().toUpperCase();
+    const current = groups.get(key) ?? [];
+    current.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.values()];
+}
 
-  const candidates = await searchCompanies(row.ticker);
+export async function loadSignalsForWatchlistGroup(
+  rows: WatchlistRow[],
+  deps: MonitoringSignalLoaderDeps = { searchCompanies, fetchOfficialResearchBundle },
+): Promise<MonitoringSignal[]> {
+  const representative = rows[0];
+  if (!representative) return [];
+  const candidates = await deps.searchCompanies(representative.ticker);
   const resolution = resolveCanonicalCompanySelection(
-    { ticker: row.ticker, canonicalTicker: row.ticker, name: row.company_name },
+    {
+      ticker: representative.ticker,
+      canonicalTicker: representative.ticker,
+      name: representative.company_name,
+    },
     candidates,
   );
-  if (!resolution.ok) throw new Error("Canonical company identity could not be resolved for monitoring.");
+  if (!resolution.ok) {
+    throw new Error("Canonical company identity could not be resolved for monitoring.");
+  }
+  const bundle = await deps.fetchOfficialResearchBundle(resolution.company, { deepResearch: true });
+  return deriveOfficialMonitoringSignals(bundle);
+}
 
-  const bundle = await fetchOfficialResearchBundle(resolution.company, { deepResearch: true });
-  const signals = deriveOfficialMonitoringSignals(bundle);
+async function processWatchlistItem(
+  row: WatchlistRow,
+  now: Date,
+  signals: MonitoringSignal[],
+): Promise<{ baselined: number; changed: number; notified: number }> {
+  const admin = createAdminClient();
+  if (!admin) throw new Error("Supabase admin client is unavailable.");
   let baselined = 0;
   let changed = 0;
   let notified = 0;
@@ -133,7 +165,58 @@ async function processWatchlistItem(row: WatchlistRow, now: Date): Promise<{ bas
   return { baselined, changed, notified };
 }
 
-export async function runOfficialWatchlistMonitoring(options: { limit?: number; now?: Date } = {}): Promise<MonitoringRunResult> {
+async function markMonitoringFailure(row: WatchlistRow, now: Date, error: unknown) {
+  const admin = createAdminClient();
+  if (!admin) return;
+  const message = error instanceof Error ? error.message.slice(0, 500) : "Unknown monitoring failure";
+  await admin.from("watchlists").update({
+    last_checked_at: now.toISOString(),
+    next_check_at: nextCheckIso(now, row.monitoring_frequency),
+    last_monitor_error: message,
+  }).eq("id", row.id);
+}
+
+export async function runWatchlistRowsMonitoring(
+  rows: WatchlistRow[],
+  now = new Date(),
+): Promise<MonitoringRunResult> {
+  const result: MonitoringRunResult = {
+    checked: 0,
+    baselined: 0,
+    changed: 0,
+    notified: 0,
+    failed: 0,
+  };
+
+  for (const group of groupWatchlistRowsByCanonicalTicker(rows)) {
+    let signals: MonitoringSignal[];
+    try {
+      signals = await loadSignalsForWatchlistGroup(group);
+    } catch (error) {
+      result.failed += group.length;
+      await Promise.all(group.map((row) => markMonitoringFailure(row, now, error)));
+      continue;
+    }
+
+    for (const row of group) {
+      try {
+        const item = await processWatchlistItem(row, now, signals);
+        result.checked += 1;
+        result.baselined += item.baselined;
+        result.changed += item.changed;
+        result.notified += item.notified;
+      } catch (error) {
+        result.failed += 1;
+        await markMonitoringFailure(row, now, error);
+      }
+    }
+  }
+  return result;
+}
+
+export async function runOfficialWatchlistMonitoring(
+  options: { limit?: number; now?: Date } = {},
+): Promise<MonitoringRunResult> {
   const admin = createAdminClient();
   if (!admin) throw new Error("Supabase admin client is unavailable.");
   const now = options.now ?? new Date();
@@ -146,24 +229,5 @@ export async function runOfficialWatchlistMonitoring(options: { limit?: number; 
     .order("next_check_at", { ascending: true })
     .limit(limit);
   if (error) throw new Error(`Unable to load due watchlist monitors: ${error.message}`);
-
-  const result: MonitoringRunResult = { checked: 0, baselined: 0, changed: 0, notified: 0, failed: 0 };
-  for (const row of (data ?? []) as WatchlistRow[]) {
-    try {
-      const item = await processWatchlistItem(row, now);
-      result.checked += 1;
-      result.baselined += item.baselined;
-      result.changed += item.changed;
-      result.notified += item.notified;
-    } catch (error) {
-      result.failed += 1;
-      const message = error instanceof Error ? error.message.slice(0, 500) : "Unknown monitoring failure";
-      await admin.from("watchlists").update({
-        last_checked_at: now.toISOString(),
-        next_check_at: nextCheckIso(now, row.monitoring_frequency),
-        last_monitor_error: message,
-      }).eq("id", row.id);
-    }
-  }
-  return result;
+  return runWatchlistRowsMonitoring((data ?? []) as WatchlistRow[], now);
 }
