@@ -187,7 +187,7 @@ function etfFlags(result: EtfAnalysisResult): { red: Flag[]; green: Flag[] } {
 function describeEtf(result: EtfAnalysisResult, company: CompanySearchResult): { oneSentence: string; summary: string } {
   const score = result.score.score === null ? "No score" : `${Math.round(result.score.score)}/100`;
   const coverage = Math.round(result.score.coverage * 100);
-  const type = result.subtype.replaceAll("_", " ").toUpperCase();
+  const type = (result.subtype ?? "equity_etf").replaceAll("_", " ").toUpperCase();
   const missing = result.score.missing.length ? ` Missing/N/A factors: ${result.score.missing.join(", ")}.` : "";
   return {
     oneSentence: `${company.name} is analyzed as ${type} with StockBox ETF score ${score} at ${coverage}% factor coverage.`,
