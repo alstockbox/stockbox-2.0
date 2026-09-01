@@ -26,7 +26,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const snapshot = await getCachedPublicStockSnapshotBySlug(slug);
   if (!snapshot) return { title: "Aktieanalys hittades inte", robots: { index: false, follow: false } };
-  const title = `${snapshot.companyName} aktieanalys – värdering, P/E & StockBox Score`;
+  const title = `${snapshot.companyName} aktie – analys, värdering & StockBox Score`;
   return {
     title,
     description: snapshot.metaDescription,
@@ -70,6 +70,10 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
     ["ROIC", percent(ratios?.returnOnInvestedCapital)],
     ["Skuld/eget kapital", number(ratios?.debtToEquity)],
   ].filter((item): item is [string, string] => Boolean(item[1]));
+  const analysisDate = new Date(snapshot.dataAsOf ?? snapshot.updatedAt).toLocaleDateString("sv-SE");
+  const primaryStrength = report.greenFlags[0]?.title ?? "Ingen explicit styrka i snapshoten";
+  const primaryRisk = report.redFlags[0]?.title ?? "Ingen explicit risk i snapshoten";
+  const peValue = multiple(valuation?.priceEarnings) ?? "Saknas i snapshoten";
 
   const structuredData = {
     "@context": "https://schema.org",
@@ -81,6 +85,7 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
         url,
         headline: `${snapshot.companyName} aktieanalys`,
         description: snapshot.metaDescription,
+        image: `${url}/opengraph-image`,
         datePublished: snapshot.publishedAt,
         dateModified: snapshot.updatedAt,
         inLanguage: "sv-SE",
@@ -103,7 +108,7 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div>
               <p className="font-mono text-sm font-semibold text-[#e1cb95]">{snapshot.ticker}</p>
-              <h1 className="serif mt-2 text-4xl font-semibold text-[#f4efe5] sm:text-5xl">{snapshot.companyName} aktieanalys</h1>
+              <h1 className="serif mt-2 text-4xl font-semibold text-[#f4efe5] sm:text-5xl">{snapshot.companyName} aktie – StockBox analys</h1>
               <p className="mt-4 max-w-3xl text-base leading-8 text-[#c9d2df]">{report.oneSentence || report.summary}</p>
             </div>
             {snapshot.score !== null ? <div className="rounded-xl border border-[#e1cb95]/30 bg-[#0b1829] p-5 text-center"><p className="text-xs uppercase tracking-[0.12em] text-[#9aa7b8]">StockBox Score</p><p className="number mt-2 text-4xl font-semibold text-[#e1cb95]">{Math.round(snapshot.score)}<span className="text-lg text-[#9aa7b8]">/100</span></p></div> : null}
@@ -119,6 +124,18 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
 
       <Section className="py-10">
         <Container className="max-w-5xl space-y-6">
+          <Card className="border-[#e1cb95]/20 p-6 sm:p-8">
+            <h2 className="serif text-3xl font-semibold text-[#f4efe5]">Snabbfakta om {snapshot.companyName} aktie</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[#c9d2df]">Det här är ett direkt faktablock från den publicerade StockBox-snapshoten. Det sammanfattar analysläget utan att omvandla modellen till en köp- eller säljrekommendation.</p>
+            <dl className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-lg border border-white/10 p-4"><dt className="text-xs text-[#9aa7b8]">StockBox Score</dt><dd className="mt-1 text-base font-semibold text-[#f4efe5]">{snapshot.score !== null ? `${Math.round(snapshot.score)}/100` : "Saknas"}</dd></div>
+              <div className="rounded-lg border border-white/10 p-4"><dt className="text-xs text-[#9aa7b8]">Analysdatum</dt><dd className="mt-1 text-base font-semibold text-[#f4efe5]">{analysisDate}</dd></div>
+              <div className="rounded-lg border border-white/10 p-4"><dt className="text-xs text-[#9aa7b8]">P/E</dt><dd className="mt-1 text-base font-semibold text-[#f4efe5]">{peValue}</dd></div>
+              <div className="rounded-lg border border-white/10 p-4 sm:col-span-2 lg:col-span-1"><dt className="text-xs text-[#9aa7b8]">Största styrka</dt><dd className="mt-1 text-sm font-semibold leading-6 text-[#d8e9d3]">{primaryStrength}</dd></div>
+              <div className="rounded-lg border border-white/10 p-4 sm:col-span-2"><dt className="text-xs text-[#9aa7b8]">Viktigaste risk</dt><dd className="mt-1 text-sm font-semibold leading-6 text-[#f1c5c5]">{primaryRisk}</dd></div>
+            </dl>
+          </Card>
+
           <Card className="p-6 sm:p-8">
             <h2 className="serif text-3xl font-semibold text-[#f4efe5]">StockBox sammanfattning</h2>
             <p className="mt-4 whitespace-pre-line text-sm leading-7 text-[#c9d2df] sm:text-base">{report.summary}</p>
