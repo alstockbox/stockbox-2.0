@@ -15,8 +15,15 @@ export type AlphaUniverseSecurity = {
 export type ParsedAlphaUniverse = {
   source: "nasdaq_trader";
   dataset: AlphaUniverseSource;
-  sourceAsOf: string;
+  sourceTimestampRaw: string;
   securities: AlphaUniverseSecurity[];
+};
+
+export type SecTickerIdentity = {
+  ticker: string;
+  cik: string;
+  name: string;
+  exchange: string | null;
 };
 
 const EXCLUDED_NAME_PATTERNS = [
@@ -57,10 +64,11 @@ function requiredColumn(header: string[], candidates: string[], label: string): 
 
 function parseCreationTime(lines: string[]): string {
   const row = lines.find((line) => line.startsWith("File Creation Time:"));
-  const match = row?.match(/File Creation Time:\s*(\d{2})(\d{2})(\d{4})(\d{2}):(\d{2})/i);
-  if (!match) throw new Error("Nasdaq Trader universe is missing a valid file creation time.");
-  const [, month, day, year, hour, minute] = match;
-  return new Date(`${year}-${month}-${day}T${hour}:${minute}:00.000Z`).toISOString();
+  const match = row?.match(/File Creation Time:\s*(\d{8}\d{2}:\d{2})/i);
+  if (!match?.[1]) throw new Error("Nasdaq Trader universe is missing a valid file creation time.");
+  // Nasdaq documents the file timestamp format but does not state a timezone on the directory
+  // definition page. Preserve the source value verbatim instead of fabricating a UTC instant.
+  return match[1];
 }
 
 function exchangeFor(source: AlphaUniverseSource, raw: string | undefined): string {
@@ -83,7 +91,7 @@ export function parseNasdaqTraderDirectory(text: string, source: AlphaUniverseSo
   const lines = normalizeLines(text);
   if (lines.length < 2) throw new Error("Nasdaq Trader universe file is empty or malformed.");
 
-  const sourceAsOf = parseCreationTime(lines);
+  const sourceTimestampRaw = parseCreationTime(lines);
   const header = lines[0]!.split("|").map((value) => value.trim());
   const tickerIndex = requiredColumn(
     header,
@@ -127,5 +135,39 @@ export function parseNasdaqTraderDirectory(text: string, source: AlphaUniverseSo
     });
   }
 
-  return { source: "nasdaq_trader", dataset: source, sourceAsOf, securities };
+  return { source: "nasdaq_trader", dataset: source, sourceTimestampRaw, securities };
+}
+
+export function parseSecTickerExchangeDirectory(payload: unknown): Map<string, SecTickerIdentity> {
+  if (!payload || typeof payload !== "object") throw new Error("SEC ticker directory payload is invalid.");
+  const record = payload as { fields?: unknown; data?: unknown };
+  if (!Array.isArray(record.fields) || !Array.isArray(record.data)) throw new Error("SEC ticker directory payload is invalid.");
+
+  const fields = record.fields.map((field) => String(field).trim().toLowerCase());
+  const cikIndex = fields.indexOf("cik");
+  const nameIndex = fields.indexOf("name");
+  const tickerIndex = fields.indexOf("ticker");
+  const exchangeIndex = fields.indexOf("exchange");
+  if ([cikIndex, nameIndex, tickerIndex, exchangeIndex].some((index) => index < 0)) {
+    throw new Error("SEC ticker directory is missing required identity fields.");
+  }
+
+  const result = new Map<string, SecTickerIdentity>();
+  for (const raw of record.data) {
+    if (!Array.isArray(raw)) continue;
+    const tickerValue = raw[tickerIndex];
+    const cikValue = raw[cikIndex];
+    const nameValue = raw[nameIndex];
+    if (typeof tickerValue !== "string" || !tickerValue.trim()) continue;
+    const cikNumber = typeof cikValue === "number" ? cikValue : Number(cikValue);
+    if (!Number.isFinite(cikNumber) || cikNumber <= 0) continue;
+    const ticker = tickerValue.trim().toUpperCase();
+    result.set(ticker, {
+      ticker,
+      cik: String(Math.trunc(cikNumber)).padStart(10, "0"),
+      name: typeof nameValue === "string" && nameValue.trim() ? nameValue.trim() : ticker,
+      exchange: typeof raw[exchangeIndex] === "string" && raw[exchangeIndex].trim() ? raw[exchangeIndex].trim() : null,
+    });
+  }
+  return result;
 }
