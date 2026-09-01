@@ -59,7 +59,7 @@ function mispricingDetail(label: IntelligenceSnapshot["mispricing"]["label"], lo
     if (label === "premium") return "Aktien handlas på en premie relativt tillgänglig värdering och kräver starkare framtida utveckling för att motiveras.";
     return "Underlaget räcker inte för att ge en robust riktning på felvärderingen.";
   }
-  if (label === "deep_discount") return "Multiple valuation lenses point to a material discount, while StockBox separately checks for value-trap risk.";
+  if (label === "deep_discount") return "Multiple valuation lenses point to a material discount, while StockBox separately checks for value trap risk.";
   if (label === "discounted") return "The shares look discounted versus available intrinsic, historical and company-aware valuation evidence.";
   if (label === "roughly_fair") return "Available valuation evidence does not show a clear directional mispricing.";
   if (label === "premium") return "The shares trade at a premium to available valuation evidence and require stronger future execution to justify it.";
@@ -88,7 +88,7 @@ function inflectionStatus(stage: IntelligenceSnapshot["inflection"]["stage"], lo
 
 function inflectionDetail(stage: IntelligenceSnapshot["inflection"]["stage"], locale: Locale) {
   if (locale === "sv") {
-    if (stage === "confirming") return "Fundamental förbättring får stöd av flera oberoende signalfamiljer, exempelvis marknad, finansiering eller förväntningar.";
+    if (stage === "confirming") return "Fundamental förbättring bekräftas av flera oberoende signalfamiljer, exempelvis marknad, finansiering eller förväntningar.";
     if (stage === "building") return "Tidiga förbättringssignaler finns, men setupen saknar ännu full bekräftelse från flera oberoende håll.";
     if (stage === "extended") return "Signalerna kan vara starka, men kursrörelsen har blivit översträckt och conviction sänks i stället för att momentum belönas blint.";
     if (stage === "fragile") return "Finansiell överlevnads- eller finansieringsrisk begränsar potentialen oavsett stark tillväxt eller momentum.";
@@ -131,9 +131,9 @@ function opportunityDetail(snapshot: IntelligenceSnapshot, locale: Locale) {
 export function buildIntelligencePresentation(snapshot: IntelligenceSnapshot, locale: Locale): IntelligencePresentation {
   const warnings: string[] = [];
   if (snapshot.mispricing.valueTrapRisk === "high") {
-    warnings.push(locale === "sv" ? "Hög value-trap-risk: billig värdering sammanfaller med tydliga försämringssignaler." : "High value-trap risk: cheap valuation coincides with material deterioration signals.");
+    warnings.push(locale === "sv" ? "Hög value-trap-risk: billig värdering sammanfaller med tydliga försämringssignaler." : "High value trap risk: cheap valuation coincides with material deterioration signals.");
   } else if (snapshot.mispricing.valueTrapRisk === "medium") {
-    warnings.push(locale === "sv" ? "Förhöjd value-trap-risk: vissa fundamentala motbevis finns." : "Elevated value-trap risk: some fundamental counter-evidence is present.");
+    warnings.push(locale === "sv" ? "Förhöjd value-trap-risk: vissa fundamentala motbevis finns." : "Elevated value trap risk: some fundamental counter-evidence is present.");
   }
   if (snapshot.inflection.overextensionRisk === "high") {
     warnings.push(locale === "sv" ? "Kursen ser översträckt ut; inflection-conviction har därför sänkts." : "Price action looks overextended; inflection conviction has been reduced.");
