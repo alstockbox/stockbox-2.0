@@ -25,6 +25,13 @@ describe("SEO trust and authority contract", () => {
     expect(page).toContain("#organization");
   });
 
+  it("defines a stable SoftwareApplication entity before other pages reference it", () => {
+    const layout = read("src/app/layout.tsx");
+    const tools = read("src/app/aktieanalys-verktyg/page.tsx");
+    expect(layout).toContain('"@id": `${baseUrl}/#software`');
+    expect(tools).toContain('`${baseUrl.replace(/\\/$/, "")}/#software`');
+  });
+
   it("links the key-metric hub from the global footer", () => {
     const footer = read("src/components/app-shell/footer.tsx");
     expect(footer).toContain('["/nyckeltal",');
