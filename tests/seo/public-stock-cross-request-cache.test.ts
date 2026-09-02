@@ -27,12 +27,13 @@ describe("public stock cross-request SEO cache", () => {
     expect(stockCacheBlock).not.toContain("PUBLIC_STOCK_LIST_TAG");
   });
 
-  it("invalidates the affected stock and listing caches after publication", () => {
+  it("invalidates the affected stock, listing and sitemap discovery caches after publication", () => {
     const route = read("src/app/api/admin/seo/publish/route.ts");
     expect(route).toContain('revalidateTag');
     expect(route).toContain('public-stock-snapshot:');
     expect(route).toContain('public-stock-list');
     expect(route).toContain('revalidatePath(`/aktier/${published.snapshot.slug}`)');
     expect(route).toContain('revalidatePath("/aktier")');
+    expect(route).toContain('revalidatePath("/aktier/sitemap/[id].xml", "page")');
   });
 });
