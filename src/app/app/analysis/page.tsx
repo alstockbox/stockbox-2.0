@@ -41,7 +41,7 @@ export default function AnalysisPage() {
       </section>
 
       <section className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
-        <div id="teach-me" className="card p-4">
+        <div className="card p-4">
           <Title icon={<BarChart3 size={20} />} text="Valuation Snapshot" />
           <div className="grid gap-3 md:grid-cols-2">
             <Fact label="Absolute valuation" value={analysis.valuation.absolute.label} />
@@ -99,7 +99,7 @@ export default function AnalysisPage() {
           </div>
         </div>
 
-        <div className="card p-4">
+        <div id="teach-me" className="card p-4">
           <Title icon={<CircleHelp size={20} />} text="Teach Me" />
           <div className="grid gap-3">
             {analysis.education.map((entry) => (
