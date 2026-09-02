@@ -1,155 +1,146 @@
 # StockBox SEO/AIO Growth Engine Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical implementation checklist, updated to reflect the architecture that now exists on `feat/seo-aio-growth-engine`. The design source of truth is `docs/superpowers/specs/2026-09-01-seo-aio-growth-engine-design.md`.
 
-**Goal:** Build a production-safe SEO/AIO growth layer with Swedish intent pages, explicitly published quality-gated stock snapshots, dynamic discovery metadata, and IndexNow notification.
+**Goal:** Build a production-safe SEO/AIO growth layer with Swedish search-intent pages, explicitly published quality-gated research snapshots, scalable crawl discovery, citeable trust documentation and low-overhead public rendering.
 
-**Architecture:** Public SEO stock pages read from a dedicated `public_stock_snapshots` table and never execute live analysis on crawler requests. Admin publication copies and sanitizes an existing balanced StockBox report after quality checks. Evergreen landing pages and stock snapshots feed a dynamic sitemap and structured metadata while private app routes stay blocked.
+**Architecture:** Public research pages read from a dedicated server-only `public_stock_snapshots` publication store and never execute live provider analysis for crawler requests. Admin publication copies and sanitizes an existing eligible report after quality checks, invalidates relevant caches and submits best-effort IndexNow discovery. Evergreen guides, proof pages, paginated public research hubs and sharded sitemaps form the public crawl graph.
 
 **Tech Stack:** Next.js 16 App Router, React 19, TypeScript 5.9, Supabase, Vitest, existing StockBox UI primitives.
 
-**Spec:** `docs/superpowers/specs/2026-09-01-seo-aio-growth-engine-design.md`
+## Global constraints
 
-## Global Constraints
+- [x] Never publish private user analyses automatically.
+- [x] Never execute a fresh provider analysis from a public crawler page request.
+- [x] Only index explicitly published snapshots passing score/confidence/coverage/freshness gates.
+- [x] Preserve source links, data dates, model version and disclaimer context.
+- [x] Do not fabricate ratings, reviews, financial figures, expertise or structured-data claims.
+- [x] Keep English application UX intact while targeting Swedish public search intent.
 
-- Never publish private user analyses automatically.
-- Never execute a fresh provider analysis from a public crawler page request.
-- Only index explicitly published snapshots passing score/confidence/coverage/freshness gates.
-- Preserve source links, data dates, model version and disclaimer context.
-- Do not fabricate ratings, reviews, financial figures or structured-data claims.
-- Keep existing English application UX intact while targeting Swedish public search intent.
+## Implemented workstreams
 
----
+### 1. Public SEO domain rules
 
-### Task 1: SEO domain utilities and tests
+- [x] `src/lib/seo/public-stock.ts` implements slugging, normalization, sanitization, public eligibility and meta-description helpers.
+- [x] Eligibility requires balanced profile, current data, finite score, >=65% confidence and >=70% coverage.
+- [x] Tests cover quality gates, sanitization and descriptions.
 
-**Files:**
-- Create: `src/lib/seo/public-stock.ts`
-- Create: `src/lib/seo/public-stock.test.ts`
+### 2. Dedicated public snapshot persistence
 
-**Interfaces:**
-- Produces: `slugifyStockPage(name: string): string`
-- Produces: `normalizeRatio(value: number | null | undefined): number | null`
-- Produces: `sanitizePublicReport(report: AnalysisReport): AnalysisReport`
-- Produces: `evaluatePublicSnapshot(report: AnalysisReport): { eligible: boolean; reasons: string[] }`
-- Produces: `buildStockMetaDescription(report: AnalysisReport): string`
+- [x] `public_stock_snapshots` migration added.
+- [x] Explicit ticker uniqueness/canonicalization added.
+- [x] RLS enabled.
+- [x] Direct `anon` / `authenticated` SELECT and writes revoked; public rendering is service-role/server-side.
+- [x] Publication preserves canonical slug and original publication time on republish.
+- [x] Original private analysis remains unchanged.
 
-- [ ] Write failing Vitest tests for slug normalization, 0-1 vs 0-100 confidence normalization, balanced-profile requirement, coverage/confidence gates, stale data rejection, admin QA removal and description length.
-- [ ] Run `npx vitest run src/lib/seo/public-stock.test.ts` and confirm failure because implementation is absent.
-- [ ] Implement the minimal utility module using existing `AnalysisReport` types.
-- [ ] Re-run the focused test and confirm pass.
-- [ ] Commit with `feat: add public stock SEO eligibility rules`.
+### 3. Admin publication, cache invalidation and IndexNow
 
-### Task 2: Public snapshot persistence
+- [x] Admin-only publication endpoint added.
+- [x] IndexNow payload/key validation covered by tests.
+- [x] Site-wide key is exposed at root `/indexnow-key.txt`, not under `/api`.
+- [x] IndexNow errors are best-effort/non-blocking.
+- [x] Successful publication invalidates security-specific and public-list cache tags and revalidates discovery paths.
+- [x] `.env.example` documents relevant SEO verification configuration.
 
-**Files:**
-- Create: `supabase/migrations/20260901213000_public_stock_snapshots.sql`
-- Create: `src/lib/seo/public-snapshots.ts`
+### 4. Public research pages
 
-**Interfaces:**
-- Consumes: Task 1 eligibility/sanitization helpers.
-- Produces: `PublicStockSnapshot` type.
-- Produces: `getPublicStockSnapshotBySlug(slug: string): Promise<PublicStockSnapshot | null>`.
-- Produces: `listPublicStockSnapshots(limit?: number): Promise<PublicStockSnapshot[]>`.
-- Produces: `publishAnalysisSnapshot(input: { analysisId: string; slug?: string; metaDescription?: string }): Promise<PublishResult>`.
+- [x] `/aktier/[slug]` renders stored published snapshots only.
+- [x] Dynamic metadata/canonical/robots/OpenGraph implemented.
+- [x] Route-specific OpenGraph and Twitter images implemented.
+- [x] BreadcrumbList + Article/WebPage structured data implemented.
+- [x] Direct answerability block exposes date, score and available research facts.
+- [x] Source citations, methodology, Research Standard and data-source links implemented.
+- [x] Security-type presentation supports ordinary equities, investment companies and ETF-specific public factors where the underlying snapshot contains supportable data.
 
-- [ ] Add migration defining `public_stock_snapshots`, uniqueness/indexes, timestamps, RLS and a read policy restricted to `is_indexable = true`.
-- [ ] Implement safe server repository functions using `createAdminClient()` and return empty/null when Supabase is unavailable.
-- [ ] In publication, fetch the source analysis, cast its report, apply Task 1 quality gates, sanitize `adminQa`, derive/default slug and upsert the public snapshot.
-- [ ] Ensure publication never changes the original `analyses` row.
-- [ ] Commit with `feat: add explicit public stock snapshot store`.
+### 5. Scalable public research hub
 
-### Task 3: Admin publication API and IndexNow
+- [x] `/aktier` no longer hard-caps internal discovery to a top-N set.
+- [x] Hub uses paginated snapshot/count queries.
+- [x] Each paginated page has its own canonical metadata.
+- [x] Previous/next HTML links keep deep research reachable through the internal crawl graph.
+- [x] Structured ItemList positions remain stable across pages.
 
-**Files:**
-- Create: `src/lib/seo/indexnow.ts`
-- Create: `src/lib/seo/indexnow.test.ts`
-- Create: `src/app/api/admin/seo/publish/route.ts`
-- Create: `src/app/api/indexnow/key/route.ts`
-- Modify: `.env.example`
+### 6. Swedish high-intent and educational cluster
 
-**Interfaces:**
-- Consumes: `publishAnalysisSnapshot`.
-- Produces: `buildIndexNowPayload(urls: string[], baseUrl: string, key: string)`.
-- Produces: `notifyIndexNow(urls: string[]): Promise<void>`.
+- [x] `/aktieanalys`
+- [x] `/aktieanalys-verktyg`
+- [x] `/ai-aktieanalys`
+- [x] `/fundamental-analys`
+- [x] `/guider`
+- [x] `/guider/hur-analyserar-man-en-aktie`
+- [x] `/guider/hur-varderar-man-en-aktie`
+- [x] `/guider/analysera-investmentbolag`
+- [x] `/guider/analysera-etf`
+- [x] `/nyckeltal`
+- [x] `/nyckeltal/pe-tal`
+- [x] `/nyckeltal/ev-ebitda`
+- [x] `/nyckeltal/roic`
+- [x] `/nyckeltal/fritt-kassaflode`
 
-- [ ] Write failing tests for URL de-duplication, same-host filtering and key location construction.
-- [ ] Implement IndexNow payload/notification helper. Network failure must resolve without breaking publication.
-- [ ] Add `INDEXNOW_KEY=` documentation to `.env.example`.
-- [ ] Add plain-text `/api/indexnow/key` route that returns 404 when no key is configured and the key when configured.
-- [ ] Add admin-only POST route accepting `{ analysisId, slug?, metaDescription? }`, publishing the snapshot, then non-blockingly notifying the stock page and `/aktier`.
-- [ ] Return 401 for signed-out, 403 for non-admin, 422 for validation/quality failures and 200 with publication metadata on success.
-- [ ] Commit with `feat: add admin SEO publication and IndexNow`.
+The cluster uses original explanatory content and contextual internal links instead of mass-generated thin keyword variants.
 
-### Task 4: Public stock hub and stock pages
+### 7. Trust and proof-of-product
 
-**Files:**
-- Create: `src/app/aktier/page.tsx`
-- Create: `src/app/aktier/[slug]/page.tsx`
-- Create: `src/components/seo/seo-shell.tsx`
+- [x] `/docs/methodology` exposes versioned model methodology.
+- [x] `/data-sources` exposes source registry, identity/data-quality rules and limitations.
+- [x] `/research-standard` documents publication thresholds, evidence boundaries and corrections.
+- [x] Root Organization schema uses configured legal seller identity/contact data only when present.
+- [x] Stable Organization, WebSite and SoftwareApplication entity IDs implemented.
+- [x] `/sample-analysis` retained as English proof page.
+- [x] `/exempel-aktieanalys` added as Swedish search-intent proof page.
+- [x] Proof pages use separate canonical URLs and language alternates.
 
-**Interfaces:**
-- Consumes: public snapshot readers and Task 1 meta description helper.
-- Produces: crawlable `/aktier` index and `/aktier/[slug]` pages.
+### 8. Crawl discovery and language semantics
 
-- [ ] Build a reusable light SEO article shell from existing `Container`, `Section`, `Card`, `ButtonLink` primitives.
-- [ ] Build the stock hub with explanatory copy, latest published snapshot links and CTA.
-- [ ] Build stock page `generateMetadata` with canonical URL, title, description, OpenGraph and robots index/follow.
-- [ ] Render score/confidence/coverage, summary, available dimensions, valuation/growth/profitability facts, flags, sources, data-as-of/model version and disclaimer.
-- [ ] Add BreadcrumbList + Article/WebPage JSON-LD with publisher and date fields; omit unsupported ratings/reviews.
-- [ ] Call `notFound()` for missing/non-indexable snapshots.
-- [ ] Commit with `feat: add crawlable public stock research pages`.
+- [x] Private application paths remain blocked from indexing.
+- [x] OAI-SearchBot and ChatGPT-User can access public content.
+- [x] Root static sitemap contains evergreen routes.
+- [x] Public security URLs use generated `/aktier/sitemap/[id].xml` shards.
+- [x] Robots advertises root + security sitemap shards.
+- [x] `/llms.txt` provides supplementary site/citation guidance.
+- [x] Swedish SEO routes receive `Content-Language: sv-SE`.
+- [x] Footer and guide hubs expose contextual internal links.
 
-### Task 5: High-intent Swedish landing pages
+### 9. Public rendering performance
 
-**Files:**
-- Create: `src/app/aktieanalys/page.tsx`
-- Create: `src/app/ai-aktieanalys/page.tsx`
-- Create: `src/app/fundamental-analys/page.tsx`
-- Create: `src/app/nyckeltal/pe-tal/page.tsx`
+- [x] Persistent `unstable_cache` added for stored snapshot reads, lists, counts and sitemap pages.
+- [x] React request memoization retained for repeated same-request snapshot access.
+- [x] Individual security cache invalidation is separated from list/sitemap invalidation.
+- [x] Cache lifetime is bounded and publication can force fresh discovery.
 
-**Interfaces:**
-- Consumes: SEO article shell and StockBox methodology/data-source URLs.
+## Verification workflow
 
-- [ ] Create `/aktieanalys` targeting “aktieanalys”, “aktie analys”, and “analysera aktie” with genuinely useful process content and product CTA.
-- [ ] Create `/ai-aktieanalys` explaining where deterministic calculations and AI-assisted research differ, without claiming guaranteed predictions.
-- [ ] Create `/fundamental-analys` explaining valuation, growth, profitability, financial health, quality and risk.
-- [ ] Create `/nyckeltal/pe-tal` explaining P/E limitations, negative earnings and why lower P/E is not automatically cheaper.
-- [ ] Give every page unique metadata, canonical, BreadcrumbList/WebPage schema and contextual internal links.
-- [ ] Commit with `feat: add Swedish stock analysis SEO guides`.
+For each behavior change:
 
-### Task 6: Crawl discovery, AI guide and internal links
+- [x] Add a focused failing regression/contract test where practical.
+- [x] Observe the expected RED CI state.
+- [x] Implement the minimal GREEN change.
+- [x] Run repository CI on the resulting branch head.
 
-**Files:**
-- Modify: `src/app/robots.ts`
-- Modify: `src/app/sitemap.ts`
-- Create: `src/app/llms.txt/route.ts`
-- Modify: `src/app/layout.tsx`
-- Modify: `src/app/page.tsx`
-- Modify: `src/components/app-shell/footer.tsx`
+Repository CI verifies:
 
-**Interfaces:**
-- Consumes: public snapshot listing.
+- [x] `npm run lint`
+- [x] `npm run typecheck` (`next typegen && tsc --noEmit`)
+- [x] full `npm test`
+- [x] `npm run build`
 
-- [ ] Change robots base fallback to production domain, retain private path disallows, explicitly permit public crawling by OAI-SearchBot and ChatGPT-User, expose host and sitemap.
-- [ ] Convert sitemap to async, add the new SEO routes and indexable stock snapshots, and use stored update timestamps rather than setting every entry to the current time.
-- [ ] Add `/llms.txt` plain-text route listing StockBox purpose, methodology/data-source URLs, stock hub and research disclaimer.
-- [ ] Improve global/home metadata to include clear “stock analysis / aktieanalys” intent while retaining source-backed positioning.
-- [ ] Add footer internal links to `/aktier`, `/aktieanalys`, `/ai-aktieanalys`, `/fundamental-analys` and `/nyckeltal/pe-tal`.
-- [ ] Commit with `feat: complete StockBox SEO crawl discovery`.
+The latest code checkpoint before this documentation sync passed all four stages, including the crawlable `/aktier` pagination change.
 
-### Task 7: Verification
+## Production activation checklist
 
-**Files:**
-- Review all changed files.
+These are deployment/operations steps, not reasons to weaken the code-level quality gates:
 
-**Interfaces:**
-- Produces: verified branch ready for PR.
+- [ ] Apply `supabase/migrations/20260901213000_public_stock_snapshots.sql` to the production database if not already applied.
+- [ ] Confirm `NEXT_PUBLIC_APP_URL=https://www.getstockbox.app` in production.
+- [ ] Configure a valid `INDEXNOW_KEY` if IndexNow submission is desired.
+- [ ] Configure `GOOGLE_SITE_VERIFICATION` and `BING_SITE_VERIFICATION` when the corresponding webmaster properties are ready.
+- [ ] Confirm configured legal seller fields are production-correct before relying on the Organization entity/contact surfaces.
+- [ ] Deploy the branch through the normal release process.
+- [ ] Verify `/robots.txt`, `/sitemap.xml`, `/aktier/sitemap/0.xml`, `/llms.txt`, `/indexnow-key.txt` (when configured) and representative public SEO pages on the production host.
+- [ ] Submit/verify sitemaps in Google Search Console and Bing Webmaster Tools after deployment.
+- [ ] Publish only approved, quality-gated public analyses through the admin publication flow.
 
-- [ ] Run `npm test` and fix all failures.
-- [ ] Run `npm run typecheck` and fix all failures.
-- [ ] Run `npm run lint` and fix all failures.
-- [ ] Run `npm run build` and fix all failures.
-- [ ] Inspect generated route output/build route list for all new public URLs.
-- [ ] Review `git diff --check` and diff for accidental secrets, private data exposure or unsupported SEO claims.
-- [ ] Commit any verification fixes with `fix: harden SEO AIO growth engine`.
+## Merge/readiness rule
+
+Do not describe the SEO/AIO branch as ready merely because individual tests pass. The current head must pass lint, typecheck, full Vitest and production build, and a final diff review must show no accidental secrets, private-data exposure, unsupported ranking promises or stale architecture references. Merge/deployment remains an explicit release decision.
