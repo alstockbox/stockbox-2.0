@@ -27,8 +27,30 @@ export type IntelligenceAggregate = {
   availableFamilies: IntelligenceEvidenceFamily[];
 };
 
+export type IntelligenceSignal = {
+  id: string;
+  label: string;
+  score: number | null;
+  weight: number;
+  confidence: number;
+  source?: string;
+  detail?: string;
+  dataAsOf?: string | null;
+  family?: IntelligenceEvidenceFamily;
+};
+
+export type IntelligenceSignalAggregate = IntelligenceAggregate & {
+  confidence: number;
+  signals: IntelligenceSignal[];
+  missingEvidence: string[];
+};
+
 function clampScore(value: number): number {
   return Math.max(0, Math.min(100, value));
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 export function aggregateIntelligenceEvidence(
@@ -54,6 +76,40 @@ export function aggregateIntelligenceEvidence(
     availableWeight,
     availableCount: available.length,
     availableFamilies,
+  };
+}
+
+export function aggregateIntelligenceSignals(
+  signals: IntelligenceSignal[],
+  options: { minimumCoverage?: number; confidencePenalty?: number } = {},
+): IntelligenceSignalAggregate {
+  const evidence = signals.map<IntelligenceEvidence>((signal) => ({
+    id: signal.id,
+    label: signal.label,
+    score: signal.score,
+    weight: signal.weight,
+    family: signal.family ?? "research",
+    detail: signal.detail,
+    dataAsOf: signal.dataAsOf,
+  }));
+  const aggregate = aggregateIntelligenceEvidence(evidence, { minimumCoverage: options.minimumCoverage });
+  const weightedSignals = signals.filter((item) => Number.isFinite(item.weight) && item.weight > 0);
+  const available = weightedSignals.filter((item) => typeof item.score === "number" && Number.isFinite(item.score));
+  const weightedConfidence = aggregate.availableWeight > 0
+    ? available.reduce((sum, item) => sum + clampUnit(item.confidence) * item.weight, 0) / aggregate.availableWeight
+    : 0;
+  const confidencePenalty = clampUnit(options.confidencePenalty ?? 1);
+  const confidence = aggregate.score === null
+    ? 0
+    : clampUnit(weightedConfidence * aggregate.coverage * confidencePenalty);
+
+  return {
+    ...aggregate,
+    confidence,
+    signals,
+    missingEvidence: weightedSignals
+      .filter((item) => typeof item.score !== "number" || !Number.isFinite(item.score))
+      .map((item) => item.id),
   };
 }
 
