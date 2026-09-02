@@ -157,7 +157,7 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
       ? `${snapshot.companyName} investmentbolagsanalys`
       : `${snapshot.companyName} aktieanalys`;
   const aboutEntity = isEtf
-    ? { "@type": "FinancialProduct", name: snapshot.companyName, category: "ETF" }
+    ? { "@type": "InvestmentFund", name: snapshot.companyName, category: "ETF" }
     : { "@type": "Corporation", name: snapshot.companyName, tickerSymbol: snapshot.ticker };
 
   const structuredData = {
