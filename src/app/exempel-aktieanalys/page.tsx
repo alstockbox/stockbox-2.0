@@ -6,7 +6,6 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
 import { getPublicSampleAnalysis } from "@/lib/analysis/public-sample";
 import { captureServerEvent } from "@/lib/analytics/events";
-import { resolveCanonicalCompanySelection, searchCompanyCatalog } from "@/lib/data/company-search";
 
 export const metadata: Metadata = {
   title: "Exempel på aktieanalys – riktig StockBox Deep Analysis",
@@ -38,9 +37,6 @@ export default async function SwedishSampleAnalysisPage() {
     return <Section><Container className="max-w-3xl"><Card><h1 className="serif text-3xl font-semibold">Exempel på aktieanalys</h1><p className="mt-3 text-sm leading-7 text-[#9aa7b8]">Den godkända exempelrapporten är tillfälligt otillgänglig. StockBox genererar inga ersättningssiffror för att fylla demon.</p></Card></Container></Section>;
   }
 
-  const listingCandidates = await searchCompanyCatalog(report.ticker);
-  const listing = resolveCanonicalCompanySelection({ ticker: report.ticker, canonicalTicker: report.ticker, name: report.companyName }, listingCandidates);
-  const exchange = listing.ok ? listing.company.exchange : undefined;
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app";
   const pageUrl = new URL("/exempel-aktieanalys", baseUrl).toString();
   const breadcrumbs = [
@@ -80,7 +76,7 @@ export default async function SwedishSampleAnalysisPage() {
           <h1 className="serif mt-2 text-3xl font-semibold text-[#f4efe5] sm:text-4xl">Exempel på aktieanalys – så ser en riktig StockBox-rapport ut</h1>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-[#c9d2df] sm:text-base">Rapporten nedan är en oföränderlig analys som StockBox faktiskt genererat. Siffror fylls inte ut för demon och saknade datapunkter behålls som saknade. Det gör sidan användbar både som produktbevis och som ett transparent exempel på hur StockBox presenterar research.</p>
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#9aa7b8]">
-            <span>{report.companyName} · {report.ticker}{exchange ? ` · ${exchange}` : ""}</span>
+            <span>{report.companyName} · {report.ticker}</span>
             <span>Analyserad: {formatAnalysisTimestamp(report.generatedAt, locale)}</span>
             <span>Modell: {report.modelVersion}</span>
             <span>Analystyp: {report.analysisType}</span>
