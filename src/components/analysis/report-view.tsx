@@ -23,6 +23,7 @@ import { buildAnalystExpectationsSummary } from "@/lib/analysis/analyst-expectat
 import { orderScoreDimensions, profilePresentationFor } from "@/lib/analysis/profile-presentation";
 import { applyAnalysisLens } from "@/lib/analysis/analysis-lens";
 import { AnalysisLensControl } from "./analysis-lens-control";
+import { OpportunityIntelligencePanel } from "./opportunity-intelligence-panel";
 
 function metricLabelsFor(copy: ReturnType<typeof getP0Copy>["report"]): Record<keyof Metrics, string> {
   return {
@@ -611,6 +612,8 @@ function ReportViewWithLens({ report: sourceReport, mode = "pro", locale = "en",
       </div>
 
       {mode === "simple" && report.historical ? <HistoricalResearchView report={report} mode={mode} locale={locale} /> : null}
+
+      <OpportunityIntelligencePanel report={report} mode={mode} locale={locale} />
 
       <WhatChanged report={report} previousReport={previousReport} copy={copy} locale={locale} />
 
