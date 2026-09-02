@@ -43,7 +43,8 @@ function report(): AnalysisReport {
 describe("buildIntelligenceSummary", () => {
   it("uses the canonical intelligence snapshot and exposes professional decision metadata", () => {
     const result = buildIntelligenceSummary(report(), "en");
-    expect(result.scores.coreQuality).toBe(81);
+    expect(result.scores.coreQuality).toBe(82);
+    expect(result.scores.canonicalCoreQuality).toBe(81);
     expect(result.scores.mispricing).not.toBeNull();
     expect(result.scores.inflection).not.toBeNull();
     expect(result.scores.opportunity).not.toBeNull();
