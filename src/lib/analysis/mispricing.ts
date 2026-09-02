@@ -1,4 +1,5 @@
-import { aggregateIntelligenceEvidence, intelligenceConfidence, type IntelligenceEvidence } from "./intelligence-common";
+import { aggregateIntelligenceEvidence, intelligenceConfidence, type IntelligenceEvidence, type IntelligenceSignal } from "./intelligence-common";
+import type { AnalysisReport } from "./types";
 
 export type MispricingLabel = "deep_discount" | "discounted" | "roughly_fair" | "premium" | "uncertain";
 export type ValueTrapRisk = "low" | "medium" | "high";
@@ -59,6 +60,18 @@ export type MispricingAssessment = {
   positiveEvidence: string[];
   counterEvidence: string[];
   dataAsOf: string | null;
+};
+
+export type MispricingScoreResult = {
+  score: number | null;
+  confidence: number;
+  coverage: number;
+  label: "mispricing";
+  classification: MispricingLabel;
+  valueTrapRisk: ValueTrapRisk;
+  signals: IntelligenceSignal[];
+  blockers: string[];
+  assessment: MispricingAssessment;
 };
 
 function finite(value: number | null | undefined): value is number {
@@ -243,5 +256,97 @@ export function computeMispricingAssessment(input: MispricingInput): MispricingA
     positiveEvidence,
     counterEvidence,
     dataAsOf: input.dataAsOf ?? null,
+  };
+}
+
+function priorFinancialPoint(report: AnalysisReport) {
+  const financials = report.historical?.financials ?? [];
+  return financials.length >= 2 ? financials[financials.length - 2] : null;
+}
+
+function referencePeHistory(report: AnalysisReport) {
+  const context = report.historical?.valuationContext;
+  if (!context) return null;
+  const reference = context.referenceWindow === "5Y" ? context.fiveYear : context.maximum;
+  return {
+    current: context.currentPriceEarnings,
+    median: context.referencePriceEarningsMedian,
+    sufficientHistory: reference.sufficientHistory,
+    observationCount: reference.peObservationCount,
+  };
+}
+
+function sourceConflictSeverity(report: AnalysisReport): "none" | "medium" | "high" {
+  const conflicts = report.engine?.sourceConflicts ?? [];
+  if (conflicts.some((item) => item.severity === "high" && item.resolved !== true)) return "high";
+  if (conflicts.some((item) => item.severity === "medium" && item.resolved !== true)) return "medium";
+  return "none";
+}
+
+export function buildMispricingScore(report: AnalysisReport): MispricingScoreResult {
+  const latest = report.historical?.financials.at(-1) ?? null;
+  const prior = priorFinancialPoint(report);
+  const valuationDimension = report.score.dimensions.find((item) => item.key === "valuation")?.score ?? null;
+  const dcfConfidence = report.engine?.dcf.confidence ?? report.confidenceBreakdown?.valuationAssumptions ?? report.score.confidence;
+  const assessment = computeMispricingAssessment({
+    currentPrice: report.market?.price ?? report.engine?.dcf.currentPrice ?? null,
+    dcf: {
+      suitable: report.dcf.suitable,
+      bear: report.dcf.bear,
+      base: report.dcf.base,
+      bull: report.dcf.bull,
+      confidence: finite(dcfConfidence) ? dcfConfidence : 0,
+    },
+    historicalPe: referencePeHistory(report),
+    peerValuationScore: null,
+    valuationDimensionScore: valuationDimension,
+    trends: {
+      revenueGrowthCurrent: latest?.revenueGrowth ?? report.metrics.revenueGrowth1y,
+      revenueGrowthPrior: prior?.revenueGrowth ?? null,
+      epsGrowthCurrent: latest?.epsGrowth ?? report.metrics.epsGrowth1y,
+      epsGrowthPrior: prior?.epsGrowth ?? null,
+      fcfMarginCurrent: latest?.freeCashFlowMargin ?? report.metrics.fcfMargin,
+      fcfMarginPrior: prior?.freeCashFlowMargin ?? null,
+      operatingMarginCurrent: latest?.operatingMargin ?? report.metrics.operatingMargin,
+      operatingMarginPrior: prior?.operatingMargin ?? null,
+      cashConversion: report.metrics.cashConversion,
+      debtToEquity: report.metrics.debtToEquity,
+      interestCoverage: report.metrics.interestCoverage,
+      shareGrowth: latest?.shareGrowth ?? null,
+    },
+    redFlags: report.redFlags.map((flag) => ({ severity: flag.severity, title: flag.title })),
+    sourceConflictSeverity: sourceConflictSeverity(report),
+    dataStatus: report.dataStatus,
+    dataAsOf: report.dataAsOf ?? report.market?.date ?? null,
+  });
+
+  const signals: IntelligenceSignal[] = assessment.pillars.map((pillar) => ({
+    id: pillar.id,
+    label: pillar.label,
+    score: pillar.score,
+    weight: pillar.weight,
+    confidence: assessment.confidence / 100,
+    source: pillar.id === "intrinsic_value"
+      ? "StockBox DCF"
+      : pillar.id === "historical_self_valuation"
+        ? "StockBox historical valuation"
+        : pillar.id === "peer_relative_valuation"
+          ? "StockBox peer valuation"
+          : "StockBox archetype-aware valuation",
+    detail: pillar.detail,
+    dataAsOf: assessment.dataAsOf,
+    family: "valuation",
+  }));
+
+  return {
+    score: assessment.score,
+    confidence: assessment.confidence / 100,
+    coverage: assessment.coverage,
+    label: "mispricing",
+    classification: assessment.label,
+    valueTrapRisk: assessment.valueTrapRisk,
+    signals,
+    blockers: assessment.counterEvidence,
+    assessment,
   };
 }
