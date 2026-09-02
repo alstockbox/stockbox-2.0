@@ -13,6 +13,11 @@ export type IntelligenceSnapshot = {
   opportunity: OpportunityAssessment;
 };
 
+type RevisionAwareForwardEstimates = NonNullable<AnalysisReport["forwardEstimates"]> & {
+  revisionNetLastWeek?: number | null;
+  revisionNetLastMonth?: number | null;
+};
+
 function finite(value: number | null | undefined): value is number { return typeof value === "number" && Number.isFinite(value); }
 function dimensionScore(report: AnalysisReport, key: string): number | null {
   const value = report.score.dimensions.find((dimension) => dimension.key === key)?.score;
@@ -42,6 +47,9 @@ function snapshotDataAsOf(report: AnalysisReport): string | null {
   const latest = orderedFinancials(report).at(-1);
   return report.dataAsOf ?? report.market?.date ?? latest?.periodEndDate ?? null;
 }
+function revisionAwareEstimates(report: AnalysisReport): RevisionAwareForwardEstimates | undefined {
+  return report.forwardEstimates as RevisionAwareForwardEstimates | undefined;
+}
 
 export function mispricingInputFromReport(report: AnalysisReport): MispricingInput {
   const { previous, current } = latestFinancialPair(report);
@@ -49,6 +57,7 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
   const referenceStats = valuation ? valuation.referenceWindow === "5Y" ? valuation.fiveYear : valuation.maximum : null;
   const currentPrice = report.market?.price ?? report.engine?.dcf.currentPrice ?? report.historical?.price.at(-1)?.close ?? null;
   const benchmarkValuation = buildBenchmarkValuationScore(report);
+  const estimates = revisionAwareEstimates(report);
   return {
     currentPrice,
     dcf: { suitable: report.dcf.suitable, bear: report.dcf.bear, base: report.dcf.base, bull: report.dcf.bull, confidence: averageScenarioConfidence(report) },
@@ -69,7 +78,7 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
       cashConversion: report.metrics.cashConversion, debtToEquity: current?.debtToEquity ?? report.metrics.debtToEquity,
       interestCoverage: current?.interestCoverage ?? report.metrics.interestCoverage, shareGrowth: current?.shareGrowth ?? null,
     },
-    revisionNetLastMonth: report.forwardEstimates?.revisionNetLastMonth ?? null,
+    revisionNetLastMonth: estimates?.revisionNetLastMonth ?? null,
     redFlags: report.redFlags.map((flag) => ({ severity: flag.severity, title: flag.title })),
     sourceConflictSeverity: sourceConflictSeverity(report), dataStatus: report.dataStatus ?? "current", dataAsOf: snapshotDataAsOf(report),
   };
@@ -77,7 +86,7 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
 
 export function inflectionInputFromReport(report: AnalysisReport): InflectionInput {
   const { previous, current } = latestFinancialPair(report);
-  const estimates = report.forwardEstimates;
+  const estimates = revisionAwareEstimates(report);
   const hasForwardEstimates = Boolean(
     finite(estimates?.nextYearRevenueGrowth)
     || finite(estimates?.nextYearEpsGrowth)
