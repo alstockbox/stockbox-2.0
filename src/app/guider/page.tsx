@@ -13,6 +13,7 @@ const guides = [
   ["Hur värderar man en aktie?", "/guider/hur-varderar-man-en-aktie", "Så kombinerar du multiplar, kassaflöde, tillväxt och kvalitet utan att fastna i ett enda P/E-tal."],
   ["Exempel på aktieanalys", "/exempel-aktieanalys", "Se en verklig StockBox Deep Analysis med score, nyckeltal, datatäckning, risker, modellversion och källor."],
   ["Analysera investmentbolag", "/guider/analysera-investmentbolag", "Så bedömer du substansvärde, NAV-rabatt eller premie, NAV-tillväxt, skuldsättning och portföljkvalitet."],
+  ["Analysera ETF:er", "/guider/analysera-etf", "Så bedömer du avgift, tracking, likviditet, koncentration, look-through-värdering och produktspecifika ETF-risker."],
   ["Aktieanalysverktyg", "/aktieanalys-verktyg", "Vad ett seriöst analysverktyg bör visa om data, beräkningar, risk, källor, saknade datapunkter och uppdateringsdatum."],
   ["Nyckeltal för aktier", "/nyckeltal", "Fördjupa dig i P/E, EV/EBITDA, ROIC och fritt kassaflöde och när respektive mått är användbart."],
 ] as const;
@@ -49,7 +50,7 @@ export default function GuidesPage() {
     />
     <SeoArticle>
       <SeoSection title="Börja med processen, inte slutsatsen">
-        <p>En robust analys börjar med rätt bolag och rätt rapportperiod. Därefter granskas verksamhetens ekonomiska utveckling, lönsamhet, kassaflöde, balansräkning, värdering och risker. Först när underlaget är begripligt blir en sammanvägd bedömning meningsfull.</p>
+        <p>En robust analys börjar med rätt bolag och rätt rapportperiod. Därefter granskas verksamhetens ekonomiska utveckling, lönsamhet, kassaflöde, balansräkning, värdering och risker. Först när underlaget är begripligt blir en sammanvägd bedömning meningsfull. För investmentbolag och ETF:er behöver processen dessutom anpassas till respektive värdepappers ekonomiska struktur.</p>
       </SeoSection>
       <SeoSection title="Guider">
         <div className="grid gap-4 sm:grid-cols-2">
