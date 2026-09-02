@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateIntelligenceEvidence } from "@/lib/analysis/intelligence-common";
+import { aggregateIntelligenceEvidence, aggregateIntelligenceSignals } from "@/lib/analysis/intelligence-common";
 
 describe("aggregateIntelligenceEvidence", () => {
   it("excludes missing evidence from score while counting it against coverage", () => {
@@ -44,5 +44,36 @@ describe("aggregateIntelligenceEvidence", () => {
     expect(result.score).toBe(80);
     expect(result.coverage).toBe(1);
     expect(result.plannedWeight).toBe(1);
+  });
+});
+
+describe("aggregateIntelligenceSignals", () => {
+  it("preserves economic score while applying signal confidence and explicit confidence penalties", () => {
+    const clean = aggregateIntelligenceSignals([
+      { id: "quality", label: "Quality", score: 80, weight: 0.7, confidence: 0.9, source: "core" },
+      { id: "estimate", label: "Estimate", score: 60, weight: 0.3, confidence: 0.7, source: "provider" },
+    ]);
+    const penalized = aggregateIntelligenceSignals([
+      { id: "quality", label: "Quality", score: 80, weight: 0.7, confidence: 0.9, source: "core" },
+      { id: "estimate", label: "Estimate", score: 60, weight: 0.3, confidence: 0.7, source: "provider" },
+    ], { confidencePenalty: 0.5 });
+
+    expect(clean.score).toBeCloseTo(74, 8);
+    expect(penalized.score).toBe(clean.score);
+    expect(clean.confidence).toBeGreaterThan(penalized.confidence);
+    expect(clean.confidence).toBeLessThanOrEqual(1);
+    expect(clean.signals).toHaveLength(2);
+  });
+
+  it("counts missing signals against coverage instead of treating them as neutral", () => {
+    const result = aggregateIntelligenceSignals([
+      { id: "quality", label: "Quality", score: 90, weight: 0.6, confidence: 0.9, source: "core" },
+      { id: "revisions", label: "Revisions", score: null, weight: 0.4, confidence: 0, source: "provider" },
+    ], { minimumCoverage: 0.5 });
+
+    expect(result.score).toBe(90);
+    expect(result.coverage).toBeCloseTo(0.6, 8);
+    expect(result.missingEvidence).toEqual(["revisions"]);
+    expect(result.confidence).toBeLessThan(0.9);
   });
 });
