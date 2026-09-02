@@ -61,6 +61,21 @@ function report(overrides: Partial<AnalysisReport> = {}): AnalysisReport {
   };
 }
 
+function etfReport(): AnalysisReport {
+  return {
+    ...report({ ticker: "SPY", companyName: "SPDR S&P 500 ETF Trust" }),
+    securityClassification: { kind: "equity_etf", confidence: 0.99, reason: "ETF classification" },
+    securityAnalysis: {
+      etf: {
+        kind: "etf",
+        subtype: "broad_market",
+        score: { coverage: 0.9, factors: [] },
+        warnings: [],
+      },
+    },
+  } as unknown as AnalysisReport;
+}
+
 describe("slugifyStockPage", () => {
   it("creates stable Swedish-safe stock slugs", () => {
     expect(slugifyStockPage("  ÅF Pöyry / Class B  ")).toBe("af-poyry-class-b");
@@ -104,11 +119,32 @@ describe("sanitizePublicReport", () => {
 });
 
 describe("buildStockMetaDescription", () => {
-  it("creates a concise Swedish description with company, ticker and StockBox score", () => {
+  it("creates a concise Swedish stock description with company, ticker and StockBox score", () => {
     const description = buildStockMetaDescription(report());
     expect(description).toContain("Mycronic AB");
     expect(description).toContain("MYCR.ST");
     expect(description).toContain("83/100");
+    expect(description).toContain("aktieanalys");
+    expect(description.length).toBeLessThanOrEqual(160);
+  });
+
+  it("does not describe an ETF as an ordinary stock/company-fundamentals analysis", () => {
+    const description = buildStockMetaDescription(etfReport());
+    expect(description).toContain("ETF-analys");
+    expect(description).toContain("kostnad");
+    expect(description).toContain("risk");
+    expect(description).not.toContain("aktieanalys");
+    expect(description).not.toContain("lönsamhet");
+    expect(description.length).toBeLessThanOrEqual(160);
+  });
+
+  it("uses investment-company intent for holding-company reports", () => {
+    const holding = report({ companyName: "Investor AB", ticker: "INVE-B.ST", analysisArchetype: "holding_company" });
+    const description = buildStockMetaDescription(holding);
+    expect(description).toContain("investmentbolagsanalys");
+    expect(description).toContain("NAV");
+    expect(description).toContain("substans");
+    expect(description).not.toContain("aktieanalys");
     expect(description.length).toBeLessThanOrEqual(160);
   });
 });
