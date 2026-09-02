@@ -4,103 +4,152 @@
 
 Turn StockBox from a mostly application-oriented site into a crawlable, trustworthy investor-research knowledge surface that can rank for Swedish stock-analysis intent and provide citeable public facts to search and AI systems without exposing private analyses or generating thin programmatic spam.
 
+This document reflects the implemented PR architecture, not the original minimum scope.
+
 ## Principles
 
 1. Public SEO content must be derived from real StockBox analysis output or carefully authored evergreen educational copy.
 2. Private user analyses must never become public automatically.
-3. Programmatic stock pages are indexable only when a deliberately published snapshot passes data-quality gates.
-4. Public pages must preserve provenance, data date, model version, coverage/confidence and financial-disclaimer context.
-5. The implementation must not trigger a new provider analysis on crawler page views; public pages read stored snapshots only.
-6. No fake review/rating structured data and no unsupported financial claims.
-7. Swedish commercial search intent is the first SEO market; existing English application UX remains intact.
+3. Programmatic security pages are indexable only when a deliberately published snapshot passes data-quality gates.
+4. Public pages preserve provenance, data date, model version, coverage/confidence and financial-research disclaimer context.
+5. Crawler page views never trigger a provider analysis; public pages read stored snapshots only.
+6. Missing financial data stays missing. No fake review/rating structured data and no unsupported financial claims.
+7. Swedish public search intent is the primary SEO market while existing English application UX remains available.
+8. `llms.txt`, IndexNow and crawler-specific controls are supplementary discovery mechanisms, not ranking shortcuts.
 
 ## Architecture
 
-### 1. Evergreen SEO landing pages
+### 1. Evergreen search-intent and knowledge cluster
 
-Create server-rendered Swedish pages for high-intent queries:
+The public Swedish content surface includes:
 
 - `/aktieanalys`
+- `/aktieanalys-verktyg`
 - `/ai-aktieanalys`
 - `/fundamental-analys`
+- `/guider`
+- `/guider/hur-analyserar-man-en-aktie`
+- `/guider/hur-varderar-man-en-aktie`
+- `/guider/analysera-investmentbolag`
+- `/guider/analysera-etf`
+- `/nyckeltal`
 - `/nyckeltal/pe-tal`
+- `/nyckeltal/ev-ebitda`
+- `/nyckeltal/roic`
+- `/nyckeltal/fritt-kassaflode`
+- `/research-standard`
+- `/exempel-aktieanalys`
 - `/aktier`
 
-These pages explain the topic with original StockBox methodology context, link to methodology/data-source pages, link to relevant public stock pages, and drive the visitor to the analysis workflow.
+The cluster favors fewer substantive pages over thin keyword variants. Pages connect educational intent to methodology, data sources, proof-of-product and published company/security analyses.
 
-### 2. Public stock snapshot store
+### 2. Public stock snapshot store and privacy boundary
 
-Add `public_stock_snapshots` in Supabase. A row stores a sanitized AnalysisReport snapshot plus SEO publication metadata. It is separate from `analyses` so publication is explicit and privacy boundaries are clear.
+`public_stock_snapshots` is a dedicated Supabase publication store separate from private `analyses`. A row stores a sanitized `AnalysisReport` snapshot plus publication metadata: slug, ticker, company name, source analysis id, report JSON, score, confidence, data coverage, data-as-of date, publish/update timestamps, indexability state and meta description.
 
-Required fields include slug, ticker, company name, source analysis id, sanitized report JSON, score, confidence, data coverage, data-as-of date, publish/update timestamps, indexability state and optional meta description.
+The table has RLS enabled, but `anon` and `authenticated` do **not** receive direct SELECT or write access. Public pages are server-rendered through the service-role admin client. This prevents the full stored report JSON from becoming a client-side database surface merely because a subset is rendered publicly.
 
-### 3. Explicit admin publication
+Ticker uniqueness is enforced through an explicit idempotent unique index. Publication preserves the established canonical slug for a ticker and resolves slug collisions for different securities deterministically.
 
-Add an admin-only API route that publishes an existing analysis into `public_stock_snapshots`. Publication is rejected unless:
+### 3. Explicit admin publication and quality gates
 
-- the analysis uses the balanced investment profile;
-- StockBox score exists;
-- confidence is at least 65%;
-- data coverage is at least 70%;
-- the report is not stale/unavailable;
-- company identity and ticker exist.
+An admin-only route publishes an existing analysis into `public_stock_snapshots`. Publication is rejected unless the report satisfies the public quality contract, including:
 
-The publisher removes admin-only QA data before storing the public snapshot. This endpoint is the only first-version path that makes an analysis public.
+- balanced investment profile;
+- current data status;
+- finite StockBox score;
+- at least 65% confidence;
+- at least 70% data coverage;
+- valid company identity and ticker.
 
-### 4. Programmatic stock pages
+Admin-only QA material is removed before storage. Publication never mutates the original private analysis. Republishing an existing ticker updates its snapshot while retaining canonical identity and original publication time.
 
-Create `/aktier/[slug]`. The page reads only `public_stock_snapshots` and 404s for unpublished/non-indexable slugs. It renders:
+### 4. Public security pages and answerability
 
-- company/ticker and updated date;
-- StockBox score, confidence and coverage;
-- research summary;
-- score dimensions;
-- valuation facts such as P/E, EV/EBITDA and FCF yield when present;
-- growth/profitability/financial-health metrics when present;
-- red/green flags;
+`/aktier/[slug]` reads only indexable stored snapshots and 404s otherwise. Pages expose a dated research snapshot with:
+
+- company/security identity and ticker;
+- StockBox Score, confidence, coverage and data date;
+- direct “Snabbfakta” answer block;
+- research summary and score dimensions;
+- available valuation, growth, profitability, quality and balance-sheet facts;
+- strengths and risks;
 - source links and provenance context;
-- methodology/data-source links;
-- conversion CTA to run a fresh StockBox analysis;
-- financial-research disclaimer.
+- model/methodology, Research Standard and data-source links;
+- conversion CTA to run a fresh analysis;
+- explicit non-advice / non-live-data context.
 
-Metadata is generated from the snapshot. JSON-LD includes BreadcrumbList and Article/WebPage publisher/date metadata, not investment-rating markup.
+Security-type presentation is conditional. Ordinary equities use company fundamentals; investment companies can expose NAV/SOTP-oriented information when available; ETF pages expose ETF-specific factors rather than forcing irrelevant company multiples.
 
-### 5. Crawl discovery
+Metadata is generated from the snapshot and security type. JSON-LD uses BreadcrumbList plus Article/WebPage entities with dates, publisher, citations and the security-specific OpenGraph image. It does not encode StockBox Score as a consumer rating.
 
-Update `robots.ts` so public content is crawlable while application/private routes remain blocked. Explicit rules preserve OAI-SearchBot and ChatGPT-User access to public pages. Add `host` and production-safe sitemap URL.
+### 5. Public hub pagination and internal crawl graph
 
-Convert `sitemap.ts` to an async sitemap that includes evergreen SEO pages and all indexable public stock snapshots. `lastModified` uses actual stored update timestamps rather than `new Date()` for every URL.
+`/aktier` is a crawlable paginated HTML hub rather than a fixed top-N list. It uses cached count/page queries, exposes canonical URLs for paginated pages, stable ItemList positions and ordinary previous/next links. This keeps deep published analyses reachable through internal HTML links as the public inventory grows.
 
-### 6. AI-readable site guide
+### 6. Cache and publication invalidation
 
-Add `/llms.txt` as a plain-text route. It briefly describes what StockBox is, which public URLs contain methodology/data provenance, and that scores are analytical research outputs rather than individualized financial advice. This is supplementary discoverability and is not treated as a ranking shortcut.
+Public snapshot reads use a bounded Next.js Data Cache in addition to React request memoization. Individual security snapshots have ticker/slug-specific invalidation tags; list/count/sitemap data use the shared public-list tag.
 
-### 7. IndexNow
+Successful publication invalidates the affected snapshot and public list/discovery caches and revalidates relevant `/aktier`, security, robots and sitemap paths. This reduces repeated Supabase work for crawlers while allowing newly published research to become discoverable promptly.
 
-Add a server helper and key-verification route. When an admin successfully publishes/updates a public stock snapshot and `INDEXNOW_KEY` is configured, notify IndexNow for the stock URL plus the stock hub. Publication must still succeed if IndexNow is unavailable.
+### 7. Crawl discovery and scalable sitemaps
 
-### 8. Internal linking and metadata
+`robots.ts` keeps private application paths out of indexing while allowing public research. Public rules include OAI-SearchBot and ChatGPT-User access without exposing private routes.
 
-Add links to the new SEO hubs from the public footer. Improve global/home metadata so it clearly includes stock-analysis language while preserving StockBox's source-backed positioning.
+The static root sitemap contains evergreen public routes. Dynamic security URLs are split into `/aktier/sitemap/[id].xml` shards generated from the publication store, with a conservative 1,000 URLs per shard. Robots advertises the root sitemap plus generated stock sitemap shards. Stored update timestamps are used for stock `lastModified` values.
+
+### 8. AI-readable discovery and citation guidance
+
+`/llms.txt` is a plain-text supplemental site guide. It identifies public research, methodology, Research Standard, sources, guides, proof pages and citation expectations. It explicitly states that public company/security pages are dated snapshots and that StockBox research outputs are not individualized financial advice.
+
+### 9. IndexNow
+
+IndexNow uses a validated root key file at `/indexnow-key.txt`. The key must be 8–128 characters using IndexNow-compatible characters. Payloads use a root `keyLocation`, which permits site-wide URL submission. Publication sends best-effort IndexNow notifications and never fails solely because the external IndexNow endpoint is unavailable.
+
+### 10. Trust, entity identity and proof-of-product
+
+The root structured-data graph defines stable Organization, WebSite and SoftwareApplication entities. The Organization entity uses configured legal seller fields (legal name, organization identifier, contact information and address) only when those public commerce settings exist; no personal/private fallback data is invented.
+
+Trust surfaces include:
+
+- `/docs/methodology` for versioned methodology;
+- `/data-sources` for source registry and data-quality limitations;
+- `/research-standard` for publication, evidence and correction boundaries;
+- `/sample-analysis` for the English immutable sample;
+- `/exempel-aktieanalys` for the Swedish search-intent equivalent.
+
+The English and Swedish proof pages use separate canonicals with language alternates rather than mixing languages on one canonical URL.
+
+### 11. Language semantics and metadata
+
+Swedish SEO routes receive `Content-Language: sv-SE` through Next.js response headers. Public pages have unique canonical metadata and structured data appropriate to their content. Stock/security pages use route-specific OpenGraph and Twitter images.
 
 ## Error handling
 
-- Missing Supabase configuration returns empty public snapshot lists and 404 for stock pages; it must not crash the marketing site.
-- Admin publication returns explicit 4xx validation errors for low-quality or unsuitable snapshots.
+- Missing Supabase configuration returns empty public discovery sets or 404s rather than crashing the marketing site.
+- Admin publication returns explicit validation errors for unsuitable snapshots.
+- Invalid and out-of-range public hub pages return not found.
 - IndexNow failures are non-blocking.
-- Invalid slugs are treated as not found.
+- Missing metrics are omitted or described as unavailable rather than converted to zero.
+- Public rendering never requires live provider calls.
 
-## Testing
+## Verification contract
 
-Add focused Vitest coverage for:
+The repository CI executes, in order:
 
-- SEO slug generation and normalized quality thresholds;
-- public-report sanitization/publication eligibility;
-- metadata/description helpers where practical;
-- IndexNow URL/key payload construction.
+1. dependency install;
+2. lint;
+3. Next route type generation + TypeScript typecheck;
+4. full Vitest suite;
+5. production Next.js build.
 
-Then run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` before merge.
+SEO-specific regression tests cover public eligibility, storage boundaries, canonical identity, sitemap scaling, cache invalidation, crawler/entity contracts, language headers, trust/schema contracts, answerability, security-type presentation, proof pages, guides and public hub pagination.
+
+## Deployment requirements
+
+Code completion is separate from production activation. Deployment requires the Supabase migration and appropriate production environment values, including the production app URL and any configured IndexNow/Search Console/Bing verification keys. Search-engine webmaster verification and sitemap submission occur after deployment.
 
 ## Success criteria
 
-The branch is complete when high-intent Swedish SEO routes are server-rendered and internally linked, public stock pages can only be created through explicit admin publication of high-quality balanced analyses, sitemap/robots/structured data expose those pages correctly, private application routes remain blocked, and the production build passes.
+The implementation is ready for review when public research surfaces are crawlable and internally connected, private analyses remain private by default, public security snapshots can only be created through explicit quality-gated administration, sitemap/discovery scales with inventory, structured data makes only supportable claims, and the latest branch head passes lint, typecheck, the full test suite and production build.
