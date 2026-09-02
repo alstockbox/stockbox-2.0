@@ -7,6 +7,7 @@ import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
 import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
+import { getLegalSeller } from "@/lib/legal/commerce";
 import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
@@ -66,6 +67,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const locale = await getLocale();
   const navCopy = getP0Copy(locale).nav;
   const env = getServerEnv();
+  const seller = getLegalSeller(env);
   const baseUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
   const structuredData = {
     "@context": "https://schema.org",
@@ -74,8 +76,29 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         "@type": "Organization",
         "@id": `${baseUrl}/#organization`,
         name: "StockBox",
+        legalName: seller.businessName || undefined,
+        identifier: seller.organizationNumber || undefined,
         url: baseUrl,
         logo: `${baseUrl}/images/stockbox-logo.png`,
+        email: seller.supportEmail || undefined,
+        telephone: seller.supportPhone || undefined,
+        taxID: seller.vatNumber || undefined,
+        address: seller.postalAddress
+          ? {
+              "@type": "PostalAddress",
+              streetAddress: seller.postalAddress,
+              addressCountry: "SE",
+            }
+          : undefined,
+        contactPoint: seller.supportEmail || seller.supportPhone
+          ? {
+              "@type": "ContactPoint",
+              contactType: "customer support",
+              email: seller.supportEmail || undefined,
+              telephone: seller.supportPhone || undefined,
+              availableLanguage: ["sv", "en"],
+            }
+          : undefined,
         sameAs: ["https://www.youtube.com/@Getstockbox", "https://www.tiktok.com/@alstockbox"],
       },
       { "@type": "WebSite", "@id": `${baseUrl}/#website`, name: "StockBox", url: baseUrl, publisher: { "@id": `${baseUrl}/#organization` } },
