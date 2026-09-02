@@ -2,6 +2,7 @@ import { applyAnalysisLens } from "./analysis-lens";
 import { computeInflectionAssessment, type InflectionAssessment, type InflectionInput } from "./inflection";
 import { computeMispricingAssessment, type MispricingAssessment, type MispricingInput } from "./mispricing";
 import { computeOpportunityAssessment, type OpportunityAssessment } from "./opportunity";
+import { buildBenchmarkValuationScore } from "./peer-benchmark";
 import type { AnalysisReport, HistoricalFinancialPoint, InvestmentProfile } from "./types";
 
 export type IntelligenceSnapshot = {
@@ -47,6 +48,7 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
   const valuation = report.historical?.valuationContext;
   const referenceStats = valuation ? valuation.referenceWindow === "5Y" ? valuation.fiveYear : valuation.maximum : null;
   const currentPrice = report.market?.price ?? report.engine?.dcf.currentPrice ?? report.historical?.price.at(-1)?.close ?? null;
+  const benchmarkValuation = buildBenchmarkValuationScore(report);
   return {
     currentPrice,
     dcf: { suitable: report.dcf.suitable, bear: report.dcf.bear, base: report.dcf.base, bull: report.dcf.bull, confidence: averageScenarioConfidence(report) },
@@ -56,7 +58,8 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
       sufficientHistory: Boolean(finite(valuation.currentPriceEarnings) && finite(valuation.referencePriceEarningsMedian) && (referenceStats?.observationCount ?? 0) >= 12),
       observationCount: referenceStats?.observationCount ?? 0,
     } : null,
-    peerValuationScore: null,
+    benchmarkValuationScore: benchmarkValuation.score,
+    benchmarkValuationDetail: benchmarkValuation.detail,
     valuationDimensionScore: dimensionScore(report, "valuation"),
     trends: {
       revenueGrowthCurrent: current?.revenueGrowth ?? report.metrics.revenueGrowth1y, revenueGrowthPrior: previous?.revenueGrowth ?? null,
@@ -66,7 +69,7 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
       cashConversion: report.metrics.cashConversion, debtToEquity: current?.debtToEquity ?? report.metrics.debtToEquity,
       interestCoverage: current?.interestCoverage ?? report.metrics.interestCoverage, shareGrowth: current?.shareGrowth ?? null,
     },
-    revisionNetLastMonth: null,
+    revisionNetLastMonth: report.forwardEstimates?.revisionNetLastMonth ?? null,
     redFlags: report.redFlags.map((flag) => ({ severity: flag.severity, title: flag.title })),
     sourceConflictSeverity: sourceConflictSeverity(report), dataStatus: report.dataStatus ?? "current", dataAsOf: snapshotDataAsOf(report),
   };
@@ -75,7 +78,12 @@ export function mispricingInputFromReport(report: AnalysisReport): MispricingInp
 export function inflectionInputFromReport(report: AnalysisReport): InflectionInput {
   const { previous, current } = latestFinancialPair(report);
   const estimates = report.forwardEstimates;
-  const hasForwardEstimates = Boolean(finite(estimates?.nextYearRevenueGrowth) || finite(estimates?.nextYearEpsGrowth));
+  const hasForwardEstimates = Boolean(
+    finite(estimates?.nextYearRevenueGrowth)
+    || finite(estimates?.nextYearEpsGrowth)
+    || finite(estimates?.revisionNetLastWeek)
+    || finite(estimates?.revisionNetLastMonth)
+  );
   const researchPositiveCount = report.research?.positives?.length ?? 0;
   const researchNegativeCount = report.research?.negatives?.length ?? 0;
   const hasResearchCatalysts = researchPositiveCount + researchNegativeCount > 0;
@@ -87,7 +95,12 @@ export function inflectionInputFromReport(report: AnalysisReport): InflectionInp
       operatingMarginCurrent: current?.operatingMargin ?? report.metrics.operatingMargin, operatingMarginPrior: previous?.operatingMargin ?? null,
       roicCurrent: current?.returnOnInvestedCapital ?? null, roicPrior: previous?.returnOnInvestedCapital ?? null,
     } : null,
-    expectations: hasForwardEstimates ? { revisionNetLastWeek: null, revisionNetLastMonth: null, nextYearRevenueGrowth: estimates?.nextYearRevenueGrowth ?? null, nextYearEpsGrowth: estimates?.nextYearEpsGrowth ?? null } : null,
+    expectations: hasForwardEstimates ? {
+      revisionNetLastWeek: estimates?.revisionNetLastWeek ?? null,
+      revisionNetLastMonth: estimates?.revisionNetLastMonth ?? null,
+      nextYearRevenueGrowth: estimates?.nextYearRevenueGrowth ?? null,
+      nextYearEpsGrowth: estimates?.nextYearEpsGrowth ?? null,
+    } : null,
     market: report.market ? {
       oneMonth: report.market.performance["1M"] ?? null, threeMonth: report.market.performance["3M"] ?? report.metrics.priceMomentum3m,
       sixMonth: report.market.performance["6M"] ?? null, oneYear: report.market.performance["1Y"] ?? report.metrics.priceMomentum1y,
