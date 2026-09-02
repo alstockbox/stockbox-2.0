@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 const guides = [
   ["Hur analyserar man en aktie?", "/guider/hur-analyserar-man-en-aktie", "En steg-för-steg-process från bolagsidentitet och rapportdata till värdering, risker och slutsats."],
   ["Hur värderar man en aktie?", "/guider/hur-varderar-man-en-aktie", "Så kombinerar du multiplar, kassaflöde, tillväxt och kvalitet utan att fastna i ett enda P/E-tal."],
+  ["Exempel på aktieanalys", "/exempel-aktieanalys", "Se en verklig StockBox Deep Analysis med score, nyckeltal, datatäckning, risker, modellversion och källor."],
   ["Analysera investmentbolag", "/guider/analysera-investmentbolag", "Så bedömer du substansvärde, NAV-rabatt eller premie, NAV-tillväxt, skuldsättning och portföljkvalitet."],
   ["Aktieanalysverktyg", "/aktieanalys-verktyg", "Vad ett seriöst analysverktyg bör visa om data, beräkningar, risk, källor, saknade datapunkter och uppdateringsdatum."],
   ["Nyckeltal för aktier", "/nyckeltal", "Fördjupa dig i P/E, EV/EBITDA, ROIC och fritt kassaflöde och när respektive mått är användbart."],
@@ -62,7 +63,7 @@ export default function GuidesPage() {
         </div>
       </SeoSection>
       <SeoSection title="Från teori till bolag">
-        <p>Vill du se hur begreppen används i praktiken kan du öppna <Link href="/aktier" className="font-semibold text-[#e1cb95] hover:text-white">publika StockBox-analyser</Link>. De publicerade sidorna visar bara datapunkter som faktiskt finns i den daterade snapshoten och länkar vidare till metodik och datakällor.</p>
+        <p>Vill du se hur begreppen används i praktiken kan du öppna <Link href="/exempel-aktieanalys" className="font-semibold text-[#e1cb95] hover:text-white">ett verkligt exempel på aktieanalys</Link> eller gå vidare till <Link href="/aktier" className="font-semibold text-[#e1cb95] hover:text-white">publika StockBox-analyser</Link>. De publicerade sidorna visar bara datapunkter som faktiskt finns i den daterade snapshoten och länkar vidare till metodik och datakällor.</p>
       </SeoSection>
     </SeoArticle>
   </>;
