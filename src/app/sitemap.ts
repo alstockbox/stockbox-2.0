@@ -28,6 +28,7 @@ const staticEntries: Array<{
   { path: "/data-sources", changeFrequency: "monthly", priority: 0.75 },
   { path: "/faq", changeFrequency: "monthly", priority: 0.65 },
   { path: "/sample-analysis", changeFrequency: "monthly", priority: 0.8 },
+  { path: "/exempel-aktieanalys", changeFrequency: "monthly", priority: 0.85 },
   { path: "/docs/methodology", changeFrequency: "monthly", priority: 0.8 },
   { path: "/changelog", changeFrequency: "weekly", priority: 0.5 },
   { path: "/legal/privacy", changeFrequency: "yearly", priority: 0.2 },
