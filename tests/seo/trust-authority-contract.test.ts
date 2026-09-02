@@ -32,6 +32,16 @@ describe("SEO trust and authority contract", () => {
     expect(tools).toContain('`${baseUrl.replace(/\\/$/, "")}/#software`');
   });
 
+  it("uses configured legal seller data to strengthen the public Organization entity", () => {
+    const layout = read("src/app/layout.tsx");
+    expect(layout).toContain('import { getLegalSeller } from "@/lib/legal/commerce"');
+    expect(layout).toContain("const seller = getLegalSeller(env)");
+    expect(layout).toContain("legalName: seller.businessName || undefined");
+    expect(layout).toContain("identifier: seller.organizationNumber || undefined");
+    expect(layout).toContain("email: seller.supportEmail || undefined");
+    expect(layout).toContain("telephone: seller.supportPhone || undefined");
+  });
+
   it("links the key-metric hub from the global footer", () => {
     const footer = read("src/components/app-shell/footer.tsx");
     expect(footer).toContain('["/nyckeltal",');
