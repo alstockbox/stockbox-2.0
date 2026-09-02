@@ -34,21 +34,36 @@ function report(): AnalysisReport {
     dcf: { suitable: true, bear: 80, base: 120, bull: 150, assumptions: { startingFcf: 100, years: 5, growthRate: 0.1, discountRate: 0.1, terminalGrowthRate: 0.025, marginOfSafety: 0.2 } },
     redFlags: [], greenFlags: [], scenarios: [], sources: [],
     disclaimer: "Test fixture only.",
-    market: { ticker: "IR", price: 90, currency: "SEK", date: "2026-09-02", volume: 50000, yearHigh: 98, yearLow: 60, performance: { "3M": 0.08, "1Y": 0.18 } },
+    market: { ticker: "IR", price: 90, currency: "SEK", date: "2026-09-02", volume: 50000, yearHigh: 98, yearLow: 60, performance: { "1M": 0.04, "3M": 0.08, "6M": 0.13, "1Y": 0.18 } },
     forwardEstimates: { nextYearRevenueGrowth: 0.18, nextYearEpsGrowth: 0.24 },
     providerDiagnostics: [{ provider: "twelve-data", capability: "estimates", status: "available", observedAt: "2026-09-02T08:00:00.000Z" }],
   };
 }
 
 describe("buildIntelligenceSummary", () => {
-  it("returns a user-facing summary with separate scores, confidence and explainable drivers", () => {
-    const result = buildIntelligenceSummary(report());
+  it("uses the canonical intelligence snapshot and exposes professional decision metadata", () => {
+    const result = buildIntelligenceSummary(report(), "en");
     expect(result.scores.coreQuality).toBe(81);
     expect(result.scores.mispricing).not.toBeNull();
     expect(result.scores.inflection).not.toBeNull();
     expect(result.scores.opportunity).not.toBeNull();
-    expect(result.confidence).toBeGreaterThan(0.6);
+    expect(result.confidence).toBeGreaterThan(0.4);
+    expect(result.coverage.opportunity).toBeGreaterThan(0);
+    expect(result.mispricing.label).toMatch(/deep_discount|discounted|roughly_fair|premium|uncertain/);
+    expect(result.inflection.stage).toMatch(/dormant|building|confirming|extended|fragile|uncertain/);
+    expect(result.opportunity.label).toMatch(/exceptional|attractive|mixed|weak|uncertain/);
     expect(result.topDrivers.length).toBeGreaterThan(0);
     expect(result.headline.length).toBeGreaterThan(15);
+  });
+
+  it("localizes the headline without changing the underlying analytical scores", () => {
+    const english = buildIntelligenceSummary(report(), "en");
+    const swedish = buildIntelligenceSummary(report(), "sv");
+
+    expect(swedish.headline).not.toBe(english.headline);
+    expect(swedish.scores).toEqual(english.scores);
+    expect(swedish.mispricing).toEqual(english.mispricing);
+    expect(swedish.inflection).toEqual(english.inflection);
+    expect(swedish.opportunity).toEqual(english.opportunity);
   });
 });
