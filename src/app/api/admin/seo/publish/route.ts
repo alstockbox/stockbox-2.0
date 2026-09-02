@@ -32,6 +32,7 @@ export async function POST(request: Request) {
   revalidateTag("public-stock-list", "max");
   revalidatePath(`/aktier/${published.snapshot.slug}`);
   revalidatePath("/aktier");
+  revalidatePath("/aktier/sitemap/[id].xml", "page");
   revalidatePath("/robots.txt");
   revalidatePath("/sitemap.xml");
 
