@@ -102,7 +102,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Stock
                       {snapshot.score !== null ? <span className="number rounded-full border border-[#e1cb95]/30 px-3 py-1 text-sm font-semibold text-[#e1cb95]">{Math.round(snapshot.score)}/100</span> : null}
                     </div>
                     <p className="mt-4 text-sm leading-6 text-[#9aa7b8]">{snapshot.metaDescription}</p>
-                    <p className="mt-4 text-xs font-semibold text-[#e1cb95]">Öppna StockBox-analysen →</p>
+                    <p className="mt-4 text-xs font-semibold text-[#e1cb95]">Öppna analysen →</p>
                   </Card>
                 </Link>
               ))}
