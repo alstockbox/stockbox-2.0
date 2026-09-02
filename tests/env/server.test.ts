@@ -61,9 +61,19 @@ describe("server environment parsing", () => {
     expect(getMarketDataProvider(parseServerEnv({ MARKET_DATA_PROVIDER: " disabled " }))).toBe("disabled");
   });
 
-  it("builds a de-duplicated provider chain and keeps Yahoo as the global safety net", () => {
+  it("does not append Yahoo to an explicitly licensed provider chain", () => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: "twelve_data", MARKET_DATA_FALLBACK_PROVIDERS: "stooq,twelve_data" });
+    expect(getMarketDataProviderChain(env)).toEqual(["twelve_data", "stooq"]);
+  });
+
+  it("keeps Yahoo when it is explicitly configured as a fallback", () => {
+    const env = parseServerEnv({ MARKET_DATA_PROVIDER: "twelve_data", MARKET_DATA_FALLBACK_PROVIDERS: "stooq,yahoo" });
     expect(getMarketDataProviderChain(env)).toEqual(["twelve_data", "stooq", "yahoo"]);
+  });
+
+  it("keeps Yahoo as the legacy no-env default without duplicating it", () => {
+    const env = parseServerEnv({});
+    expect(getMarketDataProviderChain(env)).toEqual(["yahoo"]);
   });
 
   it("enables Basic checkout without requiring a webhook secret", () => {
