@@ -14,6 +14,7 @@ function report(): AnalysisReport {
     analysisType: "deep",
     investmentProfile: "balanced",
     generatedAt: "2026-09-02T08:00:00.000Z",
+    oneSentence: "A test intelligence report.",
     summary: "",
     recommendation: "Buy",
     shortTermAssessment: "",
@@ -32,10 +33,11 @@ function report(): AnalysisReport {
     },
     dcf: { suitable: true, bear: 80, base: 120, bull: 150, assumptions: { startingFcf: 100, years: 5, growthRate: 0.1, discountRate: 0.1, terminalGrowthRate: 0.025, marginOfSafety: 0.2 } },
     redFlags: [], greenFlags: [], scenarios: [], sources: [],
+    disclaimer: "Test fixture only.",
     market: { ticker: "IR", price: 90, currency: "SEK", date: "2026-09-02", volume: 50000, yearHigh: 98, yearLow: 60, performance: { "3M": 0.08, "1Y": 0.18 } },
     forwardEstimates: { nextYearRevenueGrowth: 0.18, nextYearEpsGrowth: 0.24 },
     providerDiagnostics: [{ provider: "twelve-data", capability: "estimates", status: "available", observedAt: "2026-09-02T08:00:00.000Z" }],
-  } as AnalysisReport;
+  };
 }
 
 describe("buildIntelligenceSummary", () => {
