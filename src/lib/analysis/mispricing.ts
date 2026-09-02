@@ -7,6 +7,8 @@ export type MispricingInput = {
   currentPrice: number | null;
   dcf?: { suitable: boolean; bear: number | null; base: number | null; bull: number | null; confidence: number } | null;
   historicalPe?: { current: number | null; median: number | null; sufficientHistory: boolean; observationCount: number } | null;
+  benchmarkValuationScore?: number | null;
+  benchmarkValuationDetail?: string | null;
   peerValuationScore?: number | null;
   valuationDimensionScore?: number | null;
   trends?: {
@@ -97,10 +99,20 @@ function valueTrapRiskFor(points: number): ValueTrapRisk { return points >= 20 ?
 export function computeMispricingAssessment(input: MispricingInput): MispricingAssessment {
   const intrinsic = priceVsFairValueScore(input);
   const historical = historicalSelfValuationScore(input);
+  const relativeValuationScore = finite(input.benchmarkValuationScore)
+    ? clamp(input.benchmarkValuationScore, 0, 100)
+    : finite(input.peerValuationScore)
+      ? clamp(input.peerValuationScore, 0, 100)
+      : null;
+  const relativeValuationDetail = finite(input.benchmarkValuationScore)
+    ? input.benchmarkValuationDetail ?? "Uses StockBox's versioned sector valuation benchmark; this is not a live peer median."
+    : finite(input.peerValuationScore)
+      ? "Uses explicitly supplied peer-relative valuation evidence."
+      : "Sector benchmark or verified peer-relative valuation evidence is unavailable.";
   const pillars: MispricingPillar[] = [
     { id: "intrinsic_value", label: "Intrinsic value", score: intrinsic.score, weight: 0.3, detail: intrinsic.detail },
     { id: "historical_self_valuation", label: "Historical self-valuation", score: historical.score, weight: 0.25, detail: historical.detail },
-    { id: "peer_relative_valuation", label: "Peer-relative valuation", score: finite(input.peerValuationScore) ? clamp(input.peerValuationScore, 0, 100) : null, weight: 0.2, detail: finite(input.peerValuationScore) ? "Uses StockBox peer-relative valuation evidence." : "Comparable peer valuation evidence is unavailable." },
+    { id: "peer_relative_valuation", label: "Sector benchmark valuation", score: relativeValuationScore, weight: 0.2, detail: relativeValuationDetail },
     { id: "earnings_cashflow_power", label: "Earnings & cash-flow power", score: finite(input.valuationDimensionScore) ? clamp(input.valuationDimensionScore, 0, 100) : null, weight: 0.25, detail: finite(input.valuationDimensionScore) ? "Uses the archetype-aware StockBox valuation dimension." : "Archetype-aware valuation evidence is unavailable." },
   ];
   const evidence: IntelligenceEvidence[] = pillars.map((pillar) => ({ id: pillar.id, label: pillar.label, score: pillar.score, weight: pillar.weight, family: "valuation", detail: pillar.detail, dataAsOf: input.dataAsOf }));
