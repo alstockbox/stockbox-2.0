@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     pool: "forks",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "src/lib/seo/**/*.test.ts"],
     exclude: [...configDefaults.exclude, "tests/tmp-*.test.ts"],
     coverage: {
       reporter: ["text", "lcov"]

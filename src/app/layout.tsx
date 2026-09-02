@@ -7,6 +7,7 @@ import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
 import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
+import { getLegalSeller } from "@/lib/legal/commerce";
 import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
@@ -15,20 +16,33 @@ const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfa
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app"),
   title: {
-    default: "StockBox | Data-driven stock analysis",
+    default: "StockBox | Aktieanalys & data-driven stock analysis",
     template: "%s | StockBox",
   },
   description:
-    "StockBox turns filings, market data, scoring logic and research workflows into data-driven equity analysis with visible sources, coverage and confidence.",
+    "StockBox är ett datadrivet verktyg för aktieanalys och equity research med värdering, tillväxt, lönsamhet, risk, synliga källor, datatäckning och konfidens.",
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || undefined,
+    other: process.env.BING_SITE_VERIFICATION
+      ? { "msvalidate.01": process.env.BING_SITE_VERIFICATION }
+      : undefined,
+  },
+  robots: {
+    googleBot: {
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
   icons: {
     icon: "/images/stockbox-logo.png",
     shortcut: "/images/stockbox-logo.png",
     apple: "/images/stockbox-logo.png",
   },
   openGraph: {
-    title: "StockBox | Data-driven stock analysis",
+    title: "StockBox | Aktieanalys & data-driven stock analysis",
     description:
-      "Understand any stock faster with visible sources, deterministic calculations and honest missing-data handling.",
+      "Analysera aktier med verifierbara data, modellbaserade beräkningar, StockBox Score, synliga källor och ärlig hantering av saknad data.",
     type: "website",
     siteName: "StockBox",
     images: [
@@ -40,6 +54,12 @@ export const metadata: Metadata = {
       },
     ],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "StockBox | Aktieanalys & data-driven stock analysis",
+    description: "Datadriven aktieanalys med StockBox Score, synliga källor, datatäckning och konfidens.",
+    images: ["/images/stockbox-logo.png"],
+  },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#07111f" };
@@ -47,18 +67,49 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const locale = await getLocale();
   const navCopy = getP0Copy(locale).nav;
   const env = getServerEnv();
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app";
+  const seller = getLegalSeller(env);
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.getstockbox.app").replace(/\/$/, "");
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": "Organization", "@id": `${baseUrl}/#organization`, name: "StockBox", url: baseUrl, logo: `${baseUrl}/images/stockbox-logo.png` },
+      {
+        "@type": "Organization",
+        "@id": `${baseUrl}/#organization`,
+        name: "StockBox",
+        legalName: seller.businessName || undefined,
+        identifier: seller.organizationNumber || undefined,
+        url: baseUrl,
+        logo: `${baseUrl}/images/stockbox-logo.png`,
+        email: seller.supportEmail || undefined,
+        telephone: seller.supportPhone || undefined,
+        taxID: seller.vatNumber || undefined,
+        address: seller.postalAddress
+          ? {
+              "@type": "PostalAddress",
+              streetAddress: seller.postalAddress,
+              addressCountry: "SE",
+            }
+          : undefined,
+        contactPoint: seller.supportEmail || seller.supportPhone
+          ? {
+              "@type": "ContactPoint",
+              contactType: "customer support",
+              email: seller.supportEmail || undefined,
+              telephone: seller.supportPhone || undefined,
+              availableLanguage: ["sv", "en"],
+            }
+          : undefined,
+        sameAs: ["https://www.youtube.com/@Getstockbox", "https://www.tiktok.com/@alstockbox"],
+      },
       { "@type": "WebSite", "@id": `${baseUrl}/#website`, name: "StockBox", url: baseUrl, publisher: { "@id": `${baseUrl}/#organization` } },
       {
         "@type": "SoftwareApplication",
+        "@id": `${baseUrl}/#software`,
         name: "StockBox",
         applicationCategory: "FinanceApplication",
         operatingSystem: "Web",
         url: baseUrl,
+        description: "Data-driven stock analysis and equity research with visible data provenance, coverage and confidence.",
         offers: { "@type": "Offer", price: "0", priceCurrency: "SEK" },
       },
     ],
@@ -68,7 +119,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang={locale} className={`${inter.variable} ${playfair.variable}`}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
-        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#07111f]">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm font-semibold text-[#07111f]">
           {navCopy.skipMain}
         </a>
         <AppNav />

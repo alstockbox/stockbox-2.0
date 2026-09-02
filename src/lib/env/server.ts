@@ -77,6 +77,9 @@ const envSchema = z.object({
     .url()
     .default(DEFAULT_POSTHOG_HOST)
     .catch(DEFAULT_POSTHOG_HOST),
+  GOOGLE_SITE_VERIFICATION: z.string().trim().optional().or(z.literal("")),
+  BING_SITE_VERIFICATION: z.string().trim().optional().or(z.literal("")),
+  INDEXNOW_KEY: z.string().trim().optional().or(z.literal("")),
   ADMIN_EMAILS: z.string().optional().or(z.literal(""))
 });
 

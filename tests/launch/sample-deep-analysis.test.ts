@@ -16,6 +16,7 @@ describe("public Deep sample", () => {
     expect(page).toContain("getPublicSampleAnalysis");
     expect(page).toContain("<ReportView");
     expect(page).toContain("formatAnalysisTimestamp");
-    expect(page).toContain("searchCompanyCatalog");
+    expect(page).toContain("report.companyName");
+    expect(page).toContain("report.ticker");
   });
 });
