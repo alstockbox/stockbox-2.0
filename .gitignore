@@ -20,11 +20,6 @@ pnpm-debug.log*
 
 # testing
 coverage/
-.eslintcache
-/tests/tmp-live-*.test.ts
-
-# local diagnostics and one-off migration helpers
-/tmp_*
 
 # vercel
 .vercel/
@@ -33,7 +28,3 @@ coverage/
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
-
-# generated local QA artifacts
-.stockbox-diagnostics/
-*.log
