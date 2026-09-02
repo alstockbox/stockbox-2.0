@@ -1,1 +1,0 @@
-drop function if exists public.redeem_affiliate_giveaway_code(text);

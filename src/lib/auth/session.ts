@@ -1,51 +1,64 @@
-﻿import { redirect } from "next/navigation";
-import { adminEmails } from "@/lib/env/server";
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { getServerEnv } from "@/lib/env/server";
+import { SESSION_COOKIE } from "./constants";
 
-export type AppUser = {
-  id: string;
-  email: string | null;
-  role: "customer" | "affiliate_ambassador" | "admin";
-};
+const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
 
-export async function getCurrentUser(): Promise<AppUser | null> {
-  const supabase = await createClient();
-  if (!supabase) return null;
+function sign(payload: string, secret: string) {
+  return createHmac("sha256", secret).update(payload).digest("base64url");
+}
 
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser();
+export function createSessionToken(email: string) {
+  const secret = getServerEnv().SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET saknas.");
+  const payload = Buffer.from(
+    JSON.stringify({ email: email.toLowerCase(), nonce: randomUUID(), exp: Date.now() + ONE_WEEK_SECONDS * 1000 })
+  ).toString("base64url");
+  return `${payload}.${sign(payload, secret)}`;
+}
 
-  if (error || !user) return null;
-
-  const ownerAdmin = adminEmails().includes(user.email?.toLowerCase() ?? "");
-  let role: AppUser["role"] = ownerAdmin ? "admin" : "customer";
-
-  if (!ownerAdmin) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (profile?.role === "affiliate_ambassador") role = "affiliate_ambassador";
-  }
-
-  return {
-    id: user.id,
-    email: user.email ?? null,
-    role
+export function verifySessionToken(token?: string) {
+  const secret = getServerEnv().SESSION_SECRET;
+  if (!secret || !token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = sign(payload, secret);
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+    email: string;
+    exp: number;
   };
+  if (!parsed.email || parsed.exp < Date.now()) return null;
+  return parsed;
 }
 
-export async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/auth/login");
-  return user;
+export async function setSession(email: string) {
+  const store = await cookies();
+  store.set(SESSION_COOKIE, createSessionToken(email), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: ONE_WEEK_SECONDS,
+    path: "/"
+  });
 }
 
-export async function requireAdmin() {
-  const user = await requireUser();
-  if (user.role !== "admin") redirect("/dashboard");
-  return user;
+export async function clearSession() {
+  const store = await cookies();
+  store.delete(SESSION_COOKIE);
+}
+
+export async function getSession() {
+  const store = await cookies();
+  return verifySessionToken(store.get(SESSION_COOKIE)?.value);
+}
+
+export async function requireOwner() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  return session;
 }

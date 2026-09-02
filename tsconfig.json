@@ -18,6 +18,21 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
-  "exclude": ["node_modules", "tmp_*"]
+  "include": [
+    "next-env.d.ts",
+    "proxy.ts",
+    "src/app/**/*.ts",
+    "src/app/**/*.tsx",
+    "src/components/app/**/*.tsx",
+    "src/components/forms/**/*.tsx",
+    "src/components/ui/button.tsx",
+    "src/lib/auth/**/*.ts",
+    "src/lib/env/**/*.ts",
+    "src/lib/stockbox/**/*.ts",
+    "src/lib/supabase/admin.ts",
+    "tests/stockbox/**/*.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
 }
