@@ -56,6 +56,7 @@ const swedishSeoPaths = [
   "/ai-aktieanalys",
   "/fundamental-analys",
   "/research-standard",
+  "/exempel-aktieanalys",
   "/guider/:path*",
   "/nyckeltal/:path*",
   "/aktier/:path*",
@@ -91,6 +92,10 @@ const nextConfig: NextConfig = {
         source,
         headers: [{ key: "Content-Language", value: "sv-SE" }],
       })),
+      {
+        source: "/sample-analysis",
+        headers: [{ key: "Content-Language", value: "en" }],
+      },
       {
         source: "/(.*)",
         headers: [
