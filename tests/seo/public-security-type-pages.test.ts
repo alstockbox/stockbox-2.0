@@ -16,8 +16,9 @@ describe("security-aware public SEO pages", () => {
   it("uses security-specific metadata and structured-data entities", () => {
     const page = read("src/app/aktier/[slug]/page.tsx");
     expect(page).toContain("ETF – analys, kostnad, risk & StockBox Score");
-    expect(page).toContain('"@type": "FinancialProduct"');
+    expect(page).toContain('"@type": "InvestmentFund"');
     expect(page).toContain('"@type": "Corporation"');
+    expect(page).not.toContain('? { "@type": "FinancialProduct"');
   });
 
   it("renders ETF factors and investment-company NAV only when the report contains those outputs", () => {
