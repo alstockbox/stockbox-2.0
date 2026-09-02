@@ -3,6 +3,20 @@ import type { AnalysisReport } from "@/lib/analysis/types";
 const MIN_CONFIDENCE = 0.65;
 const MIN_COVERAGE = 0.7;
 
+type PublicSecurityMetaExtension = {
+  securityClassification?: {
+    kind?: string;
+  };
+  securityAnalysis?: {
+    etf?: {
+      kind?: string;
+    };
+    investmentCompany?: {
+      kind?: string;
+    };
+  };
+};
+
 export function slugifyStockPage(value: string): string {
   return value
     .trim()
@@ -52,8 +66,34 @@ function clipMetaDescription(value: string): string {
   return `${clipped}...`;
 }
 
+function resolvePublicSecurityKind(report: AnalysisReport): "stock" | "investment_company" | "etf" {
+  const extension = report as AnalysisReport & PublicSecurityMetaExtension;
+  const isEtf = extension.securityAnalysis?.etf?.kind === "etf"
+    || extension.securityClassification?.kind?.endsWith("_etf") === true;
+  if (isEtf) return "etf";
+
+  const archetype = report.engine?.analysisArchetype ?? report.analysisArchetype;
+  const isInvestmentCompany = extension.securityAnalysis?.investmentCompany?.kind === "investment_company"
+    || archetype === "holding_company";
+  return isInvestmentCompany ? "investment_company" : "stock";
+}
+
 export function buildStockMetaDescription(report: AnalysisReport): string {
   const score = typeof report.score?.score === "number" ? `${Math.round(report.score.score)}/100` : "utan komplett score";
+  const securityKind = resolvePublicSecurityKind(report);
+
+  if (securityKind === "etf") {
+    return clipMetaDescription(
+      `${report.companyName} (${report.ticker}) ETF-analys från StockBox: score ${score}, kostnad, diversifiering, likviditet, risk och källor.`
+    );
+  }
+
+  if (securityKind === "investment_company") {
+    return clipMetaDescription(
+      `${report.companyName} (${report.ticker}) investmentbolagsanalys från StockBox: score ${score}, NAV, substansrabatt/premie, skuldsättning, portföljkvalitet och källor.`
+    );
+  }
+
   return clipMetaDescription(
     `${report.companyName} (${report.ticker}) aktieanalys från StockBox: score ${score}, värdering, tillväxt, lönsamhet, finansiell hälsa, risk och källor.`
   );
