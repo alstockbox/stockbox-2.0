@@ -14,6 +14,7 @@ function baseReport(): AnalysisReport {
     analysisType: "deep",
     investmentProfile: "balanced",
     generatedAt: "2026-09-02T08:00:00.000Z",
+    oneSentence: "A test opportunity report.",
     summary: "",
     recommendation: "Hold",
     shortTermAssessment: "",
@@ -53,10 +54,11 @@ function baseReport(): AnalysisReport {
     greenFlags: [],
     scenarios: [],
     sources: [],
+    disclaimer: "Test fixture only.",
     market: { ticker: "OPP", price: 90, currency: "SEK", date: "2026-09-02", volume: 100000, yearHigh: 100, yearLow: 55, performance: { "3M": 0.1, "1Y": 0.22 } },
     forwardEstimates: { nextYearRevenueGrowth: 0.2, nextYearEpsGrowth: 0.27 },
     providerDiagnostics: [{ provider: "twelve-data", capability: "estimates", status: "available", observedAt: "2026-09-02T08:00:00.000Z" }],
-  } as AnalysisReport;
+  };
 }
 
 describe("buildOpportunityView", () => {
