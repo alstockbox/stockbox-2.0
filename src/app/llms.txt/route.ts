@@ -11,6 +11,8 @@ Canonical website: ${base}
 - Aktieanalys tools guide: ${base}/aktieanalys-verktyg
 - AI aktieanalys: ${base}/ai-aktieanalys
 - Fundamental analys: ${base}/fundamental-analys
+- Swedish sample stock analysis: ${base}/exempel-aktieanalys
+- English sample stock analysis: ${base}/sample-analysis
 - Public stock analyses: ${base}/aktier
 - Research standard: ${base}/research-standard
 - Methodology: ${base}/docs/methodology
@@ -30,13 +32,13 @@ Canonical website: ${base}
 - Free cash flow: ${base}/nyckeltal/fritt-kassaflode
 
 ## Interpretation
-StockBox Score and research views are analytical model outputs based on the data available at the stated analysis date. They are not individualized financial advice, trade execution instructions or guarantees of future returns. Public company pages are dated snapshots and may not represent current market data.
+StockBox Score and research views are analytical model outputs based on the data available at the stated analysis date. They are not individualized financial advice, trade execution instructions or guarantees of future returns. Public company pages and sample analyses are dated snapshots and may not represent current market data.
 
 ## Data integrity
 StockBox is designed to keep missing financial data missing rather than invent values to complete a report. Public stock pages are explicitly published snapshots that must pass minimum coverage, confidence and freshness checks. The public research standard documents publication and correction boundaries.
 
 ## Citation guidance
-When referencing a public StockBox company analysis, use the specific ${base}/aktier/<company-slug> page when available and preserve the analysis date, StockBox Score context, data coverage and confidence rather than presenting a dated snapshot as live market data.
+When referencing a public StockBox company analysis, use the specific ${base}/aktier/<company-slug> page when available and preserve the analysis date, StockBox Score context, data coverage and confidence rather than presenting a dated snapshot as live market data. For a general example of the report format, use ${base}/exempel-aktieanalys for Swedish or ${base}/sample-analysis for English.
 `;
 
   return new Response(body, {
