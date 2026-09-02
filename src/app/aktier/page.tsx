@@ -5,8 +5,8 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { SeoHero, SeoJsonLd, breadcrumbJsonLd } from "@/components/seo/seo-shell";
 import { countPublicStockSnapshots, listPublicStockSnapshotsPage } from "@/lib/seo/public-snapshots";
 
-const TITLE = "Aktier – publika aktieanalyser och StockBox Score";
-const DESCRIPTION = "Utforska publika StockBox-analyser av svenska och internationella aktier med score, värdering, tillväxt, lönsamhet, risk och synliga datakällor.";
+const TITLE = "Aktier, investmentbolag & ETF – publika StockBox-analyser";
+const DESCRIPTION = "Utforska publika StockBox-analyser av aktier, investmentbolag och ETF:er med score, relevanta nyckeltal, risk, datatäckning och synliga datakällor.";
 export const PUBLIC_STOCK_HUB_PAGE_SIZE = 48;
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ export async function generateMetadata({ searchParams }: { searchParams: StocksS
   const pageNumber = resolvePageNumber(params.page);
   const canonical = pageNumber === 1 ? "/aktier" : `/aktier?page=${pageNumber}`;
   return {
-    title: pageNumber === 1 ? TITLE : `Aktier – publika aktieanalyser, sida ${pageNumber}`,
+    title: pageNumber === 1 ? TITLE : `Publika StockBox-analyser – sida ${pageNumber}`,
     description: DESCRIPTION,
     alternates: { canonical: pageNumber === 1 ? "/aktier" : `/aktier?page=${pageNumber}` },
     robots: { index: true, follow: true },
@@ -59,7 +59,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Stock
         "@type": "CollectionPage",
         "@id": `${pageUrl}#collection`,
         url: pageUrl,
-        name: pageNumber === 1 ? "Publika StockBox aktieanalyser" : `Publika StockBox aktieanalyser – sida ${pageNumber}`,
+        name: pageNumber === 1 ? "Publika StockBox-analyser" : `Publika StockBox-analyser – sida ${pageNumber}`,
         description: DESCRIPTION,
         publisher: { "@id": `${baseUrl.replace(/\/$/, "")}/#organization` },
         mainEntity: {
@@ -68,7 +68,7 @@ export default async function StocksPage({ searchParams }: { searchParams: Stock
           itemListElement: snapshots.map((snapshot, index) => ({
             "@type": "ListItem",
             position: pageOffset + index + 1,
-            name: `${snapshot.companyName} aktieanalys`,
+            name: `${snapshot.companyName} StockBox-analys`,
             url: new URL(`/aktier/${snapshot.slug}`, baseUrl).toString(),
           })),
         },
@@ -80,15 +80,15 @@ export default async function StocksPage({ searchParams }: { searchParams: Stock
     <>
       <SeoJsonLd data={structuredData} />
       <SeoHero
-        eyebrow="Aktieanalyser"
-        title="Publika aktieanalyser med StockBox Score"
-        lead="Här samlar StockBox kvalitetssäkrade, publika analyssnapshots. Varje sida bygger på en faktisk StockBox-rapport och visar bara finansiella datapunkter som fanns i den publicerade analysen."
+        eyebrow="Publika analyser"
+        title="Aktier, investmentbolag & ETF"
+        lead="Här samlar StockBox kvalitetssäkrade, publika analyssnapshots för flera typer av värdepapper. Varje sida bygger på en faktisk StockBox-rapport och visar bara datapunkter som fanns i den publicerade analysen."
         breadcrumbs={breadcrumbs}
       />
       <Section className="py-10">
         <Container className="max-w-5xl">
           <div className="mb-8 max-w-3xl">
-            <h2 className="serif text-3xl font-semibold text-[#f4efe5]">Aktieanalys utan påhittade luckor</h2>
+            <h2 className="serif text-3xl font-semibold text-[#f4efe5]">Analys utan påhittade luckor</h2>
             <p className="mt-3 text-sm leading-7 text-[#9aa7b8]">StockBox publicerar inte automatiskt användares rapporter. En publik snapshot måste vara explicit publicerad och klara krav på datatäckning, konfidens och aktualitet.</p>
             <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm"><Link href="/nyckeltal" className="font-semibold text-[#e1cb95] hover:text-white">Nyckeltalsguider</Link><Link href="/fundamental-analys" className="font-semibold text-[#e1cb95] hover:text-white">Fundamental analys</Link><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">Metodik</Link></div>
           </div>
@@ -102,13 +102,13 @@ export default async function StocksPage({ searchParams }: { searchParams: Stock
                       {snapshot.score !== null ? <span className="number rounded-full border border-[#e1cb95]/30 px-3 py-1 text-sm font-semibold text-[#e1cb95]">{Math.round(snapshot.score)}/100</span> : null}
                     </div>
                     <p className="mt-4 text-sm leading-6 text-[#9aa7b8]">{snapshot.metaDescription}</p>
-                    <p className="mt-4 text-xs font-semibold text-[#e1cb95]">Öppna aktieanalysen →</p>
+                    <p className="mt-4 text-xs font-semibold text-[#e1cb95]">Öppna StockBox-analysen →</p>
                   </Card>
                 </Link>
               ))}
             </div>
           ) : (
-            <Card><p className="text-sm leading-7 text-[#c9d2df]">De första publika bolagssnapshotsen publiceras efter StockBox kvalitetsspärr. Under tiden kan du köra en egen analys direkt från startsidan.</p></Card>
+            <Card><p className="text-sm leading-7 text-[#c9d2df]">De första publika analyssnapshotsen publiceras efter StockBox kvalitetsspärr. Under tiden kan du köra en egen analys direkt från startsidan.</p></Card>
           )}
 
           {totalPages > 1 ? (
