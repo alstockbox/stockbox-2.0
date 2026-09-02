@@ -1,5 +1,5 @@
 import { buildInflectionScore } from "./inflection-engine";
-import { buildMispricingScore } from "./mispricing-engine";
+import { buildMispricingScore } from "./mispricing";
 import type { AnalysisReport } from "./types";
 
 function finite(value: number | null | undefined): value is number {
