@@ -141,8 +141,9 @@ export default async function PublicStockPage({ params }: { params: Promise<{ sl
   const primaryStrength = report.greenFlags[0]?.title ?? "Ingen explicit styrka i snapshoten";
   const primaryRisk = report.redFlags[0]?.title ?? "Ingen explicit risk i snapshoten";
   const peValue = !isEtf && !isInvestmentCompany ? multiple(valuation?.priceEarnings) ?? "Saknas i snapshoten" : null;
-  const navPerShare = number(investmentAnalysis?.nav.perShare);
-  const discountPremium = investmentAnalysis?.nav.discountPremium;
+  const nav = investmentAnalysis?.nav;
+  const navPerShare = number(nav ? nav.perShare : null);
+  const discountPremium = nav ? nav.discountPremium : null;
   const discountPremiumText = percent(discountPremium);
   const securityNoun = isEtf ? "ETF" : isInvestmentCompany ? "investmentbolag" : "aktie";
   const pageHeadline = isEtf
