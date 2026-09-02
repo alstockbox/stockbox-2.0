@@ -28,6 +28,15 @@ describe("sample analysis proof pages", () => {
     expect(page).toContain('href="/aktier"');
   });
 
+  it("does not trigger company-catalog or provider discovery from crawler-facing proof pages", () => {
+    const english = read("src/app/sample-analysis/page.tsx");
+    const swedish = read("src/app/exempel-aktieanalys/page.tsx");
+    for (const page of [english, swedish]) {
+      expect(page).not.toContain("searchCompanyCatalog");
+      expect(page).not.toContain("resolveCanonicalCompanySelection");
+    }
+  });
+
   it("makes the proof page discoverable from sitemap, guides and AI discovery", () => {
     const sitemap = read("src/app/sitemap.ts");
     const guides = read("src/app/guider/page.tsx");
