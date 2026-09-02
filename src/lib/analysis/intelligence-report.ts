@@ -5,6 +5,7 @@ import type { Locale } from "@/lib/i18n/types";
 export type IntelligenceSummary = {
   scores: {
     coreQuality: number | null;
+    canonicalCoreQuality: number | null;
     mispricing: number | null;
     inflection: number | null;
     opportunity: number | null;
@@ -145,7 +146,7 @@ export function buildIntelligenceSummary(report: AnalysisReport, locale: Locale 
   const topDrivers = [...mispricingDrivers, ...inflectionDrivers]
     .sort((left, right) => right.importance - left.importance)
     .slice(0, 6)
-    .map(({ importance: _importance, ...driver }) => driver);
+    .map((driver) => ({ label: driver.label, score: driver.score, source: driver.source }));
 
   const missingPillars = snapshot.opportunity.components
     .filter((component) => component.score === null)
@@ -154,6 +155,7 @@ export function buildIntelligenceSummary(report: AnalysisReport, locale: Locale 
   return {
     scores: {
       coreQuality: snapshot.lensCoreScore,
+      canonicalCoreQuality: snapshot.canonicalCoreScore,
       mispricing: snapshot.mispricing.score,
       inflection: snapshot.inflection.score,
       opportunity: snapshot.opportunity.score,
