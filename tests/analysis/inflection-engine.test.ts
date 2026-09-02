@@ -14,6 +14,7 @@ function report(overrides: Partial<AnalysisReport> = {}): AnalysisReport {
     analysisType: "deep",
     investmentProfile: "balanced",
     generatedAt: "2026-09-02T08:00:00.000Z",
+    oneSentence: "A test inflection report.",
     summary: "",
     recommendation: "Hold",
     shortTermAssessment: "",
@@ -54,10 +55,11 @@ function report(overrides: Partial<AnalysisReport> = {}): AnalysisReport {
     greenFlags: [],
     scenarios: [],
     sources: [],
+    disclaimer: "Test fixture only.",
     forwardEstimates: { nextYearRevenueGrowth: 0.22, nextYearEpsGrowth: 0.28 },
     providerDiagnostics: [{ provider: "twelve-data", capability: "estimates", status: "available", observedAt: "2026-09-02T08:00:00.000Z" }],
     ...overrides,
-  } as AnalysisReport;
+  };
 }
 
 describe("buildInflectionScore", () => {
@@ -95,5 +97,14 @@ describe("buildInflectionScore", () => {
     expect(result.score).not.toBeNull();
     expect(result.score as number).toBeLessThanOrEqual(52);
     expect(result.blockers.some((item) => item.includes("financial health"))).toBe(true);
+  });
+
+  it("counts missing forward estimates against planned coverage and confidence", () => {
+    const complete = buildInflectionScore(report());
+    const withoutEstimates = buildInflectionScore(report({ forwardEstimates: undefined, providerDiagnostics: [] }));
+
+    expect(withoutEstimates.coverage).toBeLessThan(complete.coverage);
+    expect(withoutEstimates.confidence).toBeLessThan(complete.confidence);
+    expect(withoutEstimates.missingEvidence).toContain("forward-expectations");
   });
 });
