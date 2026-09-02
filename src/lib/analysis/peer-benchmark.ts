@@ -26,6 +26,14 @@ export type PeerBenchmarkComparison = {
   summary: string;
 };
 
+export type BenchmarkValuationScore = {
+  score: number | null;
+  coverage: number;
+  availableMetrics: number;
+  detail: string;
+  benchmarkVersion: string;
+};
+
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -102,21 +110,58 @@ export function buildPeerBenchmarkComparison(report: AnalysisReport): PeerBenchm
   const available = rows.filter((item) => item.status !== "unavailable");
   const strong = rows.filter((item) => item.status === "strong").length;
   const weak = rows.filter((item) => item.status === "weak").length;
-  const missingReasons = rows
-    .filter((item) => item.status === "unavailable")
-    .map((item) => `${item.label}: company metric unavailable.`);
+  const missingReasons = rows.filter((item) => item.status === "unavailable").map((item) => `${item.label}: company metric unavailable.`);
 
   return {
     status: "benchmark_only",
     sectorLabel,
     benchmarkVersion,
     rows,
-    missingReasons: [
-      "Live peer constituents and live peer medians are not configured for this local report.",
-      ...missingReasons,
-    ],
+    missingReasons: ["Live peer constituents and live peer medians are not configured for this local report.", ...missingReasons],
     summary: available.length
       ? `${strong} metrics screen strong versus the sector benchmark, ${weak} screen weak, and ${available.length - strong - weak} sit inside the benchmark range.`
       : "No peer-readable metrics are available, so StockBox does not infer a relative positioning view.",
+  };
+}
+
+export function buildBenchmarkValuationScore(report: AnalysisReport): BenchmarkValuationScore {
+  const comparison = buildPeerBenchmarkComparison(report);
+  if (comparison.status === "unavailable") {
+    return {
+      score: null,
+      coverage: 0,
+      availableMetrics: 0,
+      detail: comparison.summary,
+      benchmarkVersion: comparison.benchmarkVersion,
+    };
+  }
+
+  const valuationRows = comparison.rows.filter((item) => item.group === "valuation");
+  const available = valuationRows.filter((item) => item.status !== "unavailable");
+  const coverage = valuationRows.length ? available.length / valuationRows.length : 0;
+  if (available.length < 2 || coverage < 0.5) {
+    return {
+      score: null,
+      coverage,
+      availableMetrics: available.length,
+      detail: "Sector benchmark valuation needs at least two traceable valuation metrics; StockBox will not infer mispricing from one multiple. This is not a live peer median.",
+      benchmarkVersion: comparison.benchmarkVersion,
+    };
+  }
+
+  const scoreByStatus: Record<Exclude<PeerBenchmarkStatus, "unavailable">, number> = {
+    strong: 85,
+    in_range: 50,
+    weak: 20,
+  };
+  const score = available.reduce((sum, item) => sum + scoreByStatus[item.status as Exclude<PeerBenchmarkStatus, "unavailable">], 0) / available.length;
+  const strong = available.filter((item) => item.status === "strong").length;
+  const weak = available.filter((item) => item.status === "weak").length;
+  return {
+    score,
+    coverage,
+    availableMetrics: available.length,
+    detail: `${strong} of ${available.length} available valuation metrics screen attractive and ${weak} screen expensive versus StockBox's versioned sector benchmark. This is not a live peer median.`,
+    benchmarkVersion: comparison.benchmarkVersion,
   };
 }
