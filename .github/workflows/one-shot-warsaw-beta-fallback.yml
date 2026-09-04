@@ -1,0 +1,89 @@
+name: One-shot Warsaw beta fallback repair
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 0
+      - name: Apply exact benchmark fallback changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/data/yahoo-market-core.ts')
+          text = path.read_text()
+
+          marker = 'const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = '
+          if marker not in text:
+              raise SystemExit('country benchmark marker not found')
+          if 'BETA_BENCHMARK_FALLBACKS_BY_SUFFIX' not in text:
+              text = text.replace(
+                  marker,
+                  'const BETA_BENCHMARK_FALLBACKS_BY_SUFFIX: Array<[string, string[]]> = [[".WA", ["ETFBW20TR.WA"]]];\n' + marker,
+                  1,
+              )
+
+          date_marker = 'function dateFromUnix(timestamp: number): string | null {'
+          helper = '''function betaBenchmarkFallbackSymbols(company: CompanySearchResult): string[] {
+            const symbol = toYahooSymbol(company);
+            return BETA_BENCHMARK_FALLBACKS_BY_SUFFIX.find(([suffix]) => symbol.endsWith(suffix))?.[1] ?? [];
+          }
+
+          '''
+          if date_marker not in text:
+              raise SystemExit('date function marker not found')
+          if 'function betaBenchmarkFallbackSymbols' not in text:
+              text = text.replace(date_marker, helper + date_marker, 1)
+
+          old_beta = '''    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
+              const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
+              const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+          '''
+          new_beta = '''    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
+              const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
+              let betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+              let resolvedBenchmarkSymbol = betaEstimate ? benchmarkSymbol : null;
+              if (!betaEstimate) {
+                for (const fallbackSymbol of betaBenchmarkFallbackSymbols(company)) {
+                  if (fallbackSymbol === benchmarkSymbol) continue;
+                  const fallbackResponse = await requestChart(fallbackSymbol);
+                  const fallbackResult = fallbackResponse.ok ? firstChartResult(fallbackResponse.data) : null;
+                  const fallbackEstimate = fallbackResult ? historicalWeeklyBeta(history, parseRows(fallbackResult)) : null;
+                  if (!fallbackEstimate) continue;
+                  betaEstimate = fallbackEstimate;
+                  resolvedBenchmarkSymbol = fallbackSymbol;
+                  break;
+                }
+              }
+          '''
+          if old_beta not in text:
+              raise SystemExit('beta calculation block not found')
+          text = text.replace(old_beta, new_beta, 1)
+
+          old_output = '        betaBenchmark: betaEstimate ? benchmarkSymbol : null,'
+          new_output = '        betaBenchmark: resolvedBenchmarkSymbol,'
+          if old_output not in text:
+              raise SystemExit('beta output marker not found')
+          text = text.replace(old_output, new_output, 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit product patch and remove one-shot workflow
+        run: |
+          rm .github/workflows/one-shot-warsaw-beta-fallback.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-market-core.ts .github/workflows/one-shot-warsaw-beta-fallback.yml
+          git commit -m "fix: fall back to viable Warsaw beta benchmark"
+          git push origin HEAD:fix/coverage-engine-root-cause
