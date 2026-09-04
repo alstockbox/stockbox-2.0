@@ -14,6 +14,7 @@ on:
       - "tests/data/adr-listing-basis.test.ts"
       - "tests/data/semantic-period-supplement-only.test.ts"
       - "tests/data/yahoo-global-beta-routing.test.ts"
+      - "tests/data/yahoo-ocf-derivation.test.ts"
       - "tests/data/provider-history-diagnostics.test.ts"
       - "tests/data/provider-history-wiring.test.ts"
       - "src/lib/data/coverage-audit*.ts"
