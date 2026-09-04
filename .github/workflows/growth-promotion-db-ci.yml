@@ -1,0 +1,89 @@
+name: Growth Promotion DB CI
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - "supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql"
+      - "supabase/migrations/20260904200500_growth_visual_completion_v3.sql"
+      - "supabase/migrations/20260904202000_growth_distribution_packages_v3.sql"
+      - "supabase/migrations/20260904213000_growth_intelligence_config_v3.sql"
+      - "supabase/migrations/20260904223000_growth_video_package_completion_gate_v3.sql"
+      - "scripts/growth/promotion-gate-db-smoke.sql"
+      - ".github/workflows/growth-promotion-db-ci.yml"
+
+jobs:
+  promotion-gate-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Isolate autonomous growth migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
+          supabase init
+
+      - name: Start disposable local Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap acquisition prerequisites
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists public.acq_content (
+            id uuid primary key default gen_random_uuid()
+          );
+          create table if not exists public.acq_config (
+            id uuid primary key default gen_random_uuid(),
+            key text not null unique,
+            value text,
+            value_type text default 'string',
+            description text,
+            updated_at timestamptz default now(),
+            created_at timestamptz default now()
+          );
+          create table if not exists public.acq_distribution_queue (
+            id uuid primary key default gen_random_uuid(),
+            content_id uuid not null references public.acq_content(id) on delete cascade,
+            platform text not null,
+            caption text,
+            script text,
+            utm_url text,
+            recommended_time text,
+            daily_rank integer,
+            status text not null default 'pending_approval',
+            generation_version text not null default 'v2'
+          );
+          SQL
+
+      - name: Apply promotion-gate migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904173000_growth_render_job_kinds_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904200500_growth_visual_completion_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904202000_growth_distribution_packages_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904213000_growth_intelligence_config_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904223000_growth_video_package_completion_gate_v3.sql
+
+      - name: Assert shadow and live video promotion gates
+        run: psql "$DATABASE_URL" -f scripts/growth/promotion-gate-db-smoke.sql
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: |
+          if command -v supabase >/dev/null 2>&1; then
+            supabase stop --no-backup
+          fi

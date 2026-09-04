@@ -1,0 +1,85 @@
+name: Growth Visual Assets Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/growth/carousel-*.ts"
+      - "src/lib/growth/generative-scenes.ts"
+      - "src/lib/growth/render-spec.ts"
+      - "src/video/carousel/**"
+      - "src/video/components/StockBoxFrame.tsx"
+      - "src/video/templates/TemplateLayout.tsx"
+      - "scripts/growth/render-growth-carousel.mjs"
+      - "scripts/growth/render-growth-static.mjs"
+      - "scripts/growth/generative-provider.mjs"
+      - "scripts/growth/smoke-generative-render.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/growth-visual-assets-smoke.yml"
+
+jobs:
+  visual-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Install FFmpeg and unzip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip
+
+      - name: Render finished carousel package
+        run: |
+          cat > /tmp/carousel-spec.json <<'JSON'
+          {
+            "version":"v3",
+            "contentId":"carousel-smoke",
+            "title":"Fyra saker att kontrollera i balansräkningen",
+            "slides":[
+              {"index":1,"headline":"Börja med skulden","body":"Jämför nettoskuld med kassaflödet.","visualKind":"metric"},
+              {"index":2,"headline":"Titta på räntan","body":"Dyrare finansiering kan pressa resultatet.","visualKind":"chart"},
+              {"index":3,"headline":"Kontrollera likviditeten","body":"Kortfristiga skulder måste kunna hanteras.","visualKind":"stockbox_ui"},
+              {"index":4,"headline":"Se trenden","body":"En nivå säger mindre än utvecklingen över tid.","visualKind":"chart"},
+              {"index":5,"headline":"Samla analysen","body":"StockBox hjälper dig se helheten.","visualKind":"cta"}
+            ],
+            "caption":"Fyra kontroller som gör balansräkningen enklare.",
+            "cta":"Analysera bolaget i StockBox"
+          }
+          JSON
+          npm run growth:carousel -- --spec /tmp/carousel-spec.json --out-dir /tmp/carousel-smoke
+          test -f /tmp/carousel-smoke/slide-01.png
+          test -f /tmp/carousel-smoke/slide-05.png
+          test -f /tmp/carousel-smoke/cover.png
+          test -f /tmp/carousel-smoke/carousel.zip
+          test -f /tmp/carousel-smoke/metadata.json
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 /tmp/carousel-smoke/slide-01.png)" = "1080"
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 /tmp/carousel-smoke/slide-01.png)" = "1350"
+          unzip -l /tmp/carousel-smoke/carousel.zip | grep -q 'slide-01.png'
+          unzip -l /tmp/carousel-smoke/carousel.zip | grep -q 'slide-05.png'
+          unzip -l /tmp/carousel-smoke/carousel.zip | grep -q 'cover.png'
+
+      - name: Render finished static StockBox image
+        run: |
+          cat > /tmp/static-spec.json <<'JSON'
+          {"version":"v3","contentId":"static-smoke","headline":"Analysera smartare","body":"Se lönsamhet, skulder och risk i sitt sammanhang.","cta":"Analysera i StockBox"}
+          JSON
+          npm run growth:static -- --spec /tmp/static-spec.json --out /tmp/static-smoke.png
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 /tmp/static-smoke.png)" = "1080"
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 /tmp/static-smoke.png)" = "1350"
+
+      - name: Render fake generated micro-scene path
+        run: node scripts/growth/smoke-generative-render.mjs --mode success --out /tmp/generated-success.mp4
+
+      - name: Render forced provider-failure fallback path
+        run: node scripts/growth/smoke-generative-render.mjs --mode fallback --out /tmp/generated-fallback.mp4
+
+      - name: Revalidate both final videos
+        run: |
+          npm run growth:qc -- --video /tmp/generated-success.mp4
+          npm run growth:qc -- --video /tmp/generated-fallback.mp4

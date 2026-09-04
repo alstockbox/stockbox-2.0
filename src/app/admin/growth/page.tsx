@@ -1,41 +1,63 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { CopyButton } from "@/components/admin/copy-button";
+import { FounderScriptIdeas } from "@/components/admin/growth/FounderScriptIdeas";
+import { GrowthDiagnostics } from "@/components/admin/growth/GrowthDiagnostics";
+import { GrowthLearningBrief } from "@/components/admin/growth/GrowthLearningBrief";
+import { GrowthSummary } from "@/components/admin/growth/GrowthSummary";
+import { ReadyAssetCard } from "@/components/admin/growth/ReadyAssetCard";
+import { ReadyVideoCard } from "@/components/admin/growth/ReadyVideoCard";
 import { requireAdmin } from "@/lib/auth/session";
+import {
+  createSupabaseGrowthAdminDataSource,
+  loadGrowthAdminData,
+} from "@/lib/growth/admin-growth-data";
 import { buildPublishingPackage } from "@/lib/growth/publishing-package";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runGrowthEngineAction, setDistributionStatusAction, setOutreachStatusAction } from "./actions";
+import {
+  runGrowthEngineAction,
+  setDistributionStatusAction,
+  setOutreachStatusAction,
+} from "./actions";
 
 export const metadata: Metadata = { title: "Growth Control Center" };
 
 export default async function GrowthAdminPage() {
   await requireAdmin();
   const supabase = createAdminClient();
-  if (!supabase) return <main className="mx-auto max-w-5xl px-6 py-12 text-[#f4efe5]">Supabase saknas.</main>;
+  if (!supabase) {
+    return <main className="mx-auto max-w-5xl px-6 py-12 text-[#f4efe5]">Supabase saknas.</main>;
+  }
 
-  const [briefResult, queueResult, outreachResult, seoResult, metricsResult, errorResult] = await Promise.all([
-    supabase.from("acq_founder_briefs").select("brief_date,summary,payload,created_at").order("brief_date", { ascending: false }).limit(1).maybeSingle(),
+  const [view, legacyQueueResult, outreachResult, seoResult] = await Promise.all([
+    loadGrowthAdminData(createSupabaseGrowthAdminDataSource(supabase)),
     supabase
       .from("acq_distribution_queue")
-      .select("id,content_id,platform,caption,script,media_instructions,cta,utm_url,recommended_time,status,created_at,quality_score,quality_flags,daily_rank,generation_version,asset_kind,asset_copy")
+      .select("id,content_id,platform,caption,script,media_instructions,utm_url,recommended_time,status,quality_score,daily_rank,generation_version")
       .eq("status", "pending_approval")
       .eq("generation_version", "v2")
       .gte("quality_score", 72)
       .order("daily_rank", { ascending: true, nullsFirst: false })
-      .order("quality_score", { ascending: false })
+      .limit(6),
+    supabase
+      .from("acq_creator_outreach")
+      .select("id,creator_id,channel,message,offer,status,created_at")
+      .eq("status", "queued")
+      .order("created_at", { ascending: true })
+      .limit(12),
+    supabase
+      .from("acq_seo_pages")
+      .select("slug,title,keyword,status,published_at")
+      .eq("status", "published")
+      .order("published_at", { ascending: false })
       .limit(8),
-    supabase.from("acq_creator_outreach").select("id,creator_id,channel,message,offer,status,created_at").eq("status", "queued").order("created_at", { ascending: true }).limit(20),
-    supabase.from("acq_seo_pages").select("slug,title,keyword,status,published_at").eq("status", "published").order("published_at", { ascending: false }).limit(12),
-    supabase.from("acq_daily_metrics").select("metric_date,qualified_unique_visitors,rolling_7d_avg,returning_visitors,attribution_rate,by_source").order("metric_date", { ascending: false }).limit(7),
-    supabase.from("acq_errors").select("source,error_type,message,occurred_at").order("occurred_at", { ascending: false }).limit(12),
   ]);
 
-  const queue = queueResult.data ?? [];
-  const contentIds = [...new Set(queue.map((row) => row.content_id).filter(Boolean))] as string[];
-  const contentResult = contentIds.length
-    ? await supabase.from("acq_content").select("id,title,topic,company").in("id", contentIds)
+  const legacyQueue = legacyQueueResult.data ?? [];
+  const legacyContentIds = [...new Set(legacyQueue.map((row) => row.content_id).filter(Boolean))] as string[];
+  const legacyContentResult = legacyContentIds.length
+    ? await supabase.from("acq_content").select("id,title,topic").in("id", legacyContentIds)
     : { data: [] };
-  const contentById = new Map((contentResult.data ?? []).map((row) => [row.id, row] as const));
+  const legacyContentById = new Map((legacyContentResult.data ?? []).map((row) => [row.id, row] as const));
 
   const outreach = outreachResult.data ?? [];
   const creatorIds = [...new Set(outreach.map((row) => row.creator_id).filter(Boolean))] as string[];
@@ -44,212 +66,163 @@ export default async function GrowthAdminPage() {
     : { data: [] };
   const creatorById = new Map((creatorResult.data ?? []).map((row) => [row.id, row] as const));
 
-  const brief = briefResult.data;
-  const latestMetric = metricsResult.data?.[0];
-  const target = Number((brief?.payload as Record<string, unknown> | null)?.target ?? 100);
-  const rolling = Number(latestMetric?.rolling_7d_avg ?? 0);
-  const uniqueErrors = Array.from(
-    new Map((errorResult.data ?? []).map((error) => [`${error.source}:${error.error_type}:${error.message}`, error])).values(),
-  ).slice(0, 6);
+  const hasV3Ready = view.readyVideos.length > 0 || view.readyAssets.length > 0;
 
   return (
     <main className="mx-auto w-full max-w-7xl px-5 py-10 text-[#f4efe5] sm:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b99b5f]">StockBox Traffic Machine</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b99b5f]">StockBox Growth</p>
           <h1 className="mt-2 text-3xl font-semibold">Growth Control Center</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">Motorn hittar, filtrerar och prioriterar innehållet. Du gör bara sista publiceringssteget på respektive plattform.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#9aa7b8]">
+            När v3-material är READY är video, ljud, subtitles, cover och plattformstext redan färdiga. Ditt normala arbete ska bara vara att ladda ner och publicera.
+          </p>
         </div>
         <form action={runGrowthEngineAction}>
           <input type="hidden" name="mode" value="full" />
-          <button className="min-h-11 rounded-md bg-[#b99b5f] px-4 text-sm font-semibold text-[#07111f] hover:bg-[#d0b579]">Kör hela motorn nu</button>
+          <button className="min-h-11 rounded-md bg-[#b99b5f] px-4 text-sm font-semibold text-[#07111f] hover:bg-[#d0b579]">
+            Kör ordinarie growth-loop nu
+          </button>
         </form>
       </div>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-3">
-        <Stat label="7-dagarssnitt" value={`${rolling}/dag`} />
-        <Stat label="Mål" value={`${target}/dag`} />
-        <Stat label="Dagens prioriterade" value={String(queue.length)} />
-      </section>
+      <GrowthSummary summary={view.summary} />
+      <GrowthLearningBrief brief={view.learningBrief} />
 
-      <section className="mt-8 rounded-xl border border-[#b99b5f]/30 bg-[#b99b5f]/[0.06] p-5">
-        <h2 className="text-lg font-semibold">Vad ska jag göra när motorn är färdig?</h2>
-        <p className="mt-2 text-sm leading-6 text-[#c7d0dc]">Börja med post <strong>#1 idag</strong>. Du behöver inte göra något tekniskt med motorn efter körningen.</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <GuideStep number="1" title="Välj posten" text="Börja med #1 i listan. Den är högst prioriterad." />
-          <GuideStep number="2" title="Kopiera paketet" text="Tryck Kopiera färdigt paket. Då får du rätt manus, caption och en enda spårad länk." />
-          <GuideStep number="3" title="Publicera" text="Öppna TikTok, YouTube, Instagram, LinkedIn eller Facebook och lägg upp innehållet där." />
-          <GuideStep number="4" title="Markera klart" text="Kom tillbaka hit och tryck Jag har publicerat. Då vet motorn att posten är färdig." />
-        </div>
-        <p className="mt-4 text-xs leading-5 text-[#9aa7b8]">Video: använd MANUS + VIDEO-UPPLÄGG och cover-bilden. Carousel: använd SLIDES + bilden. LinkedIn/Facebook: klistra in INLÄGG. Själva publiceringen på sociala medier är fortfarande det sista manuella steget.</p>
-      </section>
-
-      <section className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-5">
-        <div className="flex items-center justify-between gap-3">
+      <section className="mt-10">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Morgonrapport</h2>
-            <p className="mt-1 text-xs text-[#9aa7b8]">Mätning, prioritering och nästa tillväxtbeslut.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-200">Automatiskt material</p>
+            <h2 className="mt-2 text-2xl font-semibold">READY att publicera</h2>
+            <p className="mt-2 max-w-3xl text-sm text-[#9aa7b8]">Här visas bara v3-material som passerat QC och har färdiga distributionspaket. Inga video-kit eller redigeringsinstruktioner räknas som READY.</p>
           </div>
-          <form action={runGrowthEngineAction}>
-            <input type="hidden" name="mode" value="brief" />
-            <button className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/5">Uppdatera</button>
-          </form>
+          <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-[#9aa7b8]">{view.readyVideos.length} video · {view.readyAssets.length} bild/carousel</span>
         </div>
-        <pre className="mt-4 whitespace-pre-wrap font-sans text-sm leading-6 text-[#c7d0dc]">{brief?.summary ?? "Ingen rapport ännu. Klicka på Kör hela motorn nu."}</pre>
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-2">
+          {view.readyVideos.map((video, index) => (
+            <ReadyVideoCard key={video.renderJobId} video={video} index={index} />
+          ))}
+        </div>
+
+        {view.readyAssets.length > 0 ? (
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {view.readyAssets.map((asset) => <ReadyAssetCard key={asset.assetId} asset={asset} />)}
+          </div>
+        ) : null}
+
+        {!hasV3Ready ? (
+          <div className="mt-5 rounded-xl border border-sky-400/20 bg-sky-400/[0.035] p-5 text-sm leading-6 text-[#c7d0dc]">
+            <strong className="text-[#f4efe5]">v3 kör fortfarande säkert i shadow-läge.</strong> Det betyder att ofärdigt eller ännu inte verifierat material inte visas som READY. Legacy v2 ligger kvar som fallback längre ned tills produktionscanary är godkänd.
+          </div>
+        ) : null}
       </section>
 
-      <section className="mt-8">
-        <div>
-          <h2 className="text-xl font-semibold">1. Dagens bästa content</h2>
-          <p className="mt-1 max-w-3xl text-sm text-[#9aa7b8]">Motorn visar bara dagens prioriterade poster. Börja med #1 och arbeta nedåt om du vill publicera fler.</p>
+      <FounderScriptIdeas scripts={view.founderScripts} />
+      <GrowthDiagnostics diagnostics={view.diagnosticsSummary} />
+
+      <section className="mt-10 rounded-xl border border-white/10 bg-white/[0.02] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#7f8ea2]">Fallback under utrullningen</p>
+            <h2 className="mt-2 text-xl font-semibold">Legacy v2 content</h2>
+            <p className="mt-1 text-sm text-[#9aa7b8]">Den gamla kön tas inte bort förrän v3 är verifierad i produktion. Den här sektionen är därför backup, inte det framtida huvudflödet.</p>
+          </div>
+          <span className="text-xs text-[#7f8ea2]">{view.legacyV2Count} väntar</span>
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          {queue.map((row) => {
-            const content = row.content_id ? contentById.get(row.content_id) : null;
-            const postTitle = content?.title ?? content?.topic ?? "StockBox content";
-            const postText = buildPublishingPackage({
+          {legacyQueue.map((row) => {
+            const content = row.content_id ? legacyContentById.get(row.content_id) : null;
+            const title = content?.title ?? content?.topic ?? "StockBox content";
+            const packageText = buildPublishingPackage({
               platform: row.platform,
-              title: postTitle,
+              title,
               caption: row.caption,
               script: row.script,
               mediaInstructions: row.media_instructions,
               utmUrl: row.utm_url,
             });
-            const isVideo = ["tiktok", "instagram_reel", "youtube_short"].includes(row.platform);
-            const rank = Number(row.daily_rank ?? 0);
-            const quality = Number(row.quality_score ?? 0);
-
             return (
-              <article key={row.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+              <article key={row.id} className="rounded-xl border border-white/10 bg-black/15 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {rank > 0 ? <span className="rounded-full bg-[#b99b5f]/15 px-2 py-1 text-[11px] font-semibold text-[#d6ba7a]">#{rank} idag</span> : null}
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[11px] font-semibold text-emerald-200">Kvalitet {quality}/100</span>
-                    </div>
-                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[#b99b5f]">{row.platform}</p>
-                    <h3 className="mt-1 text-base font-semibold">{postTitle}</h3>
+                    <p className="text-xs uppercase tracking-[0.12em] text-[#7f8ea2]">{row.platform} · kvalitet {Number(row.quality_score ?? 0)}/100</p>
+                    <h3 className="mt-2 font-semibold">{title}</h3>
                   </div>
-                  <CopyButton text={postText} label="Kopiera färdigt paket" />
+                  <CopyButton text={packageText} label="Kopiera v2-paket" />
                 </div>
-
-                <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[#c7d0dc]">{row.caption}</p>
-
-                {row.media_instructions ? (
-                  <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-[#aeb9c8]">
-                    <strong className="text-[#f4efe5]">{isVideo ? "Video-kit" : row.asset_kind === "carousel_kit" ? "Carousel-kit" : "Asset"}</strong>
-                    <p className="mt-2 whitespace-pre-wrap">{row.media_instructions}</p>
-                  </div>
-                ) : null}
-
+                <p className="mt-3 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[#aeb9c8]">{row.caption}</p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <a
-                    href={`/api/admin/growth/card/${row.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-md border border-[#b99b5f]/50 px-3 py-2 text-xs font-semibold text-[#d7bd84] hover:bg-[#b99b5f]/10"
-                  >
-                    {isVideo ? "Öppna färdig cover-bild" : "Öppna färdig StockBox-bild"}
-                  </a>
-                  {row.recommended_time ? <span className="flex items-center text-xs text-[#7f8ea2]">Rek. tid: {row.recommended_time}</span> : null}
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
                   <form action={setDistributionStatusAction}>
                     <input type="hidden" name="id" value={row.id} />
                     <input type="hidden" name="status" value="posted" />
-                    <button className="rounded-md bg-[#b99b5f] px-3 py-2 text-xs font-semibold text-[#07111f]">Jag har publicerat ✓</button>
+                    <button className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold">Publicerad ✓</button>
                   </form>
                   <form action={setDistributionStatusAction}>
                     <input type="hidden" name="id" value={row.id} />
                     <input type="hidden" name="status" value="deferred" />
-                    <button className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/5">Hoppa över</button>
+                    <button className="rounded-md border border-white/10 px-3 py-2 text-xs text-[#9aa7b8]">Hoppa över</button>
                   </form>
+                  {row.recommended_time ? <span className="self-center text-xs text-[#7f8ea2]">Rek. {row.recommended_time}</span> : null}
                 </div>
               </article>
             );
           })}
-
-          {queue.length === 0 ? (
-            <div className="rounded-xl border border-white/10 bg-white/[0.025] p-5 text-sm leading-6 text-[#9aa7b8] lg:col-span-2">
-              Inget content klarar kvalitetsgränsen just nu. Det är avsiktligt bättre än att visa irrelevanta eller halvfärdiga poster. Kör motorn för att skapa nästa kvalitetsgodkända batch.
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <h2 className="text-xl font-semibold">2. Creator-samarbeten</h2>
-        <p className="mt-1 text-sm text-[#9aa7b8]">Inget skickas automatiskt. Du godkänner själv för att undvika spam.</p>
-        <div className="mt-4 space-y-3">
-          {outreach.map((row) => {
-            const creator = row.creator_id ? creatorById.get(row.creator_id) : null;
-            return (
-              <article key={row.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                <div className="flex flex-wrap justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{creator?.name ?? "Creator"} <span className="text-xs font-normal text-[#9aa7b8]">{creator?.creator_score ? `score ${creator.creator_score}` : ""}</span></p>
-                    {creator?.profile_url ? <a href={creator.profile_url} target="_blank" rel="noreferrer" className="text-xs text-[#b99b5f] underline">Öppna profil</a> : null}
-                  </div>
-                  <CopyButton text={row.message ?? ""} label="Kopiera meddelande" />
-                </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#c7d0dc]">{row.message}</p>
-                <div className="mt-3 flex gap-2">
-                  <form action={setOutreachStatusAction}>
-                    <input type="hidden" name="id" value={row.id} />
-                    <input type="hidden" name="status" value="sent" />
-                    <button className="rounded-md bg-[#b99b5f] px-3 py-2 text-xs font-semibold text-[#07111f]">Jag har skickat ✓</button>
-                  </form>
-                  <form action={setOutreachStatusAction}>
-                    <input type="hidden" name="id" value={row.id} />
-                    <input type="hidden" name="status" value="rejected" />
-                    <button className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/5">Skippa</button>
-                  </form>
-                </div>
-              </article>
-            );
-          })}
-          {outreach.length === 0 ? <p className="text-sm text-[#9aa7b8]">Inga creator-meddelanden väntar.</p> : null}
+          {legacyQueue.length === 0 ? <p className="text-sm text-[#9aa7b8]">Ingen legacy-post väntar.</p> : null}
         </div>
       </section>
 
       <section className="mt-10 grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-white/10 bg-white/[0.025] p-5">
-          <h2 className="text-lg font-semibold">SEO-sidor som redan är live</h2>
-          <div className="mt-4 space-y-2">
-            {(seoResult.data ?? []).map((page) => (
-              <Link key={page.slug} href={`/learn/${page.slug}`} target="_blank" className="block rounded-md border border-white/10 p-3 text-sm hover:bg-white/5">
-                {page.title}
-              </Link>
-            ))}
+          <h2 className="text-lg font-semibold">Creator-samarbeten</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">Utskicken är fortfarande manuellt godkända för att undvika spam.</p>
+          <div className="mt-4 space-y-3">
+            {outreach.map((row) => {
+              const creator = row.creator_id ? creatorById.get(row.creator_id) : null;
+              return (
+                <article key={row.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">{creator?.name ?? "Creator"}</p>
+                      {creator?.profile_url ? <a className="text-xs text-[#b99b5f] underline" href={creator.profile_url} target="_blank" rel="noreferrer">Öppna profil</a> : null}
+                    </div>
+                    <CopyButton text={row.message ?? ""} label="Kopiera meddelande" />
+                  </div>
+                  <p className="mt-3 line-clamp-4 whitespace-pre-wrap text-xs leading-5 text-[#aeb9c8]">{row.message}</p>
+                  <div className="mt-3 flex gap-2">
+                    <form action={setOutreachStatusAction}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <input type="hidden" name="status" value="sent" />
+                      <button className="rounded-md border border-emerald-400/20 px-2 py-1 text-[11px] text-emerald-200">Skickat ✓</button>
+                    </form>
+                    <form action={setOutreachStatusAction}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <input type="hidden" name="status" value="rejected" />
+                      <button className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-[#9aa7b8]">Skippa</button>
+                    </form>
+                  </div>
+                </article>
+              );
+            })}
+            {outreach.length === 0 ? <p className="text-sm text-[#9aa7b8]">Inga creator-meddelanden väntar.</p> : null}
           </div>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-white/[0.025] p-5">
-          <h2 className="text-lg font-semibold">Senaste unika systemfel</h2>
-          <div className="mt-4 space-y-2 text-xs text-[#9aa7b8]">
-            {uniqueErrors.map((error, index) => <p key={`${error.occurred_at}-${index}`}><strong>{error.source}</strong>: {error.message}</p>)}
-            {uniqueErrors.length === 0 ? <p>Inga loggade fel.</p> : null}
+          <h2 className="text-lg font-semibold">SEO som redan är publicerat</h2>
+          <p className="mt-1 text-sm text-[#9aa7b8]">SEO-flödet fortsätter parallellt med videofabriken.</p>
+          <div className="mt-4 space-y-2">
+            {(seoResult.data ?? []).map((page) => (
+              <div key={page.slug} className="rounded-lg border border-white/10 bg-black/15 p-3">
+                <p className="text-sm font-semibold">{page.title}</p>
+                <p className="mt-1 text-xs text-[#7f8ea2]">{page.keyword}</p>
+              </div>
+            ))}
+            {(seoResult.data ?? []).length === 0 ? <p className="text-sm text-[#9aa7b8]">Inga publicerade SEO-sidor ännu.</p> : null}
           </div>
         </div>
       </section>
-
-      <p className="mt-10 text-xs text-[#708095]">Quality v2: irrelevanta ämnen stoppas före produktion, AI-fel får automatiska retries och dagens lista hålls medvetet liten.</p>
     </main>
   );
-}
-
-function GuideStep({ number, title, text }: { number: string; title: string; text: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/15 p-4">
-      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#b99b5f] text-xs font-bold text-[#07111f]">{number}</div>
-      <p className="mt-3 text-sm font-semibold">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{text}</p>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><p className="text-xs uppercase tracking-wide text-[#9aa7b8]">{label}</p><p className="mt-2 text-2xl font-semibold">{value}</p></div>;
 }
