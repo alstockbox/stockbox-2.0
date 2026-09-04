@@ -57,6 +57,10 @@ function visitorIdentity(event: any) {
   return event.user_id || event.anonymous_id || event.session_id || event.id || null;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function aggregateAttributedGrowth(ctx: Pick<GrowthV3Context, "db" | "now">) {
   const now = ctx.now ?? new Date();
   const since = startOfDayISO(addDays(now, -27));
@@ -68,7 +72,7 @@ export async function aggregateAttributedGrowth(ctx: Pick<GrowthV3Context, "db" 
   for (const event of events || []) {
     const contentId = String(event.utm_content || "").trim();
     const identity = visitorIdentity(event);
-    if (!contentId || !identity) continue;
+    if (!isUuid(contentId) || !identity) continue;
     if (!identities.has(contentId)) identities.set(contentId, new Set());
     identities.get(contentId)!.add(String(identity));
   }
@@ -259,23 +263,22 @@ export async function generateFounderScriptsV3(ctx: GrowthV3Context, enhance?: F
     let final = base;
     if (enhance) {
       try {
-        const enhanced = await enhance({ contentId: candidate.contentId, topicKey, title: candidate.title, ...base });
-        if (enhanced) {
+        const ai = await enhance({ contentId: candidate.contentId, topicKey, title: candidate.title, hook: base.hook, script: base.script, caption: base.caption, cta: base.cta });
+        if (ai) {
           final = {
             ...base,
-            hook: clean(enhanced.hook, base.hook, 220),
-            script: clean(enhanced.script, base.script, 1800),
-            caption: clean(enhanced.caption, base.caption, 800),
-            cta: clean(enhanced.cta, base.cta, 220),
+            hook: clean(ai.hook, base.hook, 220),
+            script: clean(ai.script, base.script, 2_200),
+            caption: clean(ai.caption, base.caption, 700),
+            cta: clean(ai.cta, base.cta, 220),
           };
           aiEnhanced += 1;
         } else deterministic += 1;
       } catch { deterministic += 1; }
     } else deterministic += 1;
 
-    const key = `founder:v3:${date}:${candidate.contentId || topicKey}`;
     const inserted = await ctx.db.insertIgnore("acq_manual_script_ideas", [{
-      idempotency_key: key,
+      idempotency_key: `manual:v3:${date}:${topicKey}`,
       content_id: candidate.contentId,
       suggested_for_date: date,
       language: "sv",
@@ -287,21 +290,23 @@ export async function generateFounderScriptsV3(ctx: GrowthV3Context, enhance?: F
       recommended_platform: "instagram_reel",
       status: "suggested",
       automatic_render: false,
-      expires_at: addDays(now, 3).toISOString(),
-      metadata: { v3_intelligence: true, topic_key: topicKey, ai_enhanced: Boolean(enhance && final !== base) },
+      expires_at: addDays(now, 7).toISOString(),
+      metadata: { source: "growth_v3_optional_founder_script", ai_enhanced: Boolean(enhance && final !== base) },
     }], "idempotency_key");
     if (inserted?.length) created += 1;
   }
-  return { created, candidates: candidates.length, aiEnhanced, deterministic };
+  return { created, generated: candidates.slice(0, max).length, aiEnhanced, deterministic };
 }
 
 export function describeLearning(input: { byContent: Record<string, number>; minSample: number; labels?: Record<string, string> }) {
-  const ranked = Object.entries(input.byContent).sort((a, b) => b[1] - a[1]);
-  const total = ranked.reduce((sum, [, value]) => sum + value, 0);
-  if (!ranked.length || total === 0) return { sample: 0, confidence: "none" as const, summary: "Ingen attribuerad contenttrafik ännu; motorn fortsätter samla data och behåller bred exploration." };
-  const [winner, visits] = ranked[0];
-  const label = input.labels?.[winner] || winner;
-  const confidence = total >= input.minSample ? "directional" as const : "low_sample" as const;
-  const prefix = confidence === "low_sample" ? "I det lilla datamaterialet" : "I den senaste attribuerade trafiken";
-  return { sample: total, confidence, winnerContentId: winner, summary: `${prefix} gav ${label} mest kvalificerad trafik (${visits} besök). Motorn ökar liknande innehåll försiktigt utan att sluta testa andra teman.` };
+  const entries = Object.entries(input.byContent).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const sample = entries.reduce((sum, [, count]) => sum + count, 0);
+  const confidence = sample < input.minSample ? "low_sample" : sample < input.minSample * 3 ? "directional" : "evidence_backed";
+  const top = entries.slice(0, 3).map(([contentId, count]) => `${input.labels?.[contentId] || contentId}: ${count}`).join(", ");
+  const summary = sample === 0
+    ? "Ingen attribuerad kvalificerad trafik ännu. Behåll en bred testmix och dra inga vinnarslutsatser."
+    : confidence === "low_sample"
+      ? `Det lilla datamaterialet är endast en svag signal (${sample} attribuerade besök). Styr inte om aggressivt ännu. ${top ? `Tidiga signaler: ${top}.` : ""}`
+      : `Attribuerad trafik ger ${confidence === "directional" ? "en riktning" : "ett tydligare evidensunderlag"} från ${sample} besök. ${top ? `Starkast just nu: ${top}.` : ""}`;
+  return { sample, confidence, topContentIds: entries.slice(0, 3).map(([id]) => id), summary };
 }
