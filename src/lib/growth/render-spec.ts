@@ -12,6 +12,9 @@ export const DistributionPlatformSchema = z.enum([
 
 export type DistributionPlatform = z.infer<typeof DistributionPlatformSchema>;
 
+export const RenderJobKindSchema = z.enum(["video", "carousel", "static_image"]);
+export type RenderJobKind = z.infer<typeof RenderJobKindSchema>;
+
 export const RenderTemplateSchema = z.enum([
   "educational_checklist",
   "stock_analysis",
