@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { estimateGenerativeCostSek, generateGenerativeClip } from "./generative-provider.mjs";
 
@@ -46,6 +45,10 @@ function run(command, args, capture = false) {
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function safeRuntimePart(value) {
+  return String(value || "asset").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 120) || "asset";
 }
 
 async function uploadSigned(target, path, contentType) {
@@ -139,7 +142,7 @@ function probeGeneratedClip(path, requestedDurationSeconds) {
   }
 }
 
-async function addOptionalGeneratedScenes(job, spec, workdir) {
+async function addOptionalGeneratedScenes(job, spec, runtimeDir, runtimeRelativeDir) {
   const output = structuredClone(spec);
   const stats = { attempted: 0, generated: 0, fallback: 0, actual_cost_sek: 0 };
   const enabled = job.generative?.enabled === true;
@@ -186,10 +189,11 @@ async function addOptionalGeneratedScenes(job, spec, workdir) {
 
     try {
       const generated = await generateGenerativeClip({ request });
-      const clipPath = resolve(workdir, `generated-${String(scene.id).replace(/[^A-Za-z0-9_-]/g, "-")}.mp4`);
+      const fileName = `generated-${safeRuntimePart(scene.id)}.mp4`;
+      const clipPath = resolve(runtimeDir, fileName);
       writeFileSync(clipPath, Buffer.from(generated.bytes));
       probeGeneratedClip(clipPath, durationSeconds);
-      scene.visualRef = pathToFileURL(clipPath).href;
+      scene.visualRef = `${runtimeRelativeDir}/${fileName}`;
       stats.generated += 1;
       stats.actual_cost_sek += Number(generated.actualCostSek || 0);
     } catch {
@@ -207,47 +211,55 @@ async function renderVideo(job, workdir) {
   const videoPath = resolve(workdir, "master.mp4");
   const coverPath = resolve(workdir, "cover.jpg");
   const metadataPath = resolve(workdir, "metadata.json");
+  const runtimeRelativeDir = `.growth-runtime/${safeRuntimePart(job.id)}`;
+  const runtimeDir = resolve(process.cwd(), "public", runtimeRelativeDir);
 
   await synthesizeVoice(job, voicePath);
-  const enhanced = await addOptionalGeneratedScenes(job, job.render_spec, workdir);
-  writeFileSync(specPath, JSON.stringify(enhanced.spec));
+  mkdirSync(runtimeDir, { recursive: true });
 
-  run("node", ["scripts/growth/render-growth-video.mjs", "--spec", specPath, "--voice", voicePath, "--out", videoPath]);
-  const qcRaw = run("node", ["scripts/growth/validate-growth-video.mjs", "--video", videoPath], true).trim();
-  const qc = JSON.parse(qcRaw.split("\n").filter(Boolean).at(-1));
-  if (qc.passed !== true) throw new Error(`media_qc_failed:${(qc.reasons || []).join(",")}`);
+  try {
+    const enhanced = await addOptionalGeneratedScenes(job, job.render_spec, runtimeDir, runtimeRelativeDir);
+    writeFileSync(specPath, JSON.stringify(enhanced.spec));
 
-  run("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-y",
-    "-ss", "1", "-i", videoPath,
-    "-frames:v", "1", "-q:v", "2", coverPath,
-  ]);
+    run("node", ["scripts/growth/render-growth-video.mjs", "--spec", specPath, "--voice", voicePath, "--out", videoPath]);
+    const qcRaw = run("node", ["scripts/growth/validate-growth-video.mjs", "--video", videoPath], true).trim();
+    const qc = JSON.parse(qcRaw.split("\n").filter(Boolean).at(-1));
+    if (qc.passed !== true) throw new Error(`media_qc_failed:${(qc.reasons || []).join(",")}`);
 
-  writeFileSync(metadataPath, JSON.stringify({
-    version: "v3",
-    render_job_id: job.id,
-    content_id: job.content_id,
-    job_kind: "video",
-    qc,
-    generative: enhanced.stats,
-    generated_at: new Date().toISOString(),
-  }));
+    run("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-ss", "1", "-i", videoPath,
+      "-frames:v", "1", "-q:v", "2", coverPath,
+    ]);
 
-  await uploadSigned(job.uploads.voice_audio, voicePath, "audio/wav");
-  await uploadSigned(job.uploads.master_video, videoPath, "video/mp4");
-  await uploadSigned(job.uploads.cover, coverPath, "image/jpeg");
-  await uploadSigned(job.uploads.metadata, metadataPath, "application/json");
+    writeFileSync(metadataPath, JSON.stringify({
+      version: "v3",
+      render_job_id: job.id,
+      content_id: job.content_id,
+      job_kind: "video",
+      qc,
+      generative: enhanced.stats,
+      generated_at: new Date().toISOString(),
+    }));
 
-  const durationMs = Math.round(Number(qc.durationSeconds || 0) * 1000);
-  return {
-    qc,
-    assets: [
-      asset(job.uploads.voice_audio, voicePath, "voice_audio", "audio/wav"),
-      asset(job.uploads.master_video, videoPath, "master_video", "video/mp4", { width: 1080, height: 1920, duration_ms: durationMs }),
-      asset(job.uploads.cover, coverPath, "cover", "image/jpeg", { width: 1080, height: 1920 }),
-      asset(job.uploads.metadata, metadataPath, "metadata", "application/json"),
-    ],
-  };
+    await uploadSigned(job.uploads.voice_audio, voicePath, "audio/wav");
+    await uploadSigned(job.uploads.master_video, videoPath, "video/mp4");
+    await uploadSigned(job.uploads.cover, coverPath, "image/jpeg");
+    await uploadSigned(job.uploads.metadata, metadataPath, "application/json");
+
+    const durationMs = Math.round(Number(qc.durationSeconds || 0) * 1000);
+    return {
+      qc,
+      assets: [
+        asset(job.uploads.voice_audio, voicePath, "voice_audio", "audio/wav"),
+        asset(job.uploads.master_video, videoPath, "master_video", "video/mp4", { width: 1080, height: 1920, duration_ms: durationMs }),
+        asset(job.uploads.cover, coverPath, "cover", "image/jpeg", { width: 1080, height: 1920 }),
+        asset(job.uploads.metadata, metadataPath, "metadata", "application/json"),
+      ],
+    };
+  } finally {
+    rmSync(runtimeDir, { recursive: true, force: true });
+  }
 }
 
 async function renderCarousel(job, workdir) {
