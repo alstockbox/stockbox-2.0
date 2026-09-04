@@ -56,6 +56,8 @@ export type RenderJobState = z.infer<typeof RenderJobStateSchema>;
 
 export const MediaAssetKindSchema = z.enum([
   "voice_audio",
+  "screenshot",
+  "generated_scene",
   "master_video",
   "cover",
   "metadata",
