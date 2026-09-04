@@ -74,6 +74,7 @@ Delivers:
 - cost-aware generative micro-scene provider contract;
 - mandatory provider cost/quality benchmark before enablement;
 - automatic motion-graphics fallback;
+- explicit `video | carousel | static_image` job kinds;
 - worker support for video/carousel/static jobs.
 
 Gate: all deterministic visual formats are ready-to-post; optional generated scenes can never block production or cross budget policy.
@@ -85,7 +86,7 @@ Gate: all deterministic visual formats are ready-to-post; optional generated sce
 Path: `docs/superpowers/plans/2026-09-04-growth-provider-retention-and-visual-source-hardening.md`
 
 Delivers:
-- explicit `video | carousel | static_image` render job kinds;
+- render-job-kind contract verification across producers and worker;
 - distinct Swedish founder-clone and generic English voice paths;
 - deterministic StockBox structured/curated/captured/motion-fallback visual source selection;
 - idempotent voice/generative spend accounting;
@@ -149,6 +150,10 @@ Only request these when the corresponding implementation is ready:
 3. If the chosen cloud voice/generative provider requires an account/API credential that cannot be provisioned programmatically, configure that secret once through the provider/Supabase/GitHub secret UI. Never ask the founder to paste secrets into chat.
 
 No recurring filming, voice recording, editing, caption writing, image creation, or local computer runtime is part of the automated production requirement.
+
+## Plan self-review
+
+Before execution, the plans were checked against the approved design for budget limits, 0-2 automatic videos, optional founder scripts, Swedish/English voice separation, finished MP4/carousel/static assets, generative fallback, private voice/media storage, spend accounting, retention, existing SEO/outreach preservation, shadow rollout, and production deployment verification. Cross-cutting gaps found during review were moved into the explicit hardening plan rather than left implicit.
 
 ## Final program acceptance
 
