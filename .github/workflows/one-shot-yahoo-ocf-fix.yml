@@ -1,0 +1,87 @@
+name: One-shot Yahoo OCF fix
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 0
+      - name: Patch Yahoo cash-flow semantics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/data/yahoo-fundamentals-core.ts")
+          text = path.read_text()
+          old_capex = '''  const capexFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate) ?? atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
+          if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
+          const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
+          '''
+          new_capex = '''  const capitalExpenditureFact = atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
+          const purchaseOfPpeFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate);
+          const capexFact = capitalExpenditureFact ?? purchaseOfPpeFact;
+          if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
+          const directOperatingCashFlowFact = atDate(values, `${flowPrefix}OperatingCashFlow`, flowDate);
+          const freeCashFlowFact = atDate(values, `${flowPrefix}FreeCashFlow`, flowDate);
+          let operatingCashFlow = directOperatingCashFlowFact?.value ?? null;
+          if (directOperatingCashFlowFact) metricProvenance.operatingCashFlow = provenance(directOperatingCashFlowFact);
+          if (freeCashFlowFact) metricProvenance.freeCashFlow = provenance(freeCashFlowFact);
+          if (operatingCashFlow === null && freeCashFlowFact && capitalExpenditureFact) {
+            const fcfCurrency = freeCashFlowFact.currencyCode?.trim().toUpperCase();
+            const capexCurrency = capitalExpenditureFact.currencyCode?.trim().toUpperCase();
+            if (
+              fcfCurrency
+              && fcfCurrency === capexCurrency
+              && freeCashFlowFact.periodType === capitalExpenditureFact.periodType
+            ) {
+              const derivedOperatingCashFlow = freeCashFlowFact.value + Math.abs(capitalExpenditureFact.value);
+              if (Number.isFinite(derivedOperatingCashFlow)) {
+                operatingCashFlow = derivedOperatingCashFlow;
+                metricProvenance.operatingCashFlow = {
+                  source: "Yahoo Finance fundamentals timeseries",
+                  provider: PROVIDER_ID,
+                  unit: fcfCurrency,
+                  periodEnd: flowDate,
+                  periodBasis: flowPrefix === "trailing" ? "TTM_REPORTED" : "FY",
+                  inputs: [freeCashFlowFact.concept, capitalExpenditureFact.concept],
+                  valueKind: "derived",
+                  note: "Operating cash flow derived as Yahoo FreeCashFlow plus absolute CapitalExpenditure because direct OperatingCashFlow was unavailable; Yahoo FreeCashFlow reconciles to CapitalExpenditure rather than the narrower PurchaseOfPPE concept when those concepts differ.",
+                };
+              }
+            }
+          }
+          const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
+          '''
+          if old_capex not in text:
+              raise SystemExit("capex marker not found")
+          text = text.replace(old_capex, new_capex, 1)
+          old_return = '''    operatingCashFlow: flow("OperatingCashFlow", "operatingCashFlow"),
+              capitalExpenditures: normalizedCapex(capexFact),
+              freeCashFlow: flow("FreeCashFlow", "freeCashFlow"),
+          '''
+          new_return = '''    operatingCashFlow,
+              capitalExpenditures: normalizedCapex(capexFact),
+              freeCashFlow: freeCashFlowFact?.value ?? null,
+          '''
+          if old_return not in text:
+              raise SystemExit("cash-flow return marker not found")
+          text = text.replace(old_return, new_return, 1)
+          path.write_text(text)
+          PY
+      - name: Commit patch and remove workflow
+        run: |
+          rm .github/workflows/one-shot-yahoo-ocf-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-fundamentals-core.ts .github/workflows/one-shot-yahoo-ocf-fix.yml
+          git commit -m "fix: reconcile Yahoo OCF and capex semantics"
+          git push origin HEAD:fix/coverage-engine-root-cause
