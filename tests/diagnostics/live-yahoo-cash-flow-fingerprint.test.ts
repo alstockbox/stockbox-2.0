@@ -8,6 +8,7 @@ const OCF_PROBE_TICKERS = [
   "ASG.AX", "ERG.AX", "SRV1V.HE", "DUTI.JK", "SKLT.JK",
   "IPR.LS", "SNG.LS", "COP.MI", "NZL.NZ", "BGP.NZ",
 ] as const;
+const OCF_RECONCILIATION_CONTROLS = ["AAPL", "MSFT", "NVDA", "KO"] as const;
 
 const CASH_FLOW_TYPES = [
   "annualOperatingCashFlow",
@@ -21,9 +22,14 @@ const CASH_FLOW_TYPES = [
 ] as const;
 
 type JsonObject = Record<string, unknown>;
+type CashFlowFact = { date: string; periodType: string | null; value: number | null; currency: string | null };
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
+}
+
+function latestFact(concepts: Record<string, CashFlowFact[]>, concept: string, date: string): CashFlowFact | null {
+  return concepts[concept]?.find((fact) => fact.date === date) ?? null;
 }
 
 async function rawYahooCashFlow(symbol: string) {
@@ -38,7 +44,7 @@ async function rawYahooCashFlow(symbol: string) {
   const payload = response.ok ? object(await response.json()) : null;
   const timeseries = object(payload?.timeseries);
   const results = Array.isArray(timeseries?.result) ? timeseries.result : [];
-  const concepts: Record<string, Array<{ date: string; periodType: string | null; value: number | null; currency: string | null }>> = {};
+  const concepts: Record<string, CashFlowFact[]> = {};
 
   for (const resultValue of results) {
     const result = object(resultValue);
@@ -115,5 +121,52 @@ liveDescribe("live Yahoo cash-flow fingerprint", () => {
 
     console.log(`YAHOO_CASH_FLOW_FINGERPRINT ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(OCF_PROBE_TICKERS.length);
+  }, 240_000);
+
+  it("identifies which Yahoo capex concept reconciles reported OCF to reported FCF", async () => {
+    const rows: Array<Record<string, unknown>> = [];
+
+    for (const ticker of OCF_RECONCILIATION_CONTROLS) {
+      const candidates = await searchCompanies(ticker);
+      const company = candidates.find((candidate) =>
+        (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker
+      );
+      expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
+      if (!company) continue;
+      const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
+      const raw = await rawYahooCashFlow(symbol);
+      const annualOcf = raw.concepts.annualOperatingCashFlow ?? [];
+
+      const reconciliations = annualOcf.flatMap((ocf) => {
+        const fcf = latestFact(raw.concepts, "annualFreeCashFlow", ocf.date);
+        const capitalExpenditure = latestFact(raw.concepts, "annualCapitalExpenditure", ocf.date);
+        const purchaseOfPpe = latestFact(raw.concepts, "annualPurchaseOfPPE", ocf.date);
+        if (ocf.value === null || fcf?.value === null || fcf?.value === undefined) return [];
+        const impliedCapex = ocf.value - fcf.value;
+        const capitalExpenditureError = capitalExpenditure?.value === null || capitalExpenditure?.value === undefined
+          ? null
+          : Math.abs(impliedCapex - Math.abs(capitalExpenditure.value));
+        const purchaseOfPpeError = purchaseOfPpe?.value === null || purchaseOfPpe?.value === undefined
+          ? null
+          : Math.abs(impliedCapex - Math.abs(purchaseOfPpe.value));
+        return [{
+          date: ocf.date,
+          currency: ocf.currency,
+          ocf: ocf.value,
+          fcf: fcf.value,
+          impliedCapex,
+          capitalExpenditure: capitalExpenditure?.value ?? null,
+          capitalExpenditureError,
+          purchaseOfPpe: purchaseOfPpe?.value ?? null,
+          purchaseOfPpeError,
+        }];
+      });
+
+      rows.push({ ticker, symbol, rawStatus: raw.status, reconciliations });
+    }
+
+    console.log(`YAHOO_OCF_FCF_RECONCILIATION ${JSON.stringify(rows)}`);
+    expect(rows).toHaveLength(OCF_RECONCILIATION_CONTROLS.length);
+    expect(rows.some((row) => Array.isArray(row.reconciliations) && row.reconciliations.length > 0)).toBe(true);
   }, 240_000);
 });
