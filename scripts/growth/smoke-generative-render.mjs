@@ -1,7 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { generateGenerativeClip } from "./generative-provider.mjs";
 
@@ -26,9 +25,12 @@ if (!["success", "fallback"].includes(mode)) throw new Error("Mode must be succe
 const requestedOut = arg("--out");
 const workdir = mkdtempSync(`${tmpdir()}/stockbox-generative-render-smoke-`);
 const output = requestedOut ? resolve(requestedOut) : resolve(workdir, "final.mp4");
+const runtimeName = `smoke-${process.pid}-${Date.now()}.mp4`;
+const runtimeRelative = `.growth-runtime/${runtimeName}`;
+const runtimeDir = resolve(process.cwd(), "public", ".growth-runtime");
+const runtimePath = resolve(runtimeDir, runtimeName);
 
 try {
-  const clipPath = resolve(workdir, "generated.mp4");
   let visualRef;
   let fallbackUsed = false;
   try {
@@ -43,8 +45,9 @@ try {
       fake: true,
       forceFailure: mode === "fallback",
     });
-    writeFileSync(clipPath, Buffer.from(generated.bytes));
-    visualRef = pathToFileURL(clipPath).href;
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(runtimePath, Buffer.from(generated.bytes));
+    visualRef = runtimeRelative;
   } catch {
     fallbackUsed = true;
   }
@@ -93,5 +96,6 @@ try {
 
   process.stdout.write(JSON.stringify({ ok: true, mode, fallback_used: fallbackUsed, qc, output_bytes: readFileSync(output).byteLength }) + "\n");
 } finally {
-  if (!requestedOut) rmSync(workdir, { recursive: true, force: true });
+  rmSync(runtimePath, { force: true });
+  rmSync(workdir, { recursive: true, force: true });
 }
