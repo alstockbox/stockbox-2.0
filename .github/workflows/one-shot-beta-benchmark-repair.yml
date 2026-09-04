@@ -1,0 +1,46 @@
+name: One-shot Athens Oslo beta benchmark repair
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - ".github/workflows/one-shot-beta-benchmark-repair.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact benchmark replacements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/data/yahoo-market-core.ts")
+          text = path.read_text()
+          replacements = {
+              '[".AT", "FTSE.AT"]': '[".AT", "GD.AT"]',
+              '[".OL", "OSEAX.OL"]': '[".OL", "OSEBX.OL"]',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected exactly one occurrence of {old!r}, found {text.count(old)}")
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+
+      - name: Commit product patch and remove one-shot workflow
+        run: |
+          rm .github/workflows/one-shot-beta-benchmark-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-market-core.ts .github/workflows/one-shot-beta-benchmark-repair.yml
+          git diff --cached --check
+          git commit -m "fix: use historically viable Athens and Oslo beta benchmarks"
+          git push origin HEAD:fix/coverage-engine-root-cause
