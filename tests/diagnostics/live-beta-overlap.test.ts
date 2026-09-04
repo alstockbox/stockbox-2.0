@@ -5,16 +5,15 @@ const liveIt = runLive ? it : it.skip;
 const DAY_MS = 86_400_000;
 
 type Row = { date: string; close: number };
-
 type JsonObject = Record<string, unknown>;
 
 const CASES = [
-  ["KRI.AT", "FTSE.AT"],
-  ["KARE.AT", "FTSE.AT"],
+  ["KRI.AT", "GD.AT"],
+  ["KARE.AT", "GD.AT"],
   ["SR.BK", "^SET.BK"],
   ["FMT.BK", "^SET.BK"],
-  ["DNB.OL", "OSEAX.OL"],
-  ["PLT.OL", "OSEAX.OL"],
+  ["DNB.OL", "OSEBX.OL"],
+  ["PLT.OL", "OSEBX.OL"],
   ["2285.SR", "^TASI.SR"],
   ["9515.SR", "^TASI.SR"],
   ["APR.WA", "WIG20.WA"],
@@ -22,9 +21,6 @@ const CASES = [
 ] as const;
 
 const CANDIDATE_BENCHMARKS = [
-  ["Athens", "KRI.AT", "GD.AT"],
-  ["Oslo", "DNB.OL", "^OSEAX"],
-  ["Oslo", "DNB.OL", "OSEBX.OL"],
   ["Warsaw", "APR.WA", "^WIG20"],
   ["Warsaw", "APR.WA", "^WIG"],
   ["Warsaw", "APR.WA", "WIG.WA"],
@@ -98,7 +94,7 @@ function overlap(stock: Row[], benchmark: Row[]) {
 }
 
 describe("live beta overlap diagnostics", () => {
-  liveIt("traces the remaining benchmark overlap failures without changing provider behavior", async () => {
+  liveIt("traces current benchmark overlap after global beta repairs", async () => {
     const diagnostics = [];
     for (const [ticker, benchmark] of CASES) {
       const [stock, index] = await Promise.all([chart(ticker, "10y"), chart(benchmark, "2y")]);
@@ -122,7 +118,7 @@ describe("live beta overlap diagnostics", () => {
     expect(diagnostics).toHaveLength(CASES.length);
   }, 120_000);
 
-  liveIt("probes historically usable replacement benchmarks for markets with one-row Yahoo index feeds", async () => {
+  liveIt("keeps probing Warsaw replacements while Yahoo local-index history is unusable", async () => {
     const diagnostics = [];
     for (const [market, ticker, benchmark] of CANDIDATE_BENCHMARKS) {
       const [stock, index] = await Promise.all([chart(ticker, "10y"), chart(benchmark, "2y")]);
