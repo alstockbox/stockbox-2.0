@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --cache",
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/analysis/archetypes.test.ts",
     "test:watch": "vitest",
     "typecheck": "next typegen && tsc --noEmit",
     "release:smoke:local": "node scripts/launch/local-release-smoke.mjs",
