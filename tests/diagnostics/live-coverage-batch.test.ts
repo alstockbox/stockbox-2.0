@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCoverageAuditBatches } from "../../src/lib/data/coverage-audit-batch";
+import { searchCompanies } from "../../src/lib/data/enhanced-provider";
 
 const LIVE = process.env.RUN_LIVE_COVERAGE === "1";
 
@@ -22,6 +23,31 @@ const tickers = [
 ];
 
 (LIVE ? describe : describe.skip)("live coverage diagnostic batch", () => {
+  it("captures exact-ticker resolution candidates before applying a systemic resolver fix", async () => {
+    const candidates = await searchCompanies("NVO");
+    console.log("NVO_RESOLUTION_CANDIDATES", JSON.stringify(candidates.map((company) => ({
+      ticker: company.ticker,
+      canonicalTicker: company.canonicalTicker,
+      localTicker: company.localTicker,
+      providerTickers: company.providerTickers,
+      name: company.name,
+      country: company.country,
+      exchange: company.exchange,
+      mic: company.mic,
+      securityType: company.securityType,
+      securityId: company.securityId,
+      entityId: company.entityId,
+      cik: company.cik,
+      primarySecurity: company.primarySecurity,
+      matchType: company.matchType,
+      matchScore: company.matchScore,
+      matchConfidence: company.matchConfidence,
+      primaryCandidate: company.primaryCandidate,
+      providerCapabilities: company.providerCapabilities,
+    }))));
+    expect(candidates.length).toBeGreaterThan(0);
+  }, 120_000);
+
   it("audits a stratified 100-ticker global sample without aborting on individual failures", async () => {
     const startedAt = new Date().toISOString();
     const startedMs = Date.now();
