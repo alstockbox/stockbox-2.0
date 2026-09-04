@@ -101,11 +101,11 @@ describe("provider retry resilience P1", () => {
   });
 
   it("wires retry execution into market-data and fundamentals resolution", () => {
-    const providerSource = readFileSync(join(process.cwd(), "src/lib/data/provider.ts"), "utf8");
-    expect(providerSource).toContain("executeProviderWithRetry");
-    expect(providerSource).toContain("fetchCompanyFundamentalsResult(company)");
-    expect(providerSource).toContain("fetchYahooFundamentalsResult(company)");
-    expect(providerSource).toContain("provider.fetchMarketData(company)");
-    expect(providerSource).toContain("candidate.provider!.fetchMarketData(company)");
+    const providerCoreSource = readFileSync(join(process.cwd(), "src/lib/data/provider-core.ts"), "utf8");
+    expect(providerCoreSource).toContain("executeProviderWithRetry");
+    expect(providerCoreSource).toContain("fetchCompanyFundamentalsResult(company)");
+    expect(providerCoreSource).toContain("fetchYahooFundamentalsResult(company)");
+    expect(providerCoreSource).toContain("provider.fetchMarketData(company)");
+    expect(providerCoreSource).toContain("candidate.provider!.fetchMarketData(company)");
   });
 });
