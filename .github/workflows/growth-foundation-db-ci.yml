@@ -1,0 +1,147 @@
+name: Growth Foundation DB CI
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - ".github/workflows/growth-foundation-db-ci.yml"
+
+jobs:
+  migration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Isolate the v3 migration from historical drift
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
+          supabase init
+
+      - name: Start disposable local Supabase
+        run: supabase start
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap production prerequisites only
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists public.acq_content (
+            id uuid primary key default gen_random_uuid()
+          );
+
+          create table if not exists public.acq_config (
+            id uuid primary key default gen_random_uuid(),
+            key text not null unique,
+            value text,
+            value_type text default 'string',
+            description text,
+            updated_at timestamptz default now(),
+            created_at timestamptz default now()
+          );
+
+          create table if not exists public.acq_distribution_queue (
+            id uuid primary key default gen_random_uuid()
+          );
+          SQL
+
+      - name: Apply autonomous growth foundation migration
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+
+      - name: Assert foundation invariants
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_table_count integer;
+            v_private_bucket_count integer;
+            v_config_count integer;
+            v_rls_count integer;
+          begin
+            select count(*) into v_table_count
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_name in (
+                'acq_voice_profiles',
+                'acq_render_jobs',
+                'acq_media_assets',
+                'acq_distribution_packages',
+                'acq_budget_ledger',
+                'acq_manual_script_ideas'
+              );
+            if v_table_count <> 6 then
+              raise exception 'Expected 6 v3 tables, found %', v_table_count;
+            end if;
+
+            select count(*) into v_private_bucket_count
+            from storage.buckets
+            where id in ('growth-voice-private','growth-render-staging','growth-ready-assets')
+              and public = false;
+            if v_private_bucket_count <> 3 then
+              raise exception 'Expected 3 private growth buckets, found %', v_private_bucket_count;
+            end if;
+
+            select count(*) into v_config_count
+            from public.acq_config
+            where key in (
+              'growth_budget_target_sek',
+              'growth_budget_hard_cap_sek',
+              'growth_v3_shadow_mode',
+              'growth_v3_daily_master_video_max',
+              'growth_render_max_attempts',
+              'growth_signed_url_ttl_seconds',
+              'growth_ready_retention_days',
+              'growth_allocation_exploit_ratio',
+              'growth_allocation_explore_ratio',
+              'growth_allocation_longshot_ratio'
+            );
+            if v_config_count <> 10 then
+              raise exception 'Expected 10 v3 config keys, found %', v_config_count;
+            end if;
+
+            if to_regclass('public.acq_distribution_queue') is null then
+              raise exception 'Existing acq_distribution_queue was not preserved';
+            end if;
+
+            select count(*) into v_rls_count
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relname in (
+                'acq_voice_profiles',
+                'acq_render_jobs',
+                'acq_media_assets',
+                'acq_distribution_packages',
+                'acq_budget_ledger',
+                'acq_manual_script_ideas'
+              )
+              and c.relrowsecurity = true;
+            if v_rls_count <> 6 then
+              raise exception 'Expected RLS on all 6 v3 tables, found %', v_rls_count;
+            end if;
+          end
+          $$;
+
+          select id, public
+          from storage.buckets
+          where id like 'growth-%'
+          order by id;
+          SQL
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup
