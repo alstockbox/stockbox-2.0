@@ -68,6 +68,30 @@ async function chart(symbol: string, range: "2y" | "10y") {
   };
 }
 
+async function stooq(symbol: string) {
+  const response = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d`, {
+    headers: { accept: "text/csv,text/plain;q=0.9,*/*;q=0.1" },
+  });
+  const body = await response.text();
+  const lines = body.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+  const headers = (lines.shift() ?? "").split(",").map((value) => value.trim().toLowerCase());
+  const dateIndex = headers.indexOf("date");
+  const closeIndex = headers.indexOf("close");
+  const rows: Row[] = dateIndex < 0 || closeIndex < 0 ? [] : lines.flatMap((line) => {
+    const values = line.split(",");
+    const date = values[dateIndex]?.trim() ?? "";
+    const close = Number(values[closeIndex]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(close) || close <= 0) return [];
+    return [{ date, close }];
+  });
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    bodyPrefix: body.slice(0, 120),
+    rows,
+  };
+}
+
 function overlap(stock: Row[], benchmark: Row[]) {
   const stockWeekly = new Map<string, Row>();
   const benchmarkWeekly = new Map<string, Row>();
@@ -136,5 +160,22 @@ describe("live beta overlap diagnostics", () => {
     }
     console.log("BETA_BENCHMARK_CANDIDATES", JSON.stringify(diagnostics));
     expect(diagnostics).toHaveLength(CANDIDATE_BENCHMARKS.length);
+  }, 120_000);
+
+  liveIt("probes Stooq WIG20 as a local Warsaw beta fallback", async () => {
+    const [stock, index] = await Promise.all([chart("APR.WA", "10y"), stooq("wig20")]);
+    const diagnostic = {
+      ticker: "APR.WA",
+      benchmark: "stooq:wig20",
+      benchmarkStatus: index.status,
+      benchmarkContentType: index.contentType,
+      benchmarkRows: index.rows.length,
+      benchmarkFirst: index.rows[0]?.date ?? null,
+      benchmarkLast: index.rows.at(-1)?.date ?? null,
+      bodyPrefix: index.bodyPrefix,
+      ...overlap(stock.rows, index.rows),
+    };
+    console.log("STOOQ_WIG20_BETA_CANDIDATE", JSON.stringify(diagnostic));
+    expect(diagnostic.benchmarkRows).toBeGreaterThan(52);
   }, 120_000);
 });
