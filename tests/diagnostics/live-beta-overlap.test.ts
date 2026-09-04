@@ -21,9 +21,11 @@ const CASES = [
 ] as const;
 
 const CANDIDATE_BENCHMARKS = [
-  ["Warsaw", "APR.WA", "^WIG20"],
-  ["Warsaw", "APR.WA", "^WIG"],
-  ["Warsaw", "APR.WA", "WIG.WA"],
+  ["Warsaw index", "APR.WA", "^WIG20"],
+  ["Warsaw index", "APR.WA", "^WIG"],
+  ["Warsaw index", "APR.WA", "WIG.WA"],
+  ["Warsaw WIG20TR ETF", "APR.WA", "ETFBW20TR.WA"],
+  ["Warsaw legacy WIG20 ETF", "APR.WA", "ETFW20L.WA"],
 ] as const;
 
 function object(value: unknown): JsonObject | null {
@@ -65,30 +67,6 @@ async function chart(symbol: string, range: "2y" | "10y") {
     ok: response.ok,
     rows,
     error: typeof error?.description === "string" ? error.description : typeof error?.code === "string" ? error.code : null,
-  };
-}
-
-async function stooq(symbol: string) {
-  const response = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d`, {
-    headers: { accept: "text/csv,text/plain;q=0.9,*/*;q=0.1" },
-  });
-  const body = await response.text();
-  const lines = body.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
-  const headers = (lines.shift() ?? "").split(",").map((value) => value.trim().toLowerCase());
-  const dateIndex = headers.indexOf("date");
-  const closeIndex = headers.indexOf("close");
-  const rows: Row[] = dateIndex < 0 || closeIndex < 0 ? [] : lines.flatMap((line) => {
-    const values = line.split(",");
-    const date = values[dateIndex]?.trim() ?? "";
-    const close = Number(values[closeIndex]);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(close) || close <= 0) return [];
-    return [{ date, close }];
-  });
-  return {
-    status: response.status,
-    contentType: response.headers.get("content-type"),
-    bodyPrefix: body.slice(0, 120),
-    rows,
   };
 }
 
@@ -142,7 +120,7 @@ describe("live beta overlap diagnostics", () => {
     expect(diagnostics).toHaveLength(CASES.length);
   }, 120_000);
 
-  liveIt("keeps probing Warsaw replacements while Yahoo local-index history is unusable", async () => {
+  liveIt("probes Warsaw local-index and WIG20 ETF benchmark candidates", async () => {
     const diagnostics = [];
     for (const [market, ticker, benchmark] of CANDIDATE_BENCHMARKS) {
       const [stock, index] = await Promise.all([chart(ticker, "10y"), chart(benchmark, "2y")]);
@@ -160,22 +138,5 @@ describe("live beta overlap diagnostics", () => {
     }
     console.log("BETA_BENCHMARK_CANDIDATES", JSON.stringify(diagnostics));
     expect(diagnostics).toHaveLength(CANDIDATE_BENCHMARKS.length);
-  }, 120_000);
-
-  liveIt("probes Stooq WIG20 as a local Warsaw beta fallback", async () => {
-    const [stock, index] = await Promise.all([chart("APR.WA", "10y"), stooq("wig20")]);
-    const diagnostic = {
-      ticker: "APR.WA",
-      benchmark: "stooq:wig20",
-      benchmarkStatus: index.status,
-      benchmarkContentType: index.contentType,
-      benchmarkRows: index.rows.length,
-      benchmarkFirst: index.rows[0]?.date ?? null,
-      benchmarkLast: index.rows.at(-1)?.date ?? null,
-      bodyPrefix: index.bodyPrefix,
-      ...overlap(stock.rows, index.rows),
-    };
-    console.log("STOOQ_WIG20_BETA_CANDIDATE", JSON.stringify(diagnostic));
-    expect(diagnostic.benchmarkRows).toBeGreaterThan(52);
   }, 120_000);
 });
