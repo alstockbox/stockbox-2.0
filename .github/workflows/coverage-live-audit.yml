@@ -11,6 +11,7 @@ on:
       - "tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts"
       - "tests/data/adr-listing-basis.test.ts"
       - "tests/data/semantic-period-supplement-only.test.ts"
+      - "tests/data/yahoo-global-beta-routing.test.ts"
       - "src/lib/data/coverage-audit*.ts"
       - "src/lib/analysis/coverage-audit.ts"
       - "src/lib/data/company-search.ts"
@@ -25,6 +26,8 @@ on:
       - "src/lib/data/specialized-enrichment.ts"
       - "src/lib/data/yahoo-fundamentals.ts"
       - "src/lib/data/yahoo-fundamentals-core.ts"
+      - "src/lib/data/yahoo-market.ts"
+      - "src/lib/data/yahoo-market-core.ts"
 
 permissions:
   contents: read
