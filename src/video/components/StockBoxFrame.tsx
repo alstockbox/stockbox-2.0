@@ -1,4 +1,4 @@
-import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, OffthreadVideo, interpolate, useCurrentFrame } from "remotion";
 import type { SceneKind } from "../../lib/growth/render-spec";
 
 export type StockBoxFrameProps = {
@@ -6,10 +6,50 @@ export type StockBoxFrameProps = {
   headline?: string;
   body?: string;
   variantLabel: string;
+  visualRef?: string;
+  fallbackHeadline?: string;
+  fallbackBody?: string;
 };
 
-export function StockBoxFrame({ kind, headline, body, variantLabel }: StockBoxFrameProps) {
+export function StockBoxFrame({
+  kind,
+  headline,
+  body,
+  variantLabel,
+  visualRef,
+  fallbackHeadline,
+  fallbackBody,
+}: StockBoxFrameProps) {
   const frame = useCurrentFrame();
+
+  if (kind === "generated_micro_scene" && visualRef) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: "#06111f" }}>
+        <OffthreadVideo
+          src={visualRef}
+          muted
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+        <AbsoluteFill
+          style={{
+            background: "linear-gradient(180deg, rgba(6,17,31,0.18), rgba(6,17,31,0.64))",
+            padding: "150px 72px 260px",
+            justifyContent: "flex-end",
+            color: "#f8fafc",
+            fontFamily: "Arial, Helvetica, sans-serif",
+          }}
+        >
+          <div style={{ fontSize: 54, fontWeight: 900, lineHeight: 1.05 }}>
+            {headline ?? fallbackHeadline ?? "StockBox"}
+          </div>
+        </AbsoluteFill>
+      </AbsoluteFill>
+    );
+  }
+
+  const resolvedHeadline =
+    kind === "generated_micro_scene" ? fallbackHeadline ?? headline : headline;
+  const resolvedBody = kind === "generated_micro_scene" ? fallbackBody ?? body : body;
 
   return (
     <AbsoluteFill
@@ -49,7 +89,7 @@ export function StockBoxFrame({ kind, headline, body, variantLabel }: StockBoxFr
           })}px`,
         }}
       >
-        {headline ?? "Analysera bolaget, inte bara kursen"}
+        {resolvedHeadline ?? "Analysera bolaget, inte bara kursen"}
       </div>
       <div
         style={{
@@ -63,7 +103,7 @@ export function StockBoxFrame({ kind, headline, body, variantLabel }: StockBoxFr
           lineHeight: 1.35,
         }}
       >
-        {body ?? (kind === "stockbox_ui" ? "StockBox-vy" : "Datadriven visualisering")}
+        {resolvedBody ?? (kind === "stockbox_ui" ? "StockBox-vy" : "Datadriven visualisering")}
       </div>
     </AbsoluteFill>
   );
