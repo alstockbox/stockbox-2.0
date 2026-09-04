@@ -1,0 +1,32 @@
+name: Growth Quality CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/growth/**"
+      - "src/app/admin/growth/**"
+      - "src/app/api/admin/growth/**"
+      - "supabase/functions/stockbox-growth-engine/**"
+      - ".github/workflows/growth-quality-ci.yml"
+  push:
+    branches:
+      - growth-quality-v2
+    paths:
+      - "src/lib/growth/**"
+      - "src/app/admin/growth/**"
+      - "src/app/api/admin/growth/**"
+      - "supabase/functions/stockbox-growth-engine/**"
+      - ".github/workflows/growth-quality-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- src/lib/growth/content-quality.test.ts
+      - run: npm run typecheck
