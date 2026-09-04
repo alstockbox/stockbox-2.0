@@ -14,11 +14,19 @@ export default async function GrowthAdminPage() {
 
   const [briefResult, queueResult, outreachResult, seoResult, metricsResult, errorResult] = await Promise.all([
     supabase.from("acq_founder_briefs").select("brief_date,summary,payload,created_at").order("brief_date", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("acq_distribution_queue").select("id,content_id,platform,caption,script,media_instructions,cta,utm_url,recommended_time,status,created_at").eq("status", "pending_approval").order("created_at", { ascending: true }).limit(24),
+    supabase
+      .from("acq_distribution_queue")
+      .select("id,content_id,platform,caption,script,media_instructions,cta,utm_url,recommended_time,status,created_at,quality_score,quality_flags,daily_rank,generation_version,asset_kind,asset_copy")
+      .eq("status", "pending_approval")
+      .eq("generation_version", "v2")
+      .gte("quality_score", 72)
+      .order("daily_rank", { ascending: true, nullsFirst: false })
+      .order("quality_score", { ascending: false })
+      .limit(8),
     supabase.from("acq_creator_outreach").select("id,creator_id,channel,message,offer,status,created_at").eq("status", "queued").order("created_at", { ascending: true }).limit(20),
     supabase.from("acq_seo_pages").select("slug,title,keyword,status,published_at").eq("status", "published").order("published_at", { ascending: false }).limit(12),
     supabase.from("acq_daily_metrics").select("metric_date,qualified_unique_visitors,rolling_7d_avg,returning_visitors,attribution_rate,by_source").order("metric_date", { ascending: false }).limit(7),
-    supabase.from("acq_errors").select("source,error_type,message,occurred_at").order("occurred_at", { ascending: false }).limit(8),
+    supabase.from("acq_errors").select("source,error_type,message,occurred_at").order("occurred_at", { ascending: false }).limit(12),
   ]);
 
   const queue = queueResult.data ?? [];
@@ -39,6 +47,9 @@ export default async function GrowthAdminPage() {
   const latestMetric = metricsResult.data?.[0];
   const target = Number((brief?.payload as Record<string, unknown> | null)?.target ?? 100);
   const rolling = Number(latestMetric?.rolling_7d_avg ?? 0);
+  const uniqueErrors = Array.from(
+    new Map((errorResult.data ?? []).map((error) => [`${error.source}:${error.error_type}:${error.message}`, error])).values(),
+  ).slice(0, 6);
 
   return (
     <main className="mx-auto w-full max-w-7xl px-5 py-10 text-[#f4efe5] sm:px-8">
@@ -46,7 +57,7 @@ export default async function GrowthAdminPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b99b5f]">StockBox Traffic Machine</p>
           <h1 className="mt-2 text-3xl font-semibold">Growth Control Center</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">Här finns det du faktiskt behöver göra. Motorn hittar, prioriterar, skapar och mäter automatiskt.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">Motorn filtrerar bort irrelevanta ämnen och visar bara dagens högst prioriterade content som klarar kvalitetsgränsen.</p>
         </div>
         <form action={runGrowthEngineAction}>
           <input type="hidden" name="mode" value="full" />
@@ -57,12 +68,15 @@ export default async function GrowthAdminPage() {
       <section className="mt-8 grid gap-4 sm:grid-cols-3">
         <Stat label="7-dagarssnitt" value={`${rolling}/dag`} />
         <Stat label="Mål" value={`${target}/dag`} />
-        <Stat label="Content att posta" value={String(queue.length)} />
+        <Stat label="Dagens prioriterade" value={String(queue.length)} />
       </section>
 
       <section className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Morgonrapport</h2>
+          <div>
+            <h2 className="text-lg font-semibold">Morgonrapport</h2>
+            <p className="mt-1 text-xs text-[#9aa7b8]">Mätning, prioritering och nästa tillväxtbeslut.</p>
+          </div>
           <form action={runGrowthEngineAction}>
             <input type="hidden" name="mode" value="brief" />
             <button className="rounded-md border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/5">Uppdatera</button>
@@ -72,29 +86,55 @@ export default async function GrowthAdminPage() {
       </section>
 
       <section className="mt-8">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold">1. Content redo att publicera</h2>
-            <p className="mt-1 text-sm text-[#9aa7b8]">Kopiera, publicera på plattformen och markera sedan som postad.</p>
-          </div>
+        <div>
+          <h2 className="text-xl font-semibold">1. Dagens bästa content</h2>
+          <p className="mt-1 max-w-3xl text-sm text-[#9aa7b8]">Max ett litet antal prioriterade poster. Låg kvalitet och gamla utkast visas inte här.</p>
         </div>
+
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           {queue.map((row) => {
             const content = row.content_id ? contentById.get(row.content_id) : null;
             const postText = [row.caption, row.script ? `\n\nMANUS:\n${row.script}` : "", row.utm_url ? `\n\nLÄNK:\n${row.utm_url}` : ""].filter(Boolean).join("");
+            const isVideo = ["tiktok", "instagram_reel", "youtube_short"].includes(row.platform);
+            const rank = Number(row.daily_rank ?? 0);
+            const quality = Number(row.quality_score ?? 0);
+
             return (
               <article key={row.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[#b99b5f]">{row.platform}</p>
-                    <h3 className="mt-1 font-semibold">{content?.title ?? content?.topic ?? "StockBox content"}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {rank > 0 ? <span className="rounded-full bg-[#b99b5f]/15 px-2 py-1 text-[11px] font-semibold text-[#d6ba7a]">#{rank} idag</span> : null}
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[11px] font-semibold text-emerald-200">Kvalitet {quality}/100</span>
+                    </div>
+                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[#b99b5f]">{row.platform}</p>
+                    <h3 className="mt-1 text-base font-semibold">{content?.title ?? content?.topic ?? "StockBox content"}</h3>
                   </div>
                   <CopyButton text={postText} label="Kopiera allt" />
                 </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#c7d0dc]">{row.caption}</p>
-                {row.media_instructions ? <p className="mt-3 rounded-md bg-black/20 p-3 text-xs leading-5 text-[#9aa7b8]"><strong>Bild/video:</strong> {row.media_instructions}</p> : null}
-                {row.recommended_time ? <p className="mt-2 text-xs text-[#9aa7b8]">Rekommenderad tid: {row.recommended_time}</p> : null}
+
+                <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[#c7d0dc]">{row.caption}</p>
+
+                {row.media_instructions ? (
+                  <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-[#aeb9c8]">
+                    <strong className="text-[#f4efe5]">{isVideo ? "Video-kit" : row.asset_kind === "carousel_kit" ? "Carousel-kit" : "Asset"}</strong>
+                    <p className="mt-2 whitespace-pre-wrap">{row.media_instructions}</p>
+                  </div>
+                ) : null}
+
                 <div className="mt-4 flex flex-wrap gap-2">
+                  <a
+                    href={`/api/admin/growth/card/${row.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-md border border-[#b99b5f]/50 px-3 py-2 text-xs font-semibold text-[#d7bd84] hover:bg-[#b99b5f]/10"
+                  >
+                    {isVideo ? "Öppna färdig cover-bild" : "Öppna färdig StockBox-bild"}
+                  </a>
+                  {row.recommended_time ? <span className="flex items-center text-xs text-[#7f8ea2]">Rek. tid: {row.recommended_time}</span> : null}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4">
                   <form action={setDistributionStatusAction}>
                     <input type="hidden" name="id" value={row.id} />
                     <input type="hidden" name="status" value="posted" />
@@ -109,13 +149,18 @@ export default async function GrowthAdminPage() {
               </article>
             );
           })}
-          {queue.length === 0 ? <p className="text-sm text-[#9aa7b8]">Ingen väntande content. Kör motorn för att skapa nytt.</p> : null}
+
+          {queue.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.025] p-5 text-sm leading-6 text-[#9aa7b8] lg:col-span-2">
+              Inget content klarar kvalitetsgränsen just nu. Det är avsiktligt bättre än att visa irrelevanta eller halvfärdiga poster. Kör motorn för att skapa nästa kvalitetsgodkända batch.
+            </div>
+          ) : null}
         </div>
       </section>
 
       <section className="mt-10">
         <h2 className="text-xl font-semibold">2. Creator-samarbeten</h2>
-        <p className="mt-1 text-sm text-[#9aa7b8]">Inget skickas automatiskt. Du godkänner själv.</p>
+        <p className="mt-1 text-sm text-[#9aa7b8]">Inget skickas automatiskt. Du godkänner själv för att undvika spam.</p>
         <div className="mt-4 space-y-3">
           {outreach.map((row) => {
             const creator = row.creator_id ? creatorById.get(row.creator_id) : null;
@@ -159,16 +204,17 @@ export default async function GrowthAdminPage() {
             ))}
           </div>
         </div>
+
         <div className="rounded-xl border border-white/10 bg-white/[0.025] p-5">
-          <h2 className="text-lg font-semibold">Senaste systemfel</h2>
+          <h2 className="text-lg font-semibold">Senaste unika systemfel</h2>
           <div className="mt-4 space-y-2 text-xs text-[#9aa7b8]">
-            {(errorResult.data ?? []).map((error, index) => <p key={`${error.occurred_at}-${index}`}><strong>{error.source}</strong>: {error.message}</p>)}
-            {(errorResult.data ?? []).length === 0 ? <p>Inga loggade fel.</p> : null}
+            {uniqueErrors.map((error, index) => <p key={`${error.occurred_at}-${index}`}><strong>{error.source}</strong>: {error.message}</p>)}
+            {uniqueErrors.length === 0 ? <p>Inga loggade fel.</p> : null}
           </div>
         </div>
       </section>
 
-      <p className="mt-10 text-xs text-[#708095]">Motorn är schemalagd i Supabase och körs automatiskt varje dag. Den här sidan är din manuella kontrollstation.</p>
+      <p className="mt-10 text-xs text-[#708095]">Quality v2: irrelevanta ämnen stoppas före produktion, AI-fel får automatiska retries och dagens lista hålls medvetet liten.</p>
     </main>
   );
 }
