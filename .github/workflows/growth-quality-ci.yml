@@ -43,6 +43,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts tests/growth-video-template-selection.test.ts tests/growth-media-qc.test.ts tests/growth-worker-contract.test.ts
+      - name: Check growth worker scripts
+        run: |
+          node --check scripts/growth/render-growth-video.mjs
+          node --check scripts/growth/validate-growth-video.mjs
+          node --check scripts/growth/run-render-worker.mjs
       - name: Test founder voice contract in fake mode
         run: |
           python -m py_compile workers/growth-voice/modal_app.py workers/growth-voice/voice_contract.py
