@@ -56,6 +56,16 @@ const adrCompany: CompanySearchResult = {
   },
 };
 
+function ttmProvenance(field: string) {
+  return {
+    source: "Verified fundamentals provider",
+    valueKind: "reported" as const,
+    periodEnd: "2026-06-30",
+    periodBasis: "TTM_REPORTED" as const,
+    concept: field,
+  };
+}
+
 function fundamentals(overrides: Partial<CompanyFundamentals> = {}): CompanyFundamentals {
   return {
     ticker: "EXADR",
@@ -114,6 +124,14 @@ function fundamentals(overrides: Partial<CompanyFundamentals> = {}): CompanyFund
       incomeTaxExpense: 31,
       currentSharesOutstanding: 100,
       sharesDiluted: 100,
+      provenance: {
+        revenue: ttmProvenance("revenue"),
+        grossProfit: ttmProvenance("grossProfit"),
+        operatingIncome: ttmProvenance("operatingIncome"),
+        netIncome: ttmProvenance("netIncome"),
+        operatingCashFlow: ttmProvenance("operatingCashFlow"),
+        capitalExpenditures: ttmProvenance("capitalExpenditures"),
+      },
     },
     reportedMarketCap: 1_000,
     reportedMarketCapDate: "2026-09-04",
@@ -218,12 +236,7 @@ describe("ADR listing-basis eligibility", () => {
       investmentProfile: "balanced",
     });
 
-    const failureDetail = result.ok ? "" : JSON.stringify({
-      error: result.error,
-      warnings: result.warnings,
-      providerDiagnostics: result.providerDiagnostics,
-    });
-    expect(result.ok, failureDetail).toBe(true);
+    expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.engine?.currencyAlignment).toBe("mismatch");
       expect(result.data.engine?.dcf.status).toBe("unavailable");
