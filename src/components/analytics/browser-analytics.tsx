@@ -42,10 +42,7 @@ export function BrowserAnalytics({
   metaPixelId?: string;
   locale: Locale;
 }) {
-  const configured = Boolean(gaId || metaPixelId);
   const consent = useSyncExternalStore(subscribeConsent, readConsent, () => null);
-
-  if (!configured) return null;
 
   return (
     <>
@@ -78,8 +75,8 @@ export function BrowserAnalytics({
           <p className="text-sm font-semibold text-[#f4efe5]">{locale === "sv" ? "Valfri produktanalys" : "Optional product analytics"}</p>
           <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">
             {locale === "sv"
-              ? "Om du samtycker kan StockBox använda Google Analytics 4 och/eller Meta Pixel när de är konfigurerade. Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte om du nekar."
-              : "If you consent, StockBox may use Google Analytics 4 and/or Meta Pixel when configured. Essential account, billing and security functions are unaffected if you reject analytics."}
+              ? "Om du samtycker kan StockBox mäta var besökare kommer ifrån och hur webbplatsen används. Google Analytics 4 och/eller Meta Pixel används också om de är konfigurerade. Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte om du nekar."
+              : "If you consent, StockBox may measure where visitors come from and how the website is used. Google Analytics 4 and/or Meta Pixel are also used when configured. Essential account, billing and security functions are unaffected if you reject analytics."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" onClick={() => storeConsent("rejected")} className="min-h-11 rounded-md border border-white/15 px-4 text-sm font-semibold text-[#f4efe5] hover:bg-white/5">
