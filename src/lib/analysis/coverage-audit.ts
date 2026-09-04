@@ -68,8 +68,34 @@ export type CoverageAudit = {
   providerDiagnostics: ProviderDiagnostic[];
 };
 
+const REIT_SPECIALIZED_CONTRIBUTORS = new Set([
+  "FFO growth",
+  "AFFO growth",
+  "FFO margin",
+  "FFO yield",
+  "AFFO",
+  "AFFO payout",
+  "Dividend coverage",
+  "Occupancy",
+  "Same-store NOI growth",
+  "Net debt / EBITDAre",
+  "Fixed-charge coverage",
+]);
+
 function normalizedText(value: string | null | undefined): string {
   return value?.trim().toLowerCase() ?? "";
+}
+
+function inferredMissingReason(
+  contributor: ScoreContributor,
+  result: FinancialAnalysisResult,
+): string | null {
+  const explicit = contributor.missingReason?.trim();
+  if (explicit) return explicit;
+  if (result.analysisArchetype === "reit" && REIT_SPECIALIZED_CONTRIBUTORS.has(contributor.label)) {
+    return `${contributor.label} requires reported specialized REIT data; operating-company substitutes are not used.`;
+  }
+  return null;
 }
 
 function diagnosticFailureStatus(diagnostic: ProviderDiagnostic): CoverageDataStatus | null {
@@ -128,6 +154,7 @@ function classifyMissingStatus(
     return { status: "PERIOD_ERROR", diagnostics: [] };
   }
   if (/invalid|impossible|non-finite/.test(reason)) return { status: "INVALID", diagnostics: [] };
+  if (/specialized (?:reit|bank|insurer) data/.test(reason)) return { status: "PROVIDER_MISSING", diagnostics: [] };
 
   const diagnostics = providerDiagnosticsForReason(reason, result.diagnostics.providerDiagnostics ?? []);
   for (const diagnostic of diagnostics) {
@@ -162,6 +189,7 @@ function auditMetric(
 ): CoverageAuditMetric {
   const relevant = contributor.availability !== "unsuitable";
   const available = contributor.availability === "available";
+  const reason = inferredMissingReason(contributor, result);
   let status: CoverageDataStatus;
   let diagnostics: ProviderDiagnostic[] = [];
 
@@ -170,7 +198,7 @@ function auditMetric(
   } else if (available) {
     status = explicitDerivedContributor(contributor, result) ? "DERIVED" : "AVAILABLE";
   } else {
-    const classified = classifyMissingStatus(contributor.missingReason, result);
+    const classified = classifyMissingStatus(reason, result);
     status = classified.status;
     diagnostics = classified.diagnostics;
   }
@@ -184,7 +212,7 @@ function auditMetric(
     available,
     value: typeof contributor.value === "number" && Number.isFinite(contributor.value) ? contributor.value : null,
     weight: contributor.weight,
-    reason: contributor.missingReason ?? null,
+    reason,
     source: contributor.source ?? null,
     period: contributor.period ?? null,
     providerDiagnostics: diagnostics,
