@@ -56,7 +56,7 @@ const tickers = [
       investmentProfile: "balanced",
       batchSize: 20,
       concurrency: 3,
-      pauseMs: 250,
+      interBatchDelayMs: 250,
       retainResults: true,
     });
 
