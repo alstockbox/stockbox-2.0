@@ -115,6 +115,9 @@ export function getSecUserAgent(env = getServerEnv()) {
   const explicit = env.SEC_USER_AGENT?.trim();
   if (explicit) return explicit;
 
+  const legalSupportEmail = env.LEGAL_SUPPORT_EMAIL?.trim();
+  if (legalSupportEmail) return `StockBox/1.0 ${legalSupportEmail}`;
+
   const adminAlertEmail = env.ADMIN_ALERT_EMAIL?.trim();
   if (adminAlertEmail) return `StockBox/1.0 ${adminAlertEmail}`;
 
