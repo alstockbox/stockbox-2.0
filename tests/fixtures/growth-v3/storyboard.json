@@ -1,0 +1,23 @@
+{
+  "input": {
+    "contentId": "content-1",
+    "renderJobId": "job-1",
+    "language": "sv",
+    "template": "educational_checklist",
+    "title": "Tre saker att kontrollera",
+    "hook": "Tre varningssignaler på 35 sekunder",
+    "script": "Börja med skuldsättningen. Kontrollera sedan kassaflödet och räntetäckningen. Jämför utvecklingen över tid så att en enskild siffra inte lurar dig.",
+    "ctaText": "Analysera bolaget i StockBox",
+    "ctaUrl": "https://www.getstockbox.app/",
+    "allowGeneratedScene": false,
+    "preferredVisualRefs": []
+  },
+  "expectedScenes": [
+    { "id": "hook", "kind": "motion_graphic", "startMs": 0, "endMs": 2500 },
+    { "id": "body-1", "kind": "motion_graphic", "startMs": 2500, "endMs": 10000 },
+    { "id": "body-2", "kind": "chart", "startMs": 10000, "endMs": 18000 },
+    { "id": "body-3", "kind": "motion_graphic", "startMs": 18000, "endMs": 27000 },
+    { "id": "visual-break", "kind": "motion_graphic", "startMs": 27000, "endMs": 31000 },
+    { "id": "cta", "kind": "cta", "startMs": 31000, "endMs": 35000 }
+  ]
+}

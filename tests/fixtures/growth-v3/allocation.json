@@ -1,0 +1,18 @@
+{
+  "seed": "2026-09-04",
+  "slots": 4,
+  "ratios": { "exploit": 0.7, "explore": 0.2, "longshot": 0.1 },
+  "candidates": [
+    { "candidateId": "a", "topicKey": "risk", "channel": "reel", "expectedGrowthScore": 95, "noveltyScore": 10, "costSek": 0, "qualityScore": 100 },
+    { "candidateId": "b", "topicKey": "debt", "channel": "reel", "expectedGrowthScore": 90, "noveltyScore": 20, "costSek": 0, "qualityScore": 100 },
+    { "candidateId": "c", "topicKey": "cashflow", "channel": "carousel", "expectedGrowthScore": 60, "noveltyScore": 95, "costSek": 0, "qualityScore": 95 },
+    { "candidateId": "d", "topicKey": "valuation", "channel": "reel", "expectedGrowthScore": 35, "noveltyScore": 80, "costSek": 0, "qualityScore": 90 },
+    { "candidateId": "e", "topicKey": "quality", "channel": "linkedin", "expectedGrowthScore": 55, "noveltyScore": 88, "costSek": 0, "qualityScore": 92 }
+  ],
+  "expected": [
+    { "candidateId": "a", "bucket": "exploit" },
+    { "candidateId": "b", "bucket": "exploit" },
+    { "candidateId": "c", "bucket": "exploit" },
+    { "candidateId": "e", "bucket": "explore" }
+  ]
+}
