@@ -224,6 +224,7 @@ function mergeFinancialPeriod(
   primary: FinancialPeriod,
   secondary: FinancialPeriod,
   conflicts: ProviderSourceConflict[],
+  compareOverlappingValues = true,
 ): { period: FinancialPeriod; supplemented: number } {
   const primaryCurrency = normalizedProviderCurrency(primary.currency);
   const secondaryCurrency = normalizedProviderCurrency(secondary.currency);
@@ -271,7 +272,7 @@ function mergeFinancialPeriod(
       const provenance = secondary.provenance?.[field];
       if (provenance) period.provenance![field] = provenance;
       supplemented += 1;
-    } else if (primaryNumber !== null && secondaryNumber !== null) {
+    } else if (compareOverlappingValues && primaryNumber !== null && secondaryNumber !== null) {
       if (shareBasis && (field === "epsDiluted" || field === "sharesDiluted")) continue;
       const primaryProvenance = primary.provenance?.[field];
       const secondaryProvenance = secondary.provenance?.[field];
@@ -331,10 +332,11 @@ function mergePeriodCollections(
   const periods = primaryPeriods.map((primary) => {
     const key = periodKey(primary);
     let matchIndex = key ? remainingSecondary.findIndex((secondary) => periodKey(secondary) === key) : -1;
+    const exactMatch = matchIndex >= 0;
     if (matchIndex < 0) matchIndex = findBestSemanticPeriodMatchIndex(primary, remainingSecondary);
     if (matchIndex < 0) return primary;
     const [secondary] = remainingSecondary.splice(matchIndex, 1);
-    const merged = mergeFinancialPeriod(primary, secondary, conflicts);
+    const merged = mergeFinancialPeriod(primary, secondary, conflicts, exactMatch);
     supplemented += merged.supplemented;
     return merged.period;
   });
@@ -378,10 +380,14 @@ function mergeFundamentals(
   const annual = mergePeriodCollections(primary.annualPeriods ?? [], secondary.annualPeriods ?? [], conflicts);
   let trailingTwelveMonths = primary.trailingTwelveMonths;
   let trailingSupplemented = 0;
-  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && (periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths) || periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths))) {
-    const merged = mergeFinancialPeriod(primary.trailingTwelveMonths, secondary.trailingTwelveMonths, conflicts);
-    trailingTwelveMonths = merged.period;
-    trailingSupplemented = merged.supplemented;
+  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths) {
+    const exactTtmMatch = periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths);
+    const semanticTtmMatch = !exactTtmMatch && periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths);
+    if (exactTtmMatch || semanticTtmMatch) {
+      const merged = mergeFinancialPeriod(primary.trailingTwelveMonths, secondary.trailingTwelveMonths, conflicts, exactTtmMatch);
+      trailingTwelveMonths = merged.period;
+      trailingSupplemented = merged.supplemented;
+    }
   }
   const classification = classificationForMerge(primary, secondary);
   const otherClassification = classification === primary ? secondary : primary;
