@@ -8,16 +8,19 @@ function json(value: unknown) {
   });
 }
 
-function weeklyPayload(scale: number) {
+function weeklyPayload(scale: number, truncateTailWeeks = 0) {
   const marketReturns = Array.from({ length: 80 }, (_, index) => ((index % 9) - 4) * 0.004 + 0.001);
-  const closes = marketReturns.reduce(
+  const allCloses = marketReturns.reduce(
     (rows, ret) => [...rows, rows.at(-1)! * (1 + ret * scale)],
     [100],
   );
-  const timestamps = Array.from(
-    { length: closes.length },
+  const allTimestamps = Array.from(
+    { length: allCloses.length },
     (_, index) => 1_688_601_600 + index * 7 * 86_400,
   );
+  const keep = Math.max(0, allCloses.length - truncateTailWeeks);
+  const closes = allCloses.slice(0, keep);
+  const timestamps = allTimestamps.slice(0, keep);
   return json({
     chart: {
       result: [{
@@ -62,5 +65,41 @@ describe("Yahoo global beta benchmark routing", () => {
     expect(result.data.beta).toBeCloseTo(1.2, 2);
     expect(result.data.betaBenchmark).toBe(expectedBenchmark);
     expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
+  });
+
+  it("keeps a well-sampled historical beta when the benchmark feed trails by seven weeks", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(weeklyPayload(1.2))
+      .mockResolvedValueOnce(weeklyPayload(1, 7));
+
+    const result = await yahooMarketDataProvider.fetchMarketData({
+      ticker: "FIXTURE.BK",
+      canonicalTicker: "FIXTURE.BK",
+      name: "Historical beta staleness fixture",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.beta).toBeCloseTo(1.2, 2);
+    expect(result.data.betaBenchmark).toBe("^SET.BK");
+    expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
+  });
+
+  it("still rejects a historical beta when the benchmark feed trails by more than nine weeks", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(weeklyPayload(1.2))
+      .mockResolvedValueOnce(weeklyPayload(1, 10));
+
+    const result = await yahooMarketDataProvider.fetchMarketData({
+      ticker: "FIXTURE.BK",
+      canonicalTicker: "FIXTURE.BK",
+      name: "Stale beta benchmark fixture",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.beta).toBeNull();
+    expect(result.data.betaBenchmark).toBeNull();
+    expect(result.data.betaObservationCount).toBeNull();
   });
 });
