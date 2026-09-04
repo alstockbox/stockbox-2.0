@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - "supabase/migrations/20260904193000_growth_render_worker_rpc_v3.sql"
+      - "supabase/migrations/20260904194500_growth_budget_authorize_rpc_v3.sql"
+      - "supabase/migrations/20260904195000_growth_render_defer_rpc_v3.sql"
       - ".github/workflows/growth-foundation-db-ci.yml"
 
 jobs:
@@ -16,12 +19,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      - name: Isolate the v3 migration from historical drift
+      - name: Isolate v3 migrations from historical drift
         run: |
           mkdir -p /tmp/stockbox-migrations
           mv supabase/migrations/*.sql /tmp/stockbox-migrations/
@@ -38,31 +40,22 @@ jobs:
       - name: Bootstrap production prerequisites only
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          create table if not exists public.acq_content (
-            id uuid primary key default gen_random_uuid()
-          );
-
+          create table if not exists public.acq_content (id uuid primary key default gen_random_uuid());
           create table if not exists public.acq_config (
-            id uuid primary key default gen_random_uuid(),
-            key text not null unique,
-            value text,
-            value_type text default 'string',
-            description text,
-            updated_at timestamptz default now(),
-            created_at timestamptz default now()
+            id uuid primary key default gen_random_uuid(), key text not null unique, value text,
+            value_type text default 'string', description text, updated_at timestamptz default now(), created_at timestamptz default now()
           );
-
-          create table if not exists public.acq_distribution_queue (
-            id uuid primary key default gen_random_uuid()
-          );
+          create table if not exists public.acq_distribution_queue (id uuid primary key default gen_random_uuid());
           SQL
 
-      - name: Apply autonomous growth foundation migration
+      - name: Apply autonomous growth migrations
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904193000_growth_render_worker_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904194500_growth_budget_authorize_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904195000_growth_render_defer_rpc_v3.sql
 
-      - name: Assert foundation invariants
+      - name: Assert foundation and worker invariants
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           do $$
@@ -71,75 +64,74 @@ jobs:
             v_private_bucket_count integer;
             v_config_count integer;
             v_rls_count integer;
+            v_content uuid := gen_random_uuid();
+            v_voice uuid := gen_random_uuid();
+            v_job uuid := gen_random_uuid();
+            v_claim public.acq_render_jobs%rowtype;
+            v_defer public.acq_render_jobs%rowtype;
+            v_budget jsonb;
           begin
-            select count(*) into v_table_count
-            from information_schema.tables
-            where table_schema = 'public'
-              and table_name in (
-                'acq_voice_profiles',
-                'acq_render_jobs',
-                'acq_media_assets',
-                'acq_distribution_packages',
-                'acq_budget_ledger',
-                'acq_manual_script_ideas'
-              );
-            if v_table_count <> 6 then
-              raise exception 'Expected 6 v3 tables, found %', v_table_count;
-            end if;
-
-            select count(*) into v_private_bucket_count
-            from storage.buckets
-            where id in ('growth-voice-private','growth-render-staging','growth-ready-assets')
-              and public = false;
-            if v_private_bucket_count <> 3 then
-              raise exception 'Expected 3 private growth buckets, found %', v_private_bucket_count;
-            end if;
-
-            select count(*) into v_config_count
-            from public.acq_config
-            where key in (
-              'growth_budget_target_sek',
-              'growth_budget_hard_cap_sek',
-              'growth_v3_shadow_mode',
-              'growth_v3_daily_master_video_max',
-              'growth_render_max_attempts',
-              'growth_signed_url_ttl_seconds',
-              'growth_ready_retention_days',
-              'growth_allocation_exploit_ratio',
-              'growth_allocation_explore_ratio',
-              'growth_allocation_longshot_ratio'
+            select count(*) into v_table_count from information_schema.tables
+            where table_schema = 'public' and table_name in (
+              'acq_voice_profiles','acq_render_jobs','acq_media_assets','acq_distribution_packages','acq_budget_ledger','acq_manual_script_ideas'
             );
-            if v_config_count <> 10 then
-              raise exception 'Expected 10 v3 config keys, found %', v_config_count;
+            if v_table_count <> 6 then raise exception 'Expected 6 v3 tables, found %', v_table_count; end if;
+
+            select count(*) into v_private_bucket_count from storage.buckets
+            where id in ('growth-voice-private','growth-render-staging','growth-ready-assets') and public = false;
+            if v_private_bucket_count <> 3 then raise exception 'Expected 3 private growth buckets, found %', v_private_bucket_count; end if;
+
+            select count(*) into v_config_count from public.acq_config where key in (
+              'growth_budget_target_sek','growth_budget_hard_cap_sek','growth_v3_shadow_mode','growth_v3_daily_master_video_max',
+              'growth_render_max_attempts','growth_signed_url_ttl_seconds','growth_ready_retention_days','growth_allocation_exploit_ratio',
+              'growth_allocation_explore_ratio','growth_allocation_longshot_ratio'
+            );
+            if v_config_count <> 10 then raise exception 'Expected 10 v3 config keys, found %', v_config_count; end if;
+            if to_regclass('public.acq_distribution_queue') is null then raise exception 'Existing acq_distribution_queue was not preserved'; end if;
+
+            select count(*) into v_rls_count from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relname in (
+              'acq_voice_profiles','acq_render_jobs','acq_media_assets','acq_distribution_packages','acq_budget_ledger','acq_manual_script_ideas'
+            ) and c.relrowsecurity = true;
+            if v_rls_count <> 6 then raise exception 'Expected RLS on all 6 v3 tables, found %', v_rls_count; end if;
+
+            insert into public.acq_content(id) values (v_content);
+            insert into public.acq_voice_profiles(
+              id,idempotency_key,language,provider,storage_path,status,consent_at
+            ) values (
+              v_voice,'ci-voice','sv','ci','ci/reference.wav','active',now()
+            );
+            insert into public.acq_render_jobs(
+              id,idempotency_key,content_id,voice_profile_id,state,template,language,render_spec
+            ) values (
+              v_job,'ci-job',v_content,v_voice,'queued','educational_checklist','sv','{}'::jsonb
+            );
+
+            select * into v_claim from public.acq_claim_render_job_v3('ci-worker');
+            if v_claim.id <> v_job or v_claim.state <> 'storyboarding' or v_claim.attempt_count <> 1 then
+              raise exception 'Atomic claim invariant failed';
             end if;
 
-            if to_regclass('public.acq_distribution_queue') is null then
-              raise exception 'Existing acq_distribution_queue was not preserved';
+            select * into v_defer from public.acq_defer_render_job_v3(v_job,'ci-worker','budget_wait');
+            if v_defer.state <> 'queued' or v_defer.attempt_count <> 0 or v_defer.worker_id is not null then
+              raise exception 'Deferral invariant failed';
             end if;
 
-            select count(*) into v_rls_count
-            from pg_class c
-            join pg_namespace n on n.oid = c.relnamespace
-            where n.nspname = 'public'
-              and c.relname in (
-                'acq_voice_profiles',
-                'acq_render_jobs',
-                'acq_media_assets',
-                'acq_distribution_packages',
-                'acq_budget_ledger',
-                'acq_manual_script_ideas'
-              )
-              and c.relrowsecurity = true;
-            if v_rls_count <> 6 then
-              raise exception 'Expected RLS on all 6 v3 tables, found %', v_rls_count;
+            select public.acq_authorize_growth_cost_v3('ci-cost','modal','voice',1.25,v_content,v_job,false) into v_budget;
+            if coalesce((v_budget->>'allowed')::boolean,false) is not true then raise exception 'Budget authorization should allow bounded cost: %', v_budget; end if;
+
+            select public.acq_authorize_growth_cost_v3('ci-cost','modal','voice',1.25,v_content,v_job,false) into v_budget;
+            if coalesce((v_budget->>'duplicate')::boolean,false) is not true then raise exception 'Budget authorization must be idempotent: %', v_budget; end if;
+
+            insert into public.acq_budget_ledger(idempotency_key,provider,operation,estimated_sek,billing_period)
+            values ('ci-pressure','ci','pressure',73.80,date_trunc('month',now())::date);
+
+            select public.acq_authorize_growth_cost_v3('ci-hard-stop','modal','voice',1.00,v_content,v_job,false) into v_budget;
+            if coalesce((v_budget->>'allowed')::boolean,true) is true or v_budget->>'reason' <> 'hard_cap' then
+              raise exception 'Hard cap must fail closed: %', v_budget;
             end if;
           end
           $$;
-
-          select id, public
-          from storage.buckets
-          where id like 'growth-%'
-          order by id;
           SQL
 
       - name: Stop disposable local Supabase

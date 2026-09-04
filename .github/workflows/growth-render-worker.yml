@@ -1,0 +1,40 @@
+name: Growth Render Worker
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: growth-render-worker
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GROWTH_WORKER_API_URL: ${{ secrets.GROWTH_WORKER_API_URL }}
+      GROWTH_RENDER_WORKER_TOKEN: ${{ secrets.GROWTH_RENDER_WORKER_TOKEN }}
+      GROWTH_VOICE_WORKER_URL: ${{ secrets.GROWTH_VOICE_WORKER_URL }}
+      GROWTH_VOICE_WORKER_TOKEN: ${{ secrets.GROWTH_VOICE_WORKER_TOKEN }}
+      GROWTH_VOICE_ESTIMATED_SEK_PER_JOB: ${{ vars.GROWTH_VOICE_ESTIMATED_SEK_PER_JOB }}
+      GROWTH_RENDER_MAX_JOBS: "2"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Run autonomous render worker
+        run: node scripts/growth/run-render-worker.mjs

@@ -1,0 +1,215 @@
+// @ts-nocheck
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.112.3";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const WORKER_TOKEN = Deno.env.get("GROWTH_RENDER_WORKER_TOKEN") || "";
+
+const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function secureEqual(a: string, b: string) {
+  if (!a || !b) return false;
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+  const l = new Uint8Array(left);
+  const r = new Uint8Array(right);
+  let diff = 0;
+  for (let i = 0; i < l.length; i += 1) diff |= l[i] ^ r[i];
+  return diff === 0;
+}
+
+async function configNumber(key: string, fallback: number) {
+  const { data, error } = await supabase.from("acq_config").select("value").eq("key", key).maybeSingle();
+  if (error) return fallback;
+  const value = Number(data?.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function utcDate(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error("invalid_job_created_at");
+  return date.toISOString().slice(0, 10);
+}
+
+async function signedUpload(bucket: string, path: string) {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path, { upsert: true });
+  if (error || !data?.signedUrl || !data?.token) throw new Error(`signed_upload_failed:${bucket}`);
+  return { bucket, path: data.path ?? path, signed_url: data.signedUrl, token: data.token };
+}
+
+async function deferClaim(jobId: string, workerId: string, reason: string) {
+  await supabase.rpc("acq_defer_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_reason: reason.slice(0, 1000),
+  });
+}
+
+async function handleClaim(body: any) {
+  const workerId = String(body.worker_id || "").trim().slice(0, 160);
+  if (!workerId) return json({ error: "worker_id_required" }, 400);
+
+  const { data: jobs, error } = await supabase.rpc("acq_claim_render_job_v3", { p_worker_id: workerId });
+  if (error) throw new Error(`claim_rpc_failed:${error.message}`);
+  const job = Array.isArray(jobs) ? jobs[0] : null;
+  if (!job) return json({ job: null });
+
+  try {
+    const prefix = `${utcDate(job.created_at)}/${job.content_id}/${job.id}/`;
+    const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
+    let voiceReference = null;
+
+    if (job.language === "sv") {
+      const { data: profile, error: profileError } = await supabase
+        .from("acq_voice_profiles")
+        .select("id,storage_bucket,storage_path,status,language")
+        .eq("id", job.voice_profile_id)
+        .maybeSingle();
+      if (profileError || !profile || profile.status !== "active" || profile.language !== "sv") {
+        throw new Error("active_founder_voice_profile_required");
+      }
+      const { data: signed, error: signedError } = await supabase.storage
+        .from(profile.storage_bucket)
+        .createSignedUrl(profile.storage_path, ttl);
+      if (signedError || !signed?.signedUrl) throw new Error("voice_reference_sign_failed");
+      voiceReference = signed.signedUrl;
+    }
+
+    const uploads = {
+      voice_audio: await signedUpload("growth-render-staging", `${prefix}voice.wav`),
+      master_video: await signedUpload("growth-ready-assets", `${prefix}master.mp4`),
+      cover: await signedUpload("growth-ready-assets", `${prefix}cover.jpg`),
+      metadata: await signedUpload("growth-ready-assets", `${prefix}metadata.json`),
+    };
+
+    return json({
+      job: {
+        id: job.id,
+        content_id: job.content_id,
+        render_spec: job.render_spec,
+        language: job.language,
+        template: job.template,
+        attempt_count: job.attempt_count,
+        voice_reference_url: voiceReference,
+        asset_prefix: prefix,
+        uploads,
+      },
+    });
+  } catch (error) {
+    // A claim should never become permanently stranded because signing or
+    // private-asset preparation failed after the DB transition.
+    await deferClaim(job.id, workerId, error instanceof Error ? error.message : "claim_preparation_failed");
+    throw error;
+  }
+}
+
+async function handleAuthorizeCost(body: any) {
+  const jobId = String(body.job_id || "");
+  const contentId = body.content_id ? String(body.content_id) : null;
+  const provider = String(body.provider || "").trim().slice(0, 120);
+  const operation = String(body.operation || "").trim().slice(0, 120);
+  const idempotencyKey = String(body.idempotency_key || "").trim().slice(0, 240);
+  const estimatedSek = Number(body.estimated_sek);
+  if (!jobId || !provider || !operation || !idempotencyKey || !Number.isFinite(estimatedSek) || estimatedSek < 0) {
+    return json({ error: "invalid_cost_authorization_request" }, 400);
+  }
+
+  const { data, error } = await supabase.rpc("acq_authorize_growth_cost_v3", {
+    p_idempotency_key: idempotencyKey,
+    p_provider: provider,
+    p_operation: operation,
+    p_estimated_sek: estimatedSek,
+    p_content_id: contentId,
+    p_render_job_id: jobId,
+    p_optional: body.optional === true,
+  });
+  if (error) return json({ error: "budget_authorization_failed", detail: error.message }, 409);
+  return json({ authorization: data });
+}
+
+async function handleComplete(body: any) {
+  const jobId = String(body.job_id || "");
+  const workerId = String(body.worker_id || "").trim().slice(0, 160);
+  if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
+  if (!body.qc || body.qc.passed !== true) return json({ error: "qc_must_pass" }, 400);
+  if (!Array.isArray(body.assets)) return json({ error: "assets_must_be_array" }, 400);
+
+  const { data, error } = await supabase.rpc("acq_complete_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_qc_summary: body.qc,
+    p_assets: body.assets,
+  });
+  if (error) return json({ error: "completion_rejected", detail: error.message }, 409);
+  return json({ job: data, ready: true });
+}
+
+async function handleDefer(body: any) {
+  const jobId = String(body.job_id || "");
+  const workerId = String(body.worker_id || "").trim().slice(0, 160);
+  if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
+  const { data, error } = await supabase.rpc("acq_defer_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_reason: String(body.reason || "deferred").slice(0, 1000),
+  });
+  if (error) return json({ error: "deferral_rejected", detail: error.message }, 409);
+  return json({ job: data });
+}
+
+async function handleFail(body: any) {
+  const jobId = String(body.job_id || "");
+  const workerId = String(body.worker_id || "").trim().slice(0, 160);
+  if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
+  const maxAttempts = Math.max(1, Math.min(10, await configNumber("growth_render_max_attempts", 2)));
+  const { data, error } = await supabase.rpc("acq_fail_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_reason: String(body.reason || "render_failed").slice(0, 1000),
+    p_retryable: body.retryable !== false,
+    p_max_attempts: maxAttempts,
+  });
+  if (error) return json({ error: "failure_transition_rejected", detail: error.message }, 409);
+  return json({ job: data });
+}
+
+Deno.serve(async (request) => {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  if (!SUPABASE_URL || !SERVICE_KEY || !WORKER_TOKEN) return json({ error: "worker_api_not_configured" }, 503);
+
+  const supplied = request.headers.get("x-stockbox-growth-worker-token") || "";
+  if (!(await secureEqual(supplied, WORKER_TOKEN))) return json({ error: "unauthorized" }, 401);
+
+  let body: any;
+  try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+
+  try {
+    switch (body?.action) {
+      case "claim": return await handleClaim(body);
+      case "authorize_cost": return await handleAuthorizeCost(body);
+      case "complete": return await handleComplete(body);
+      case "defer": return await handleDefer(body);
+      case "fail": return await handleFail(body);
+      default: return json({ error: "unsupported_action" }, 400);
+    }
+  } catch (error) {
+    console.error("growth_worker_api_error", error instanceof Error ? error.message : String(error));
+    return json({ error: "worker_api_internal_error" }, 500);
+  }
+});
