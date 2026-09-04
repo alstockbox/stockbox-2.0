@@ -5,6 +5,7 @@ on:
     paths:
       - "tests/growth-*.test.ts"
       - "src/lib/growth/**"
+      - "src/video/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
@@ -17,6 +18,7 @@ on:
     paths:
       - "tests/growth-*.test.ts"
       - "src/lib/growth/**"
+      - "src/video/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
@@ -34,6 +36,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts
+      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts
       - run: npm run typecheck
       - run: npm run build
