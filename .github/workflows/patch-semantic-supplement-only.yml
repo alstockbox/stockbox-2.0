@@ -1,0 +1,102 @@
+name: Apply semantic supplement-only patch
+
+on:
+  push:
+    branches: [fix/coverage-engine-root-cause]
+    paths:
+      - .github/workflows/patch-semantic-supplement-only.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 1
+      - name: Apply exact patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/data/provider-core.ts')
+          text = path.read_text()
+
+          old_signature = '''function mergeFinancialPeriod(
+            primary: FinancialPeriod,
+            secondary: FinancialPeriod,
+            conflicts: ProviderSourceConflict[],
+          ): { period: FinancialPeriod; supplemented: number } {'''
+          new_signature = '''function mergeFinancialPeriod(
+            primary: FinancialPeriod,
+            secondary: FinancialPeriod,
+            conflicts: ProviderSourceConflict[],
+            compareOverlappingValues = true,
+          ): { period: FinancialPeriod; supplemented: number } {'''
+          if old_signature not in text:
+              raise SystemExit('mergeFinancialPeriod signature anchor not found')
+          text = text.replace(old_signature, new_signature, 1)
+
+          old_overlap = '} else if (primaryNumber !== null && secondaryNumber !== null) {'
+          new_overlap = '} else if (compareOverlappingValues && primaryNumber !== null && secondaryNumber !== null) {'
+          if old_overlap not in text:
+              raise SystemExit('overlap comparison anchor not found')
+          text = text.replace(old_overlap, new_overlap, 1)
+
+          old_collection = '''  const periods = primaryPeriods.map((primary) => {
+              const key = periodKey(primary);
+              let matchIndex = key ? remainingSecondary.findIndex((secondary) => periodKey(secondary) === key) : -1;
+              if (matchIndex < 0) matchIndex = findBestSemanticPeriodMatchIndex(primary, remainingSecondary);
+              if (matchIndex < 0) return primary;
+              const [secondary] = remainingSecondary.splice(matchIndex, 1);
+              const merged = mergeFinancialPeriod(primary, secondary, conflicts);
+              supplemented += merged.supplemented;
+              return merged.period;
+            });'''
+          new_collection = '''  const periods = primaryPeriods.map((primary) => {
+              const key = periodKey(primary);
+              let matchIndex = key ? remainingSecondary.findIndex((secondary) => periodKey(secondary) === key) : -1;
+              const exactMatch = matchIndex >= 0;
+              if (matchIndex < 0) matchIndex = findBestSemanticPeriodMatchIndex(primary, remainingSecondary);
+              if (matchIndex < 0) return primary;
+              const [secondary] = remainingSecondary.splice(matchIndex, 1);
+              const merged = mergeFinancialPeriod(primary, secondary, conflicts, exactMatch);
+              supplemented += merged.supplemented;
+              return merged.period;
+            });'''
+          if old_collection not in text:
+              raise SystemExit('annual merge anchor not found')
+          text = text.replace(old_collection, new_collection, 1)
+
+          old_ttm = '''  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && (periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths) || periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths))) {
+              const merged = mergeFinancialPeriod(primary.trailingTwelveMonths, secondary.trailingTwelveMonths, conflicts);
+              trailingTwelveMonths = merged.period;
+              trailingSupplemented = merged.supplemented;
+            }'''
+          new_ttm = '''  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths) {
+              const exactTtmMatch = periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths);
+              const semanticTtmMatch = !exactTtmMatch && periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths);
+              if (exactTtmMatch || semanticTtmMatch) {
+                const merged = mergeFinancialPeriod(primary.trailingTwelveMonths, secondary.trailingTwelveMonths, conflicts, exactTtmMatch);
+                trailingTwelveMonths = merged.period;
+                trailingSupplemented = merged.supplemented;
+              }
+            }'''
+          if old_ttm not in text:
+              raise SystemExit('TTM merge anchor not found')
+          text = text.replace(old_ttm, new_ttm, 1)
+
+          path.write_text(text)
+          Path('.github/workflows/patch-semantic-supplement-only.yml').unlink()
+          PY
+      - name: Commit exact patch
+        run: |
+          git config user.name "StockBox Coverage Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/data/provider-core.ts .github/workflows/patch-semantic-supplement-only.yml
+          git diff --cached --check
+          git commit -m "fix: supplement approximate provider periods without blocking conflicts"
+          git push origin HEAD:fix/coverage-engine-root-cause
