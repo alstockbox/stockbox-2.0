@@ -128,7 +128,8 @@ jobs:
               (j_video,'ci-video',c_video,'storyboarding','educational_checklist','sv','video','{}'::jsonb,'ci-worker',now());
 
             p_carousel := to_char(current_date,'YYYY-MM-DD') || '/' || c_carousel || '/' || j_carousel || '/';
-            select public.acq_complete_render_job_v3(
+            select * into r
+            from public.acq_complete_render_job_v3(
               j_carousel,'ci-worker','{"passed":true}'::jsonb,
               jsonb_build_array(
                 jsonb_build_object('kind','carousel_slide','bucket','growth-ready-assets','storage_path',p_carousel||'slide-01.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('a',64)),
@@ -138,7 +139,7 @@ jobs:
                 jsonb_build_object('kind','carousel_zip','bucket','growth-ready-assets','storage_path',p_carousel||'carousel.zip','mime_type','application/zip','checksum_sha256',repeat('e',64)),
                 jsonb_build_object('kind','metadata','bucket','growth-ready-assets','storage_path',p_carousel||'metadata.json','mime_type','application/json','checksum_sha256',repeat('f',64))
               )
-            ) into r;
+            );
             if r.state <> 'ready' then raise exception 'Carousel did not become READY'; end if;
             select count(*) into asset_count from public.acq_media_assets where render_job_id=j_carousel;
             if asset_count <> 6 then raise exception 'Carousel expected 6 assets, got %',asset_count; end if;
