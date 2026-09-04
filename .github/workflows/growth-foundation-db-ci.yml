@@ -28,7 +28,7 @@ jobs:
           supabase init
 
       - name: Start disposable local Supabase
-        run: supabase start
+        run: supabase start -x vector,edge-runtime,logflare
 
       - name: Install PostgreSQL client
         run: |
