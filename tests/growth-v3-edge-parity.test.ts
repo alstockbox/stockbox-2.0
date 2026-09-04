@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { allocateGrowthCandidates as allocateApp } from "@/lib/growth/explore-exploit";
 import { buildGrowthStoryboard as storyboardApp } from "@/lib/growth/storyboard";
+import { calculateGrowthScore as scoreApp, EARLY_GROWTH_WEIGHTS } from "@/lib/growth/growth-score";
 import { evaluateBudget as budgetApp, chooseDailyVideoCapacity as capacityApp } from "@/lib/growth/budget-governor";
 import { allocateGrowthCandidates as allocateEdge } from "../supabase/functions/stockbox-growth-engine/v3/explore-exploit";
 import { buildGrowthStoryboard as storyboardEdge } from "../supabase/functions/stockbox-growth-engine/v3/storyboard";
+import { calculateGrowthScore as scoreEdge } from "../supabase/functions/stockbox-growth-engine/v3/growth-score";
 import { evaluateBudget as budgetEdge, chooseDailyVideoCapacity as capacityEdge } from "../supabase/functions/stockbox-growth-engine/v3/budget";
 
 function fixture(name: string) {
@@ -26,6 +28,11 @@ describe("growth v3 app/Edge policy parity", () => {
     const edge = storyboardEdge(data.input);
     expect(edge).toEqual(app);
     expect(app.scenes.map(({ id, kind, startMs, endMs }) => ({ id, kind, startMs, endMs }))).toEqual(data.expectedScenes);
+  });
+
+  it("keeps sparse customer-value scoring identical", () => {
+    const metrics = { qualifiedVisits: 82, ctr: 70, signupConversion: null, engagement: 55, activationConversion: undefined, costEfficiency: 90 };
+    expect(scoreEdge(metrics, EARLY_GROWTH_WEIGHTS)).toEqual(scoreApp(metrics, EARLY_GROWTH_WEIGHTS));
   });
 
   it("keeps budget decisions identical", () => {
