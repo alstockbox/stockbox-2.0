@@ -1,6 +1,7 @@
 // @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
+import { runRetentionCleanup } from "./retention.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -80,8 +81,7 @@ function subtitleChunks(script: string) {
     } else current = next;
   }
   if (current) chunks.push(current);
-  const picked = chunks.slice(0, 6);
-  return picked.map((text, index) => {
+  return chunks.slice(0, 6).map((text, index) => {
     const startMs = 1_000 + index * 4_200;
     return { startMs, endMs: Math.min(27_000, startMs + 3_800), text };
   });
@@ -104,8 +104,8 @@ function buildVideoSpec(row: any) {
     voiceMode: "educational",
     scenes: [
       { id: "hook", kind: "motion_graphic", startMs: 0, endMs: 5_000, headline: title, body: "En snabb StockBox-genomgång." },
-      { id: "stockbox", kind: "stockbox_ui", startMs: 5_000, endMs: 15_000, headline: "Se helheten", body: compact(assetCopy.bullets?.[0] || "Jämför nyckeltal, kvalitet och risk i samma analys.", 220) },
-      { id: "analysis", kind: "chart", startMs: 15_000, endMs: 20_000, headline: compact(assetCopy.bullets?.[1] || "Titta på utvecklingen", 120), body: compact(assetCopy.bullets?.[2] || "En enskild siffra säger mindre än trenden över tid.", 220) },
+      { id: "stockbox", kind: "stockbox_ui", startMs: 5_000, endMs: 15_000, headline: "Se helheten", body: compact(assetCopy.bullets?.[0] || "Jämför nyckeltal, kvalitet och risk i samma analys.", 220), curatedAssetId: "stockbox-analysis-frame" },
+      { id: "analysis", kind: "chart", startMs: 15_000, endMs: 20_000, headline: compact(assetCopy.bullets?.[1] || "Titta på utvecklingen", 120), body: compact(assetCopy.bullets?.[2] || "En enskild siffra säger mindre än trenden över tid.", 220), metricKey: "analysis_primary_metric" },
       {
         id: "micro",
         kind: "generated_micro_scene",
@@ -208,7 +208,7 @@ async function handleMaterialize() {
       language: "sv",
       job_kind: kind,
       render_spec: renderSpec,
-      metadata: { source_queue_id: row.id, quality_score: row.quality_score ?? null },
+      metadata: { source_queue_id: row.id, quality_score: row.quality_score ?? null, visual_sources: { structured: {}, curated: { "stockbox-analysis-frame": true }, captures: {} } },
     };
     const { data: inserted, error: insertError } = await supabase
       .from("acq_render_jobs")
@@ -281,6 +281,8 @@ async function handleClaim(body: any) {
     const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
     const jobKind = String(job.job_kind || "video");
     let voiceReference = null;
+    let founderProfileActive = false;
+
     if (jobKind === "video" && job.language === "sv") {
       const { data: profile, error: profileError } = await supabase
         .from("acq_voice_profiles")
@@ -288,6 +290,7 @@ async function handleClaim(body: any) {
         .eq("id", job.voice_profile_id)
         .maybeSingle();
       if (profileError || !profile || profile.status !== "active" || profile.language !== "sv") throw new Error("active_founder_voice_profile_required");
+      founderProfileActive = true;
       const { data: signed, error: signedError } = await supabase.storage.from(profile.storage_bucket).createSignedUrl(profile.storage_path, ttl);
       if (signedError || !signed?.signedUrl) throw new Error("voice_reference_sign_failed");
       voiceReference = signed.signedUrl;
@@ -303,8 +306,14 @@ async function handleClaim(body: any) {
         template: job.template,
         attempt_count: job.attempt_count,
         voice_reference_url: voiceReference,
+        founder_profile_active: founderProfileActive,
         asset_prefix: prefix,
         uploads: await buildUploads(jobKind, prefix, job.render_spec),
+        visual_sources: job.metadata?.visual_sources || { structured: {}, curated: {}, captures: {} },
+        voice: {
+          english_enabled: job.language === "en" && (await configBoolean("growth_english_voice_enabled", false)),
+          english_estimated_sek_per_job: await configNullableNumber("growth_english_voice_estimated_sek_per_job"),
+        },
         generative: {
           enabled: jobKind === "video" && (await configBoolean("growth_generative_provider_enabled", false)),
           cost_per_second_sek: await configNullableNumber("growth_generative_cost_sek_per_second"),
@@ -338,12 +347,54 @@ async function handleAuthorizeCost(body: any) {
   return json({ authorization: data });
 }
 
+function normalizeUsage(raw: any) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error("usage_must_be_array");
+  const seen = new Set<string>();
+  return raw.map((entry) => {
+    const idempotencyKey = String(entry?.idempotencyKey || "").trim().slice(0, 240);
+    const provider = String(entry?.provider || "").trim().slice(0, 120);
+    const operation = String(entry?.operation || "").trim().slice(0, 120);
+    const estimatedSek = Number(entry?.estimatedSek);
+    const actualSek = entry?.actualSek === undefined || entry?.actualSek === null ? null : Number(entry.actualSek);
+    if (!idempotencyKey || !provider || !operation || seen.has(idempotencyKey)) throw new Error("invalid_usage_identity");
+    if (!Number.isFinite(estimatedSek) || estimatedSek < 0) throw new Error("invalid_usage_cost");
+    if (actualSek !== null && (!Number.isFinite(actualSek) || actualSek < 0)) throw new Error("invalid_usage_cost");
+    seen.add(idempotencyKey);
+    return { idempotencyKey, provider, operation, estimatedSek, actualSek };
+  });
+}
+
+async function finalizeUsage(jobId: string, usage: any[]) {
+  for (const entry of usage) {
+    const { error } = await supabase.rpc("acq_finalize_growth_usage_v3", {
+      p_idempotency_key: entry.idempotencyKey,
+      p_provider: entry.provider,
+      p_operation: entry.operation,
+      p_estimated_sek: entry.estimatedSek,
+      p_actual_sek: entry.actualSek,
+      p_render_job_id: jobId,
+    });
+    if (error) throw new Error(`usage_finalize_failed:${error.message}`);
+  }
+}
+
 async function handleComplete(body: any) {
   const jobId = String(body.job_id || "");
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
   if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
   if (!body.qc || body.qc.passed !== true) return json({ error: "qc_must_pass" }, 400);
   if (!Array.isArray(body.assets)) return json({ error: "assets_must_be_array" }, 400);
+
+  let usage;
+  try { usage = normalizeUsage(body.usage); } catch (error) { return json({ error: error instanceof Error ? error.message : "invalid_usage" }, 400); }
+
+  const { data: job, error: jobError } = await supabase.from("acq_render_jobs").select("id,job_kind,state").eq("id", jobId).maybeSingle();
+  if (jobError || !job) return json({ error: "render_job_not_found" }, 404);
+  if (job.job_kind === "video" && job.state !== "ready" && usage.length === 0) return json({ error: "provider_usage_required_for_video" }, 400);
+
+  try { await finalizeUsage(jobId, usage); } catch (error) { return json({ error: "usage_accounting_rejected", detail: error instanceof Error ? error.message : String(error) }, 409); }
+
   const { data, error } = await supabase.rpc("acq_complete_render_job_v3", {
     p_job_id: jobId,
     p_worker_id: workerId,
@@ -383,6 +434,11 @@ async function handleFail(body: any) {
   return json({ job: data });
 }
 
+async function handleCleanup() {
+  const result = await runRetentionCleanup(supabase, configNumber);
+  return json({ retention: result });
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (!SUPABASE_URL || !SERVICE_KEY || !WORKER_TOKEN) return json({ error: "worker_api_not_configured" }, 503);
@@ -397,6 +453,7 @@ Deno.serve(async (request) => {
       case "claim": return await handleClaim(body);
       case "authorize_cost": return await handleAuthorizeCost(body);
       case "complete": return await handleComplete(body);
+      case "cleanup": return await handleCleanup();
       case "defer": return await handleDefer(body);
       case "fail": return await handleFail(body);
       default: return json({ error: "unsupported_action" }, 400);

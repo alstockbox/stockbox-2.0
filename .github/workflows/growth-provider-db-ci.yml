@@ -1,0 +1,133 @@
+name: Growth Provider DB CI
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - "supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql"
+      - "supabase/migrations/20260904194500_growth_budget_authorize_rpc_v3.sql"
+      - "supabase/migrations/20260904210000_growth_usage_finalize_v3.sql"
+      - "supabase/migrations/20260904210500_growth_budget_reservation_identity_v3.sql"
+      - "supabase/migrations/20260904211000_growth_provider_hardening_config_v3.sql"
+      - ".github/workflows/growth-provider-db-ci.yml"
+
+jobs:
+  provider-ledger-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Isolate autonomous growth migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
+          supabase init
+
+      - name: Start disposable local Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap acquisition prerequisites
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists public.acq_content (
+            id uuid primary key default gen_random_uuid()
+          );
+          create table if not exists public.acq_config (
+            id uuid primary key default gen_random_uuid(),
+            key text not null unique,
+            value text,
+            value_type text default 'string',
+            description text,
+            updated_at timestamptz default now(),
+            created_at timestamptz default now()
+          );
+          create table if not exists public.acq_distribution_queue (
+            id uuid primary key default gen_random_uuid()
+          );
+          SQL
+
+      - name: Apply budget and provider migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904173000_growth_render_job_kinds_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904194500_growth_budget_authorize_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904210000_growth_usage_finalize_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904210500_growth_budget_reservation_identity_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904211000_growth_provider_hardening_config_v3.sql
+
+      - name: Assert reservation finalization is idempotent
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            c uuid := gen_random_uuid();
+            j uuid := gen_random_uuid();
+            auth jsonb;
+            ledger_count integer;
+            actual numeric;
+            finalized boolean;
+          begin
+            insert into public.acq_content(id) values (c);
+            insert into public.acq_render_jobs(id,idempotency_key,content_id,state,template,language,job_kind,render_spec)
+            values (j,'provider-ci-job',c,'queued','educational_checklist','sv','video','{}'::jsonb);
+
+            select public.acq_authorize_growth_cost_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,c,j,false) into auth;
+            if coalesce((auth->>'allowed')::boolean,false) is not true then raise exception 'authorization unexpectedly rejected: %',auth; end if;
+
+            select public.acq_authorize_growth_cost_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,c,j,false) into auth;
+            if coalesce((auth->>'duplicate')::boolean,false) is not true then raise exception 'exact duplicate reservation should be idempotent'; end if;
+
+            begin
+              perform public.acq_authorize_growth_cost_v3('provider-ci-voice','different-provider','founder_voice_tts',0.20,c,j,false);
+              raise exception 'reservation identity mismatch should have failed';
+            exception when others then
+              if sqlerrm = 'reservation identity mismatch should have failed' then raise; end if;
+            end;
+
+            perform public.acq_finalize_growth_usage_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,0.18,j);
+            perform public.acq_finalize_growth_usage_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,0.18,j);
+
+            select count(*), max(actual_sek), bool_and(coalesce((metadata->>'finalized')::boolean,false))
+            into ledger_count, actual, finalized
+            from public.acq_budget_ledger where idempotency_key='provider-ci-voice';
+            if ledger_count <> 1 or actual <> 0.18 or finalized is not true then
+              raise exception 'usage finalization invariant failed count=% actual=% finalized=%',ledger_count,actual,finalized;
+            end if;
+
+            begin
+              perform public.acq_finalize_growth_usage_v3('missing-reservation','x','y',0.10,0.10,j);
+              raise exception 'missing reservation should have failed';
+            exception when others then
+              if sqlerrm = 'missing reservation should have failed' then raise; end if;
+            end;
+
+            begin
+              perform public.acq_finalize_growth_usage_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,-0.01,j);
+              raise exception 'negative actual cost should have failed';
+            exception when others then
+              if sqlerrm = 'negative actual cost should have failed' then raise; end if;
+            end;
+
+            if (select value from public.acq_config where key='growth_english_voice_enabled') <> 'false' then
+              raise exception 'English experiments must default disabled';
+            end if;
+          end
+          $$;
+          SQL
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup

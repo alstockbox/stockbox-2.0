@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DistributionPlatformSchema,
   MediaAssetKindSchema,
+  RenderJobKindSchema,
   RenderSpecSchema,
   RenderTemplateSchema,
   SceneKindSchema,
@@ -36,30 +37,15 @@ describe("growth render contracts", () => {
   });
 
   it("rejects non-positive scene duration", () => {
-    expect(() =>
-      RenderSpecSchema.parse({
-        ...baseSpec,
-        scenes: [{ ...baseSpec.scenes[0], endMs: 0 }],
-      }),
-    ).toThrow();
+    expect(() => RenderSpecSchema.parse({ ...baseSpec, scenes: [{ ...baseSpec.scenes[0], endMs: 0 }] })).toThrow();
   });
 
   it("rejects a render longer than 60 seconds", () => {
-    expect(() =>
-      RenderSpecSchema.parse({
-        ...baseSpec,
-        scenes: [{ ...baseSpec.scenes[0], endMs: 61000 }],
-      }),
-    ).toThrow();
+    expect(() => RenderSpecSchema.parse({ ...baseSpec, scenes: [{ ...baseSpec.scenes[0], endMs: 61000 }] })).toThrow();
   });
 
   it("rejects subtitles that extend past the final scene", () => {
-    expect(() =>
-      RenderSpecSchema.parse({
-        ...baseSpec,
-        subtitles: [{ startMs: 3500, endMs: 4500, text: "För sent" }],
-      }),
-    ).toThrow();
+    expect(() => RenderSpecSchema.parse({ ...baseSpec, subtitles: [{ startMs: 3500, endMs: 4500, text: "För sent" }] })).toThrow();
   });
 
   it("rejects unapproved Swedish automatic voice modes", () => {
@@ -71,10 +57,28 @@ describe("growth render contracts", () => {
     expect(parsed.scenes.some((scene) => scene.kind === "generated_micro_scene")).toBe(false);
   });
 
-  it("keeps platform/template/scene identifiers stable", () => {
+  it("preserves deterministic visual-source fields through schema validation", () => {
+    const parsed = RenderSpecSchema.parse({
+      ...baseSpec,
+      scenes: [{
+        ...baseSpec.scenes[0],
+        metricKey: "net_debt_to_ebitda",
+        curatedAssetId: "stockbox-risk-card",
+        visualSource: { kind: "structured_chart", payload: { value: 2.1 } },
+      }],
+    });
+    expect(parsed.scenes[0]).toMatchObject({
+      metricKey: "net_debt_to_ebitda",
+      curatedAssetId: "stockbox-risk-card",
+      visualSource: { kind: "structured_chart", payload: { value: 2.1 } },
+    });
+  });
+
+  it("keeps platform/template/scene/job identifiers stable", () => {
     expect(DistributionPlatformSchema.parse("facebook_reel")).toBe("facebook_reel");
     expect(RenderTemplateSchema.parse("company_comparison")).toBe("company_comparison");
     expect(SceneKindSchema.parse("generated_micro_scene")).toBe("generated_micro_scene");
+    expect(RenderJobKindSchema.options).toEqual(["video", "carousel", "static_image"]);
     expect(() => DistributionPlatformSchema.parse("twitter")).toThrow();
   });
 

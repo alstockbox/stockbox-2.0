@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideRenderFailure,
   validateCompletionPayload,
+  validateUsageEntries,
   validateWorkerToken,
 } from "../src/lib/growth/worker-contract";
 
@@ -46,6 +47,21 @@ describe("growth worker contract", () => {
         ],
       }).ready,
     ).toBe(true);
+  });
+
+  it("accepts finite non-negative provider usage", () => {
+    expect(validateUsageEntries([
+      { idempotencyKey: "job-1:voice", provider: "voice-worker", operation: "voice_sv", estimatedSek: 0.2, actualSek: 0.18 },
+      { idempotencyKey: "job-1:gen:s3", provider: "gen-video", operation: "micro_scene", estimatedSek: 0.4, actualSek: 0.4 },
+    ])).toHaveLength(2);
+  });
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid usage estimated cost %s", (value) => {
+    expect(() => validateUsageEntries([{ idempotencyKey: "x", provider: "p", operation: "o", estimatedSek: value }])).toThrow(/cost/i);
+  });
+
+  it("rejects negative actual provider spend", () => {
+    expect(() => validateUsageEntries([{ idempotencyKey: "x", provider: "p", operation: "o", estimatedSek: 0.1, actualSek: -0.1 }])).toThrow(/cost/i);
   });
 
   it("requeues retryable failures below max attempts and fails exhausted jobs", () => {

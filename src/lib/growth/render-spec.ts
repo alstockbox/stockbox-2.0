@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GROWTH_RENDER_JOB_KINDS } from "./render-job-kind";
 
 export const DistributionPlatformSchema = z.enum([
   "instagram_reel",
@@ -12,7 +13,7 @@ export const DistributionPlatformSchema = z.enum([
 
 export type DistributionPlatform = z.infer<typeof DistributionPlatformSchema>;
 
-export const RenderJobKindSchema = z.enum(["video", "carousel", "static_image"]);
+export const RenderJobKindSchema = z.enum(GROWTH_RENDER_JOB_KINDS);
 export type RenderJobKind = z.infer<typeof RenderJobKindSchema>;
 
 export const RenderTemplateSchema = z.enum([
@@ -71,6 +72,13 @@ export const MediaAssetKindSchema = z.enum([
 
 export type MediaAssetKind = z.infer<typeof MediaAssetKindSchema>;
 
+const VisualSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("structured_chart"), payload: z.record(z.string(), z.unknown()) }),
+  z.object({ kind: z.literal("curated_frame"), assetId: z.string().min(1).max(240) }),
+  z.object({ kind: z.literal("controlled_capture"), assetId: z.string().min(1).max(240) }),
+  z.object({ kind: z.literal("motion_fallback"), headline: z.string().min(1).max(220), body: z.string().max(1200).optional() }),
+]);
+
 const SceneSchema = z.object({
   id: z.string().min(1).max(120),
   kind: SceneKindSchema,
@@ -79,6 +87,10 @@ const SceneSchema = z.object({
   headline: z.string().max(220).optional(),
   body: z.string().max(1200).optional(),
   visualRef: z.string().max(500).optional(),
+  metricKey: z.string().min(1).max(160).optional(),
+  curatedAssetId: z.string().min(1).max(240).optional(),
+  captureAssetId: z.string().min(1).max(240).optional(),
+  visualSource: VisualSourceSchema.optional(),
   prompt: z.string().min(8).max(1200).optional(),
   fallbackKind: z.literal("motion_graphic").optional(),
   fallbackHeadline: z.string().min(1).max(220).optional(),
