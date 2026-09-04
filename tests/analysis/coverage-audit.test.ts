@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { analyzeFinancials, buildCoverageAudit, type FinancialAnalysisInput } from "../../src/lib/analysis";
 import { durableCompounderInput } from "./fixtures";
+import { goldenAnalysisFixtures } from "./golden-fixtures";
 
 function analyze(overrides: Partial<FinancialAnalysisInput> = {}) {
   return analyzeFinancials({
@@ -64,6 +65,31 @@ describe("coverage audit", () => {
     expect(fcfYield?.reason).toContain("operating cash flow and capex");
     expect(audit.categories.valuation.missing).toBeGreaterThan(0);
     expect(audit.rootCauseCounts.PROVIDER_MISSING).toBeGreaterThan(0);
+  });
+
+  it("does not leak an unrelated provider failure into a missing metric with no causal reason", () => {
+    const fixture = goldenAnalysisFixtures.find((item) => item.id === "reit-missing-ffo");
+    expect(fixture).toBeDefined();
+    const result = analyzeFinancials({
+      ...structuredClone(fixture!.input),
+      providerDiagnostics: [{
+        provider: "fixture-sec",
+        capability: "fundamentals",
+        status: "unavailable",
+        reason: "not_configured",
+        observedAt: "2026-08-25T00:00:00.000Z",
+      }],
+    });
+    const audit = buildCoverageAudit({ ticker: "REIT", result });
+    const ffoYield = audit.metrics.find((metric) => metric.category === "valuation" && metric.label === "FFO yield");
+
+    expect(ffoYield).toMatchObject({
+      status: "UNKNOWN",
+      relevant: true,
+      available: false,
+      reason: null,
+      providerDiagnostics: [],
+    });
   });
 
   it("returns category coverage from relevant metric counts instead of treating unsuitable metrics as missing", () => {
