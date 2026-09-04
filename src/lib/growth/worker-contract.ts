@@ -7,6 +7,14 @@ export type GrowthWorkerAsset = {
   checksumSha256: string;
 };
 
+export type GrowthUsageEntry = {
+  idempotencyKey: string;
+  provider: string;
+  operation: string;
+  estimatedSek: number;
+  actualSek?: number | null;
+};
+
 // The deployed Edge API uses x-stockbox-growth-worker-token with the raw token
 // value (not an Authorization/Bearer wrapper). Keep the pure test contract in
 // sync with that boundary.
@@ -16,6 +24,24 @@ export function validateWorkerToken(supplied: string | null | undefined, expecte
   const expectedBuffer = Buffer.from(expected);
   if (suppliedBuffer.length !== expectedBuffer.length) return false;
   return timingSafeEqual(suppliedBuffer, expectedBuffer);
+}
+
+export function validateUsageEntries(input: GrowthUsageEntry[]): GrowthUsageEntry[] {
+  if (!Array.isArray(input)) throw new Error("Usage entries must be an array");
+  const seen = new Set<string>();
+  return input.map((entry) => {
+    const idempotencyKey = String(entry?.idempotencyKey || "").trim();
+    const provider = String(entry?.provider || "").trim();
+    const operation = String(entry?.operation || "").trim();
+    if (!idempotencyKey || !provider || !operation) throw new Error("Usage identity fields are required");
+    if (seen.has(idempotencyKey)) throw new Error("Duplicate usage idempotency key");
+    seen.add(idempotencyKey);
+    if (!Number.isFinite(entry.estimatedSek) || entry.estimatedSek < 0) throw new Error("Invalid estimated provider cost");
+    if (entry.actualSek !== undefined && entry.actualSek !== null && (!Number.isFinite(entry.actualSek) || entry.actualSek < 0)) {
+      throw new Error("Invalid actual provider cost");
+    }
+    return { ...entry, idempotencyKey, provider, operation };
+  });
 }
 
 export function validateCompletionPayload(input: {
