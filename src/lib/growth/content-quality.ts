@@ -37,6 +37,9 @@ const STRONG_STOCK_TERMS = [
   "skuldsättning",
   "omsättning",
   "vinst",
+  "vinstvarning",
+  "riktkurs",
+  "börsvärde",
   "investmentbolag",
   "balansräkning",
   "lönsamhet",
@@ -50,6 +53,7 @@ const SUPPORTING_TERMS = [
   "investering",
   "investerare",
   "analys",
+  "analytiker",
   "risk",
   "tillväxt",
   "finans",
@@ -110,12 +114,14 @@ export function scoreStockboxTopic(input: TopicInput): TopicScore {
   const hasEntity = Boolean(company || ticker);
   const evergreen = type === "evergreen";
   const news = type === "news";
+  const educationalCue = /\b(hur|vad|varfor|förklaring|checklista|vanliga)\b/.test(topic);
 
   let score = 22;
   score += Math.min(48, strongHits.length * 16);
   score += Math.min(18, supportingHits.length * 6);
   if (hasEntity) score += 22;
   if (evergreen) score += 22;
+  if (evergreen && educationalCue) score += 12;
   if (news && !hasEntity && strongHits.length === 0) score -= 28;
   if (privateFinanceHits.length > 0) score -= 65;
   if (offTopicHits.length > 0) score -= 60;
