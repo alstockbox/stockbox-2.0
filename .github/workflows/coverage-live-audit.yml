@@ -1,0 +1,49 @@
+name: StockBox Live Coverage Audit
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - ".github/workflows/coverage-live-audit.yml"
+      - "tests/diagnostics/live-coverage-batch.test.ts"
+      - "src/lib/data/coverage-audit*.ts"
+      - "src/lib/analysis/coverage-audit.ts"
+      - "src/lib/data/company-search.ts"
+      - "src/lib/data/company-search-core.ts"
+      - "src/lib/data/security-classification.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  live-coverage-100:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run stratified live coverage audit
+        env:
+          RUN_LIVE_COVERAGE: "1"
+          SEC_USER_AGENT: "StockBox coverage-audit https://github.com/alstockbox/stockbox-2.0"
+        run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts --reporter=verbose
+
+      - name: Upload coverage diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-live-100
+          path: artifacts/coverage-live/coverage-live-100.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -12,3 +12,4 @@ export * from "./reconciliation";
 export * from "./evaluation";
 export * from "./research";
 export * from "./qa";
+export * from "./coverage-audit";

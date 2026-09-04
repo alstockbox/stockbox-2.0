@@ -266,20 +266,20 @@ function ebitdaForValuation(period: FinancialPeriod | null | undefined): number 
 }
 
 function priceEarningsMissingReason(metrics: FinancialMetrics): string | undefined {
-  if (!isFiniteNumber(metrics.valuation.marketCap)) return "P/E requires a current same-currency market cap.";
   const earnings = commonEarnings(metrics.latestPeriod);
   if (!isFiniteNumber(earnings)) return "P/E requires net income available to common shareholders for the selected valuation period.";
   if (earnings <= 0) return "P/E is not meaningful when common earnings are non-positive.";
+  if (!isFiniteNumber(metrics.valuation.marketCap)) return "P/E requires a current same-currency market cap.";
   return undefined;
 }
 
 function evEbitdaMissingReason(metrics: FinancialMetrics): string | undefined {
-  if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
-    return "EV / EBITDA requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
-  }
   const ebitda = ebitdaForValuation(metrics.latestPeriod);
   if (!isFiniteNumber(ebitda)) return "EV / EBITDA requires EBITDA for the selected valuation period.";
   if (ebitda <= 0) return "EV / EBITDA is not meaningful when EBITDA is non-positive.";
+  if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
+    return "EV / EBITDA requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
+  }
   return undefined;
 }
 
@@ -401,10 +401,10 @@ function simpleFcfMissingReason(label: string): string {
 }
 
 function fcfYieldMissingReason(metrics: FinancialMetrics): string | undefined {
+  if (!isFiniteNumber(metrics.cashFlow.simpleFreeCashFlow)) return simpleFcfMissingReason("FCF yield");
   if (!isFiniteNumber(metrics.valuation.marketCap) || metrics.valuation.marketCap <= 0) {
     return "FCF yield requires a current same-currency market cap.";
   }
-  if (!isFiniteNumber(metrics.cashFlow.simpleFreeCashFlow)) return simpleFcfMissingReason("FCF yield");
   return undefined;
 }
 
@@ -461,12 +461,12 @@ function balanceRatioMissingReason(label: string, numeratorLabel: string, numera
 }
 
 function evSalesMissingReason(metrics: FinancialMetrics): string | undefined {
-  if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
-    return "EV / Sales requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
-  }
   const revenue = metrics.latestPeriod?.revenue;
   if (!isFiniteNumber(revenue)) return "EV / Sales requires reported revenue for the selected valuation period.";
   if (revenue <= 0) return "EV / Sales is not meaningful when revenue is non-positive.";
+  if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
+    return "EV / Sales requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
+  }
   return undefined;
 }
 
@@ -567,12 +567,9 @@ function bookMultipleMissingReason(
   bookValue: number | null | undefined,
   bookValueLabel: string,
 ): string | undefined {
-  const missing = [
-    !isFiniteNumber(metrics.valuation.marketCap) ? "a current same-currency market cap" : null,
-    !isFiniteNumber(bookValue) ? `reported ${bookValueLabel}` : null,
-  ].filter((item): item is string => Boolean(item));
-  if (missing.length) return `${label} requires ${missing.join(" and ")}.`;
-  if ((bookValue as number) <= 0) return `${label} is not meaningful when ${bookValueLabel} is non-positive.`;
+  if (!isFiniteNumber(bookValue)) return `${label} requires reported ${bookValueLabel}.`;
+  if (bookValue <= 0) return `${label} is not meaningful when ${bookValueLabel} is non-positive.`;
+  if (!isFiniteNumber(metrics.valuation.marketCap)) return `${label} requires a current same-currency market cap.`;
   return undefined;
 }
 
