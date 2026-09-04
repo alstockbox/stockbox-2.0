@@ -67,7 +67,7 @@ describe("coverage audit", () => {
     expect(audit.rootCauseCounts.PROVIDER_MISSING).toBeGreaterThan(0);
   });
 
-  it("does not leak an unrelated provider failure into a missing metric with no causal reason", () => {
+  it("assigns an explicit specialist coverage cause when a REIT metric has no provider value", () => {
     const fixture = goldenAnalysisFixtures.find((item) => item.id === "reit-missing-ffo");
     expect(fixture).toBeDefined();
     const result = analyzeFinancials({
@@ -84,12 +84,12 @@ describe("coverage audit", () => {
     const ffoYield = audit.metrics.find((metric) => metric.category === "valuation" && metric.label === "FFO yield");
 
     expect(ffoYield).toMatchObject({
-      status: "UNKNOWN",
+      status: "PROVIDER_MISSING",
       relevant: true,
       available: false,
-      reason: null,
       providerDiagnostics: [],
     });
+    expect(ffoYield?.reason).toContain("specialized REIT data");
   });
 
   it("returns category coverage from relevant metric counts instead of treating unsuitable metrics as missing", () => {
