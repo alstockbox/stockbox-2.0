@@ -37,7 +37,7 @@ type EarningsFiling = {
 
 type RequestResult =
   | { ok: true; response: Response }
-  | { ok: false; reason: ProviderFailureReason };
+  | { ok: false; reason: ProviderFailureReason; diagnosticReason?: string };
 
 function padCik(value: string): string {
   return value.replace(/\D/g, "").padStart(10, "0");
@@ -48,7 +48,10 @@ function stringAt(values: unknown[] | undefined, index: number): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function failure(reason: ProviderFailureReason): AdapterResult<ReitSpecializedMetrics> {
+function failure(
+  reason: ProviderFailureReason,
+  diagnosticReason: string = reason,
+): AdapterResult<ReitSpecializedMetrics> {
   const message = reason === "not_configured"
     ? "SEC contact is not configured."
     : reason === "unsupported_symbol"
@@ -68,7 +71,7 @@ function failure(reason: ProviderFailureReason): AdapterResult<ReitSpecializedMe
       PROVIDER_NAME,
       "specialized",
       reason === "unsupported_symbol" ? "unsupported" : "unavailable",
-      reason,
+      diagnosticReason,
     ),
   };
 }
@@ -90,10 +93,14 @@ async function secRequest(url: string, userAgent: string, accept: string): Promi
       if (response.ok) return { ok: true, response };
       if (response.status === 429) {
         if (attempt < MAX_ATTEMPTS) continue;
-        return { ok: false, reason: "rate_limited" };
+        return { ok: false, reason: "rate_limited", diagnosticReason: "rate_limited" };
       }
       if (response.status >= 500 && attempt < MAX_ATTEMPTS) continue;
-      return { ok: false, reason: "upstream_error" };
+      return {
+        ok: false,
+        reason: "upstream_error",
+        diagnosticReason: `http_${response.status}`,
+      };
     } catch (error) {
       const timeoutFailure = error instanceof Error && error.name === "AbortError";
       if (attempt < MAX_ATTEMPTS) continue;
@@ -231,7 +238,7 @@ export async function fetchSecReitSpecializedData(
   const cik = padCik(company.cik);
   const submissionsUrl = `https://data.sec.gov/submissions/CIK${cik}.json`;
   const submissionsResponse = await secRequest(submissionsUrl, userAgent, "application/json");
-  if (!submissionsResponse.ok) return failure(submissionsResponse.reason);
+  if (!submissionsResponse.ok) return failure(submissionsResponse.reason, submissionsResponse.diagnosticReason);
 
   let payload: SecSubmissionsPayload;
   try {
@@ -243,7 +250,7 @@ export async function fetchSecReitSpecializedData(
   if (!filing) return failure("empty_response");
 
   const indexResponse = await secRequest(filingIndexUrl(filing), userAgent, "text/html,application/xhtml+xml");
-  if (!indexResponse.ok) return failure(indexResponse.reason);
+  if (!indexResponse.ok) return failure(indexResponse.reason, indexResponse.diagnosticReason);
   const indexHtml = await indexResponse.response.text();
   const periodEnd = periodOfReport(indexHtml);
   if (!periodEnd) return failure("empty_response");
@@ -252,13 +259,20 @@ export async function fetchSecReitSpecializedData(
   if (!exhibitUrls.length) return failure("empty_response");
 
   const observations = new Map<SecReitMetricKey, SecReitObservation>();
+  let lastExhibitFailure: Extract<RequestResult, { ok: false }> | null = null;
   for (const url of exhibitUrls) {
     const exhibitResponse = await secRequest(url, userAgent, "text/html,application/xhtml+xml");
-    if (!exhibitResponse.ok) continue;
+    if (!exhibitResponse.ok) {
+      lastExhibitFailure = exhibitResponse;
+      continue;
+    }
     const html = await exhibitResponse.response.text();
     for (const observation of parseSecReitSpecializedDocument(html, { sourceUrl: url, periodEnd })) {
       if (!observations.has(observation.metric)) observations.set(observation.metric, observation);
     }
+  }
+  if (!observations.size && lastExhibitFailure) {
+    return failure(lastExhibitFailure.reason, lastExhibitFailure.diagnosticReason);
   }
   if (!observations.size) return failure("empty_response");
 
