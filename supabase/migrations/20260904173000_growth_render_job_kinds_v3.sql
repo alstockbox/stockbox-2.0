@@ -1,7 +1,8 @@
 -- Explicit output kind for autonomous growth render jobs.
 
 alter table public.acq_render_jobs
-  add column if not exists job_kind text;
+  add column if not exists job_kind text,
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 update public.acq_render_jobs
 set job_kind = 'video'
