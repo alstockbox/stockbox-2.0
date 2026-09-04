@@ -1,8 +1,8 @@
 export type TopicInput = { topic?: string | null; type?: string | null; company?: string | null; ticker?: string | null };
 export type DailyCandidate = { id: string; platform: string; contentId: string; qualityScore: number };
 
-const STRONG_STOCK_TERMS = ["aktie","börs","börsen","bolag","kvartalsrapport","årsrapport","rapport","resultat","utdelning","värdering","nyckeltal","p/e","roic","kassaflöde","marginal","skuldsättning","omsättning","vinst","investmentbolag","balansräkning","lönsamhet","earnings","revenue","cash flow","valuation"];
-const SUPPORTING_TERMS = ["investering","investerare","analys","risk","tillväxt","finans","marknad","sektor","industri","kapital"];
+const STRONG_STOCK_TERMS = ["aktie","börs","börsen","bolag","kvartalsrapport","årsrapport","rapport","resultat","utdelning","värdering","nyckeltal","p/e","roic","kassaflöde","marginal","skuldsättning","omsättning","vinst","vinstvarning","riktkurs","börsvärde","investmentbolag","balansräkning","lönsamhet","earnings","revenue","cash flow","valuation"];
+const SUPPORTING_TERMS = ["investering","investerare","analys","analytiker","risk","tillväxt","finans","marknad","sektor","industri","kapital"];
 const PRIVATE_FINANCE_PHRASES = ["förskott på arv","bostadsrättsköp","bostadsrätt","bolån","sparkonto","barnbidrag","privatekonomi","familjeekonomi","arv gynna"];
 const CLEARLY_OFF_TOPIC_PHRASES = ["farliga batterier dumpas","recept","matlagning","relationstips","semesterresa","bostadsköp"];
 
@@ -14,8 +14,8 @@ export function scoreStockboxTopic(input: TopicInput) {
   const privateFinanceHits = containsAny(topic, PRIVATE_FINANCE_PHRASES), offTopicHits = containsAny(topic, CLEARLY_OFF_TOPIC_PHRASES), strongHits = containsAny(topic, STRONG_STOCK_TERMS), supportingHits = containsAny(topic, SUPPORTING_TERMS);
   if (privateFinanceHits.length) flags.push("off_topic_private_finance");
   if (offTopicHits.length) flags.push("off_topic_general");
-  const hasEntity = Boolean(company || ticker), evergreen = type === "evergreen", news = type === "news";
-  let score = 22 + Math.min(48, strongHits.length * 16) + Math.min(18, supportingHits.length * 6) + (hasEntity ? 22 : 0) + (evergreen ? 22 : 0);
+  const hasEntity = Boolean(company || ticker), evergreen = type === "evergreen", news = type === "news", educationalCue = /\b(hur|vad|varfor|förklaring|checklista|vanliga)\b/.test(topic);
+  let score = 22 + Math.min(48, strongHits.length * 16) + Math.min(18, supportingHits.length * 6) + (hasEntity ? 22 : 0) + (evergreen ? 22 : 0) + (evergreen && educationalCue ? 12 : 0);
   if (news && !hasEntity && !strongHits.length) score -= 28;
   if (privateFinanceHits.length) score -= 65;
   if (offTopicHits.length) score -= 60;
