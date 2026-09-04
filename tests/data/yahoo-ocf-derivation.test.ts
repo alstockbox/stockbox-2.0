@@ -78,7 +78,7 @@ async function latestAnnual(facts: FactInput[]) {
   const result = await fetchYahooFundamentalsResult(company);
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.message);
-  const period = result.data.annualPeriods.at(-1);
+  const period = result.data.annualPeriods?.at(-1);
   expect(period).toBeDefined();
   if (!period) throw new Error("Expected annual period");
   return period;
