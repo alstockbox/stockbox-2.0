@@ -15,6 +15,7 @@ const MIN_BETA_OBSERVATIONS = 52;
 const MAX_BETA_LAG_DAYS = 63;
 const YAHOO_REQUEST_TIMEOUT_MS = 10_000;
 const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".F", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".BA", "^MERV"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEBX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"], [".AT", "GD.AT"], [".BK", "^SET.BK"], [".BR", "^BFX"], [".LS", "PSI20.LS"], [".SR", "^TASI.SR"], [".TA", "^TA125.TA"], [".WA", "WIG20.WA"]];
+const BETA_BENCHMARK_FALLBACKS_BY_SUFFIX: Array<[string, string[]]> = [[".WA", ["ETFBW20TR.WA"]]];
 const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = { US: "^GSPC", "UNITED STATES": "^GSPC", SE: "^OMX", SWEDEN: "^OMX", GB: "^FTSE", UK: "^FTSE", "UNITED KINGDOM": "^FTSE", DE: "^GDAXI", GERMANY: "^GDAXI", FR: "^FCHI", FRANCE: "^FCHI", NL: "^AEX", NETHERLANDS: "^AEX", CH: "^SSMI", SWITZERLAND: "^SSMI", CA: "^GSPTSE", CANADA: "^GSPTSE", AU: "^AXJO", AUSTRALIA: "^AXJO", JP: "^N225", JAPAN: "^N225", HK: "^HSI", "HONG KONG": "^HSI", CN: "000001.SS", CHINA: "000001.SS", KR: "^KS11", "SOUTH KOREA": "^KS11", TW: "^TWII", TAIWAN: "^TWII", IN: "^NSEI", INDIA: "^NSEI", BR: "^BVSP", BRAZIL: "^BVSP", MX: "^MXX", MEXICO: "^MXX", AR: "^MERV", ARGENTINA: "^MERV", ES: "^IBEX", SPAIN: "^IBEX", IT: "FTSEMIB.MI", ITALY: "FTSEMIB.MI", DK: "^OMXC25", DENMARK: "^OMXC25", FI: "^OMXH25", FINLAND: "^OMXH25", NO: "OSEAX.OL", NORWAY: "OSEAX.OL", SG: "^STI", SINGAPORE: "^STI", ID: "^JKSE", INDONESIA: "^JKSE", MY: "^KLSE", MALAYSIA: "^KLSE", NZ: "^NZ50", "NEW ZEALAND": "^NZ50" };
 const BETA_BENCHMARK_BY_EXCHANGE: Record<string, string> = {
   AMEX: "^GSPC",
@@ -105,6 +106,11 @@ function betaBenchmarkSymbol(company: CompanySearchResult): string | null {
   if (!exchange) return null;
   const compactExchange = exchange.replace(/[^A-Z0-9]/g, "");
   return BETA_BENCHMARK_BY_EXCHANGE[exchange] ?? BETA_BENCHMARK_BY_EXCHANGE[compactExchange] ?? null;
+}
+
+function betaBenchmarkFallbackSymbols(company: CompanySearchResult): string[] {
+  const symbol = toYahooSymbol(company);
+  return BETA_BENCHMARK_FALLBACKS_BY_SUFFIX.find(([suffix]) => symbol.endsWith(suffix))?.[1] ?? [];
 }
 
 function dateFromUnix(timestamp: number): string | null {
@@ -376,7 +382,20 @@ export const yahooMarketDataProvider: MarketDataProvider = {
 
     const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
     const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
-    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+    let betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+    let resolvedBenchmarkSymbol = betaEstimate ? benchmarkSymbol : null;
+    if (!betaEstimate) {
+      for (const fallbackSymbol of betaBenchmarkFallbackSymbols(company)) {
+        if (fallbackSymbol === benchmarkSymbol) continue;
+        const fallbackResponse = await requestChart(fallbackSymbol);
+        const fallbackResult = fallbackResponse.ok ? firstChartResult(fallbackResponse.data) : null;
+        const fallbackEstimate = fallbackResult ? historicalWeeklyBeta(history, parseRows(fallbackResult)) : null;
+        if (!fallbackEstimate) continue;
+        betaEstimate = fallbackEstimate;
+        resolvedBenchmarkSymbol = fallbackSymbol;
+        break;
+      }
+    }
     const yearRows = lastYearRows(history);
     const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
     const dividendEvents = parseDividendEvents(result, marketCurrency);
@@ -397,7 +416,7 @@ export const yahooMarketDataProvider: MarketDataProvider = {
         marketCap: null,
         sharesOutstanding: null,
         beta: betaEstimate?.beta ?? null,
-        betaBenchmark: betaEstimate ? benchmarkSymbol : null,
+        betaBenchmark: resolvedBenchmarkSymbol,
         betaMethod: betaEstimate ? "historical_weekly_regression" : null,
         betaObservationCount: betaEstimate?.observations ?? null,
         provider: PROVIDER_ID,
