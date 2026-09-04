@@ -7,6 +7,7 @@ on:
       - "supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql"
       - "supabase/migrations/20260904194500_growth_budget_authorize_rpc_v3.sql"
       - "supabase/migrations/20260904210000_growth_usage_finalize_v3.sql"
+      - "supabase/migrations/20260904210500_growth_budget_reservation_identity_v3.sql"
       - "supabase/migrations/20260904211000_growth_provider_hardening_config_v3.sql"
       - ".github/workflows/growth-provider-db-ci.yml"
 
@@ -64,6 +65,7 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904173000_growth_render_job_kinds_v3.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904194500_growth_budget_authorize_rpc_v3.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904210000_growth_usage_finalize_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904210500_growth_budget_reservation_identity_v3.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904211000_growth_provider_hardening_config_v3.sql
 
       - name: Assert reservation finalization is idempotent
@@ -84,6 +86,16 @@ jobs:
 
             select public.acq_authorize_growth_cost_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,c,j,false) into auth;
             if coalesce((auth->>'allowed')::boolean,false) is not true then raise exception 'authorization unexpectedly rejected: %',auth; end if;
+
+            select public.acq_authorize_growth_cost_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,c,j,false) into auth;
+            if coalesce((auth->>'duplicate')::boolean,false) is not true then raise exception 'exact duplicate reservation should be idempotent'; end if;
+
+            begin
+              perform public.acq_authorize_growth_cost_v3('provider-ci-voice','different-provider','founder_voice_tts',0.20,c,j,false);
+              raise exception 'reservation identity mismatch should have failed';
+            exception when others then
+              if sqlerrm = 'reservation identity mismatch should have failed' then raise; end if;
+            end;
 
             perform public.acq_finalize_growth_usage_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,0.18,j);
             perform public.acq_finalize_growth_usage_v3('provider-ci-voice','modal_chatterbox','founder_voice_tts',0.20,0.18,j);
