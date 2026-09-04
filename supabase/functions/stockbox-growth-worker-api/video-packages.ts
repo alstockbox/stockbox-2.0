@@ -16,6 +16,10 @@ export type VideoPackageInput = {
   campaign?: string;
 };
 
+export type CompletionVideoPackageInput = VideoPackageInput & {
+  promotionAllowed: boolean;
+};
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -70,5 +74,12 @@ export function buildVideoDistributionPackages(input: VideoPackageInput) {
       status: input.shadowMode ? "draft" : "ready",
       metadata: { master_reuse: true, growth_v3: true },
     };
+  });
+}
+
+export function buildCompletionVideoPackages(input: CompletionVideoPackageInput) {
+  return buildVideoDistributionPackages({
+    ...input,
+    shadowMode: input.shadowMode || !input.promotionAllowed,
   });
 }
