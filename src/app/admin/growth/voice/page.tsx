@@ -1,9 +1,22 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { disableFounderVoiceProfileAction, uploadFounderVoiceProfileAction } from "./actions";
+import {
+  activateFounderVoiceProfileAction,
+  disableFounderVoiceProfileAction,
+  generateFounderVoiceTestAction,
+  uploadFounderVoiceProfileAction,
+} from "./actions";
 
 export const metadata: Metadata = { title: "Growth Voice Profile" };
+
+const TEST_ERROR_TEXT: Record<string, string> = {
+  voice_worker_not_configured: "Rösttjänsten är inte konfigurerad ännu.",
+  voice_cost_not_configured: "Kostnadsgränsen för rösttestet saknas.",
+  voice_budget_blocked: "Budgetmotorn stoppade rösttestet.",
+  voice_reference_unavailable: "Referensinspelningen kunde inte läsas privat.",
+  voice_test_failed: "Rösttestet misslyckades. Profilen är fortfarande privat och inaktiv.",
+};
 
 export default async function GrowthVoicePage() {
   await requireAdmin();
@@ -27,7 +40,7 @@ export default async function GrowthVoicePage() {
 
       <section className="mt-8 rounded-xl border border-white/10 bg-white/[0.025] p-5">
         <h2 className="text-lg font-semibold">Ladda upp 5–10 minuter</h2>
-        <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">Stöd: WAV, MP3 och M4A. Max 25 MB. Profilen hamnar först i testläge och blir inte aktiv förrän ett röstprov har verifierats.</p>
+        <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">Stöd: WAV, MP3 och M4A. Max 25 MB. Profilen hamnar först i testläge. Ett privat AI-röstprov skapas därefter och du aktiverar profilen först när du själv har lyssnat.</p>
         <form action={uploadFounderVoiceProfileAction} className="mt-5 space-y-4">
           <input
             type="file"
@@ -49,6 +62,8 @@ export default async function GrowthVoicePage() {
         <div className="mt-4 space-y-3">
           {(profiles ?? []).map((profile) => {
             const metadata = (profile.metadata ?? {}) as Record<string, unknown>;
+            const testPassed = metadata.test_synthesis_passed === true;
+            const testError = String(metadata.test_error || "");
             return (
               <article key={profile.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -58,7 +73,7 @@ export default async function GrowthVoicePage() {
                       <span className="text-xs text-[#7f8ea2]">{profile.provider} · {profile.model}</span>
                     </div>
                     <p className="mt-3 text-sm text-[#c7d0dc]">Uppladdad {new Date(profile.created_at).toLocaleString("sv-SE")}</p>
-                    <p className="mt-1 text-xs text-[#7f8ea2]">{Number(metadata.size_bytes ?? 0) > 0 ? `${Math.round(Number(metadata.size_bytes) / 1024 / 1024 * 10) / 10} MB` : "Storlek saknas"} · rösttest {metadata.test_synthesis_passed === true ? "godkänt" : "inte godkänt ännu"}</p>
+                    <p className="mt-1 text-xs text-[#7f8ea2]">{Number(metadata.size_bytes ?? 0) > 0 ? `${Math.round(Number(metadata.size_bytes) / 1024 / 1024 * 10) / 10} MB` : "Storlek saknas"} · rösttest {testPassed ? "godkänt" : "inte godkänt ännu"}</p>
                   </div>
                   {profile.status !== "disabled" ? (
                     <form action={disableFounderVoiceProfileAction}>
@@ -67,6 +82,32 @@ export default async function GrowthVoicePage() {
                     </form>
                   ) : null}
                 </div>
+
+                {profile.status === "testing" && !testPassed ? (
+                  <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
+                    <p className="text-sm leading-6 text-[#c7d0dc]">Nästa steg är ett kort privat rösttest med Chatterbox. Det räknas mot samma 50/75 kr-budget som resten av motorn.</p>
+                    {testError ? <p className="mt-2 text-xs text-amber-200">{TEST_ERROR_TEXT[testError] ?? "Rösttestet behöver köras igen."}</p> : null}
+                    <form action={generateFounderVoiceTestAction} className="mt-3">
+                      <input type="hidden" name="id" value={profile.id} />
+                      <button className="rounded-md bg-[#b99b5f] px-3 py-2 text-xs font-semibold text-[#07111f]">Skapa privat rösttest</button>
+                    </form>
+                  </div>
+                ) : null}
+
+                {testPassed ? (
+                  <div className="mt-4 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] p-4">
+                    <p className="text-sm font-semibold">Lyssna innan aktivering</p>
+                    <audio controls preload="none" className="mt-3 w-full" src={`/api/admin/growth/voice-test/${profile.id}`} />
+                    {profile.status === "testing" ? (
+                      <form action={activateFounderVoiceProfileAction} className="mt-3">
+                        <input type="hidden" name="id" value={profile.id} />
+                        <button className="rounded-md bg-emerald-300 px-3 py-2 text-xs font-semibold text-[#07111f]">Aktivera denna röst ✓</button>
+                      </form>
+                    ) : profile.status === "active" ? (
+                      <p className="mt-3 text-xs text-emerald-200">Den här rösten är aktiv och får användas av den automatiska svenska videomotorn.</p>
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
             );
           })}
