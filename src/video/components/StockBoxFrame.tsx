@@ -1,4 +1,4 @@
-import { AbsoluteFill, OffthreadVideo, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, OffthreadVideo, interpolate, staticFile, useCurrentFrame } from "remotion";
 import type { SceneKind } from "../../lib/growth/render-spec";
 
 export type StockBoxFrameProps = {
@@ -10,6 +10,11 @@ export type StockBoxFrameProps = {
   fallbackHeadline?: string;
   fallbackBody?: string;
 };
+
+function resolveVisualSource(visualRef: string) {
+  if (/^https?:\/\//i.test(visualRef)) return visualRef;
+  return staticFile(visualRef.replace(/^\/+/, ""));
+}
 
 export function StockBoxFrame({
   kind,
@@ -26,7 +31,7 @@ export function StockBoxFrame({
     return (
       <AbsoluteFill style={{ backgroundColor: "#06111f" }}>
         <OffthreadVideo
-          src={visualRef}
+          src={resolveVisualSource(visualRef)}
           muted
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
