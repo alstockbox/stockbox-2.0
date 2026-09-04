@@ -4,7 +4,7 @@
 
 **Goal:** Deliver the approved autonomous StockBox ready-to-post customer-acquisition engine in reviewable, independently testable subsystem increments.
 
-**Architecture:** The approved design spans several independent subsystems, so implementation is deliberately split into five ordered plans rather than one unsafe mega-change. Supabase stays the durable control plane, pure TypeScript policy remains separately testable, GitHub Actions/Remotion/FFmpeg provide cloud media rendering, private storage protects voice/media, and Growth Control Center exposes only QC-passing final assets.
+**Architecture:** The approved design spans several independent subsystems, so implementation is deliberately split into six ordered plans rather than one unsafe mega-change. Supabase stays the durable control plane, pure TypeScript policy remains separately testable, GitHub Actions/Remotion/FFmpeg provide cloud media rendering, private storage protects voice/media, and Growth Control Center exposes only QC-passing final assets.
 
 **Tech Stack:** Next.js 16, React 19, TypeScript 5.9, Vitest 4, Zod 4, Supabase Postgres/Storage/Edge Functions, Remotion, FFmpeg/ffprobe, GitHub Actions, Python/Modal-compatible voice inference.
 
@@ -22,13 +22,13 @@
 - 1-2 founder-recorded script ideas/day are optional bonus output and never block automation.
 - Provider failures use bounded retries and approved fallbacks; failed/QC-invalid assets never become READY.
 - Founder voice reference audio remains private and outside GitHub.
-- v2 acquisition remains operational throughout v3 shadow/canary rollout.
+- v2 acquisition, including existing SEO and creator-outreach paths, remains operational throughout v3 shadow/canary rollout.
 
 ---
 
-## Why this is split into five plans
+## Why this is split into six plans
 
-The approved specification contains independent data/budget, media rendering, visual assets, growth intelligence, and founder UI/rollout subsystems. Each plan below ends in software that can be tested/reviewed without requiring the next plan to be complete. Execute them in order because later plans consume interfaces created earlier.
+The approved specification contains independent data/budget, media rendering, visual assets, provider/privacy/retention integration, growth intelligence, and founder UI/rollout subsystems. Each plan below ends in software that can be tested and reviewed without requiring the next plan to be complete. Execute them in order because later plans consume interfaces created earlier.
 
 ### Plan 1 — Foundation and global budget
 
@@ -80,7 +80,23 @@ Gate: all deterministic visual formats are ready-to-post; optional generated sce
 
 - [ ] Execute every task in Plan 3 and pass its visual-assets acceptance gate.
 
-### Plan 4 — Growth intelligence and daily orchestration
+### Plan 4 — Provider, retention, and visual-source hardening
+
+Path: `docs/superpowers/plans/2026-09-04-growth-provider-retention-and-visual-source-hardening.md`
+
+Delivers:
+- explicit `video | carousel | static_image` render job kinds;
+- distinct Swedish founder-clone and generic English voice paths;
+- deterministic StockBox structured/curated/captured/motion-fallback visual source selection;
+- idempotent voice/generative spend accounting;
+- staging cleanup and ready-asset retention;
+- regression protection for existing SEO and creator-outreach workflows.
+
+Gate: cross-cutting provider/privacy/storage behavior is explicit, measurable, budgeted, and does not regress current acquisition channels.
+
+- [ ] Execute every task in Plan 4 and pass its hardening acceptance gate.
+
+### Plan 5 — Growth intelligence and daily orchestration
 
 Path: `docs/superpowers/plans/2026-09-04-growth-intelligence-and-orchestration.md`
 
@@ -96,9 +112,9 @@ Delivers:
 
 Gate: a shadow full run learns, allocates, enqueues idempotently, respects budget, and leaves v2 production intact.
 
-- [ ] Execute every task in Plan 4 and pass its orchestration acceptance gate.
+- [ ] Execute every task in Plan 5 and pass its orchestration acceptance gate.
 
-### Plan 5 — Growth Control Center v3 and production rollout
+### Plan 6 — Growth Control Center v3 and production rollout
 
 Path: `docs/superpowers/plans/2026-09-04-growth-control-center-and-rollout.md`
 
@@ -114,15 +130,16 @@ Delivers:
 
 Gate: actual production canary is rendered, QC-passed, privately served, ready to post, budget-observed, and production frontend deployment is independently verified.
 
-- [ ] Execute every task in Plan 5 and pass its rollout acceptance gate.
+- [ ] Execute every task in Plan 6 and pass its rollout acceptance gate.
 
 ## Cross-plan review checkpoints
 
 - [ ] After Plan 1: review schema/security/budget before creating any external-worker integration.
 - [ ] After Plan 2: review a deterministic rendered MP4 and worker logs for secret leakage before adding generative media.
 - [ ] After Plan 3: verify deterministic carousel/static output and benchmark any real generative provider before enablement.
-- [ ] After Plan 4: run v3 entirely in shadow mode and compare against current v2 behavior/traffic pipeline.
-- [ ] After Plan 5 one-video canary: verify actual voice quality, spend, storage privacy, QC, and live UI before allowing max 2/day.
+- [ ] After Plan 4: verify English voice isolation, visual fallbacks, spend accounting, retention, SEO, and creator outreach before orchestration consumes them.
+- [ ] After Plan 5: run v3 entirely in shadow mode and compare against current v2 behavior/traffic pipeline.
+- [ ] After Plan 6 one-video canary: verify actual voice quality, spend, storage privacy, QC, and live UI before allowing max 2/day.
 
 ## Required one-time founder actions during implementation
 
@@ -135,4 +152,4 @@ No recurring filming, voice recording, editing, caption writing, image creation,
 
 ## Final program acceptance
 
-The full v3 program is complete only after all five plan gates pass and the 14 acceptance criteria in the approved design spec have recorded evidence. Software completion must be reported separately from actual acquisition performance: reaching 100 relevant visits/day remains the engine's optimization objective and is measured after rollout, not a promise made by the implementation.
+The full v3 program is complete only after all six plan gates pass and the 14 acceptance criteria in the approved design spec have recorded evidence. Software completion must be reported separately from actual acquisition performance: reaching 100 relevant visits/day remains the engine's optimization objective and is measured after rollout, not a promise made by the implementation.
