@@ -34,11 +34,27 @@ async function secureEqual(a: string, b: string) {
   return diff === 0;
 }
 
-async function configNumber(key: string, fallback: number) {
+async function configValue(key: string) {
   const { data, error } = await supabase.from("acq_config").select("value").eq("key", key).maybeSingle();
-  if (error) return fallback;
-  const value = Number(data?.value);
+  return error ? null : data?.value ?? null;
+}
+
+async function configNumber(key: string, fallback: number) {
+  const value = Number(await configValue(key));
   return Number.isFinite(value) ? value : fallback;
+}
+
+async function configNullableNumber(key: string) {
+  const raw = await configValue(key);
+  if (raw === null || String(raw).trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+async function configBoolean(key: string, fallback = false) {
+  const raw = await configValue(key);
+  if (raw === null) return fallback;
+  return ["true", "1", "yes", "on"].includes(String(raw).trim().toLowerCase());
 }
 
 function utcDate(value: string) {
@@ -61,6 +77,48 @@ async function deferClaim(jobId: string, workerId: string, reason: string) {
   });
 }
 
+async function buildUploads(jobKind: string, prefix: string, renderSpec: any) {
+  const metadata = await signedUpload("growth-ready-assets", `${prefix}metadata.json`);
+
+  if (jobKind === "video") {
+    return {
+      voice_audio: await signedUpload("growth-render-staging", `${prefix}voice.wav`),
+      master_video: await signedUpload("growth-ready-assets", `${prefix}master.mp4`),
+      cover: await signedUpload("growth-ready-assets", `${prefix}cover.jpg`),
+      metadata,
+    };
+  }
+
+  if (jobKind === "carousel") {
+    const slides = Array.isArray(renderSpec?.slides) ? renderSpec.slides : [];
+    if (slides.length < 3 || slides.length > 8) throw new Error("invalid_carousel_render_spec");
+    const slideUploads = [];
+    for (let index = 0; index < slides.length; index += 1) {
+      slideUploads.push(
+        await signedUpload(
+          "growth-ready-assets",
+          `${prefix}slide-${String(index + 1).padStart(2, "0")}.png`,
+        ),
+      );
+    }
+    return {
+      slides: slideUploads,
+      cover: await signedUpload("growth-ready-assets", `${prefix}cover.png`),
+      carousel_zip: await signedUpload("growth-ready-assets", `${prefix}carousel.zip`),
+      metadata,
+    };
+  }
+
+  if (jobKind === "static_image") {
+    return {
+      static_image: await signedUpload("growth-ready-assets", `${prefix}static.png`),
+      metadata,
+    };
+  }
+
+  throw new Error("unsupported_job_kind");
+}
+
 async function handleClaim(body: any) {
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
   if (!workerId) return json({ error: "worker_id_required" }, 400);
@@ -73,9 +131,10 @@ async function handleClaim(body: any) {
   try {
     const prefix = `${utcDate(job.created_at)}/${job.content_id}/${job.id}/`;
     const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
+    const jobKind = String(job.job_kind || "video");
     let voiceReference = null;
 
-    if (job.language === "sv") {
+    if (jobKind === "video" && job.language === "sv") {
       const { data: profile, error: profileError } = await supabase
         .from("acq_voice_profiles")
         .select("id,storage_bucket,storage_path,status,language")
@@ -91,11 +150,10 @@ async function handleClaim(body: any) {
       voiceReference = signed.signedUrl;
     }
 
-    const uploads = {
-      voice_audio: await signedUpload("growth-render-staging", `${prefix}voice.wav`),
-      master_video: await signedUpload("growth-ready-assets", `${prefix}master.mp4`),
-      cover: await signedUpload("growth-ready-assets", `${prefix}cover.jpg`),
-      metadata: await signedUpload("growth-ready-assets", `${prefix}metadata.json`),
+    const uploads = await buildUploads(jobKind, prefix, job.render_spec);
+    const generative = {
+      enabled: jobKind === "video" && (await configBoolean("growth_generative_provider_enabled", false)),
+      cost_per_second_sek: await configNullableNumber("growth_generative_cost_sek_per_second"),
     };
 
     return json({
@@ -103,17 +161,17 @@ async function handleClaim(body: any) {
         id: job.id,
         content_id: job.content_id,
         render_spec: job.render_spec,
+        job_kind: jobKind,
         language: job.language,
         template: job.template,
         attempt_count: job.attempt_count,
         voice_reference_url: voiceReference,
         asset_prefix: prefix,
         uploads,
+        generative,
       },
     });
   } catch (error) {
-    // A claim should never become permanently stranded because signing or
-    // private-asset preparation failed after the DB transition.
     await deferClaim(job.id, workerId, error instanceof Error ? error.message : "claim_preparation_failed");
     throw error;
   }
