@@ -10,6 +10,7 @@ on:
       - "tests/diagnostics/live-reit-specialized.test.ts"
       - "tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts"
       - "tests/data/adr-listing-basis.test.ts"
+      - "tests/data/semantic-period-supplement-only.test.ts"
       - "src/lib/data/coverage-audit*.ts"
       - "src/lib/analysis/coverage-audit.ts"
       - "src/lib/data/company-search.ts"
