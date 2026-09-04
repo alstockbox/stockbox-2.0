@@ -67,7 +67,7 @@ describe("Yahoo global beta benchmark routing", () => {
     expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
   });
 
-  it("keeps a well-sampled historical beta when the benchmark feed trails by seven weeks", async () => {
+  it("keeps a well-sampled historical beta when benchmark lag stays within the nine-week policy", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(weeklyPayload(1.2))
       .mockResolvedValueOnce(weeklyPayload(1, 7));
