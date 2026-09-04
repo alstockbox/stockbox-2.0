@@ -266,20 +266,20 @@ function ebitdaForValuation(period: FinancialPeriod | null | undefined): number 
 }
 
 function priceEarningsMissingReason(metrics: FinancialMetrics): string | undefined {
+  if (!isFiniteNumber(metrics.valuation.marketCap)) return "P/E requires a current same-currency market cap.";
   const earnings = commonEarnings(metrics.latestPeriod);
   if (!isFiniteNumber(earnings)) return "P/E requires net income available to common shareholders for the selected valuation period.";
   if (earnings <= 0) return "P/E is not meaningful when common earnings are non-positive.";
-  if (!isFiniteNumber(metrics.valuation.marketCap)) return "P/E requires a current same-currency market cap.";
   return undefined;
 }
 
 function evEbitdaMissingReason(metrics: FinancialMetrics): string | undefined {
-  const ebitda = ebitdaForValuation(metrics.latestPeriod);
-  if (!isFiniteNumber(ebitda)) return "EV / EBITDA requires EBITDA for the selected valuation period.";
-  if (ebitda <= 0) return "EV / EBITDA is not meaningful when EBITDA is non-positive.";
   if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
     return "EV / EBITDA requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
   }
+  const ebitda = ebitdaForValuation(metrics.latestPeriod);
+  if (!isFiniteNumber(ebitda)) return "EV / EBITDA requires EBITDA for the selected valuation period.";
+  if (ebitda <= 0) return "EV / EBITDA is not meaningful when EBITDA is non-positive.";
   return undefined;
 }
 
@@ -401,10 +401,10 @@ function simpleFcfMissingReason(label: string): string {
 }
 
 function fcfYieldMissingReason(metrics: FinancialMetrics): string | undefined {
-  if (!isFiniteNumber(metrics.cashFlow.simpleFreeCashFlow)) return simpleFcfMissingReason("FCF yield");
   if (!isFiniteNumber(metrics.valuation.marketCap) || metrics.valuation.marketCap <= 0) {
     return "FCF yield requires a current same-currency market cap.";
   }
+  if (!isFiniteNumber(metrics.cashFlow.simpleFreeCashFlow)) return simpleFcfMissingReason("FCF yield");
   return undefined;
 }
 
@@ -461,12 +461,12 @@ function balanceRatioMissingReason(label: string, numeratorLabel: string, numera
 }
 
 function evSalesMissingReason(metrics: FinancialMetrics): string | undefined {
-  const revenue = metrics.latestPeriod?.revenue;
-  if (!isFiniteNumber(revenue)) return "EV / Sales requires reported revenue for the selected valuation period.";
-  if (revenue <= 0) return "EV / Sales is not meaningful when revenue is non-positive.";
   if (!isFiniteNumber(metrics.valuation.enterpriseValue)) {
     return "EV / Sales requires enterprise value from current market cap plus reported debt and cash, or provider-reported EV.";
   }
+  const revenue = metrics.latestPeriod?.revenue;
+  if (!isFiniteNumber(revenue)) return "EV / Sales requires reported revenue for the selected valuation period.";
+  if (revenue <= 0) return "EV / Sales is not meaningful when revenue is non-positive.";
   return undefined;
 }
 
@@ -567,9 +567,12 @@ function bookMultipleMissingReason(
   bookValue: number | null | undefined,
   bookValueLabel: string,
 ): string | undefined {
-  if (!isFiniteNumber(bookValue)) return `${label} requires reported ${bookValueLabel}.`;
-  if (bookValue <= 0) return `${label} is not meaningful when ${bookValueLabel} is non-positive.`;
-  if (!isFiniteNumber(metrics.valuation.marketCap)) return `${label} requires a current same-currency market cap.`;
+  const missing = [
+    !isFiniteNumber(metrics.valuation.marketCap) ? "a current same-currency market cap" : null,
+    !isFiniteNumber(bookValue) ? `reported ${bookValueLabel}` : null,
+  ].filter((item): item is string => Boolean(item));
+  if (missing.length) return `${label} requires ${missing.join(" and ")}.`;
+  if ((bookValue as number) <= 0) return `${label} is not meaningful when ${bookValueLabel} is non-positive.`;
   return undefined;
 }
 
@@ -961,24 +964,23 @@ function archetypeDimensions(
       c("Simple FCF margin", metrics.margins.freeCashFlowMargin, scoreHigherIsBetter(metrics.margins.freeCashFlowMargin, -0.05, 0.18), 0.25, false, cashFlowMarginMissingReason("Simple FCF margin", "operating cash flow and capex or provider-reported free cash flow", metrics.cashFlow.simpleFreeCashFlow, metrics.latestPeriod?.revenue)),
       c("FCF growth", metrics.growth.freeCashFlowGrowthYoY, scoreHigherIsBetter(metrics.growth.freeCashFlowGrowthYoY, -0.2, 0.15), 0.2, false, fcfGrowthMissingReason(input, metrics)),
       c("Share dilution", metrics.trends.sharesDilutionYoY, scoreLowerIsBetter(metrics.trends.sharesDilutionYoY, 0.08, -0.02), 0.15, false, shareDilutionMissingReason(input)),
-    ], "Property-company cash flow separates operating cash generation from capex-heavy development cycles."),
-    earningsQuality: dimension("earningsQuality", [
+    ], "Property-company cash flow separates operating cash generation from capex-heavy development cycles.");
+    dimensions.earningsQuality = dimension("earningsQuality", [
       c("CFO / net income", metrics.cashFlow.cfoToNetIncome, scoreTargetRange(metrics.cashFlow.cfoToNetIncome, 0, 0.7, 1.6, 3), 0.4, false, netIncomeConversionMissingReason("CFO / net income", "operating cash flow", metrics.latestPeriod?.operatingCashFlow, metrics.latestPeriod?.netIncome)),
       c("Accrual ratio", metrics.cashFlow.accrualRatio, scoreLowerIsBetter(metrics.cashFlow.accrualRatio, 0.2, -0.05), 0.3, false, accrualRatioMissingReason(input, metrics)),
       c("Operating margin stability", metrics.cashFlow.operatingMarginStability, scoreHigherIsBetter(metrics.cashFlow.operatingMarginStability, 0.25, 0.85), 0.3, false, marginStabilityMissingReason(input, "Operating margin stability", "operating income", "operatingIncome")),
-    ], "Property-company earnings quality uses cash conversion and margin stability because fair-value movements can distort accounting earnings."),
-    quality: dimension("quality", [
+    ], "Property-company earnings quality uses cash conversion and margin stability because fair-value movements can distort accounting earnings.");
+    dimensions.quality = dimension("quality", [
       c("ROA", metrics.ratios.returnOnAssets, scoreHigherIsBetter(metrics.ratios.returnOnAssets, 0.01, 0.06), 0.35, false, returnOnAssetsMissingReason(input, metrics)),
       c("Equity / assets", metrics.ratios.equityToAssets, scoreHigherIsBetter(metrics.ratios.equityToAssets, 0.25, 0.6), 0.3, false, balanceRatioMissingReason("Equity / assets", "equity", metrics.latestPeriod?.totalEquity, "assets", metrics.latestPeriod?.totalAssets)),
       c("Share dilution", metrics.trends.sharesDilutionYoY, scoreLowerIsBetter(metrics.trends.sharesDilutionYoY, 0.08, -0.02), 0.2, false, shareDilutionMissingReason(input)),
       c("Revenue CAGR 3Y", metrics.growth.revenueCagr3y, scoreHigherIsBetter(metrics.growth.revenueCagr3y, -0.03, 0.08), 0.15, false, revenueCagrMissingReason(input, 3)),
-    ], "Property-company quality emphasizes asset returns, balance-sheet resilience and per-share discipline."),
-    risk: dimension("risk", [
+    ], "Property-company quality emphasizes asset returns, balance-sheet resilience and per-share discipline.");
+    dimensions.risk = dimension("risk", [
       c("Net debt / assets", netDebtToAssets, scoreLowerIsBetter(netDebtToAssets, 0.6, 0.2), 0.4, false, leverageMissingReason("Net debt / assets", "assets", balance?.totalAssets)),
       c("Interest coverage", metrics.ratios.interestCoverage, scoreHigherIsBetter(metrics.ratios.interestCoverage, 1.2, 4), 0.35, false, interestCoverageMissingReason(input, metrics)),
       c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.25, false, betaMissingReason()),
-    ], "Property-company risk combines asset leverage, debt service coverage and bounded market sensitivity."),
-  };
+    ], "Property-company risk combines asset leverage, debt service coverage and bounded market sensitivity.");
   }
 
   if (archetype === "asset_manager") {
@@ -992,41 +994,40 @@ function archetypeDimensions(
       c("Net margin", metrics.margins.netMargin, scoreHigherIsBetter(metrics.margins.netMargin, 0.08, 0.28), 0.25, false, marginMissingReason("Net margin", "net income", metrics.latestPeriod?.netIncome, metrics.latestPeriod?.revenue)),
       c("Return on equity", metrics.ratios.returnOnEquity, scoreHigherIsBetter(metrics.ratios.returnOnEquity, 0.06, 0.22), 0.25, false, returnOnEquityMissingReason(input, metrics)),
       c("Return on assets", metrics.ratios.returnOnAssets, scoreHigherIsBetter(metrics.ratios.returnOnAssets, 0.02, 0.12), 0.15, false, returnOnAssetsMissingReason(input, metrics)),
-    ], "Asset-manager profitability emphasizes fee margins and equity returns rather than bank spread metrics."),
-    financialHealth: dimension("financialHealth", [
+    ], "Asset-manager profitability emphasizes fee margins and equity returns rather than bank spread metrics.");
+    dimensions.financialHealth = dimension("financialHealth", [
       c("Equity / assets", metrics.ratios.equityToAssets, scoreHigherIsBetter(metrics.ratios.equityToAssets, 0.25, 0.65), 0.35, false, balanceRatioMissingReason("Equity / assets", "equity", metrics.latestPeriod?.totalEquity, "assets", metrics.latestPeriod?.totalAssets)),
       c("Cash / debt", metrics.ratios.cashToDebt, scoreHigherIsBetter(metrics.ratios.cashToDebt, 0.1, 1.5), 0.25, false, cashToDebtMissingReason(input, metrics)),
       c("Interest coverage", metrics.ratios.interestCoverage, scoreHigherIsBetter(metrics.ratios.interestCoverage, 2, 10), 0.25, false, interestCoverageMissingReason(input, metrics)),
       c("Debt / equity", metrics.ratios.debtToEquity, scoreLowerIsBetter(metrics.ratios.debtToEquity, 1.2, 0.1), 0.15, false, balanceRatioMissingReason("Debt / equity", "debt", metrics.latestPeriod?.totalDebt, "equity", metrics.latestPeriod?.totalEquity)),
-    ], "Asset-manager health focuses on capital-light balance-sheet resilience rather than deposit or loan metrics."),
-    valuation: dimension("valuation", [
+    ], "Asset-manager health focuses on capital-light balance-sheet resilience rather than deposit or loan metrics.");
+    dimensions.valuation = dimension("valuation", [
       c("P / E", metrics.valuation.priceEarnings, scoreLowerIsBetter(metrics.valuation.priceEarnings, 24, 9), 0.4, false, priceEarningsMissingReason(metrics)),
       c("EV / EBITDA", metrics.valuation.evEbitda, scoreLowerIsBetter(metrics.valuation.evEbitda, 18, 7), 0.35, false, evEbitdaMissingReason(metrics)),
       c("P / Book", metrics.valuation.priceBook, scoreLowerIsBetter(metrics.valuation.priceBook, 3.5, 0.9), 0.25, false, bookMultipleMissingReason("P / Book", metrics, metrics.latestPeriod?.totalEquity, "book equity")),
-    ], "Asset-manager valuation uses reported earnings and capital-light multiples; AUM multiple data is not fabricated."),
-    cashFlow: dimension("cashFlow", [
+    ], "Asset-manager valuation uses reported earnings and capital-light multiples; AUM multiple data is not fabricated.");
+    dimensions.cashFlow = dimension("cashFlow", [
       c("CFO margin", metrics.margins.operatingCashFlowMargin, scoreHigherIsBetter(metrics.margins.operatingCashFlowMargin, 0.05, 0.3), 0.3, false, cashFlowMarginMissingReason("CFO margin", "operating cash flow", metrics.latestPeriod?.operatingCashFlow, metrics.latestPeriod?.revenue)),
       c("Simple FCF margin", metrics.margins.freeCashFlowMargin, scoreHigherIsBetter(metrics.margins.freeCashFlowMargin, 0.03, 0.25), 0.25, false, cashFlowMarginMissingReason("Simple FCF margin", "operating cash flow and capex or provider-reported free cash flow", metrics.cashFlow.simpleFreeCashFlow, metrics.latestPeriod?.revenue)),
       c("FCF / net income", metrics.cashFlow.freeCashFlowToNetIncome, scoreTargetRange(metrics.cashFlow.freeCashFlowToNetIncome, 0, 0.8, 1.5, 3), 0.25, false, netIncomeConversionMissingReason("FCF / net income", "simple free cash flow", metrics.cashFlow.simpleFreeCashFlow, metrics.latestPeriod?.netIncome)),
       c("Share dilution", metrics.trends.sharesDilutionYoY, scoreLowerIsBetter(metrics.trends.sharesDilutionYoY, 0.08, -0.02), 0.2, false, shareDilutionMissingReason(input)),
-    ], "Asset-manager cash generation uses reported operating cash flow and per-share discipline."),
-    earningsQuality: dimension("earningsQuality", [
+    ], "Asset-manager cash generation uses reported operating cash flow and per-share discipline.");
+    dimensions.earningsQuality = dimension("earningsQuality", [
       c("CFO / net income", metrics.cashFlow.cfoToNetIncome, scoreTargetRange(metrics.cashFlow.cfoToNetIncome, 0, 0.85, 1.5, 3), 0.4, false, netIncomeConversionMissingReason("CFO / net income", "operating cash flow", metrics.latestPeriod?.operatingCashFlow, metrics.latestPeriod?.netIncome)),
       c("Accrual ratio", metrics.cashFlow.accrualRatio, scoreLowerIsBetter(metrics.cashFlow.accrualRatio, 0.15, -0.05), 0.3, false, accrualRatioMissingReason(input, metrics)),
       c("Operating margin stability", metrics.cashFlow.operatingMarginStability, scoreHigherIsBetter(metrics.cashFlow.operatingMarginStability, 0.3, 0.9), 0.3, false, marginStabilityMissingReason(input, "Operating margin stability", "operating income", "operatingIncome")),
-    ], "Asset-manager earnings quality is anchored in cash conversion and recurring fee-margin stability."),
-    quality: dimension("quality", [
+    ], "Asset-manager earnings quality is anchored in cash conversion and recurring fee-margin stability.");
+    dimensions.quality = dimension("quality", [
       c("Return on equity", metrics.ratios.returnOnEquity, scoreHigherIsBetter(metrics.ratios.returnOnEquity, 0.06, 0.22), 0.35, false, returnOnEquityMissingReason(input, metrics)),
       c("Return on assets", metrics.ratios.returnOnAssets, scoreHigherIsBetter(metrics.ratios.returnOnAssets, 0.02, 0.12), 0.2, false, returnOnAssetsMissingReason(input, metrics)),
       c("Operating margin stability", metrics.cashFlow.operatingMarginStability, scoreHigherIsBetter(metrics.cashFlow.operatingMarginStability, 0.3, 0.9), 0.25, false, marginStabilityMissingReason(input, "Operating margin stability", "operating income", "operatingIncome")),
       c("Share dilution", metrics.trends.sharesDilutionYoY, scoreLowerIsBetter(metrics.trends.sharesDilutionYoY, 0.08, -0.02), 0.2, false, shareDilutionMissingReason(input)),
-    ], "Asset-manager quality emphasizes durable fee economics, capital efficiency and per-share discipline."),
-    risk: dimension("risk", [
+    ], "Asset-manager quality emphasizes durable fee economics, capital efficiency and per-share discipline.");
+    dimensions.risk = dimension("risk", [
       c("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.6, 0.7), 0.35, false, betaMissingReason()),
       c("Equity / assets", metrics.ratios.equityToAssets, scoreHigherIsBetter(metrics.ratios.equityToAssets, 0.25, 0.65), 0.35, false, balanceRatioMissingReason("Equity / assets", "equity", metrics.latestPeriod?.totalEquity, "assets", metrics.latestPeriod?.totalAssets)),
       c("Interest coverage", metrics.ratios.interestCoverage, scoreHigherIsBetter(metrics.ratios.interestCoverage, 2, 10), 0.3, false, interestCoverageMissingReason(input, metrics)),
-    ], "Asset-manager risk combines market sensitivity with balance-sheet and debt-service resilience."),
-  };
+    ], "Asset-manager risk combines market sensitivity with balance-sheet and debt-service resilience.");
   }
 
   if (archetype === "software_growth") {
@@ -1045,13 +1046,14 @@ function archetypeDimensions(
       c("Operating margin", metrics.margins.operatingMargin, scoreHigherIsBetter(metrics.margins.operatingMargin, 0, 0.18), 0.3, false, marginMissingReason("Operating margin", "operating income", metrics.latestPeriod?.operatingIncome, metrics.latestPeriod?.revenue)),
       c("Operating margin stability", metrics.cashFlow.operatingMarginStability, scoreHigherIsBetter(metrics.cashFlow.operatingMarginStability, 0.2, 0.8), 0.4, false, marginStabilityMissingReason(input, "Operating margin stability", "operating income", "operatingIncome")),
       c("ROIC", metrics.ratios.returnOnInvestedCapital, scoreHigherIsBetter(metrics.ratios.returnOnInvestedCapital, 0.03, 0.15), 0.3, false, roicMissingReason(input, metrics)),
-    ], "Through-cycle stability prevents one peak margin year from dominating."),
-    growth: dimension("growth", [
-      c("Revenue CAGR 5Y", metrics.growth.revenueCagr5y, scoreHigherIsBetter(metrics.growth.revenueCagr5y, -0.03, 0.08), isFiniteNumber(metrics.growth.revenueCagr5y) ? 0.6 : 0.3, false, revenueCagrMissingReason(input, 5)),
-      c("Revenue CAGR 3Y fallback", isFiniteNumber(metrics.growth.revenueCagr5y) ? null : metrics.growth.revenueCagr3y, scoreHigherIsBetter(isFiniteNumber(metrics.growth.revenueCagr5y) ? null : metrics.growth.revenueCagr3y, -0.03, 0.08), 0.3, isFiniteNumber(metrics.growth.revenueCagr5y), revenueCagrMissingReason(input, 3)),
+    ], "Through-cycle stability prevents one peak margin year from dominating.");
+    const hasFiveYearRevenueHistory = isFiniteNumber(metrics.growth.revenueCagr5y);
+    const threeYearFallback = hasFiveYearRevenueHistory ? null : metrics.growth.revenueCagr3y;
+    dimensions.growth = dimension("growth", [
+      c("Revenue CAGR 5Y", metrics.growth.revenueCagr5y, scoreHigherIsBetter(metrics.growth.revenueCagr5y, -0.03, 0.08), hasFiveYearRevenueHistory ? 0.6 : 0.3, false, revenueCagrMissingReason(input, 5)),
+      c("Revenue CAGR 3Y fallback", threeYearFallback, scoreHigherIsBetter(threeYearFallback, -0.03, 0.08), 0.3, hasFiveYearRevenueHistory, revenueCagrMissingReason(input, 3)),
       c("FCF stability", metrics.cashFlow.freeCashFlowStability, scoreHigherIsBetter(metrics.cashFlow.freeCashFlowStability, 0.2, 0.8), 0.4, false, fcfStabilityMissingReason(input)),
-    ], "Five-year growth is preferred; a three-year CAGR can restore only partial coverage when the provider history is shorter, while the missing five-year evidence remains explicit."),
-  };
+    ], "Five-year growth is preferred; a three-year CAGR can restore only partial coverage when the provider history is shorter, while the missing five-year evidence remains explicit.");
   }
 
   if (archetype === "pre_revenue_biotech") {
@@ -1085,21 +1087,20 @@ function archetypeDimensions(
       hc("Net debt / equity", netDebtToEquity, scoreLowerIsBetter(netDebtToEquity, 0.35, 0), 0.45, false, balanceRatioMissingReason("Net debt / equity", "debt and cash", isFiniteNumber(balance?.totalDebt) && isFiniteNumber(balance?.cashAndEquivalents) ? balance.totalDebt - balance.cashAndEquivalents : null, "equity", balance?.totalEquity)),
       hc("Cash / debt", cashToDebt, scoreHigherIsBetter(cashToDebt, 0.1, 1), 0.25, false, balanceRatioMissingReason("Cash / debt", "cash", balance?.cashAndEquivalents, "debt", balance?.totalDebt)),
       hc("Equity / assets", equityToAssets, scoreHigherIsBetter(equityToAssets, 0.45, 0.85), 0.3, false, balanceRatioMissingReason("Equity / assets", "equity", balance?.totalEquity, "assets", balance?.totalAssets)),
-    ], "Holding-company balance-sheet resilience uses same-period debt, cash and equity rather than EBITDA leverage."),
-    dimensions.valuation = dimension("valuation", [hc("NAV discount / premium", null, null, 1, false, holdingNavMissingReason)], "A holding-company valuation requires real look-through NAV or SOTP data; book equity is not substituted for NAV."),
-    dimensions.cashFlow = dimension("cashFlow", [hc("Corporate free cash flow", null, null, 1, true)], "Industrial free-cash-flow conversion is not comparable for an investment holding company."),
-    dimensions.earningsQuality = dimension("earningsQuality", [hc("Operating accruals", null, null, 1, true)], "Industrial accrual metrics are not used for fair-value-driven holding-company earnings."),
+    ], "Holding-company balance-sheet resilience uses same-period debt, cash and equity rather than EBITDA leverage.");
+    dimensions.valuation = dimension("valuation", [hc("NAV discount / premium", null, null, 1, false, holdingNavMissingReason)], "A holding-company valuation requires real look-through NAV or SOTP data; book equity is not substituted for NAV.");
+    dimensions.cashFlow = dimension("cashFlow", [hc("Corporate free cash flow", null, null, 1, true)], "Industrial free-cash-flow conversion is not comparable for an investment holding company.");
+    dimensions.earningsQuality = dimension("earningsQuality", [hc("Operating accruals", null, null, 1, true)], "Industrial accrual metrics are not used for fair-value-driven holding-company earnings.");
     dimensions.quality = dimension("quality", [
       hc("NAV / share compounding", null, null, 0.5, false, holdingNavMissingReason),
       hc("Equity / assets", equityToAssets, scoreHigherIsBetter(equityToAssets, 0.45, 0.85), 0.25, false, balanceRatioMissingReason("Equity / assets", "equity", balance?.totalEquity, "assets", balance?.totalAssets)),
       hc("Share dilution", metrics.trends.sharesDilutionYoY, scoreLowerIsBetter(metrics.trends.sharesDilutionYoY, 0.08, -0.02), 0.25, false, shareDilutionMissingReason(input)),
-    ], "Holding-company quality emphasizes NAV compounding, balance-sheet strength and per-share discipline."),
+    ], "Holding-company quality emphasizes NAV compounding, balance-sheet strength and per-share discipline.");
     dimensions.risk = dimension("risk", [
       hc("Beta", input.market?.beta ?? null, scoreLowerIsBetter(input.market?.beta ?? null, 1.5, 0.7), 0.35, false, betaMissingReason()),
       hc("Net debt / equity", netDebtToEquity, scoreLowerIsBetter(netDebtToEquity, 0.35, 0), 0.35, false, balanceRatioMissingReason("Net debt / equity", "debt and cash", isFiniteNumber(balance?.totalDebt) && isFiniteNumber(balance?.cashAndEquivalents) ? balance.totalDebt - balance.cashAndEquivalents : null, "equity", balance?.totalEquity)),
       hc("Equity / assets", equityToAssets, scoreHigherIsBetter(equityToAssets, 0.45, 0.85), 0.3, false, balanceRatioMissingReason("Equity / assets", "equity", balance?.totalEquity, "assets", balance?.totalAssets)),
-    ], "Holding-company risk combines market sensitivity with same-period holding-level balance-sheet resilience."),
-  };
+    ], "Holding-company risk combines market sensitivity with same-period holding-level balance-sheet resilience.");
   }
 
   if (input.company.investmentProfile === "dividend" && ["standard", "software_growth", "cyclical", "utility"].includes(archetype)) {
@@ -1119,8 +1120,7 @@ function archetypeDimensions(
       c("AFFO payout", affoPayout, scoreTargetRange(affoPayout, 0, 0.25, 0.8, 1.2), 0.3),
       c("Dividend coverage", dividendCoverage, scoreHigherIsBetter(dividendCoverage, 0.8, 1.5), 0.3),
       c("AFFO growth", affoGrowth, scoreHigherIsBetter(affoGrowth, -0.08, 0.1), 0.2),
-    ], "REIT dividends require reported AFFO payout and dividend coverage rather than generic FCF payout."),
-  };
+    ], "REIT dividends require reported AFFO payout and dividend coverage rather than generic FCF payout.");
   }
 
   return dimensions;
