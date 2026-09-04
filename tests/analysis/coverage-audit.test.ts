@@ -69,6 +69,10 @@ describe("coverage audit", () => {
 
   it("attributes five-year growth gaps to a known provider history cap instead of the issuer", () => {
     const result = analyze({
+      company: {
+        ...durableCompounderInput.company,
+        analysisArchetype: "cyclical",
+      },
       providerDiagnostics: [{
         provider: "Yahoo Finance fundamentals",
         capability: "fundamentals",
