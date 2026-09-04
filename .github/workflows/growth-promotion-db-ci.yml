@@ -1,0 +1,186 @@
+name: Growth Promotion DB CI
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - "supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql"
+      - "supabase/migrations/20260904200500_growth_visual_completion_v3.sql"
+      - "supabase/migrations/20260904202000_growth_distribution_packages_v3.sql"
+      - "supabase/migrations/20260904213000_growth_intelligence_config_v3.sql"
+      - "supabase/migrations/20260904223000_growth_video_package_completion_gate_v3.sql"
+      - ".github/workflows/growth-promotion-db-ci.yml"
+
+jobs:
+  promotion-gate-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Isolate autonomous growth migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
+          supabase init
+
+      - name: Start disposable local Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap acquisition prerequisites
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists public.acq_content (
+            id uuid primary key default gen_random_uuid()
+          );
+          create table if not exists public.acq_config (
+            id uuid primary key default gen_random_uuid(),
+            key text not null unique,
+            value text,
+            value_type text default 'string',
+            description text,
+            updated_at timestamptz default now(),
+            created_at timestamptz default now()
+          );
+          create table if not exists public.acq_distribution_queue (
+            id uuid primary key default gen_random_uuid(),
+            content_id uuid not null references public.acq_content(id) on delete cascade,
+            platform text not null,
+            caption text,
+            script text,
+            utm_url text,
+            recommended_time text,
+            daily_rank integer,
+            status text not null default 'pending_approval',
+            generation_version text not null default 'v2'
+          );
+          SQL
+
+      - name: Apply promotion-gate migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904173000_growth_render_job_kinds_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904200500_growth_visual_completion_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904202000_growth_distribution_packages_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904213000_growth_intelligence_config_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904223000_growth_video_package_completion_gate_v3.sql
+
+      - name: Assert shadow and live video promotion gates
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            c_shadow uuid := gen_random_uuid();
+            c_live uuid := gen_random_uuid();
+            c_static uuid := gen_random_uuid();
+            q_shadow uuid := gen_random_uuid();
+            q_live uuid := gen_random_uuid();
+            q_static uuid := gen_random_uuid();
+            j_shadow uuid := gen_random_uuid();
+            j_live uuid := gen_random_uuid();
+            j_static uuid := gen_random_uuid();
+            voice_id uuid := gen_random_uuid();
+            p text;
+            package_count integer;
+            ready_count integer;
+            distinct_master integer;
+            tracked_count integer;
+          begin
+            insert into public.acq_voice_profiles(
+              id,idempotency_key,language,provider,model,storage_path,status,consent_at
+            ) values (
+              voice_id,'promotion-ci-voice','sv','chatterbox','multilingual-v3','profiles/ci/reference.wav','active',now()
+            );
+
+            insert into public.acq_content(id) values (c_shadow),(c_live),(c_static);
+            insert into public.acq_distribution_queue(id,content_id,platform,caption,script,utm_url,recommended_time,daily_rank,status,generation_version)
+            values
+              (q_shadow,c_shadow,'youtube_short','Tre risker. Testa StockBox: https://old.example/?utm_source=old','Tre risker i ett bolag.','https://old.example/?utm_source=old','18:30 Europe/Stockholm',1,'pending_approval','v2'),
+              (q_live,c_live,'instagram_reel','Så granskar du lönsamhet.','Så granskar du lönsamhet över tid.','https://old.example/?utm_source=old2','17:30 Europe/Stockholm',1,'pending_approval','v2'),
+              (q_static,c_static,'linkedin','Statisk analys',null,'https://example.test/?utm_source=linkedin','12:00 Europe/Stockholm',2,'pending_approval','v2');
+
+            insert into public.acq_render_jobs(
+              id,idempotency_key,content_id,voice_profile_id,state,template,language,job_kind,render_spec,metadata,worker_id,claimed_at
+            ) values
+              (j_shadow,'promotion-ci-shadow',c_shadow,voice_id,'storyboarding','educational_checklist','sv','video',jsonb_build_object('title','Tre risker','script','Tre risker i ett bolag.'),jsonb_build_object('source_queue_id',q_shadow),'ci-worker',now()),
+              (j_live,'promotion-ci-live',c_live,voice_id,'storyboarding','educational_checklist','sv','video',jsonb_build_object('title','Granska lönsamheten','script','Så granskar du lönsamhet över tid.'),jsonb_build_object('source_queue_id',q_live),'ci-worker',now()),
+              (j_static,'promotion-ci-static',c_static,null,'storyboarding','educational_checklist','sv','static_image','{}'::jsonb,jsonb_build_object('source_queue_id',q_static),'ci-worker',now());
+
+            insert into public.acq_budget_ledger(idempotency_key,provider,operation,content_id,render_job_id,estimated_sek,actual_sek)
+            values
+              ('promotion-ci-ledger-shadow','modal_chatterbox','founder_voice_tts',c_shadow,j_shadow,0.20,0.18),
+              ('promotion-ci-ledger-live','modal_chatterbox','founder_voice_tts',c_live,j_live,0.20,0.18);
+
+            -- Shadow mode defaults true: render may complete, but all social packages must remain draft.
+            p := to_char(current_date,'YYYY-MM-DD') || '/' || c_shadow || '/' || j_shadow || '/';
+            perform public.acq_complete_render_job_v3(
+              j_shadow,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','voice_audio','bucket','growth-render-staging','storage_path',p||'voice.wav','mime_type','audio/wav','checksum_sha256',repeat('1',64)),
+                jsonb_build_object('kind','master_video','bucket','growth-ready-assets','storage_path',p||'master.mp4','mime_type','video/mp4','width',1080,'height',1920,'duration_ms',30000,'checksum_sha256',repeat('2',64)),
+                jsonb_build_object('kind','cover','bucket','growth-ready-assets','storage_path',p||'cover.jpg','mime_type','image/jpeg','width',1080,'height',1920,'checksum_sha256',repeat('3',64))
+              )
+            );
+
+            select count(*), count(*) filter (where status='ready'), count(distinct master_asset_id),
+              count(*) filter (where position(utm_url in coalesce(caption,description,'')) > 0)
+            into package_count, ready_count, distinct_master, tracked_count
+            from public.acq_distribution_packages where render_job_id=j_shadow;
+            if package_count <> 4 or ready_count <> 0 or distinct_master <> 1 or tracked_count <> 4 then
+              raise exception 'shadow package invariant failed total=% ready=% masters=% tracked=%',package_count,ready_count,distinct_master,tracked_count;
+            end if;
+            if exists(select 1 from public.acq_distribution_packages where render_job_id=j_shadow and idempotency_key like 'package:v3:%') then
+              raise exception 'legacy video package trigger bypassed promotion gate';
+            end if;
+            if exists(select 1 from public.acq_distribution_packages where render_job_id=j_shadow and coalesce((metadata->>'promotion_allowed')::boolean,false)) then
+              raise exception 'shadow packages incorrectly marked promotable';
+            end if;
+
+            -- Promotion enabled + active founder clone + QC assets + budget telemetry => four READY packages.
+            update public.acq_config set value='false', updated_at=now() where key='growth_render_shadow_mode';
+            p := to_char(current_date,'YYYY-MM-DD') || '/' || c_live || '/' || j_live || '/';
+            perform public.acq_complete_render_job_v3(
+              j_live,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','voice_audio','bucket','growth-render-staging','storage_path',p||'voice.wav','mime_type','audio/wav','checksum_sha256',repeat('4',64)),
+                jsonb_build_object('kind','master_video','bucket','growth-ready-assets','storage_path',p||'master.mp4','mime_type','video/mp4','width',1080,'height',1920,'duration_ms',30000,'checksum_sha256',repeat('5',64)),
+                jsonb_build_object('kind','cover','bucket','growth-ready-assets','storage_path',p||'cover.jpg','mime_type','image/jpeg','width',1080,'height',1920,'checksum_sha256',repeat('6',64))
+              )
+            );
+            select count(*), count(*) filter (where status='ready'), count(distinct master_asset_id),
+              count(*) filter (where position(utm_url in coalesce(caption,description,'')) > 0)
+            into package_count, ready_count, distinct_master, tracked_count
+            from public.acq_distribution_packages where render_job_id=j_live;
+            if package_count <> 4 or ready_count <> 4 or distinct_master <> 1 or tracked_count <> 4 then
+              raise exception 'live package invariant failed total=% ready=% masters=% tracked=%',package_count,ready_count,distinct_master,tracked_count;
+            end if;
+
+            -- Replacing the legacy video trigger must not break non-video READY packaging.
+            p := to_char(current_date,'YYYY-MM-DD') || '/' || c_static || '/' || j_static || '/';
+            perform public.acq_complete_render_job_v3(
+              j_static,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','static_image','bucket','growth-ready-assets','storage_path',p||'static.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('7',64))
+              )
+            );
+            select count(*) into package_count from public.acq_distribution_packages where render_job_id=j_static and status='ready';
+            if package_count <> 1 then raise exception 'non-video package trigger regression'; end if;
+          end
+          $$;
+          SQL
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup
