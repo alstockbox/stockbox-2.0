@@ -29,7 +29,7 @@ const GUIDANCE_LANGUAGE = /\b(guidance|outlook|forecast|expected|expects|approxi
 const RULES: ParserRule[] = [
   {
     metric: "occupancy",
-    pattern: /\b(?:period[- ]end\s+|average\s+|property[- ]level\s+)?occupancy\b[^\d%]{0,48}(\d{1,3}(?:\.\d+)?)\s*%/i,
+    pattern: /\b(?:period[- ]end\s+|average\s+|property[- ]level\s+)?occupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
   },
   {
@@ -39,17 +39,17 @@ const RULES: ParserRule[] = [
   },
   {
     metric: "sameStoreNoiGrowth",
-    pattern: /\b(?:cash\s+)?same[- ]store(?:\s+cash)?\s+noi(?:\s+growth)?\*?\b[^\d%+\-]{0,48}([+\-]?\d{1,3}(?:\.\d+)?)\s*%/i,
+    pattern: /\b(?:cash\s+)?same[- ]store(?:\s+cash)?\s+noi(?:\s+growth)?\*?\b(?:(?![+\-]?\d{1,3}(?:\.\d+)?\s*%).){0,96}?([+\-]?\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
   },
   {
     metric: "netDebtToEbitdare",
-    pattern: /\bnet\s+debt\s+(?:to|\/)\s+(?:annualized\s+(?:pro\s+forma\s+)?)?(?:adjusted\s+)?ebitdare\b[^\d]{0,64}(\d{1,2}(?:\.\d+)?)\s*x\b/i,
+    pattern: /\bnet\s+debt(?:\s+and\s+preferred\s+stock)?\s*(?:to|\/)\s*(?:annualized\s+(?:pro\s+forma\s+)?)?(?:adjusted\s+)?ebitdare\b(?:(?!\d{1,2}(?:\.\d+)?\s*x).){0,96}?(\d{1,2}(?:\.\d+)?)\s*x\b/i,
     scale: 1,
   },
   {
     metric: "fixedChargeCoverage",
-    pattern: /\bfixed[- ]charge\s+coverage(?:\s+ratio)?\b[^\d]{0,48}(\d{1,2}(?:\.\d+)?)\s*x\b/i,
+    pattern: /\bfixed[- ]charge\s+coverage(?:\s+ratio)?\b(?:(?!\d{1,2}(?:\.\d+)?\s*x).){0,96}?(\d{1,2}(?:\.\d+)?)\s*x\b/i,
     scale: 1,
   },
 ];
