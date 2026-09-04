@@ -18,6 +18,12 @@ export type DailyCandidate = {
   qualityScore: number;
 };
 
+export type DailyQueuePlan = {
+  id: string;
+  status: "pending_approval" | "deferred";
+  dailyRank: number | null;
+};
+
 const STRONG_STOCK_TERMS = [
   "aktie",
   "börs",
@@ -169,7 +175,6 @@ export function selectDailyContent(
     contentCounts.set(item.contentId, (contentCounts.get(item.contentId) ?? 0) + 1);
   };
 
-  // First pass: preserve platform spread while preventing one topic from dominating.
   for (const item of eligible) {
     if (selected.length >= limit) break;
     if (usedPlatforms.has(item.platform)) continue;
@@ -177,15 +182,12 @@ export function selectDailyContent(
     take(item);
   }
 
-  // Second pass: if diversity constraints left a platform unused, fill it with the
-  // best remaining candidate even if that requires relaxing the per-topic cap.
   for (const item of eligible) {
     if (selected.length >= limit) break;
     if (usedIds.has(item.id) || usedPlatforms.has(item.platform)) continue;
     take(item);
   }
 
-  // Final fallback: only used when there are fewer distinct platforms than the limit.
   for (const item of eligible) {
     if (selected.length >= limit) break;
     if (usedIds.has(item.id)) continue;
@@ -193,6 +195,22 @@ export function selectDailyContent(
   }
 
   return selected;
+}
+
+export function planDailyQueue(
+  candidates: DailyCandidate[],
+  options: { limit: number; minQuality: number },
+): DailyQueuePlan[] {
+  const selected = selectDailyContent(candidates, options);
+  const ranks = new Map(selected.map((item, index) => [item.id, index + 1]));
+  return candidates.map((item) => {
+    const rank = ranks.get(item.id) ?? null;
+    return {
+      id: item.id,
+      status: rank ? "pending_approval" : "deferred",
+      dailyRank: rank,
+    };
+  });
 }
 
 export function isTransientAiStatus(status: number) {
