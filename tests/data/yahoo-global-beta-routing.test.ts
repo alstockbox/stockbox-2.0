@@ -68,6 +68,28 @@ describe("Yahoo global beta benchmark routing", () => {
     expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
   });
 
+  it("falls back to the local WIG20TR ETF when Yahoo's Warsaw index feed has no usable history", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(weeklyPayload(1.2))
+      .mockResolvedValueOnce(weeklyPayload(1, 80))
+      .mockResolvedValueOnce(weeklyPayload(1));
+
+    const result = await yahooMarketDataProvider.fetchMarketData({
+      ticker: "FIXTURE.WA",
+      canonicalTicker: "FIXTURE.WA",
+      name: "Warsaw beta fallback fixture",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(encodeURIComponent("WIG20.WA"));
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(encodeURIComponent("ETFBW20TR.WA"));
+    expect(result.data.beta).toBeCloseTo(1.2, 2);
+    expect(result.data.betaBenchmark).toBe("ETFBW20TR.WA");
+    expect(result.data.betaObservationCount).toBeGreaterThanOrEqual(52);
+  });
+
   it("keeps a well-sampled historical beta when benchmark lag stays within the nine-week policy", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(weeklyPayload(1.2))
