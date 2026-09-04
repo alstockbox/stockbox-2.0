@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildMasterVideoDistributionPackages } from "@/lib/growth/publishing-package";
 import {
@@ -84,5 +85,15 @@ describe("growth master-video package parity", () => {
     expect(result.promotion.allowed).toBe(false);
     expect(result.promotion.reasons).toContain("founder_voice_not_active");
     expect(result.packages.every((item) => item.status === "draft")).toBe(true);
+  });
+
+  it("wires completed video renders into durable distribution-package upserts", () => {
+    const source = readFileSync(
+      new URL("../supabase/functions/stockbox-growth-worker-api/index.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain('import { prepareCompletedVideoPackages } from "./video-packages.ts"');
+    expect(source).toContain('.from("acq_distribution_packages")');
+    expect(source).toContain("prepareCompletedVideoPackages({");
   });
 });
