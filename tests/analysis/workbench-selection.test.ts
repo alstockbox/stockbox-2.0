@@ -90,7 +90,7 @@ describe("analysis workbench selection state", () => {
     })).toBe(false);
   });
 
-  it("does not trust a common-stock label when the security text says ADR", () => {
+  it("uses ADR text classification while allowing staged provider attempts when fundamentals capability is explicit", () => {
     expect(supportsLiveFundamentals({
       ticker: "NVO",
       name: "Novo Nordisk A/S ADR",
@@ -101,7 +101,7 @@ describe("analysis workbench selection state", () => {
         marketData: true,
         providerIds: ["client"],
       },
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it.each([
