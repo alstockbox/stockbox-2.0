@@ -17,6 +17,7 @@ on:
       - "src/lib/data/security-classification.ts"
       - "src/lib/data/provider.ts"
       - "src/lib/data/provider-core.ts"
+      - "src/lib/data/period-alignment.ts"
       - "src/lib/data/sec.ts"
       - "src/lib/data/sec-core.ts"
       - "src/lib/data/sec-reit-specialized*.ts"
