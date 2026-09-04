@@ -12,11 +12,11 @@
 
 ## Global Constraints
 
-- Carousels/images must be finished files, not instructions such as “Slide 1 should say…”.
+- Carousels/images must be finished files, not production instructions.
 - Final carousel package includes individual slide PNGs plus a ZIP where supported.
 - Generated video is an enhancement, never a base dependency.
 - Short generative micro-scenes are attempted only when a provider has a known bounded projected cost and the global Budget Governor authorizes the call.
-- If the monthly target/cap, provider availability, or QC prevents a generative clip, replace it with StockBox UI/motion graphics automatically.
+- If budget, provider availability, or QC prevents a generative clip, replace it with StockBox UI/motion graphics automatically.
 - Total engine target <= 50 SEK/month; absolute hard cap 75 SEK/month.
 - No generative-media provider may receive founder voice reference audio.
 - Generated scenes must pass media/content QC before inclusion.
@@ -31,9 +31,12 @@ Create:
 - `src/video/carousel/CarouselSlide.tsx`
 - `src/video/carousel/StaticGrowthCard.tsx`
 - `scripts/growth/render-growth-carousel.mjs`
+- `scripts/growth/generative-provider.mjs`
+- `scripts/growth/benchmark-generative-provider.mjs`
 - `tests/growth-carousel-spec.test.ts`
 - `tests/growth-generative-scenes.test.ts`
 - `tests/growth-carousel-render.test.ts`
+- `supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql`
 
 Modify:
 - `src/lib/growth/render-spec.ts`
@@ -42,16 +45,13 @@ Modify:
 - `supabase/functions/stockbox-growth-engine/index.ts`
 - `supabase/functions/stockbox-growth-worker-api/index.ts`
 - `.github/workflows/growth-render-worker.yml`
+- `.github/workflows/growth-quality-ci.yml`
 
 ### Task 1: Typed Carousel and Static Asset Contract
 
-**Files:**
-- Create: `src/lib/growth/carousel-spec.ts`
-- Test: `tests/growth-carousel-spec.test.ts`
+**Files:** `src/lib/growth/carousel-spec.ts`, `tests/growth-carousel-spec.test.ts`.
 
-**Interfaces:**
-- Produces `CarouselSpecSchema`, `CarouselSpec`, `CarouselSlideSpec`.
-- A carousel contains 3-8 slides, each with headline/body/visual hint, plus caption/CTA/content ID.
+**Interfaces:** Produces `CarouselSpecSchema`, `CarouselSpec`, `CarouselSlideSpec`; a carousel contains 3-8 complete slides plus caption/CTA/content ID.
 
 - [ ] **Step 1: Write failing schema tests**
 
@@ -61,9 +61,7 @@ import { CarouselSpecSchema } from "@/lib/growth/carousel-spec";
 
 it("accepts a complete five-slide StockBox carousel", () => {
   const value = CarouselSpecSchema.parse({
-    version: "v3",
-    contentId: "content-1",
-    title: "Fyra saker att kontrollera i balansräkningen",
+    version: "v3", contentId: "content-1", title: "Fyra saker att kontrollera i balansräkningen",
     slides: [
       { index: 1, headline: "Börja med skulden", body: "Jämför nettoskuld med kassaflödet.", visualKind: "metric" },
       { index: 2, headline: "Titta på räntan", body: "Dyrare finansiering kan pressa resultatet.", visualKind: "chart" },
@@ -71,35 +69,27 @@ it("accepts a complete five-slide StockBox carousel", () => {
       { index: 4, headline: "Se trenden", body: "En nivå säger mindre än utvecklingen över tid.", visualKind: "chart" },
       { index: 5, headline: "Samla analysen", body: "StockBox hjälper dig se helheten.", visualKind: "cta" },
     ],
-    caption: "Fyra kontroller som gör balansräkningen enklare.",
-    cta: "Analysera bolaget i StockBox",
+    caption: "Fyra kontroller som gör balansräkningen enklare.", cta: "Analysera bolaget i StockBox",
   });
   expect(value.slides).toHaveLength(5);
 });
 
-it("rejects instruction-only or empty slides", () => {
+it("rejects empty/incomplete slide sets", () => {
   expect(() => CarouselSpecSchema.parse({ version: "v3", contentId: "x", title: "x", slides: [], caption: "x", cta: "x" })).toThrow();
 });
 ```
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Verify RED**
 
 ```bash
 npm test -- tests/growth-carousel-spec.test.ts
 ```
-Expected: FAIL.
 
-- [ ] **Step 3: Implement Zod schema**
+- [ ] **Step 3: Implement schema rules**
 
-Rules:
-- 3-8 slides;
-- continuous indexes starting at 1;
-- headline 3-90 chars;
-- body 0-220 chars;
-- `visualKind` enum `metric | chart | stockbox_ui | icon | cta`;
-- final slide may be CTA but other slides must still provide educational value.
+Require 3-8 continuous slide indexes starting at 1; headline 3-90 chars; body max 220 chars; `visualKind` in `metric | chart | stockbox_ui | icon | cta`; final slide may be CTA but previous slides must remain educational.
 
-- [ ] **Step 4: Run test and commit**
+- [ ] **Step 4: Verify and commit**
 
 ```bash
 npm test -- tests/growth-carousel-spec.test.ts
@@ -109,70 +99,38 @@ git commit -m "feat: define ready carousel contract"
 
 ### Task 2: Render Finished Carousel Slides and ZIP
 
-**Files:**
-- Create: `src/video/carousel/CarouselSlide.tsx`
-- Create: `src/video/carousel/StaticGrowthCard.tsx`
-- Create: `scripts/growth/render-growth-carousel.mjs`
-- Test: `tests/growth-carousel-render.test.ts`
+**Files:** `src/video/carousel/CarouselSlide.tsx`, `src/video/carousel/StaticGrowthCard.tsx`, `scripts/growth/render-growth-carousel.mjs`, `tests/growth-carousel-render.test.ts`, `package.json`, `package-lock.json`.
 
-**Interfaces:**
-- CLI: `npm run growth:carousel -- --spec <json> --out-dir <dir>`.
-- Produces `slide-01.png ... slide-N.png`, `cover.png`, `carousel.zip`, and `metadata.json`.
+**Interfaces:** `npm run growth:carousel -- --spec <json> --out-dir <dir>` creates numbered slide PNGs, `cover.png`, `carousel.zip`, and `metadata.json`.
 
-- [ ] **Step 1: Write failing pure naming/render-plan test**
+- [ ] **Step 1: Write failing render-plan test**
 
-Assert five slides create exactly:
-```text
-slide-01.png
-slide-02.png
-slide-03.png
-slide-04.png
-slide-05.png
-cover.png
-carousel.zip
-metadata.json
-```
+For five slides, assert output names `slide-01.png` through `slide-05.png` plus `cover.png`, `carousel.zip`, `metadata.json`.
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Verify RED**
 
 ```bash
 npm test -- tests/growth-carousel-render.test.ts
 ```
-Expected: FAIL.
 
-- [ ] **Step 3: Implement branded still composition**
+- [ ] **Step 3: Implement 1080x1350 branded still composition**
 
-Use 1080x1350 for feed carousel slides. Shared layout rules:
-- StockBox brand header/mark;
-- one clear headline;
-- readable body text;
-- structured metric/chart/UI area;
-- slide index except cover/CTA when visually unnecessary;
-- CTA final slide;
-- no permanent tracking URL baked into image unless specifically desired; the tracked URL belongs in platform copy.
+Shared layout: StockBox brand header/mark, one clear headline, readable body, structured metric/chart/UI area, slide index, CTA final slide. Keep tracked URL in platform copy rather than baking a long URL into the image.
 
-- [ ] **Step 4: Implement render CLI using Remotion `renderStill`**
+- [ ] **Step 4: Implement render CLI with Remotion `renderStill` and JSZip**
 
-For each slide:
-1. validate CarouselSpec;
-2. render PNG;
-3. render cover from slide 1/title;
-4. create ZIP using existing `jszip` dependency;
-5. write metadata with checksums and dimensions;
-6. never include internal instructions in final files.
+Validate spec, render every slide and cover, build ZIP using existing `jszip`, write dimensions/checksums in metadata, and ensure no internal production instructions are emitted as final user-facing copy.
 
-- [ ] **Step 5: Add package script and run smoke**
+- [ ] **Step 5: Add script and smoke**
 
-Add:
 ```json
-"growth:carousel": "node scripts/growth/render-growth-carousel.mjs"
+{"growth:carousel":"node scripts/growth/render-growth-carousel.mjs"}
 ```
 
-Run with deterministic fixture:
 ```bash
 npm run growth:carousel -- --spec /tmp/carousel-spec.json --out-dir /tmp/carousel-smoke
 ```
-Expected: all required files exist and PNG dimensions are 1080x1350.
+Expected: all files exist and slide PNGs are 1080x1350.
 
 - [ ] **Step 6: Commit**
 
@@ -181,35 +139,23 @@ git add src/video/carousel scripts/growth/render-growth-carousel.mjs tests/growt
 git commit -m "feat: render ready StockBox carousels"
 ```
 
-### Task 3: Cost-Aware Generative Scene Provider Contract
+### Task 3: Cost-Aware Generative Scene Contract
 
-**Files:**
-- Create: `src/lib/growth/generative-scenes.ts`
-- Test: `tests/growth-generative-scenes.test.ts`
-- Modify: `src/lib/growth/render-spec.ts`
+**Files:** `src/lib/growth/generative-scenes.ts`, `src/lib/growth/render-spec.ts`, `tests/growth-generative-scenes.test.ts`.
 
-**Interfaces:**
-- Produces `planGenerativeScene(input): GenerativeSceneDecision`.
-- Provider adapter must expose `estimateCostSek(request): number | null` before `generate(request)`.
+**Interfaces:** Produces `planGenerativeScene(input): GenerativeSceneDecision`; provider exposes cost estimate before generation.
 
 - [ ] **Step 1: Write failing decision tests**
 
-Cover:
-- known low cost + budget authorization -> `generate`;
-- unknown provider cost -> `motion_fallback`;
-- projected monthly spend over 50 for optional clip -> `motion_fallback`;
-- hard cap -> `motion_fallback`;
-- scene does not materially improve meaning -> `motion_fallback`;
-- generated scene duration limited to 2-5 seconds.
+Cover: known low cost + authorization -> generate; unknown cost -> motion fallback; projected spend above 50 for optional clip -> fallback; hard cap -> fallback; low-value scene -> fallback; duration limited to 2-5 seconds.
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Verify RED**
 
 ```bash
 npm test -- tests/growth-generative-scenes.test.ts
 ```
-Expected: FAIL.
 
-- [ ] **Step 3: Implement provider-neutral request and decision types**
+- [ ] **Step 3: Implement provider-neutral types**
 
 ```ts
 export type GenerativeSceneRequest = {
@@ -227,13 +173,9 @@ export interface GenerativeVideoProvider {
 }
 ```
 
-`planGenerativeScene()` must return a deterministic fallback reason when generation is skipped.
+Each generated RenderSpec slot includes `fallbackKind: "motion_graphic"` and a complete deterministic fallback description.
 
-- [ ] **Step 4: Extend RenderSpec generated scene metadata**
-
-A generated slot must include `fallbackKind:'motion_graphic'` and a deterministic fallback description so rendering never depends on the external clip.
-
-- [ ] **Step 5: Run tests and commit**
+- [ ] **Step 4: Verify and commit**
 
 ```bash
 npm test -- tests/growth-generative-scenes.test.ts tests/growth-render-spec.test.ts
@@ -241,63 +183,31 @@ git add src/lib/growth/generative-scenes.ts src/lib/growth/render-spec.ts tests/
 git commit -m "feat: add budgeted generative scene contract"
 ```
 
-### Task 4: External Generative Provider Adapter with Mandatory Benchmark Gate
+### Task 4: External Generative Provider Adapter and Benchmark Gate
 
-**Files:**
-- Create: `scripts/growth/generative-provider.mjs`
-- Create: `scripts/growth/benchmark-generative-provider.mjs`
-- Modify: `scripts/growth/run-render-worker.mjs`
+**Files:** `scripts/growth/generative-provider.mjs`, `scripts/growth/benchmark-generative-provider.mjs`, `scripts/growth/run-render-worker.mjs`.
 
-**Interfaces:**
-- Production configuration uses secret names `GROWTH_GENERATIVE_VIDEO_ENDPOINT` and `GROWTH_GENERATIVE_VIDEO_TOKEN` plus a non-secret cost model config.
-- Provider is considered enabled only when `growth_generative_provider_enabled=true` and a benchmarked cost model is present in `acq_config`.
+**Interfaces:** Production secret names `GROWTH_GENERATIVE_VIDEO_ENDPOINT` and `GROWTH_GENERATIVE_VIDEO_TOKEN`; provider enablement additionally requires `growth_generative_provider_enabled=true` and an explicit cost model in `acq_config`.
 
-- [ ] **Step 1: Implement adapter with a hard preflight**
+- [ ] **Step 1: Implement hard preflight**
 
-Before any provider request:
-1. calculate projected per-clip SEK cost from configured provider cost model;
-2. if unknown, do not send request;
-3. call global budget authorization;
-4. enforce duration <=5s and 9:16;
-5. set request timeout <=90s;
-6. never retry a paid generation automatically more than once.
+Before request: calculate projected per-clip SEK cost; deny unknown cost; authorize global budget; enforce <=5 seconds and 9:16; timeout <=90s; max one automatic paid retry.
 
-- [ ] **Step 2: Implement benchmark script**
+- [ ] **Step 2: Implement one-shot benchmark script**
 
-Benchmark performs at most one explicitly authorized test generation and prints:
-```json
-{
-  "duration_seconds": 3,
-  "actual_cost_sek": 0.0,
-  "latency_ms": 0,
-  "decodable": true,
-  "usable": true
-}
-```
-with real values. It must not be run automatically in PR CI because it may incur cost.
+Print measured JSON fields `duration_seconds`, `actual_cost_sek`, `latency_ms`, `decodable`, `usable`. Never run a paid benchmark automatically in PR CI.
 
-- [ ] **Step 3: Add enablement rule**
+- [ ] **Step 3: Enforce enablement rule**
 
-Do not enable generative scenes in production until:
-- provider output is decodable/usable;
-- per-clip cost is known;
-- projected monthly spend including LLM + voice + expected clip frequency stays within 50 SEK target under normal mode;
-- 75 SEK hard cap remains enforceable.
+Enable a real provider only if output is usable/decodable, per-clip cost is known, expected LLM+voice+clip monthly spend fits the 50 SEK normal target, and the 75 SEK hard cap remains enforceable. Otherwise leave real generation disabled and keep deterministic ready-to-post output.
 
-If no provider meets that at implementation time, keep the adapter disabled and use the already-implemented motion fallback. This is a valid budget-safe production state; it does not block ready-to-post video.
+- [ ] **Step 4: Integrate worker clip/fallback path**
 
-- [ ] **Step 4: Integrate optional clip into worker**
+Authorize, generate, decode-QC, include clip only on pass, otherwise substitute motion fallback and continue. Report estimated/actual provider usage for later ledger recording.
 
-For each generated slot:
-- ask decision policy;
-- generate only if approved;
-- run ffprobe/decode QC on clip;
-- if provider/QC fails, replace with fallback scene and continue rendering;
-- report estimated/actual spend to worker completion payload for normalized budget ledger recording.
+- [ ] **Step 5: Add `GROWTH_GENERATIVE_FAKE=1`**
 
-- [ ] **Step 5: Add fake provider mode to CI**
-
-`GROWTH_GENERATIVE_FAKE=1` returns a deterministic 3-second fixture video at cost 0 so the render worker can prove insertion/fallback logic without an external call.
+Fake provider returns deterministic 3-second MP4 at zero cost for CI.
 
 - [ ] **Step 6: Commit**
 
@@ -306,73 +216,80 @@ git add scripts/growth/generative-provider.mjs scripts/growth/benchmark-generati
 git commit -m "feat: add optional generative growth scenes"
 ```
 
-### Task 5: Orchestrate Ready Static/Carousel Packages
+### Task 5: Add Explicit Render Job Kinds and Orchestrate Finished Visual Packages
 
-**Files:**
-- Modify: `supabase/functions/stockbox-growth-engine/index.ts`
-- Modify: `supabase/functions/stockbox-growth-worker-api/index.ts`
-- Modify: `scripts/growth/run-render-worker.mjs`
+**Files:** `supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql`, `supabase/functions/stockbox-growth-engine/index.ts`, `supabase/functions/stockbox-growth-worker-api/index.ts`, `scripts/growth/run-render-worker.mjs`.
 
-**Interfaces:**
-- Quality-approved selected content may produce `asset_kind='carousel' | 'static_image'` jobs alongside videos.
-- Final assets are recorded in `acq_media_assets` and platform copy in `acq_distribution_packages`.
+**Interfaces:** `acq_render_jobs.job_kind` is explicit `video | carousel | static_image`; final outputs are `acq_media_assets` plus platform-specific `acq_distribution_packages`.
 
-- [ ] **Step 1: Add asset selection policy**
+- [ ] **Step 1: Add the exact additive migration**
 
-Use existing content selection; do not create a second unrelated topic engine. Pick carousel/static formats according to channel fit and explore/exploit allocation. Free deterministic asset rendering has zero provider cost but still respects daily quality limits.
+```sql
+alter table public.acq_render_jobs
+  add column if not exists job_kind text;
 
-- [ ] **Step 2: Add worker job kind**
+update public.acq_render_jobs
+set job_kind = 'video'
+where job_kind is null;
 
-Extend durable render jobs with explicit `job_kind` (`video | carousel | static_image`) via a new additive migration if the foundation schema did not include it. Do not overload template name to infer job type.
+alter table public.acq_render_jobs
+  alter column job_kind set default 'video',
+  alter column job_kind set not null;
 
-- [ ] **Step 3: Render/upload carousel outputs**
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'acq_render_jobs_job_kind_check') then
+    alter table public.acq_render_jobs add constraint acq_render_jobs_job_kind_check
+      check (job_kind in ('video','carousel','static_image'));
+  end if;
+end $$;
 
-Worker requests signed upload URLs for each slide, cover, ZIP, and metadata. Completion validates all expected slide indexes before setting asset/package READY.
+create index if not exists acq_render_jobs_kind_state_idx
+  on public.acq_render_jobs(job_kind, state, created_at);
+```
+
+- [ ] **Step 2: Add format selection policy using existing content candidates**
+
+Do not create another topic engine. Select `carousel`/`static_image` from already quality-approved content according to channel fit and explore/exploit allocation; deterministic rendering is zero provider cost but still respects quality limits.
+
+- [ ] **Step 3: Extend worker handling by `job_kind`**
+
+Video uses video renderer; carousel uses carousel renderer and uploads every numbered slide, cover, ZIP, metadata; static image uses branded still renderer. Completion validates all expected outputs before READY.
 
 - [ ] **Step 4: Create platform packages**
 
-At minimum:
-- Instagram carousel caption + UTM;
-- Facebook image/carousel post copy + UTM;
-- LinkedIn text/image package where selected.
+At minimum: Instagram carousel caption+UTM; Facebook image/carousel copy+UTM; LinkedIn text/image package when selected.
 
-- [ ] **Step 5: Test idempotent reruns**
+- [ ] **Step 5: Verify idempotent rerun**
 
-Running the same carousel job twice must upsert identical asset/package IDs and not duplicate slides or ZIP rows.
+Run the same carousel job twice in fake/integration mode and assert asset/package unique keys prevent duplicate slides, ZIPs, or platform packages.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add supabase/functions/stockbox-growth-engine/index.ts supabase/functions/stockbox-growth-worker-api/index.ts scripts/growth/run-render-worker.mjs supabase/migrations
+git add supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql supabase/functions/stockbox-growth-engine/index.ts supabase/functions/stockbox-growth-worker-api/index.ts scripts/growth/run-render-worker.mjs
 git commit -m "feat: produce ready growth visual packages"
 ```
 
-### Task 6: Extend Render CI for Visual Assets and Generated-Scene Fallback
+### Task 6: CI for Visual Assets and Generated-Scene Fallback
 
-**Files:**
-- Modify: `.github/workflows/growth-render-worker.yml`
-- Modify: `.github/workflows/growth-quality-ci.yml`
+**Files:** `.github/workflows/growth-render-worker.yml`, `.github/workflows/growth-quality-ci.yml`.
 
-- [ ] **Step 1: Add unit tests to focused CI**
+- [ ] **Step 1: Add unit tests**
 
-Include:
-```text
-tests/growth-carousel-spec.test.ts
-tests/growth-carousel-render.test.ts
-tests/growth-generative-scenes.test.ts
-```
+Include `growth-carousel-spec`, `growth-carousel-render`, and `growth-generative-scenes` in focused CI.
 
 - [ ] **Step 2: Add deterministic carousel smoke**
 
-CI renders a fixture carousel and asserts PNG dimensions + ZIP entries.
+Render fixture carousel; assert PNG dimensions and ZIP entries.
 
-- [ ] **Step 3: Add fake-generated-scene video smoke**
+- [ ] **Step 3: Add generated-scene and forced-failure smokes**
 
-Run worker once with `GROWTH_GENERATIVE_FAKE=1`, then once with forced provider failure. Both must produce QC-passing final MP4s; the second must report `motion_fallback`.
+Run once with `GROWTH_GENERATIVE_FAKE=1`, once with forced provider failure. Both final videos must QC-pass; failure run reports motion fallback.
 
-- [ ] **Step 4: Verify no paid external generation occurs in PR CI**
+- [ ] **Step 4: Verify PR jobs cannot call paid provider**
 
-No real generative provider secrets are made available to pull-request jobs.
+Real provider secrets are not available to pull-request jobs.
 
 - [ ] **Step 5: Commit**
 
@@ -383,11 +300,12 @@ git commit -m "ci: verify growth visual asset factory"
 
 ## Visual-assets/generative acceptance gate
 
-Before production promotion:
-- carousel output is actual PNG files + ZIP, not instructions;
-- static image output is a final branded file;
-- all assets use private storage and passed QC;
-- generated micro-scenes can be inserted when explicitly budget-authorized;
-- unknown-cost or failed generation always falls back automatically;
-- fake provider tests prove both generated and fallback paths;
-- real provider is enabled only after a measured cost/quality benchmark demonstrates it fits the remaining 50 SEK target budget; hard cap 75 SEK remains enforced.
+Before continuing:
+- carousels are real PNG files + ZIP;
+- static images are final branded files;
+- render job kind is explicit and typed;
+- all visual assets remain private and QC-passed;
+- generated micro-scenes are inserted only when budget-authorized;
+- unknown-cost/failed generation automatically falls back;
+- fake provider tests prove generated and fallback paths;
+- a real provider is enabled only after measured cost/quality demonstrates it fits the remaining 50 SEK target budget while the 75 SEK hard cap remains enforced.
