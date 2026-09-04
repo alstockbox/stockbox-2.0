@@ -3,6 +3,7 @@ import { buildMasterVideoDistributionPackages } from "@/lib/growth/publishing-pa
 import {
   buildCompletionVideoPackages,
   buildVideoDistributionPackages,
+  prepareCompletedVideoPackages,
 } from "../supabase/functions/stockbox-growth-worker-api/video-packages";
 
 describe("growth master-video package parity", () => {
@@ -47,5 +48,41 @@ describe("growth master-video package parity", () => {
   it("never promotes while shadow mode is enabled even when the promotion gate passes", () => {
     const packages = buildCompletionVideoPackages({ ...input, shadowMode: true, promotionAllowed: true });
     expect(packages.every((item) => item.status === "draft")).toBe(true);
+  });
+
+  it("prepares four ready packages only when the full completion gate passes", () => {
+    const result = prepareCompletedVideoPackages({
+      ...input,
+      renderState: "ready",
+      language: "sv",
+      founderVoiceActive: true,
+      assets: [
+        { kind: "master_video", qcStatus: "passed" },
+        { kind: "cover", qcStatus: "passed" },
+      ],
+      paidOperations: [{ provider: "chatterbox", ledgerRecorded: true }],
+    });
+
+    expect(result.promotion).toEqual({ allowed: true, reasons: [] });
+    expect(result.packages).toHaveLength(4);
+    expect(result.packages.every((item) => item.status === "ready")).toBe(true);
+  });
+
+  it("keeps packages draft when founder voice is missing", () => {
+    const result = prepareCompletedVideoPackages({
+      ...input,
+      renderState: "ready",
+      language: "sv",
+      founderVoiceActive: false,
+      assets: [
+        { kind: "master_video", qcStatus: "passed" },
+        { kind: "cover", qcStatus: "passed" },
+      ],
+      paidOperations: [{ provider: "chatterbox", ledgerRecorded: true }],
+    });
+
+    expect(result.promotion.allowed).toBe(false);
+    expect(result.promotion.reasons).toContain("founder_voice_not_active");
+    expect(result.packages.every((item) => item.status === "draft")).toBe(true);
   });
 });
