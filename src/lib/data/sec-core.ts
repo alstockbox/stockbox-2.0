@@ -209,7 +209,7 @@ function periodFromMaps(maps: FactMaps, end: string): FinancialPeriod {
   if (debt.provenance) provenance.totalDebt = debt.provenance;
   const primary = get("revenue") ?? get("netIncome") ?? get("assets") ?? get("operatingCashFlow");
   return {
-    fiscalYear: primary?.fy ?? Number(end.slice(0, 4)),
+    fiscalYear: Number(end.slice(0, 4)),
     periodStartDate: primary?.start,
     periodEndDate: end,
     filedDate: primary?.filed,
