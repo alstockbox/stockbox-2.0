@@ -40,12 +40,13 @@ describe("Yahoo global beta benchmark routing", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ["Athens", "KRI.AT", "FTSE.AT"],
+    ["Athens", "KRI.AT", "GD.AT"],
     ["Thailand", "SR.BK", "^SET.BK"],
     ["Belgium", "SIP.BR", "^BFX"],
     ["Portugal", "IPR.LS", "PSI20.LS"],
     ["Saudi Arabia", "9515.SR", "^TASI.SR"],
     ["Israel", "TEVA.TA", "^TA125.TA"],
+    ["Oslo", "DNB.OL", "OSEBX.OL"],
     ["Poland", "PKO.WA", "WIG20.WA"],
   ])("routes %s listings to a local-market beta benchmark", async (_market, ticker, expectedBenchmark) => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
