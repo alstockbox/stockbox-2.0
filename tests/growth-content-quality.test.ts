@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isTransientAiStatus,
+  planDailyQueue,
   scoreStockboxTopic,
   selectDailyContent,
   type DailyCandidate,
@@ -78,6 +79,40 @@ describe("selectDailyContent", () => {
 
     expect(selected).toHaveLength(6);
     expect(new Set(selected.map((item) => item.platform)).size).toBe(6);
+    expect(counts.a).toBeLessThanOrEqual(3);
+    expect(counts.b).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("planDailyQueue", () => {
+  it("rebalances existing pending and deferred rows instead of freezing the old shortlist", () => {
+    const candidates: DailyCandidate[] = [
+      { id: "a1", platform: "tiktok", contentId: "a", qualityScore: 100 },
+      { id: "a2", platform: "instagram_reel", contentId: "a", qualityScore: 100 },
+      { id: "a3", platform: "instagram_carousel", contentId: "a", qualityScore: 100 },
+      { id: "a4", platform: "youtube_short", contentId: "a", qualityScore: 100 },
+      { id: "a5", platform: "linkedin", contentId: "a", qualityScore: 100 },
+      { id: "a6", platform: "facebook", contentId: "a", qualityScore: 100 },
+      { id: "b1", platform: "tiktok", contentId: "b", qualityScore: 98 },
+      { id: "b2", platform: "instagram_reel", contentId: "b", qualityScore: 98 },
+      { id: "b3", platform: "instagram_carousel", contentId: "b", qualityScore: 98 },
+      { id: "b4", platform: "youtube_short", contentId: "b", qualityScore: 98 },
+      { id: "b5", platform: "linkedin", contentId: "b", qualityScore: 98 },
+      { id: "b6", platform: "facebook", contentId: "b", qualityScore: 98 },
+    ];
+
+    const plan = planDailyQueue(candidates, { limit: 6, minQuality: 72 });
+    const pending = plan.filter((row) => row.status === "pending_approval");
+    const deferred = plan.filter((row) => row.status === "deferred");
+    const counts = pending.reduce<Record<string, number>>((acc, row) => {
+      const original = candidates.find((item) => item.id === row.id)!;
+      acc[original.contentId] = (acc[original.contentId] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    expect(pending).toHaveLength(6);
+    expect(deferred).toHaveLength(6);
+    expect(pending.map((row) => row.dailyRank)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(counts.a).toBeLessThanOrEqual(3);
     expect(counts.b).toBeGreaterThanOrEqual(3);
   });
