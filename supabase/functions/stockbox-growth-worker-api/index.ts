@@ -146,6 +146,19 @@ async function handleComplete(body: any) {
   return json({ job: data, ready: true });
 }
 
+async function handleDefer(body: any) {
+  const jobId = String(body.job_id || "");
+  const workerId = String(body.worker_id || "").trim().slice(0, 160);
+  if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
+  const { data, error } = await supabase.rpc("acq_defer_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_reason: String(body.reason || "deferred").slice(0, 1000),
+  });
+  if (error) return json({ error: "deferral_rejected", detail: error.message }, 409);
+  return json({ job: data });
+}
+
 async function handleFail(body: any) {
   const jobId = String(body.job_id || "");
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
@@ -177,6 +190,7 @@ Deno.serve(async (request) => {
       case "claim": return await handleClaim(body);
       case "authorize_cost": return await handleAuthorizeCost(body);
       case "complete": return await handleComplete(body);
+      case "defer": return await handleDefer(body);
       case "fail": return await handleFail(body);
       default: return json({ error: "unsupported_action" }, 400);
     }
