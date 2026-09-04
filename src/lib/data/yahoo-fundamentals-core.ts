@@ -281,7 +281,38 @@ function buildPeriod(
     metricProvenance[output] = provenance(fact);
     return fact.value;
   };
-  const capexFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate) ?? atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
+  const capitalExpenditureFact = atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
+  const purchaseOfPpeFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate);
+  const capexFact = capitalExpenditureFact ?? purchaseOfPpeFact;
+  const directOperatingCashFlowFact = atDate(values, `${flowPrefix}OperatingCashFlow`, flowDate);
+  const freeCashFlowFact = atDate(values, `${flowPrefix}FreeCashFlow`, flowDate);
+  let operatingCashFlow = directOperatingCashFlowFact?.value ?? null;
+  if (directOperatingCashFlowFact) metricProvenance.operatingCashFlow = provenance(directOperatingCashFlowFact);
+  if (freeCashFlowFact) metricProvenance.freeCashFlow = provenance(freeCashFlowFact);
+  if (operatingCashFlow === null && freeCashFlowFact && capitalExpenditureFact) {
+    const fcfCurrency = freeCashFlowFact.currencyCode?.trim().toUpperCase();
+    const capexCurrency = capitalExpenditureFact.currencyCode?.trim().toUpperCase();
+    if (
+      fcfCurrency
+      && fcfCurrency === capexCurrency
+      && freeCashFlowFact.periodType === capitalExpenditureFact.periodType
+    ) {
+      const derivedOperatingCashFlow = freeCashFlowFact.value + Math.abs(capitalExpenditureFact.value);
+      if (Number.isFinite(derivedOperatingCashFlow)) {
+        operatingCashFlow = derivedOperatingCashFlow;
+        metricProvenance.operatingCashFlow = {
+          source: "Yahoo Finance fundamentals timeseries",
+          provider: PROVIDER_ID,
+          unit: fcfCurrency,
+          periodEnd: flowDate,
+          periodBasis: flowPrefix === "trailing" ? "TTM_REPORTED" : "FY",
+          inputs: [freeCashFlowFact.concept, capitalExpenditureFact.concept],
+          valueKind: "derived",
+          note: "Operating cash flow derived as Yahoo FreeCashFlow plus absolute CapitalExpenditure because direct OperatingCashFlow was unavailable; Yahoo FreeCashFlow reconciles to CapitalExpenditure rather than the narrower PurchaseOfPPE concept when those concepts differ.",
+        };
+      }
+    }
+  }
   if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
   const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
   if (dividendFact) metricProvenance.dividendsPaid = provenance(dividendFact);
@@ -346,9 +377,9 @@ function buildPeriod(
     netIncomeCommonStockholders: flow("NetIncomeCommonStockholders", "netIncomeCommonStockholders"),
     dilutedNetIncomeAvailableToCommon: flow("DilutedNIAvailtoComStockholders", "dilutedNetIncomeAvailableToCommon"),
     epsDiluted: flow("DilutedEPS", "epsDiluted"),
-    operatingCashFlow: flow("OperatingCashFlow", "operatingCashFlow"),
+    operatingCashFlow,
     capitalExpenditures: normalizedCapex(capexFact),
-    freeCashFlow: flow("FreeCashFlow", "freeCashFlow"),
+    freeCashFlow: freeCashFlowFact?.value ?? null,
     interestExpense: flow("InterestExpense", "interestExpense"),
     pretaxIncome: flow("PretaxIncome", "pretaxIncome"),
     incomeTaxExpense: flow("TaxProvision", "incomeTaxExpense"),
