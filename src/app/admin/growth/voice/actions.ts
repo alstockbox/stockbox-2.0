@@ -9,7 +9,7 @@ export async function uploadFounderVoiceProfileAction(formData: FormData) {
   await requireAdmin();
   const file = formData.get("voiceFile");
   const consent = formData.get("consent") === "on";
-  if (!(file instanceof File)) return { ok: false, reason: "file_required" };
+  if (!(file instanceof File)) return;
 
   const validation = validateFounderVoiceUpload({
     language: "sv",
@@ -17,10 +17,10 @@ export async function uploadFounderVoiceProfileAction(formData: FormData) {
     sizeBytes: file.size,
     consent,
   });
-  if (!validation.allowed || !validation.extension) return { ok: false, reason: validation.reason };
+  if (!validation.allowed || !validation.extension) return;
 
   const supabase = createAdminClient();
-  if (!supabase) return { ok: false, reason: "supabase_unavailable" };
+  if (!supabase) return;
 
   const profileId = crypto.randomUUID();
   const path = `profiles/${profileId}/reference.${validation.extension}`;
@@ -32,7 +32,7 @@ export async function uploadFounderVoiceProfileAction(formData: FormData) {
       upsert: false,
       cacheControl: "0",
     });
-  if (uploadError) return { ok: false, reason: "voice_upload_failed" };
+  if (uploadError) return;
 
   const consentAt = new Date().toISOString();
   const { error: rowError } = await supabase.from("acq_voice_profiles").insert({
@@ -55,12 +55,11 @@ export async function uploadFounderVoiceProfileAction(formData: FormData) {
 
   if (rowError) {
     await supabase.storage.from("growth-voice-private").remove([path]);
-    return { ok: false, reason: "voice_profile_create_failed" };
+    return;
   }
 
   revalidatePath("/admin/growth/voice");
   revalidatePath("/admin/growth");
-  return { ok: true, profileId };
 }
 
 export async function disableFounderVoiceProfileAction(formData: FormData) {
