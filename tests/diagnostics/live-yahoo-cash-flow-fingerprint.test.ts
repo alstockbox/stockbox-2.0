@@ -9,6 +9,11 @@ const OCF_PROBE_TICKERS = [
   "IPR.LS", "SNG.LS", "COP.MI", "NZL.NZ", "BGP.NZ",
 ] as const;
 const OCF_RECONCILIATION_CONTROLS = ["AAPL", "MSFT", "NVDA", "KO"] as const;
+const DIFFERING_CAPEX_CANDIDATES = [
+  "BHP.AX", "RIO.AX", "OR.PA", "GTT.PA", "PXT.TO",
+  "BMW.DE", "SAP.DE", "ASML.AS", "SAN.MC", "NOVO-B.CO",
+  "9984.T", "005930.KS", "NESN.SW", "600519.SS", "TSM",
+] as const;
 
 const CASH_FLOW_TYPES = [
   "annualOperatingCashFlow",
@@ -30,6 +35,33 @@ function object(value: unknown): JsonObject | null {
 
 function latestFact(concepts: Record<string, CashFlowFact[]>, concept: string, date: string): CashFlowFact | null {
   return concepts[concept]?.find((fact) => fact.date === date) ?? null;
+}
+
+function reconciliationsFor(concepts: Record<string, CashFlowFact[]>) {
+  return (concepts.annualOperatingCashFlow ?? []).flatMap((ocf) => {
+    const fcf = latestFact(concepts, "annualFreeCashFlow", ocf.date);
+    const capitalExpenditure = latestFact(concepts, "annualCapitalExpenditure", ocf.date);
+    const purchaseOfPpe = latestFact(concepts, "annualPurchaseOfPPE", ocf.date);
+    if (ocf.value === null || fcf?.value === null || fcf?.value === undefined) return [];
+    const impliedCapex = ocf.value - fcf.value;
+    const capitalExpenditureError = capitalExpenditure?.value === null || capitalExpenditure?.value === undefined
+      ? null
+      : Math.abs(impliedCapex - Math.abs(capitalExpenditure.value));
+    const purchaseOfPpeError = purchaseOfPpe?.value === null || purchaseOfPpe?.value === undefined
+      ? null
+      : Math.abs(impliedCapex - Math.abs(purchaseOfPpe.value));
+    return [{
+      date: ocf.date,
+      currency: ocf.currency,
+      ocf: ocf.value,
+      fcf: fcf.value,
+      impliedCapex,
+      capitalExpenditure: capitalExpenditure?.value ?? null,
+      capitalExpenditureError,
+      purchaseOfPpe: purchaseOfPpe?.value ?? null,
+      purchaseOfPpeError,
+    }];
+  });
 }
 
 async function rawYahooCashFlow(symbol: string) {
@@ -135,38 +167,28 @@ liveDescribe("live Yahoo cash-flow fingerprint", () => {
       if (!company) continue;
       const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
       const raw = await rawYahooCashFlow(symbol);
-      const annualOcf = raw.concepts.annualOperatingCashFlow ?? [];
-
-      const reconciliations = annualOcf.flatMap((ocf) => {
-        const fcf = latestFact(raw.concepts, "annualFreeCashFlow", ocf.date);
-        const capitalExpenditure = latestFact(raw.concepts, "annualCapitalExpenditure", ocf.date);
-        const purchaseOfPpe = latestFact(raw.concepts, "annualPurchaseOfPPE", ocf.date);
-        if (ocf.value === null || fcf?.value === null || fcf?.value === undefined) return [];
-        const impliedCapex = ocf.value - fcf.value;
-        const capitalExpenditureError = capitalExpenditure?.value === null || capitalExpenditure?.value === undefined
-          ? null
-          : Math.abs(impliedCapex - Math.abs(capitalExpenditure.value));
-        const purchaseOfPpeError = purchaseOfPpe?.value === null || purchaseOfPpe?.value === undefined
-          ? null
-          : Math.abs(impliedCapex - Math.abs(purchaseOfPpe.value));
-        return [{
-          date: ocf.date,
-          currency: ocf.currency,
-          ocf: ocf.value,
-          fcf: fcf.value,
-          impliedCapex,
-          capitalExpenditure: capitalExpenditure?.value ?? null,
-          capitalExpenditureError,
-          purchaseOfPpe: purchaseOfPpe?.value ?? null,
-          purchaseOfPpeError,
-        }];
-      });
-
-      rows.push({ ticker, symbol, rawStatus: raw.status, reconciliations });
+      rows.push({ ticker, symbol, rawStatus: raw.status, reconciliations: reconciliationsFor(raw.concepts) });
     }
 
     console.log(`YAHOO_OCF_FCF_RECONCILIATION ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(OCF_RECONCILIATION_CONTROLS.length);
     expect(rows.some((row) => Array.isArray(row.reconciliations) && row.reconciliations.length > 0)).toBe(true);
+  }, 240_000);
+
+  it("finds live periods where Yahoo capex concepts differ and records which one matches FCF", async () => {
+    const rows = await Promise.all(DIFFERING_CAPEX_CANDIDATES.map(async (symbol) => {
+      const raw = await rawYahooCashFlow(symbol);
+      const differing = reconciliationsFor(raw.concepts).filter((row) =>
+        row.capitalExpenditure !== null
+        && row.purchaseOfPpe !== null
+        && Math.abs(Math.abs(row.capitalExpenditure) - Math.abs(row.purchaseOfPpe)) > 0
+      );
+      return { symbol, status: raw.status, differing };
+    }));
+    const evidence = rows.filter((row) => row.differing.length > 0);
+
+    console.log(`YAHOO_DIFFERING_CAPEX_RECONCILIATION ${JSON.stringify(evidence)}`);
+    expect(rows).toHaveLength(DIFFERING_CAPEX_CANDIDATES.length);
+    expect(evidence.length).toBeGreaterThan(0);
   }, 240_000);
 });
