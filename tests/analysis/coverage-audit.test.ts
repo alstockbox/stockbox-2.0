@@ -67,6 +67,34 @@ describe("coverage audit", () => {
     expect(audit.rootCauseCounts.PROVIDER_MISSING).toBeGreaterThan(0);
   });
 
+  it("attributes five-year growth gaps to a known provider history cap instead of the issuer", () => {
+    const result = analyze({
+      providerDiagnostics: [{
+        provider: "Yahoo Finance fundamentals",
+        capability: "fundamentals",
+        status: "partial",
+        reason: "annual_history_provider_limit",
+        observedAt: "2026-08-25T00:00:00.000Z",
+      }],
+    });
+    const audit = buildCoverageAudit({ ticker: "TEST", result });
+    const revenueCagr5y = audit.metrics.find((metric) => metric.category === "growth" && metric.label === "Revenue CAGR 5Y");
+
+    expect(revenueCagr5y).toMatchObject({
+      status: "PROVIDER_MISSING",
+      relevant: true,
+      available: false,
+    });
+    expect(revenueCagr5y?.providerDiagnostics).toEqual([
+      expect.objectContaining({
+        provider: "Yahoo Finance fundamentals",
+        capability: "fundamentals",
+        status: "partial",
+        reason: "annual_history_provider_limit",
+      }),
+    ]);
+  });
+
   it("assigns an explicit specialist coverage cause when a REIT metric has no provider value", () => {
     const fixture = goldenAnalysisFixtures.find((item) => item.id === "reit-missing-ffo");
     expect(fixture).toBeDefined();
