@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "work/**"
+      - fix/coverage-engine-root-cause
   pull_request:
     branches:
       - main
