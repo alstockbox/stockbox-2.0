@@ -119,7 +119,9 @@ function classifyMissingStatus(
   if (/insufficient history|history is required|at least three contiguous|three-year-prior|five-year-prior|comparable latest and prior annual|comparable latest and three-year-prior/.test(reason)) {
     return { status: "INSUFFICIENT_HISTORY", diagnostics: [] };
   }
-  if (/period mismatch|period alignment|fiscal period|ttm period|selected .* period/.test(reason)) return { status: "PERIOD_ERROR", diagnostics: [] };
+  if (/period mismatch|period alignment|fiscal period|ttm period|selected (annual|ttm|fiscal|reporting) period/.test(reason)) {
+    return { status: "PERIOD_ERROR", diagnostics: [] };
+  }
   if (/invalid|impossible|non-finite/.test(reason)) return { status: "INVALID", diagnostics: [] };
 
   const diagnostics = providerDiagnosticsForReason(reason, result.diagnostics.providerDiagnostics ?? []);
