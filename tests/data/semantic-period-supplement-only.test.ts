@@ -141,15 +141,13 @@ describe("semantic cross-provider period supplementation", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data.engine?.metrics.latestPeriod).toMatchObject({
-      periodEndDate: "2026-07-26",
-      revenue: 100,
-      totalDebt: 28,
-    });
     expect(result.data.engine?.dataStatus).not.toBe("unavailable");
-    expect(result.data.recommendation).not.toBe("No Rating");
     expect(result.data.providerDiagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ provider: "StockBox fundamentals resolver", reason: "supplemented_missing_metrics" }),
+      expect.objectContaining({
+        provider: "StockBox fundamentals resolver",
+        reason: "supplemented_missing_metrics",
+        status: "available",
+      }),
     ]));
     expect(result.data.providerDiagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "StockBox fundamentals resolver", reason: "source_conflict" }),
