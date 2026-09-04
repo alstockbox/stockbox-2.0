@@ -150,23 +150,46 @@ export function selectDailyContent(
     .filter((item) => item.qualityScore >= minQuality)
     .sort((a, b) => b.qualityScore - a.qualityScore || a.id.localeCompare(b.id));
 
+  if (limit === 0 || eligible.length === 0) return [];
+
+  const uniqueContentCount = new Set(eligible.map((item) => item.contentId)).size;
+  const maxPerContent = uniqueContentCount <= 1
+    ? limit
+    : Math.max(2, Math.ceil(limit / uniqueContentCount));
+
   const selected: DailyCandidate[] = [];
   const usedPlatforms = new Set<string>();
   const usedIds = new Set<string>();
+  const contentCounts = new Map<string, number>();
 
-  for (const item of eligible) {
-    if (selected.length >= limit) break;
-    if (usedPlatforms.has(item.platform)) continue;
+  const take = (item: DailyCandidate) => {
     selected.push(item);
     usedPlatforms.add(item.platform);
     usedIds.add(item.id);
+    contentCounts.set(item.contentId, (contentCounts.get(item.contentId) ?? 0) + 1);
+  };
+
+  // First pass: preserve platform spread while preventing one topic from dominating.
+  for (const item of eligible) {
+    if (selected.length >= limit) break;
+    if (usedPlatforms.has(item.platform)) continue;
+    if ((contentCounts.get(item.contentId) ?? 0) >= maxPerContent) continue;
+    take(item);
   }
 
+  // Second pass: if diversity constraints left a platform unused, fill it with the
+  // best remaining candidate even if that requires relaxing the per-topic cap.
+  for (const item of eligible) {
+    if (selected.length >= limit) break;
+    if (usedIds.has(item.id) || usedPlatforms.has(item.platform)) continue;
+    take(item);
+  }
+
+  // Final fallback: only used when there are fewer distinct platforms than the limit.
   for (const item of eligible) {
     if (selected.length >= limit) break;
     if (usedIds.has(item.id)) continue;
-    selected.push(item);
-    usedIds.add(item.id);
+    take(item);
   }
 
   return selected;
