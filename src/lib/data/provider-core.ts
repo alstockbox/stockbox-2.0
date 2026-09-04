@@ -31,6 +31,7 @@ import { createTwelveDataMarketProvider, createTwelveDataSearchProvider } from "
 import { yahooMarketDataProvider } from "./yahoo-market";
 import { fetchYahooFundamentalsResult, yahooCompanySearchProvider, yahooSymbolForCompany } from "./yahoo-fundamentals";
 import { canAttemptConfiguredFundamentals } from "./security-classification";
+import { findBestSemanticPeriodMatchIndex, periodsSemanticallyMatch } from "./period-alignment";
 import { PROVIDER_ADAPTER_VERSIONS, providerAdapterVersion } from "./provider-versions";
 
 export type ProviderResult<T> =
@@ -325,22 +326,20 @@ function mergePeriodCollections(
   secondaryPeriods: FinancialPeriod[],
   conflicts: ProviderSourceConflict[],
 ): { periods: FinancialPeriod[]; supplemented: number } {
-  const secondaryByKey = new Map(secondaryPeriods.flatMap((period) => {
-    const key = periodKey(period);
-    return key ? [[key, period] as const] : [];
-  }));
+  const remainingSecondary = [...secondaryPeriods];
   let supplemented = 0;
   const periods = primaryPeriods.map((primary) => {
     const key = periodKey(primary);
-    const secondary = key ? secondaryByKey.get(key) : undefined;
-    if (!secondary) return primary;
-    secondaryByKey.delete(key as string);
+    let matchIndex = key ? remainingSecondary.findIndex((secondary) => periodKey(secondary) === key) : -1;
+    if (matchIndex < 0) matchIndex = findBestSemanticPeriodMatchIndex(primary, remainingSecondary);
+    if (matchIndex < 0) return primary;
+    const [secondary] = remainingSecondary.splice(matchIndex, 1);
     const merged = mergeFinancialPeriod(primary, secondary, conflicts);
     supplemented += merged.supplemented;
     return merged.period;
   });
   const knownCurrency = periods.map((period) => normalizedProviderCurrency(period.currency)).find(Boolean);
-  for (const secondary of secondaryByKey.values()) {
+  for (const secondary of remainingSecondary) {
     if (knownCurrency && normalizedProviderCurrency(secondary.currency) === knownCurrency) {
       periods.push(secondary);
       supplemented += CORE_FUNDAMENTAL_FIELDS.filter((field) => finiteMetric(secondary, field)).length;
@@ -379,7 +378,7 @@ function mergeFundamentals(
   const annual = mergePeriodCollections(primary.annualPeriods ?? [], secondary.annualPeriods ?? [], conflicts);
   let trailingTwelveMonths = primary.trailingTwelveMonths;
   let trailingSupplemented = 0;
-  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths)) {
+  if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && (periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths) || periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths))) {
     const merged = mergeFinancialPeriod(primary.trailingTwelveMonths, secondary.trailingTwelveMonths, conflicts);
     trailingTwelveMonths = merged.period;
     trailingSupplemented = merged.supplemented;
