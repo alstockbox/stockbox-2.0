@@ -1,5 +1,6 @@
 -- Atomically materialize four platform-specific distribution packages when a v3 video render becomes ready.
 -- The render completion transaction remains authoritative: if package persistence fails, the render state update rolls back.
+-- The earlier generic package trigger remains responsible only for carousel/static outputs; videos use this stricter gate.
 
 create or replace function public.acq_sync_video_distribution_packages_v3()
 returns trigger
@@ -173,9 +174,28 @@ $$;
 
 revoke all on function public.acq_sync_video_distribution_packages_v3() from public, anon, authenticated;
 
+-- Remove the old generic trigger so it cannot mark video packages READY before this gate runs.
+drop trigger if exists acq_render_jobs_build_packages_v3 on public.acq_render_jobs;
+
+-- Preserve the existing generic package builder for non-video final assets.
+drop trigger if exists acq_render_jobs_build_nonvideo_packages_v3 on public.acq_render_jobs;
+create trigger acq_render_jobs_build_nonvideo_packages_v3
+after update of state on public.acq_render_jobs
+for each row
+when (
+  new.state = 'ready'
+  and old.state is distinct from new.state
+  and new.job_kind in ('carousel','static_image')
+)
+execute function public.acq_build_distribution_packages_v3();
+
 drop trigger if exists acq_render_ready_sync_video_packages_v3 on public.acq_render_jobs;
 create trigger acq_render_ready_sync_video_packages_v3
 after update of state on public.acq_render_jobs
 for each row
-when (new.state = 'ready' and old.state is distinct from new.state)
+when (
+  new.state = 'ready'
+  and old.state is distinct from new.state
+  and new.job_kind = 'video'
+)
 execute function public.acq_sync_video_distribution_packages_v3();
