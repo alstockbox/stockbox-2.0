@@ -119,18 +119,33 @@ function relevantCapability(reason: string): ProviderDiagnostic["capability"] | 
   return null;
 }
 
+function isAnnualHistoryProviderLimit(diagnostic: ProviderDiagnostic): boolean {
+  return diagnostic.capability === "fundamentals"
+    && diagnostic.status !== "available"
+    && /annual_history_provider_limit/.test(normalizedText(diagnostic.reason));
+}
+
+function providerHistoryLimitDiagnostics(
+  reason: string,
+  diagnostics: ProviderDiagnostic[],
+): ProviderDiagnostic[] {
+  if (!/(?:five[- ]year|5y)/.test(normalizedText(reason))) return [];
+  return diagnostics.filter(isAnnualHistoryProviderLimit);
+}
+
 function providerDiagnosticsForReason(
   reason: string,
   diagnostics: ProviderDiagnostic[],
 ): ProviderDiagnostic[] {
   const normalizedReason = normalizedText(reason);
   if (!normalizedReason) return [];
+  const candidateDiagnostics = diagnostics.filter((item) => !isAnnualHistoryProviderLimit(item));
   const capability = relevantCapability(normalizedReason);
   if (!capability) {
     const explicitlyProviderRelated = /provider|source|upstream|data service|data feed/.test(normalizedReason);
-    return explicitlyProviderRelated ? diagnostics.filter((item) => item.status !== "available") : [];
+    return explicitlyProviderRelated ? candidateDiagnostics.filter((item) => item.status !== "available") : [];
   }
-  return diagnostics.filter((item) => item.capability === capability && item.status !== "available");
+  return candidateDiagnostics.filter((item) => item.capability === capability && item.status !== "available");
 }
 
 function classifyMissingStatus(
@@ -138,6 +153,7 @@ function classifyMissingStatus(
   result: FinancialAnalysisResult,
 ): { status: CoverageDataStatus; diagnostics: ProviderDiagnostic[] } {
   const reason = normalizedText(reasonValue);
+  const providerDiagnostics = result.diagnostics.providerDiagnostics ?? [];
 
   if (/rate[ -]?limit|too many requests|\b429\b/.test(reason)) return { status: "RATE_LIMITED", diagnostics: [] };
   if (/timeout|timed out|aborted/.test(reason)) return { status: "TIMEOUT", diagnostics: [] };
@@ -147,6 +163,12 @@ function classifyMissingStatus(
   if (/calculation failed|unable to calculate|calculation error/.test(reason)) return { status: "CALCULATION_FAILED", diagnostics: [] };
   if (/currency|same-currency/.test(reason)) return { status: "CURRENCY_ERROR", diagnostics: [] };
   if (/stale|outdated|freshness/.test(reason)) return { status: "STALE", diagnostics: [] };
+
+  const historyLimitDiagnostics = providerHistoryLimitDiagnostics(reason, providerDiagnostics);
+  if (historyLimitDiagnostics.length) {
+    return { status: "PROVIDER_MISSING", diagnostics: historyLimitDiagnostics };
+  }
+
   if (/insufficient history|history is required|at least three contiguous|three-year-prior|five-year-prior|comparable latest and prior annual|comparable latest and three-year-prior/.test(reason)) {
     return { status: "INSUFFICIENT_HISTORY", diagnostics: [] };
   }
@@ -156,7 +178,7 @@ function classifyMissingStatus(
   if (/invalid|impossible|non-finite/.test(reason)) return { status: "INVALID", diagnostics: [] };
   if (/specialized (?:reit|bank|insurer) data/.test(reason)) return { status: "PROVIDER_MISSING", diagnostics: [] };
 
-  const diagnostics = providerDiagnosticsForReason(reason, result.diagnostics.providerDiagnostics ?? []);
+  const diagnostics = providerDiagnosticsForReason(reason, providerDiagnostics);
   for (const diagnostic of diagnostics) {
     const classified = diagnosticFailureStatus(diagnostic);
     if (classified === "RATE_LIMITED" || classified === "TIMEOUT") return { status: classified, diagnostics };
