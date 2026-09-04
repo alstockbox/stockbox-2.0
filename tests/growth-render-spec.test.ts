@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DistributionPlatformSchema,
+  MediaAssetKindSchema,
   RenderSpecSchema,
   RenderTemplateSchema,
   SceneKindSchema,
@@ -75,5 +76,11 @@ describe("growth render contracts", () => {
     expect(RenderTemplateSchema.parse("company_comparison")).toBe("company_comparison");
     expect(SceneKindSchema.parse("generated_micro_scene")).toBe("generated_micro_scene");
     expect(() => DistributionPlatformSchema.parse("twitter")).toThrow();
+  });
+
+  it("keeps the asset registry aligned with the approved media model", () => {
+    expect(MediaAssetKindSchema.parse("screenshot")).toBe("screenshot");
+    expect(MediaAssetKindSchema.parse("generated_scene")).toBe("generated_scene");
+    expect(MediaAssetKindSchema.parse("master_video")).toBe("master_video");
   });
 });
