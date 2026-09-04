@@ -4,6 +4,7 @@ import "./globals.css";
 import { AppNav } from "@/components/app-shell/nav";
 import { AppFooter } from "@/components/app-shell/footer";
 import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
+import { AcquisitionTracker } from "@/components/analytics/acquisition-tracker";
 import { getServerEnv } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
@@ -68,13 +69,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang={locale} className={`${inter.variable} ${playfair.variable}`}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
-        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#07111f]">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-[#f4efe5] focus:px-4 focus:py-2 focus:text-sm font-semibold text-[#07111f]">
           {navCopy.skipMain}
         </a>
         <AppNav />
         <main id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
         <BrowserAnalytics gaId={env.NEXT_PUBLIC_GA_ID || undefined} metaPixelId={env.NEXT_PUBLIC_META_PIXEL_ID || undefined} locale={locale} />
+        <AcquisitionTracker />
         <Analytics />
       </body>
     </html>
