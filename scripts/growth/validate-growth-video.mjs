@@ -38,7 +38,10 @@ const black = capture("ffmpeg", [
   videoPath,
   "-an",
   "-vf",
-  "blackdetect=d=0.05:pix_th=0.10",
+  // Keep this threshold intentionally strict: StockBox's brand background is
+  // very dark navy and must not be classified as a terminal black frame.
+  // We only want genuinely black / near-black frames to fail QC.
+  "blackdetect=d=0.05:pix_th=0.02",
   "-f",
   "null",
   "-",
