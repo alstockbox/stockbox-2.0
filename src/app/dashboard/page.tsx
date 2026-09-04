@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, BarChart3, Clock3, Search } from "lucide-react";
+import { ArrowRight, BarChart3, Clock3, Radar, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -50,7 +50,7 @@ export default async function DashboardPage() {
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
               <Card><BarChart3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.savedAnalyses}</p><p className="number mt-1 text-3xl font-semibold">{savedAnalysisCount}</p><Link href="/history" className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{locale === "sv" ? "Visa alla" : "View all"}</Link></Card>
               <Card><Clock3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.currentAccess}</p><p className="mt-1 text-xl font-semibold">{planLabel}</p><Link href={billingState === "basic" || billingState === "basic_manage" ? "/settings/billing" : "/pricing"} className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{billingState === "basic_manage" ? copy.resolveBilling : billingState === "basic" ? copy.managePlan : copy.viewPlans}</Link></Card>
-              <Card><Search className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.defaultWorkflow}</p><p className="mt-1 text-xl font-semibold">{copy.workflow}</p></Card>
+              <Card><Radar className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">StockBox Alpha</p><p className="mt-1 text-xl font-semibold">Hidden Gems</p><Link href="/hidden-gems" className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{locale === "sv" ? "Öppna discovery-motorn" : "Open discovery engine"}</Link></Card>
             </div>
             <section className="mt-10"><h2 className="text-lg font-semibold text-[#f4efe5]">{copy.recentResearch}</h2>
               <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
