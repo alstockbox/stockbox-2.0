@@ -35,11 +35,7 @@ async function secureEqual(a: string, b: string) {
 }
 
 async function configNumber(key: string, fallback: number) {
-  const { data, error } = await supabase
-    .from("acq_config")
-    .select("value")
-    .eq("key", key)
-    .maybeSingle();
+  const { data, error } = await supabase.from("acq_config").select("value").eq("key", key).maybeSingle();
   if (error) return fallback;
   const value = Number(data?.value);
   return Number.isFinite(value) ? value : fallback;
@@ -53,36 +49,25 @@ function utcDate(value: string) {
 
 async function signedUpload(bucket: string, path: string) {
   const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path, { upsert: true });
-  if (error || !data?.signedUrl || !data?.token) {
-    throw new Error(`signed_upload_failed:${bucket}`);
-  }
-  return {
-    bucket,
-    path: data.path ?? path,
-    signed_url: data.signedUrl,
-    token: data.token,
-  };
+  if (error || !data?.signedUrl || !data?.token) throw new Error(`signed_upload_failed:${bucket}`);
+  return { bucket, path: data.path ?? path, signed_url: data.signedUrl, token: data.token };
 }
 
 async function handleClaim(body: any) {
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
   if (!workerId) return json({ error: "worker_id_required" }, 400);
 
-  const { data: jobs, error } = await supabase.rpc("acq_claim_render_job_v3", {
-    p_worker_id: workerId,
-  });
+  const { data: jobs, error } = await supabase.rpc("acq_claim_render_job_v3", { p_worker_id: workerId });
   if (error) throw new Error(`claim_rpc_failed:${error.message}`);
   const job = Array.isArray(jobs) ? jobs[0] : null;
   if (!job) return json({ job: null });
 
   const prefix = `${utcDate(job.created_at)}/${job.content_id}/${job.id}/`;
   const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
-
   let voiceReference = null;
+
   if (job.language === "sv") {
-    if (!job.voice_profile_id) {
-      throw new Error("active_founder_voice_profile_required");
-    }
+    if (!job.voice_profile_id) throw new Error("active_founder_voice_profile_required");
     const { data: profile, error: profileError } = await supabase
       .from("acq_voice_profiles")
       .select("id,storage_bucket,storage_path,status,language")
@@ -120,6 +105,30 @@ async function handleClaim(body: any) {
   });
 }
 
+async function handleAuthorizeCost(body: any) {
+  const jobId = String(body.job_id || "");
+  const contentId = body.content_id ? String(body.content_id) : null;
+  const provider = String(body.provider || "").trim().slice(0, 120);
+  const operation = String(body.operation || "").trim().slice(0, 120);
+  const idempotencyKey = String(body.idempotency_key || "").trim().slice(0, 240);
+  const estimatedSek = Number(body.estimated_sek);
+  if (!jobId || !provider || !operation || !idempotencyKey || !Number.isFinite(estimatedSek) || estimatedSek < 0) {
+    return json({ error: "invalid_cost_authorization_request" }, 400);
+  }
+
+  const { data, error } = await supabase.rpc("acq_authorize_growth_cost_v3", {
+    p_idempotency_key: idempotencyKey,
+    p_provider: provider,
+    p_operation: operation,
+    p_estimated_sek: estimatedSek,
+    p_content_id: contentId,
+    p_render_job_id: jobId,
+    p_optional: body.optional === true,
+  });
+  if (error) return json({ error: "budget_authorization_failed", detail: error.message }, 409);
+  return json({ authorization: data });
+}
+
 async function handleComplete(body: any) {
   const jobId = String(body.job_id || "");
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
@@ -142,14 +151,11 @@ async function handleFail(body: any) {
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
   if (!jobId || !workerId) return json({ error: "job_id_and_worker_id_required" }, 400);
   const maxAttempts = Math.max(1, Math.min(10, await configNumber("growth_render_max_attempts", 2)));
-  const reason = String(body.reason || "render_failed").slice(0, 1000);
-  const retryable = body.retryable !== false;
-
   const { data, error } = await supabase.rpc("acq_fail_render_job_v3", {
     p_job_id: jobId,
     p_worker_id: workerId,
-    p_reason: reason,
-    p_retryable: retryable,
+    p_reason: String(body.reason || "render_failed").slice(0, 1000),
+    p_retryable: body.retryable !== false,
     p_max_attempts: maxAttempts,
   });
   if (error) return json({ error: "failure_transition_rejected", detail: error.message }, 409);
@@ -164,25 +170,17 @@ Deno.serve(async (request) => {
   if (!(await secureEqual(supplied, WORKER_TOKEN))) return json({ error: "unauthorized" }, 401);
 
   let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "invalid_json" }, 400);
-  }
+  try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
   try {
     switch (body?.action) {
-      case "claim":
-        return await handleClaim(body);
-      case "complete":
-        return await handleComplete(body);
-      case "fail":
-        return await handleFail(body);
-      default:
-        return json({ error: "unsupported_action" }, 400);
+      case "claim": return await handleClaim(body);
+      case "authorize_cost": return await handleAuthorizeCost(body);
+      case "complete": return await handleComplete(body);
+      case "fail": return await handleFail(body);
+      default: return json({ error: "unsupported_action" }, 400);
     }
   } catch (error) {
-    // Never include signed URLs, secrets, or request payloads in logs/errors.
     console.error("growth_worker_api_error", error instanceof Error ? error.message : String(error));
     return json({ error: "worker_api_internal_error" }, 500);
   }
