@@ -21,6 +21,15 @@ const CASES = [
   ["CPL.WA", "WIG20.WA"],
 ] as const;
 
+const CANDIDATE_BENCHMARKS = [
+  ["Athens", "KRI.AT", "GD.AT"],
+  ["Oslo", "DNB.OL", "^OSEAX"],
+  ["Oslo", "DNB.OL", "OSEBX.OL"],
+  ["Warsaw", "APR.WA", "^WIG20"],
+  ["Warsaw", "APR.WA", "^WIG"],
+  ["Warsaw", "APR.WA", "WIG.WA"],
+] as const;
+
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
 }
@@ -111,5 +120,25 @@ describe("live beta overlap diagnostics", () => {
     }
     console.log("BETA_OVERLAP_DIAGNOSTIC", JSON.stringify(diagnostics));
     expect(diagnostics).toHaveLength(CASES.length);
+  }, 120_000);
+
+  liveIt("probes historically usable replacement benchmarks for markets with one-row Yahoo index feeds", async () => {
+    const diagnostics = [];
+    for (const [market, ticker, benchmark] of CANDIDATE_BENCHMARKS) {
+      const [stock, index] = await Promise.all([chart(ticker, "10y"), chart(benchmark, "2y")]);
+      diagnostics.push({
+        market,
+        ticker,
+        benchmark,
+        benchmarkStatus: index.status,
+        benchmarkError: index.error,
+        benchmarkRows: index.rows.length,
+        benchmarkFirst: index.rows[0]?.date ?? null,
+        benchmarkLast: index.rows.at(-1)?.date ?? null,
+        ...overlap(stock.rows, index.rows),
+      });
+    }
+    console.log("BETA_BENCHMARK_CANDIDATES", JSON.stringify(diagnostics));
+    expect(diagnostics).toHaveLength(CANDIDATE_BENCHMARKS.length);
   }, 120_000);
 });
