@@ -1,0 +1,43 @@
+name: One-shot global beta routing patch
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - ".github/workflows/one-shot-beta-routing-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact beta routing patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/yahoo-market-core.ts")
+          text = path.read_text()
+          old = 'const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".F", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".BA", "^MERV"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"]];'
+          new = 'const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".F", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".BA", "^MERV"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"], [".AT", "FTSE.AT"], [".BK", "^SET.BK"], [".BR", "^BFX"], [".LS", "PSI20.LS"], [".SR", "^TASI.SR"], [".TA", "^TA125.TA"], [".WA", "WIG20.WA"]];'
+          if text.count(old) != 1:
+              raise SystemExit(f"Expected exactly one beta benchmark table, found {text.count(old)}")
+          path.write_text(text.replace(old, new))
+          PY
+
+      - name: Commit product patch and remove one-shot workflow
+        run: |
+          rm .github/workflows/one-shot-beta-routing-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-market-core.ts .github/workflows/one-shot-beta-routing-patch.yml
+          git diff --cached --check
+          git commit -m "fix: route global listings to local beta benchmarks"
+          git push origin HEAD:fix/coverage-engine-root-cause
