@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "tests/growth-content-quality.test.ts"
+      - "tests/growth-publishing-package.test.ts"
       - "src/lib/growth/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
@@ -16,6 +17,7 @@ on:
       - growth-quality-v2
     paths:
       - "tests/growth-content-quality.test.ts"
+      - "tests/growth-publishing-package.test.ts"
       - "src/lib/growth/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
@@ -34,6 +36,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/growth-content-quality.test.ts
+      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts
       - run: npm run typecheck
       - run: npm run build
