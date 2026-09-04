@@ -1,5 +1,7 @@
+import type { DistributionPlatform } from "./render-spec";
+
 export type PublishingPackageInput = {
-  platform: string;
+  platform: DistributionPlatform;
   title?: string | null;
   caption?: string | null;
   script?: string | null;
@@ -30,7 +32,7 @@ function cleanCopy(text: string | null | undefined, utmUrl: string) {
 }
 
 export function buildPublishingPackage(input: PublishingPackageInput) {
-  const platform = (input.platform || "").toLowerCase();
+  const platform = input.platform.toLowerCase();
   const title = (input.title || "StockBox").trim();
   const url = (input.utmUrl || "").trim();
   const caption = cleanCopy(input.caption, url);
