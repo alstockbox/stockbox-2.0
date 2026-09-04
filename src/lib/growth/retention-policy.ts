@@ -21,7 +21,7 @@ export type RetentionPolicyInput = {
   assets: RetentionAsset[];
 };
 
-const ACTIVE_PACKAGE_STATES = new Set(["ready", "published", "active", "queued", "pending_approval"]);
+const ACTIVE_PACKAGE_STATES = new Set(["draft", "ready", "posted", "published", "active", "queued", "pending_approval"]);
 
 function ageMs(now: Date, createdAt: string) {
   const created = new Date(createdAt).getTime();
