@@ -24,3 +24,9 @@ end $$;
 
 create index if not exists acq_render_jobs_kind_state_idx
   on public.acq_render_jobs(job_kind, state, created_at);
+
+insert into public.acq_config (key, value, value_type, description)
+values
+  ('growth_generative_provider_enabled', 'false', 'boolean', 'Explicit gate for paid generative micro-scenes'),
+  ('growth_generative_cost_sek_per_second', '', 'number', 'Known measured SEK cost per second required before generative provider enablement')
+on conflict (key) do nothing;
