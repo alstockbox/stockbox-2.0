@@ -35,6 +35,8 @@ type EarningsFiling = {
   filingDate: string;
 };
 
+type RequestStage = "submissions" | "filing_index" | "exhibit";
+
 type RequestResult =
   | { ok: true; response: Response }
   | { ok: false; reason: ProviderFailureReason; diagnosticReason?: string };
@@ -76,7 +78,12 @@ function failure(
   };
 }
 
-async function secRequest(url: string, userAgent: string, accept: string): Promise<RequestResult> {
+async function secRequest(
+  url: string,
+  userAgent: string,
+  accept: string,
+  stage: RequestStage,
+): Promise<RequestResult> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -99,7 +106,7 @@ async function secRequest(url: string, userAgent: string, accept: string): Promi
       return {
         ok: false,
         reason: "upstream_error",
-        diagnosticReason: `http_${response.status}`,
+        diagnosticReason: `${stage}_http_${response.status}`,
       };
     } catch (error) {
       const timeoutFailure = error instanceof Error && error.name === "AbortError";
@@ -237,7 +244,7 @@ export async function fetchSecReitSpecializedData(
 
   const cik = padCik(company.cik);
   const submissionsUrl = `https://data.sec.gov/submissions/CIK${cik}.json`;
-  const submissionsResponse = await secRequest(submissionsUrl, userAgent, "application/json");
+  const submissionsResponse = await secRequest(submissionsUrl, userAgent, "application/json", "submissions");
   if (!submissionsResponse.ok) return failure(submissionsResponse.reason, submissionsResponse.diagnosticReason);
 
   let payload: SecSubmissionsPayload;
@@ -249,7 +256,12 @@ export async function fetchSecReitSpecializedData(
   const filing = latestEarnings8K(payload, cik);
   if (!filing) return failure("empty_response");
 
-  const indexResponse = await secRequest(filingIndexUrl(filing), userAgent, "text/html,application/xhtml+xml");
+  const indexResponse = await secRequest(
+    filingIndexUrl(filing),
+    userAgent,
+    "text/html,application/xhtml+xml",
+    "filing_index",
+  );
   if (!indexResponse.ok) return failure(indexResponse.reason, indexResponse.diagnosticReason);
   const indexHtml = await indexResponse.response.text();
   const periodEnd = periodOfReport(indexHtml);
@@ -261,7 +273,12 @@ export async function fetchSecReitSpecializedData(
   const observations = new Map<SecReitMetricKey, SecReitObservation>();
   let lastExhibitFailure: Extract<RequestResult, { ok: false }> | null = null;
   for (const url of exhibitUrls) {
-    const exhibitResponse = await secRequest(url, userAgent, "text/html,application/xhtml+xml");
+    const exhibitResponse = await secRequest(
+      url,
+      userAgent,
+      "text/html,application/xhtml+xml",
+      "exhibit",
+    );
     if (!exhibitResponse.ok) {
       lastExhibitFailure = exhibitResponse;
       continue;
