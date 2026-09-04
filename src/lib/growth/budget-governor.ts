@@ -9,7 +9,8 @@ export type BudgetDecisionReason =
   | "conserve"
   | "target_exceeded"
   | "hard_cap"
-  | "unknown_cost";
+  | "unknown_cost"
+  | "invalid_cost";
 
 export type BudgetDecision = {
   allowed: boolean;
@@ -34,10 +35,19 @@ export function evaluateBudget(input: BudgetEvaluationInput): BudgetDecision {
     };
   }
 
+  if (input.projectedCostSek < 0) {
+    return {
+      allowed: false,
+      mode: "free_only",
+      projectedMonthlySek: null,
+      reason: "invalid_cost",
+    };
+  }
+
   const monthlySpendSek = Number.isFinite(input.monthlySpendSek)
     ? Math.max(0, input.monthlySpendSek)
     : GROWTH_BUDGET_HARD_CAP_SEK;
-  const projectedCostSek = Math.max(0, input.projectedCostSek);
+  const projectedCostSek = input.projectedCostSek;
   const projectedMonthlySek = monthlySpendSek + projectedCostSek;
 
   if (
