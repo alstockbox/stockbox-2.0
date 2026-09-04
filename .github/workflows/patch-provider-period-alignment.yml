@@ -1,0 +1,117 @@
+name: Apply provider period alignment patch
+
+on:
+  push:
+    branches: [fix/coverage-engine-root-cause]
+    paths:
+      - .github/workflows/patch-provider-period-alignment.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 1
+      - name: Apply exact patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/data/provider-core.ts')
+          text = path.read_text()
+
+          old_import = 'import { canAttemptConfiguredFundamentals } from "./security-classification";\n'
+          new_import = old_import + 'import { findBestSemanticPeriodMatchIndex, periodsSemanticallyMatch } from "./period-alignment";\n'
+          if old_import not in text:
+              raise SystemExit('expected import anchor not found')
+          text = text.replace(old_import, new_import, 1)
+
+          old_collection = '''function mergePeriodCollections(
+            primaryPeriods: FinancialPeriod[],
+            secondaryPeriods: FinancialPeriod[],
+            conflicts: ProviderSourceConflict[],
+          ): { periods: FinancialPeriod[]; supplemented: number } {
+            const secondaryByKey = new Map(secondaryPeriods.flatMap((period) => {
+              const key = periodKey(period);
+              return key ? [[key, period] as const] : [];
+            }));
+            let supplemented = 0;
+            const periods = primaryPeriods.map((primary) => {
+              const key = periodKey(primary);
+              const secondary = key ? secondaryByKey.get(key) : undefined;
+              if (!secondary) return primary;
+              secondaryByKey.delete(key as string);
+              const merged = mergeFinancialPeriod(primary, secondary, conflicts);
+              supplemented += merged.supplemented;
+              return merged.period;
+            });
+            const knownCurrency = periods.map((period) => normalizedProviderCurrency(period.currency)).find(Boolean);
+            for (const secondary of secondaryByKey.values()) {
+              if (knownCurrency && normalizedProviderCurrency(secondary.currency) === knownCurrency) {
+                periods.push(secondary);
+                supplemented += CORE_FUNDAMENTAL_FIELDS.filter((field) => finiteMetric(secondary, field)).length;
+              }
+            }
+            return {
+              periods: periods.sort((left, right) => (left.periodEndDate ?? "").localeCompare(right.periodEndDate ?? "")),
+              supplemented,
+            };
+          }
+          '''
+
+          new_collection = '''function mergePeriodCollections(
+            primaryPeriods: FinancialPeriod[],
+            secondaryPeriods: FinancialPeriod[],
+            conflicts: ProviderSourceConflict[],
+          ): { periods: FinancialPeriod[]; supplemented: number } {
+            const remainingSecondary = [...secondaryPeriods];
+            let supplemented = 0;
+            const periods = primaryPeriods.map((primary) => {
+              const key = periodKey(primary);
+              let matchIndex = key ? remainingSecondary.findIndex((secondary) => periodKey(secondary) === key) : -1;
+              if (matchIndex < 0) matchIndex = findBestSemanticPeriodMatchIndex(primary, remainingSecondary);
+              if (matchIndex < 0) return primary;
+              const [secondary] = remainingSecondary.splice(matchIndex, 1);
+              const merged = mergeFinancialPeriod(primary, secondary, conflicts);
+              supplemented += merged.supplemented;
+              return merged.period;
+            });
+            const knownCurrency = periods.map((period) => normalizedProviderCurrency(period.currency)).find(Boolean);
+            for (const secondary of remainingSecondary) {
+              if (knownCurrency && normalizedProviderCurrency(secondary.currency) === knownCurrency) {
+                periods.push(secondary);
+                supplemented += CORE_FUNDAMENTAL_FIELDS.filter((field) => finiteMetric(secondary, field)).length;
+              }
+            }
+            return {
+              periods: periods.sort((left, right) => (left.periodEndDate ?? "").localeCompare(right.periodEndDate ?? "")),
+              supplemented,
+            };
+          }
+          '''
+          if old_collection not in text:
+              raise SystemExit('expected mergePeriodCollections block not found')
+          text = text.replace(old_collection, new_collection, 1)
+
+          old_ttm = 'if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths)) {'
+          new_ttm = 'if (primary.trailingTwelveMonths && secondary.trailingTwelveMonths && (periodKey(primary.trailingTwelveMonths) === periodKey(secondary.trailingTwelveMonths) || periodsSemanticallyMatch(primary.trailingTwelveMonths, secondary.trailingTwelveMonths))) {'
+          if old_ttm not in text:
+              raise SystemExit('expected TTM merge condition not found')
+          text = text.replace(old_ttm, new_ttm, 1)
+
+          path.write_text(text)
+          Path('.github/workflows/patch-provider-period-alignment.yml').unlink()
+          PY
+      - name: Commit exact patch
+        run: |
+          git config user.name "StockBox Coverage Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/data/provider-core.ts .github/workflows/patch-provider-period-alignment.yml
+          git diff --cached --check
+          git commit -m "fix: merge semantically equivalent provider periods"
+          git push origin HEAD:fix/coverage-engine-root-cause
