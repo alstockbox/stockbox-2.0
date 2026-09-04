@@ -29,7 +29,14 @@ export function calculateGrowthScore(
 ): GrowthScoreResult {
   const usable = Object.entries(weights)
     .filter(([, weight]) => Number.isFinite(weight) && weight > 0)
-    .map(([key, weight]) => ({ key, weight, value: clamp100(Number(metrics[key])) }))
+    .map(([key, weight]) => {
+      const raw = metrics[key];
+      return {
+        key,
+        weight,
+        value: raw === null || raw === undefined ? null : clamp100(Number(raw)),
+      };
+    })
     .filter((item): item is { key: string; weight: number; value: number } => item.value !== null);
 
   const totalWeight = usable.reduce((sum, item) => sum + item.weight, 0);
