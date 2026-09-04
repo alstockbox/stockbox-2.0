@@ -53,6 +53,14 @@ async function signedUpload(bucket: string, path: string) {
   return { bucket, path: data.path ?? path, signed_url: data.signedUrl, token: data.token };
 }
 
+async function deferClaim(jobId: string, workerId: string, reason: string) {
+  await supabase.rpc("acq_defer_render_job_v3", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_reason: reason.slice(0, 1000),
+  });
+}
+
 async function handleClaim(body: any) {
   const workerId = String(body.worker_id || "").trim().slice(0, 160);
   if (!workerId) return json({ error: "worker_id_required" }, 400);
@@ -62,47 +70,53 @@ async function handleClaim(body: any) {
   const job = Array.isArray(jobs) ? jobs[0] : null;
   if (!job) return json({ job: null });
 
-  const prefix = `${utcDate(job.created_at)}/${job.content_id}/${job.id}/`;
-  const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
-  let voiceReference = null;
+  try {
+    const prefix = `${utcDate(job.created_at)}/${job.content_id}/${job.id}/`;
+    const ttl = Math.max(60, Math.min(3600, await configNumber("growth_signed_url_ttl_seconds", 600)));
+    let voiceReference = null;
 
-  if (job.language === "sv") {
-    if (!job.voice_profile_id) throw new Error("active_founder_voice_profile_required");
-    const { data: profile, error: profileError } = await supabase
-      .from("acq_voice_profiles")
-      .select("id,storage_bucket,storage_path,status,language")
-      .eq("id", job.voice_profile_id)
-      .maybeSingle();
-    if (profileError || !profile || profile.status !== "active" || profile.language !== "sv") {
-      throw new Error("active_founder_voice_profile_required");
+    if (job.language === "sv") {
+      const { data: profile, error: profileError } = await supabase
+        .from("acq_voice_profiles")
+        .select("id,storage_bucket,storage_path,status,language")
+        .eq("id", job.voice_profile_id)
+        .maybeSingle();
+      if (profileError || !profile || profile.status !== "active" || profile.language !== "sv") {
+        throw new Error("active_founder_voice_profile_required");
+      }
+      const { data: signed, error: signedError } = await supabase.storage
+        .from(profile.storage_bucket)
+        .createSignedUrl(profile.storage_path, ttl);
+      if (signedError || !signed?.signedUrl) throw new Error("voice_reference_sign_failed");
+      voiceReference = signed.signedUrl;
     }
-    const { data: signed, error: signedError } = await supabase.storage
-      .from(profile.storage_bucket)
-      .createSignedUrl(profile.storage_path, ttl);
-    if (signedError || !signed?.signedUrl) throw new Error("voice_reference_sign_failed");
-    voiceReference = signed.signedUrl;
+
+    const uploads = {
+      voice_audio: await signedUpload("growth-render-staging", `${prefix}voice.wav`),
+      master_video: await signedUpload("growth-ready-assets", `${prefix}master.mp4`),
+      cover: await signedUpload("growth-ready-assets", `${prefix}cover.jpg`),
+      metadata: await signedUpload("growth-ready-assets", `${prefix}metadata.json`),
+    };
+
+    return json({
+      job: {
+        id: job.id,
+        content_id: job.content_id,
+        render_spec: job.render_spec,
+        language: job.language,
+        template: job.template,
+        attempt_count: job.attempt_count,
+        voice_reference_url: voiceReference,
+        asset_prefix: prefix,
+        uploads,
+      },
+    });
+  } catch (error) {
+    // A claim should never become permanently stranded because signing or
+    // private-asset preparation failed after the DB transition.
+    await deferClaim(job.id, workerId, error instanceof Error ? error.message : "claim_preparation_failed");
+    throw error;
   }
-
-  const uploads = {
-    voice_audio: await signedUpload("growth-render-staging", `${prefix}voice.wav`),
-    master_video: await signedUpload("growth-ready-assets", `${prefix}master.mp4`),
-    cover: await signedUpload("growth-ready-assets", `${prefix}cover.jpg`),
-    metadata: await signedUpload("growth-ready-assets", `${prefix}metadata.json`),
-  };
-
-  return json({
-    job: {
-      id: job.id,
-      content_id: job.content_id,
-      render_spec: job.render_spec,
-      language: job.language,
-      template: job.template,
-      attempt_count: job.attempt_count,
-      voice_reference_url: voiceReference,
-      asset_prefix: prefix,
-      uploads,
-    },
-  });
 }
 
 async function handleAuthorizeCost(body: any) {
