@@ -75,7 +75,7 @@ export function BrowserAnalytics({
           <p className="text-sm font-semibold text-[#f4efe5]">{locale === "sv" ? "Valfri produktanalys" : "Optional product analytics"}</p>
           <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">
             {locale === "sv"
-              ? "Om du samtycker kan StockBox mäta var besökare kommer ifrån och hur webbplatsen används. Google Analytics 4 och/eller Meta Pixel används också om de är konfigurerade. Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte om du nekar."
+              ? "Om du samtycker kan StockBox använda valfri produktanalys för att mäta var besökare kommer ifrån och hur webbplatsen används. Google Analytics 4 och/eller Meta Pixel används också om de är konfigurerade. Nödvändiga konto-, betalnings- och säkerhetsfunktioner påverkas inte om du nekar."
               : "If you consent, StockBox may measure where visitors come from and how the website is used. Google Analytics 4 and/or Meta Pixel are also used when configured. Essential account, billing and security functions are unaffected if you reject analytics."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
