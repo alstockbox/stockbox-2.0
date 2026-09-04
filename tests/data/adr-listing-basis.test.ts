@@ -218,7 +218,12 @@ describe("ADR listing-basis eligibility", () => {
       investmentProfile: "balanced",
     });
 
-    expect(result.ok).toBe(true);
+    const failureDetail = result.ok ? "" : JSON.stringify({
+      error: result.error,
+      warnings: result.warnings,
+      providerDiagnostics: result.providerDiagnostics,
+    });
+    expect(result.ok, failureDetail).toBe(true);
     if (result.ok) {
       expect(result.data.engine?.currencyAlignment).toBe("mismatch");
       expect(result.data.engine?.dcf.status).toBe("unavailable");
