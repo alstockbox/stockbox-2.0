@@ -37,7 +37,7 @@ describe("Yahoo global beta benchmark routing", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ["Athens", "KRI.AT", "^FTSE.AT"],
+    ["Athens", "KRI.AT", "FTSE.AT"],
     ["Thailand", "SR.BK", "^SET.BK"],
     ["Belgium", "SIP.BR", "^BFX"],
     ["Portugal", "IPR.LS", "PSI20.LS"],
