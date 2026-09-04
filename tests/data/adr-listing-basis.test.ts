@@ -220,7 +220,7 @@ describe("ADR listing-basis eligibility", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data.engine?.currencyAlignment.status).toBe("mismatch");
+      expect(result.data.engine?.currencyAlignment).toBe("mismatch");
       expect(result.data.engine?.dcf.status).toBe("unavailable");
       expect(result.data.engine?.dcf.reason).toMatch(/currenc/i);
     }
