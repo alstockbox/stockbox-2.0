@@ -46,7 +46,7 @@ jobs:
       - name: Run stratified live coverage audit
         env:
           RUN_LIVE_COVERAGE: "1"
-          SEC_USER_AGENT: "StockBox coverage-audit https://github.com/alstockbox/stockbox-2.0"
+          SEC_USER_AGENT: "StockBox/1.0 https://www.getstockbox.app/contact"
         run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts tests/diagnostics/live-reit-specialized.test.ts --reporter=verbose
 
       - name: Upload coverage diagnostic
