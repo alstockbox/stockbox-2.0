@@ -97,8 +97,13 @@ function providerDiagnosticsForReason(
   reason: string,
   diagnostics: ProviderDiagnostic[],
 ): ProviderDiagnostic[] {
-  const capability = relevantCapability(reason);
-  if (!capability) return diagnostics.filter((item) => item.status !== "available");
+  const normalizedReason = normalizedText(reason);
+  if (!normalizedReason) return [];
+  const capability = relevantCapability(normalizedReason);
+  if (!capability) {
+    const explicitlyProviderRelated = /provider|source|upstream|data service|data feed/.test(normalizedReason);
+    return explicitlyProviderRelated ? diagnostics.filter((item) => item.status !== "available") : [];
+  }
   return diagnostics.filter((item) => item.capability === capability && item.status !== "available");
 }
 
