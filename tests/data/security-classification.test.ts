@@ -19,10 +19,37 @@ describe("configured fundamentals eligibility", () => {
     expect(canAttemptConfiguredFundamentals(company())).toBe(true);
   });
 
+  it("allows an ADR to attempt configured providers only when discovery has fundamentals capability", () => {
+    expect(canAttemptConfiguredFundamentals(company({
+      ticker: "EXADR",
+      canonicalTicker: "EXADR",
+      name: "Example Holdings ADR",
+      country: "US",
+      securityType: "ADR",
+      providerCapabilities: {
+        fundamentals: true,
+        marketData: true,
+        providerIds: ["verified-fundamentals-provider"],
+      },
+    }))).toBe(true);
+
+    expect(canAttemptConfiguredFundamentals(company({
+      ticker: "EXADR",
+      canonicalTicker: "EXADR",
+      name: "Example Holdings ADR",
+      country: "US",
+      securityType: "ADR",
+      providerCapabilities: {
+        fundamentals: false,
+        marketData: true,
+        providerIds: ["market-only-provider"],
+      },
+    }))).toBe(false);
+  });
+
   it.each([
     ["Preferred", { ticker: "ACME-PB", canonicalTicker: "ACME-PB", name: "Acme Preferred Series B", securityType: "Preferred" }],
     ["ETF/Fund", { ticker: "SPY", canonicalTicker: "SPY", name: "State Street SPDR S&P 500 ETF Trust", securityType: "ETF/Fund" }],
-    ["ADR", { ticker: "BABA", canonicalTicker: "BABA", name: "Alibaba ADR", securityType: "ADR" }],
     ["Other", { ticker: "ROP.SW", canonicalTicker: "ROP.SW", name: "Roche Holding AG", securityType: "Other" }],
   ] as const)("blocks unsupported %s securities", (_label, overrides) => {
     expect(canAttemptConfiguredFundamentals(company(overrides))).toBe(false);
