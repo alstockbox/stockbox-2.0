@@ -30,6 +30,13 @@ describe("growth budget governor", () => {
     });
   });
 
+  it("fails closed when projected paid cost is negative", () => {
+    expect(evaluateBudget({ monthlySpendSek: 74, projectedCostSek: -5 })).toMatchObject({
+      allowed: false,
+      reason: "invalid_cost",
+    });
+  });
+
   it("reduces daily video capacity as budget pressure rises", () => {
     expect(chooseDailyVideoCapacity({ monthlySpendSek: 10, qualityCandidates: 2 })).toBe(2);
     expect(chooseDailyVideoCapacity({ monthlySpendSek: 46, qualityCandidates: 2 })).toBe(1);
