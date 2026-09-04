@@ -87,13 +87,16 @@ describe("growth master-video package parity", () => {
     expect(result.packages.every((item) => item.status === "draft")).toBe(true);
   });
 
-  it("wires completed video renders into durable distribution-package upserts", () => {
+  it("wires render completion atomically into durable distribution-package upserts", () => {
     const source = readFileSync(
-      new URL("../supabase/functions/stockbox-growth-worker-api/index.ts", import.meta.url),
+      new URL("../supabase/migrations/20260904223000_growth_video_package_completion_gate_v3.sql", import.meta.url),
       "utf8",
     );
-    expect(source).toContain('import { prepareCompletedVideoPackages } from "./video-packages.ts"');
-    expect(source).toContain('.from("acq_distribution_packages")');
-    expect(source).toContain("prepareCompletedVideoPackages({");
+    expect(source).toContain("acq_sync_video_distribution_packages_v3");
+    expect(source).toContain("acq_distribution_packages");
+    expect(source).toContain("growth_render_shadow_mode");
+    for (const platform of ["instagram_reel", "facebook_reel", "tiktok", "youtube_short"]) {
+      expect(source).toContain(platform);
+    }
   });
 });
