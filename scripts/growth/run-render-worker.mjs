@@ -7,15 +7,28 @@ import { estimateGenerativeCostSek, generateGenerativeClip } from "./generative-
 
 const API_URL = process.env.GROWTH_WORKER_API_URL || "";
 const API_TOKEN = process.env.GROWTH_RENDER_WORKER_TOKEN || "";
-const VOICE_URL = process.env.GROWTH_VOICE_WORKER_URL || "";
-const VOICE_TOKEN = process.env.GROWTH_VOICE_WORKER_TOKEN || "";
-const VOICE_ESTIMATED_SEK = Number(process.env.GROWTH_VOICE_ESTIMATED_SEK_PER_JOB);
+const FOUNDER_VOICE_URL = process.env.GROWTH_VOICE_ENDPOINT || process.env.GROWTH_VOICE_WORKER_URL || "";
+const FOUNDER_VOICE_TOKEN = process.env.GROWTH_VOICE_WORKER_TOKEN || "";
+const FOUNDER_VOICE_ESTIMATED_SEK = Number(process.env.GROWTH_VOICE_ESTIMATED_SEK_PER_JOB);
+const ENGLISH_VOICE_URL = process.env.GROWTH_ENGLISH_VOICE_ENDPOINT || "";
+const ENGLISH_VOICE_TOKEN = process.env.GROWTH_ENGLISH_VOICE_TOKEN || "";
+const ENGLISH_VOICE_ESTIMATED_SEK = Number(process.env.GROWTH_ENGLISH_VOICE_ESTIMATED_SEK_PER_JOB);
 const MAX_JOBS = Math.min(2, Math.max(1, Number(process.env.GROWTH_RENDER_MAX_JOBS || 2)));
 const WORKER_ID = `gha-${process.env.GITHUB_RUN_ID || Date.now()}-${process.env.GITHUB_RUN_ATTEMPT || 1}`;
 
 function required(name, value) {
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function validCost(value) {
+  return Number.isFinite(value) && value >= 0;
+}
+
+function skipExperiment(reason) {
+  const error = new Error(reason);
+  error.code = "EXPERIMENT_SKIPPED";
+  return error;
 }
 
 async function workerApi(payload) {
@@ -77,50 +90,111 @@ function asset(target, localPath, kind, mimeType, extra = {}) {
   };
 }
 
-async function synthesizeVoice(job, outputPath) {
-  if (job.language !== "sv") throw new Error("english_voice_path_not_implemented");
-  required("GROWTH_VOICE_WORKER_URL", VOICE_URL);
-  required("GROWTH_VOICE_WORKER_TOKEN", VOICE_TOKEN);
-  if (!job.voice_reference_url) throw new Error("founder_voice_reference_missing");
-  if (!Number.isFinite(VOICE_ESTIMATED_SEK) || VOICE_ESTIMATED_SEK < 0) {
-    throw new Error("GROWTH_VOICE_ESTIMATED_SEK_PER_JOB must be configured");
-  }
-
-  const authorization = await workerApi({
+async function authorizeVoiceCost(job, provider, operation, estimatedSek, optional) {
+  const idempotencyKey = `voice:${job.id}:${operation}:${job.attempt_count}`;
+  const result = await workerApi({
     action: "authorize_cost",
     worker_id: WORKER_ID,
     job_id: job.id,
     content_id: job.content_id,
-    provider: "modal_chatterbox",
-    operation: "founder_voice_tts",
-    estimated_sek: VOICE_ESTIMATED_SEK,
-    optional: false,
-    idempotency_key: `voice:${job.id}:${job.attempt_count}`,
+    provider,
+    operation,
+    estimated_sek: estimatedSek,
+    optional,
+    idempotency_key: idempotencyKey,
   });
+  return { authorization: result.authorization, idempotencyKey };
+}
 
-  if (!authorization.authorization?.allowed) {
-    const error = new Error(`budget_deferred:${authorization.authorization?.reason || "budget"}`);
-    error.code = "BUDGET_DEFERRED";
-    throw error;
+async function synthesizeVoice(job, outputPath) {
+  const spec = job.render_spec || {};
+
+  if (job.language === "sv") {
+    required("GROWTH_VOICE_ENDPOINT", FOUNDER_VOICE_URL);
+    required("GROWTH_VOICE_WORKER_TOKEN", FOUNDER_VOICE_TOKEN);
+    if (!job.voice_reference_url) throw new Error("founder_voice_reference_missing");
+    if (!validCost(FOUNDER_VOICE_ESTIMATED_SEK)) {
+      throw new Error("GROWTH_VOICE_ESTIMATED_SEK_PER_JOB must be configured");
+    }
+
+    const { authorization, idempotencyKey } = await authorizeVoiceCost(
+      job,
+      "modal_chatterbox",
+      "founder_voice_tts",
+      FOUNDER_VOICE_ESTIMATED_SEK,
+      false,
+    );
+    if (!authorization?.allowed) {
+      const error = new Error(`budget_deferred:${authorization?.reason || "budget"}`);
+      error.code = "BUDGET_DEFERRED";
+      throw error;
+    }
+
+    const response = await fetch(FOUNDER_VOICE_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${FOUNDER_VOICE_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: job.id,
+        text: String(spec.script || "").slice(0, 1500),
+        language: "sv",
+        voice_mode: spec.voiceMode || "educational",
+        reference_audio_url: job.voice_reference_url,
+      }),
+    });
+    if (!response.ok) throw new Error(`founder_voice_worker_${response.status}`);
+    writeFileSync(outputPath, Buffer.from(await response.arrayBuffer()));
+    return {
+      idempotencyKey,
+      provider: "modal_chatterbox",
+      operation: "founder_voice_tts",
+      estimatedSek: FOUNDER_VOICE_ESTIMATED_SEK,
+      actualSek: null,
+    };
   }
 
-  const spec = job.render_spec || {};
-  const response = await fetch(VOICE_URL, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${VOICE_TOKEN}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      request_id: job.id,
-      text: String(spec.script || "").slice(0, 1500),
-      language: "sv",
-      voice_mode: spec.voiceMode || "educational",
-      reference_audio_url: job.voice_reference_url,
-    }),
-  });
-  if (!response.ok) throw new Error(`voice_worker_${response.status}`);
-  writeFileSync(outputPath, Buffer.from(await response.arrayBuffer()));
+  if (job.language === "en") {
+    if (!ENGLISH_VOICE_URL || !ENGLISH_VOICE_TOKEN || !validCost(ENGLISH_VOICE_ESTIMATED_SEK)) {
+      throw skipExperiment("english_voice_unavailable_or_unknown_cost");
+    }
+    if (job.voice_reference_url) throw new Error("english_voice_must_not_receive_founder_reference");
+
+    const { authorization, idempotencyKey } = await authorizeVoiceCost(
+      job,
+      "generic_english_voice",
+      "generic_english_tts",
+      ENGLISH_VOICE_ESTIMATED_SEK,
+      true,
+    );
+    if (!authorization?.allowed) throw skipExperiment(`english_voice_budget:${authorization?.reason || "budget"}`);
+
+    const response = await fetch(ENGLISH_VOICE_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${ENGLISH_VOICE_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: job.id,
+        text: String(spec.script || "").slice(0, 1500),
+        language: "en",
+        voice_mode: "generic_english",
+      }),
+    });
+    if (!response.ok) throw skipExperiment(`english_voice_worker_${response.status}`);
+    writeFileSync(outputPath, Buffer.from(await response.arrayBuffer()));
+    return {
+      idempotencyKey,
+      provider: "generic_english_voice",
+      operation: "generic_english_tts",
+      estimatedSek: ENGLISH_VOICE_ESTIMATED_SEK,
+      actualSek: null,
+    };
+  }
+
+  throw new Error("unsupported_voice_language");
 }
 
 function probeGeneratedClip(path, requestedDurationSeconds) {
@@ -214,7 +288,7 @@ async function renderVideo(job, workdir) {
   const runtimeRelativeDir = `.growth-runtime/${safeRuntimePart(job.id)}`;
   const runtimeDir = resolve(process.cwd(), "public", runtimeRelativeDir);
 
-  await synthesizeVoice(job, voicePath);
+  const voiceUsage = await synthesizeVoice(job, voicePath);
   mkdirSync(runtimeDir, { recursive: true });
 
   try {
@@ -238,6 +312,7 @@ async function renderVideo(job, workdir) {
       content_id: job.content_id,
       job_kind: "video",
       qc,
+      voice_provider: voiceUsage.provider,
       generative: enhanced.stats,
       generated_at: new Date().toISOString(),
     }));
@@ -250,6 +325,7 @@ async function renderVideo(job, workdir) {
     const durationMs = Math.round(Number(qc.durationSeconds || 0) * 1000);
     return {
       qc,
+      usage: [voiceUsage],
       assets: [
         asset(job.uploads.voice_audio, voicePath, "voice_audio", "audio/wav"),
         asset(job.uploads.master_video, videoPath, "master_video", "video/mp4", { width: 1080, height: 1920, duration_ms: durationMs }),
@@ -289,7 +365,7 @@ async function renderCarousel(job, workdir) {
   assets.push(asset(job.uploads.carousel_zip, zipPath, "carousel_zip", "application/zip"));
   assets.push(asset(job.uploads.metadata, metadataPath, "metadata", "application/json"));
 
-  return { qc: { passed: true, kind: "carousel", slide_count: slides.length }, assets };
+  return { qc: { passed: true, kind: "carousel", slide_count: slides.length }, assets, usage: [] };
 }
 
 async function renderStaticImage(job, workdir) {
@@ -316,6 +392,7 @@ async function renderStaticImage(job, workdir) {
       asset(job.uploads.static_image, imagePath, "static_image", "image/png", { width: 1080, height: 1350 }),
       asset(job.uploads.metadata, metadataPath, "metadata", "application/json"),
     ],
+    usage: [],
   };
 }
 
@@ -338,6 +415,7 @@ async function renderOne(job) {
       job_id: job.id,
       qc: result.qc,
       assets: result.assets,
+      usage: result.usage || [],
     });
   } finally {
     rmSync(workdir, { recursive: true, force: true });
@@ -357,17 +435,19 @@ async function main() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const budgetDeferred = error?.code === "BUDGET_DEFERRED" || message.startsWith("budget_deferred:");
+      const experimentSkipped = error?.code === "EXPERIMENT_SKIPPED";
       try {
         await workerApi({
           action: budgetDeferred ? "defer" : "fail",
           worker_id: WORKER_ID,
           job_id: job.id,
           reason: message.slice(0, 900),
-          retryable: !budgetDeferred,
+          retryable: !budgetDeferred && !experimentSkipped,
         });
       } catch (transitionError) {
         console.error("render_state_transition_failed", transitionError instanceof Error ? transitionError.message : String(transitionError));
       }
+      if (experimentSkipped) continue;
       if (!budgetDeferred) throw error;
       break;
     }
