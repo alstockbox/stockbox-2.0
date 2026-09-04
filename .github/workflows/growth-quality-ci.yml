@@ -5,9 +5,11 @@ on:
     paths:
       - "tests/growth-content-quality.test.ts"
       - "src/lib/growth/**"
+      - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/migrations/*growth*"
       - ".github/workflows/growth-quality-ci.yml"
   push:
     branches:
@@ -15,9 +17,11 @@ on:
     paths:
       - "tests/growth-content-quality.test.ts"
       - "src/lib/growth/**"
+      - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/migrations/*growth*"
       - ".github/workflows/growth-quality-ci.yml"
 
 jobs:
@@ -32,3 +36,4 @@ jobs:
       - run: npm ci
       - run: npm test -- tests/growth-content-quality.test.ts
       - run: npm run typecheck
+      - run: npm run build
