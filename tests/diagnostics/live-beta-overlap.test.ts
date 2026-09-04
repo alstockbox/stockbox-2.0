@@ -20,12 +20,9 @@ const CASES = [
   ["CPL.WA", "WIG20.WA"],
 ] as const;
 
-const CANDIDATE_BENCHMARKS = [
-  ["Warsaw index", "APR.WA", "^WIG20"],
-  ["Warsaw index", "APR.WA", "^WIG"],
-  ["Warsaw index", "APR.WA", "WIG.WA"],
-  ["Warsaw WIG20TR ETF", "APR.WA", "ETFBW20TR.WA"],
-  ["Warsaw legacy WIG20 ETF", "APR.WA", "ETFW20L.WA"],
+const WARSAW_BENCHMARKS = [
+  ["primary", "APR.WA", "WIG20.WA"],
+  ["fallback", "APR.WA", "ETFBW20TR.WA"],
 ] as const;
 
 function object(value: unknown): JsonObject | null {
@@ -120,12 +117,12 @@ describe("live beta overlap diagnostics", () => {
     expect(diagnostics).toHaveLength(CASES.length);
   }, 120_000);
 
-  liveIt("probes Warsaw local-index and WIG20 ETF benchmark candidates", async () => {
+  liveIt("verifies the selected Warsaw WIG20TR fallback remains statistically usable", async () => {
     const diagnostics = [];
-    for (const [market, ticker, benchmark] of CANDIDATE_BENCHMARKS) {
+    for (const [role, ticker, benchmark] of WARSAW_BENCHMARKS) {
       const [stock, index] = await Promise.all([chart(ticker, "10y"), chart(benchmark, "2y")]);
       diagnostics.push({
-        market,
+        role,
         ticker,
         benchmark,
         benchmarkStatus: index.status,
@@ -136,7 +133,10 @@ describe("live beta overlap diagnostics", () => {
         ...overlap(stock.rows, index.rows),
       });
     }
-    console.log("BETA_BENCHMARK_CANDIDATES", JSON.stringify(diagnostics));
-    expect(diagnostics).toHaveLength(CANDIDATE_BENCHMARKS.length);
+    console.log("WARSAW_BETA_BENCHMARKS", JSON.stringify(diagnostics));
+    const fallback = diagnostics.find((item) => item.role === "fallback");
+    expect(fallback?.benchmarkRows ?? 0).toBeGreaterThan(52);
+    expect(fallback?.consecutivePairs ?? 0).toBeGreaterThanOrEqual(52);
+    expect(fallback?.stockLagDays ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(63);
   }, 120_000);
 });
