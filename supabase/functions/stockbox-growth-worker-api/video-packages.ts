@@ -1,3 +1,5 @@
+import { canPromoteRenderToReadyEdge } from "./promotion-policy.ts";
+
 export const VIDEO_DISTRIBUTION_PLATFORMS = [
   "instagram_reel",
   "facebook_reel",
@@ -18,6 +20,14 @@ export type VideoPackageInput = {
 
 export type CompletionVideoPackageInput = VideoPackageInput & {
   promotionAllowed: boolean;
+};
+
+export type CompletedVideoPreparationInput = VideoPackageInput & {
+  renderState: string;
+  language: "sv" | "en";
+  founderVoiceActive: boolean;
+  assets: Array<{ kind: string; qcStatus: string }>;
+  paidOperations: Array<{ provider: string; ledgerRecorded: boolean }>;
 };
 
 function escapeRegExp(value: string) {
@@ -82,4 +92,26 @@ export function buildCompletionVideoPackages(input: CompletionVideoPackageInput)
     ...input,
     shadowMode: input.shadowMode || !input.promotionAllowed,
   });
+}
+
+export function prepareCompletedVideoPackages(input: CompletedVideoPreparationInput) {
+  const candidates = buildVideoDistributionPackages({ ...input, shadowMode: true });
+  const promotion = canPromoteRenderToReadyEdge({
+    shadowMode: input.shadowMode,
+    renderState: input.renderState,
+    language: input.language,
+    founderVoiceActive: input.founderVoiceActive,
+    assets: input.assets,
+    paidOperations: input.paidOperations,
+    packages: candidates.map((pkg) => ({
+      platform: pkg.platform,
+      copy: pkg.description ?? pkg.caption ?? "",
+      utmUrl: pkg.utm_url,
+    })),
+  });
+
+  return {
+    promotion,
+    packages: buildCompletionVideoPackages({ ...input, promotionAllowed: promotion.allowed }),
+  };
 }
