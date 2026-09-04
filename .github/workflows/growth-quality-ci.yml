@@ -6,12 +6,15 @@ on:
       - "tests/growth-*.test.ts"
       - "src/lib/growth/**"
       - "src/video/**"
+      - "scripts/growth/**"
+      - "workers/growth-voice/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/functions/stockbox-growth-worker-api/**"
       - "supabase/migrations/*growth*"
-      - ".github/workflows/growth-quality-ci.yml"
+      - ".github/workflows/growth-*.yml"
   push:
     branches:
       - growth-quality-v2
@@ -19,12 +22,15 @@ on:
       - "tests/growth-*.test.ts"
       - "src/lib/growth/**"
       - "src/video/**"
+      - "scripts/growth/**"
+      - "workers/growth-voice/**"
       - "src/components/analytics/browser-analytics.tsx"
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/functions/stockbox-growth-worker-api/**"
       - "supabase/migrations/*growth*"
-      - ".github/workflows/growth-quality-ci.yml"
+      - ".github/workflows/growth-*.yml"
 
 jobs:
   test:
@@ -36,6 +42,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts tests/growth-video-template-selection.test.ts tests/growth-media-qc.test.ts
+      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts tests/growth-video-template-selection.test.ts tests/growth-media-qc.test.ts tests/growth-worker-contract.test.ts
       - run: npm run typecheck
       - run: npm run build
