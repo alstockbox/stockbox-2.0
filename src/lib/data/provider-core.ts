@@ -33,6 +33,7 @@ import { fetchYahooFundamentalsResult, yahooCompanySearchProvider, yahooSymbolFo
 import { canAttemptConfiguredFundamentals } from "./security-classification";
 import { findBestSemanticPeriodMatchIndex, periodsSemanticallyMatch } from "./period-alignment";
 import { PROVIDER_ADAPTER_VERSIONS, providerAdapterVersion } from "./provider-versions";
+import { annualHistoryProviderLimitDiagnostic } from "./provider-history-diagnostics";
 
 export type ProviderResult<T> =
   | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
@@ -853,6 +854,12 @@ export async function analyzeCompany({
   const rawMarket = marketResult.ok ? marketResult.data : null;
   const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
   const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
+  const annualHistoryLimitDiagnostic = annualHistoryProviderLimitDiagnostic({
+    fundamentals,
+    market: rawMarket,
+    selectedFundamentalsProvider: fundamentalsResult.ok ? fundamentalsResult.diagnostic.provider : null,
+  });
+  if (annualHistoryLimitDiagnostic) providerDiagnostics.push(annualHistoryLimitDiagnostic);
 
   if (fundamentals) {
     const secCiks = fundamentals.sourceCiks ?? (fundamentals.cik ? [fundamentals.cik] : []);
