@@ -1,0 +1,54 @@
+name: One-shot provider history diagnostic wiring
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 0
+      - name: Wire annual-history diagnostic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/data/provider-core.ts")
+          text = path.read_text()
+          import_marker = 'import { PROVIDER_ADAPTER_VERSIONS, providerAdapterVersion } from "./provider-versions";\n'
+          import_line = 'import { annualHistoryProviderLimitDiagnostic } from "./provider-history-diagnostics";\n'
+          if import_marker not in text:
+              raise SystemExit("provider versions import marker not found")
+          if import_line not in text:
+              text = text.replace(import_marker, import_marker + import_line, 1)
+          old = '  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];\n'
+          new = (
+              '  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];\n'
+              '  const annualHistoryLimitDiagnostic = annualHistoryProviderLimitDiagnostic({\n'
+              '    fundamentals,\n'
+              '    market: rawMarket,\n'
+              '    selectedFundamentalsProvider: fundamentalsResult.ok ? fundamentalsResult.diagnostic.provider : null,\n'
+              '  });\n'
+              '  if (annualHistoryLimitDiagnostic) providerDiagnostics.push(annualHistoryLimitDiagnostic);\n'
+          )
+          if old not in text:
+              raise SystemExit("provider diagnostics marker not found")
+          if "const annualHistoryLimitDiagnostic = annualHistoryProviderLimitDiagnostic({" not in text:
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Commit patch and remove workflow
+        run: |
+          rm .github/workflows/one-shot-provider-history-wire.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/provider-core.ts .github/workflows/one-shot-provider-history-wire.yml
+          git commit -m "fix: surface Yahoo annual-history provider limit"
+          git push origin HEAD:fix/coverage-engine-root-cause
