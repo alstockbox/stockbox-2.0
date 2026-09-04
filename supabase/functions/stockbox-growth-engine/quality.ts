@@ -29,9 +29,29 @@ export function scoreStockboxTopic(input: TopicInput) {
 export function selectDailyContent(candidates: DailyCandidate[], options: { limit: number; minQuality: number }) {
   const limit = Math.max(0, Math.floor(options.limit)), minQuality = Number.isFinite(options.minQuality) ? options.minQuality : 72;
   const eligible = candidates.filter((item) => item.qualityScore >= minQuality).sort((a,b) => b.qualityScore - a.qualityScore || a.id.localeCompare(b.id));
-  const selected: DailyCandidate[] = [], usedPlatforms = new Set<string>(), usedIds = new Set<string>();
-  for (const item of eligible) { if (selected.length >= limit) break; if (usedPlatforms.has(item.platform)) continue; selected.push(item); usedPlatforms.add(item.platform); usedIds.add(item.id); }
-  for (const item of eligible) { if (selected.length >= limit) break; if (usedIds.has(item.id)) continue; selected.push(item); usedIds.add(item.id); }
+  if (limit === 0 || eligible.length === 0) return [];
+
+  const uniqueContentCount = new Set(eligible.map((item) => item.contentId)).size;
+  const maxPerContent = uniqueContentCount <= 1 ? limit : Math.max(2, Math.ceil(limit / uniqueContentCount));
+  const selected: DailyCandidate[] = [], usedPlatforms = new Set<string>(), usedIds = new Set<string>(), contentCounts = new Map<string, number>();
+  const take = (item: DailyCandidate) => { selected.push(item); usedPlatforms.add(item.platform); usedIds.add(item.id); contentCounts.set(item.contentId, (contentCounts.get(item.contentId) ?? 0) + 1); };
+
+  for (const item of eligible) {
+    if (selected.length >= limit) break;
+    if (usedPlatforms.has(item.platform)) continue;
+    if ((contentCounts.get(item.contentId) ?? 0) >= maxPerContent) continue;
+    take(item);
+  }
+  for (const item of eligible) {
+    if (selected.length >= limit) break;
+    if (usedIds.has(item.id) || usedPlatforms.has(item.platform)) continue;
+    take(item);
+  }
+  for (const item of eligible) {
+    if (selected.length >= limit) break;
+    if (usedIds.has(item.id)) continue;
+    take(item);
+  }
   return selected;
 }
 
