@@ -19,6 +19,8 @@ jobs:
       GROWTH_VOICE_WORKER_URL: ${{ secrets.GROWTH_VOICE_WORKER_URL }}
       GROWTH_VOICE_WORKER_TOKEN: ${{ secrets.GROWTH_VOICE_WORKER_TOKEN }}
       GROWTH_VOICE_ESTIMATED_SEK_PER_JOB: ${{ vars.GROWTH_VOICE_ESTIMATED_SEK_PER_JOB }}
+      GROWTH_GENERATIVE_VIDEO_ENDPOINT: ${{ secrets.GROWTH_GENERATIVE_VIDEO_ENDPOINT }}
+      GROWTH_GENERATIVE_VIDEO_TOKEN: ${{ secrets.GROWTH_GENERATIVE_VIDEO_TOKEN }}
       GROWTH_RENDER_MAX_JOBS: "2"
 
     steps:
@@ -36,5 +38,5 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Run autonomous render worker
-        run: node scripts/growth/run-render-worker.mjs
+      - name: Run autonomous growth render cycle
+        run: node scripts/growth/run-render-cycle.mjs

@@ -1,0 +1,184 @@
+name: Growth Visual DB CI
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/20260904170000_autonomous_growth_media_foundation_v3.sql"
+      - "supabase/migrations/20260904173000_growth_render_job_kinds_v3.sql"
+      - "supabase/migrations/20260904193000_growth_render_worker_rpc_v3.sql"
+      - "supabase/migrations/20260904194500_growth_budget_authorize_rpc_v3.sql"
+      - "supabase/migrations/20260904195000_growth_render_defer_rpc_v3.sql"
+      - "supabase/migrations/20260904200500_growth_visual_completion_v3.sql"
+      - "supabase/migrations/20260904202000_growth_distribution_packages_v3.sql"
+      - ".github/workflows/growth-visual-db-ci.yml"
+
+jobs:
+  visual-migration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Isolate autonomous growth migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
+          supabase init
+
+      - name: Start disposable local Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap legacy acquisition prerequisites
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists public.acq_content (
+            id uuid primary key default gen_random_uuid()
+          );
+
+          create table if not exists public.acq_config (
+            id uuid primary key default gen_random_uuid(),
+            key text not null unique,
+            value text,
+            value_type text default 'string',
+            description text,
+            updated_at timestamptz default now(),
+            created_at timestamptz default now()
+          );
+
+          create table if not exists public.acq_distribution_queue (
+            id uuid primary key default gen_random_uuid(),
+            content_id uuid not null references public.acq_content(id) on delete cascade,
+            platform text not null,
+            caption text,
+            script text,
+            utm_url text,
+            recommended_time text,
+            daily_rank integer,
+            status text not null default 'pending_approval',
+            generation_version text not null default 'v2'
+          );
+          SQL
+
+      - name: Apply v3 media and visual migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904170000_autonomous_growth_media_foundation_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904173000_growth_render_job_kinds_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904193000_growth_render_worker_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904194500_growth_budget_authorize_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904195000_growth_render_defer_rpc_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904200500_growth_visual_completion_v3.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260904202000_growth_distribution_packages_v3.sql
+
+      - name: Assert carousel, static, and video READY invariants
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            c_carousel uuid := gen_random_uuid();
+            c_static uuid := gen_random_uuid();
+            c_video uuid := gen_random_uuid();
+            j_carousel uuid := gen_random_uuid();
+            j_static uuid := gen_random_uuid();
+            j_video uuid := gen_random_uuid();
+            p_carousel text;
+            p_static text;
+            p_video text;
+            r public.acq_render_jobs%rowtype;
+            package_count integer;
+            asset_count integer;
+          begin
+            if not exists (
+              select 1 from information_schema.columns
+              where table_schema='public' and table_name='acq_render_jobs' and column_name='job_kind'
+            ) then raise exception 'job_kind column missing'; end if;
+
+            if not exists (
+              select 1 from information_schema.columns
+              where table_schema='public' and table_name='acq_render_jobs' and column_name='metadata'
+            ) then raise exception 'render job metadata column missing'; end if;
+
+            if (select value from public.acq_config where key='growth_generative_provider_enabled') <> 'false' then
+              raise exception 'Generative provider must default disabled';
+            end if;
+
+            insert into public.acq_content(id) values (c_carousel),(c_static),(c_video);
+            insert into public.acq_distribution_queue(id,content_id,platform,caption,script,utm_url,recommended_time,daily_rank,status,generation_version)
+            values
+              (gen_random_uuid(),c_carousel,'instagram_carousel','Carousel caption',null,'https://example.test/?utm_content=carousel','18:30 Europe/Stockholm',1,'pending_approval','v2'),
+              (gen_random_uuid(),c_static,'linkedin','LinkedIn caption',null,'https://example.test/?utm_content=static','12:00 Europe/Stockholm',2,'pending_approval','v2'),
+              (gen_random_uuid(),c_video,'youtube_short','Video caption','Video description','https://example.test/?utm_content=video','18:30 Europe/Stockholm',3,'pending_approval','v2');
+
+            insert into public.acq_render_jobs(id,idempotency_key,content_id,state,template,language,job_kind,render_spec,worker_id,claimed_at)
+            values
+              (j_carousel,'ci-carousel',c_carousel,'storyboarding','educational_checklist','sv','carousel',jsonb_build_object('slides',jsonb_build_array(1,2,3)),'ci-worker',now()),
+              (j_static,'ci-static',c_static,'storyboarding','educational_checklist','sv','static_image','{}'::jsonb,'ci-worker',now()),
+              (j_video,'ci-video',c_video,'storyboarding','educational_checklist','sv','video','{}'::jsonb,'ci-worker',now());
+
+            p_carousel := to_char(current_date,'YYYY-MM-DD') || '/' || c_carousel || '/' || j_carousel || '/';
+            select * into r
+            from public.acq_complete_render_job_v3(
+              j_carousel,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','carousel_slide','bucket','growth-ready-assets','storage_path',p_carousel||'slide-01.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('a',64)),
+                jsonb_build_object('kind','carousel_slide','bucket','growth-ready-assets','storage_path',p_carousel||'slide-02.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('b',64)),
+                jsonb_build_object('kind','carousel_slide','bucket','growth-ready-assets','storage_path',p_carousel||'slide-03.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('c',64)),
+                jsonb_build_object('kind','cover','bucket','growth-ready-assets','storage_path',p_carousel||'cover.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('d',64)),
+                jsonb_build_object('kind','carousel_zip','bucket','growth-ready-assets','storage_path',p_carousel||'carousel.zip','mime_type','application/zip','checksum_sha256',repeat('e',64)),
+                jsonb_build_object('kind','metadata','bucket','growth-ready-assets','storage_path',p_carousel||'metadata.json','mime_type','application/json','checksum_sha256',repeat('f',64))
+              )
+            );
+            if r.state <> 'ready' then raise exception 'Carousel did not become READY'; end if;
+            select count(*) into asset_count from public.acq_media_assets where render_job_id=j_carousel;
+            if asset_count <> 6 then raise exception 'Carousel expected 6 assets, got %',asset_count; end if;
+            select count(*) into package_count from public.acq_distribution_packages where render_job_id=j_carousel and platform='instagram_carousel' and status='ready';
+            if package_count <> 1 then raise exception 'Carousel package missing'; end if;
+
+            p_static := to_char(current_date,'YYYY-MM-DD') || '/' || c_static || '/' || j_static || '/';
+            perform public.acq_complete_render_job_v3(
+              j_static,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','static_image','bucket','growth-ready-assets','storage_path',p_static||'static.png','mime_type','image/png','width',1080,'height',1350,'checksum_sha256',repeat('1',64)),
+                jsonb_build_object('kind','metadata','bucket','growth-ready-assets','storage_path',p_static||'metadata.json','mime_type','application/json','checksum_sha256',repeat('2',64))
+              )
+            );
+            select count(*) into package_count from public.acq_distribution_packages where render_job_id=j_static and platform='linkedin' and status='ready';
+            if package_count <> 1 then raise exception 'Static package missing'; end if;
+
+            p_video := to_char(current_date,'YYYY-MM-DD') || '/' || c_video || '/' || j_video || '/';
+            perform public.acq_complete_render_job_v3(
+              j_video,'ci-worker','{"passed":true}'::jsonb,
+              jsonb_build_array(
+                jsonb_build_object('kind','voice_audio','bucket','growth-render-staging','storage_path',p_video||'voice.wav','mime_type','audio/wav','checksum_sha256',repeat('3',64)),
+                jsonb_build_object('kind','master_video','bucket','growth-ready-assets','storage_path',p_video||'master.mp4','mime_type','video/mp4','width',1080,'height',1920,'duration_ms',30000,'checksum_sha256',repeat('4',64)),
+                jsonb_build_object('kind','cover','bucket','growth-ready-assets','storage_path',p_video||'cover.jpg','mime_type','image/jpeg','width',1080,'height',1920,'checksum_sha256',repeat('5',64)),
+                jsonb_build_object('kind','metadata','bucket','growth-ready-assets','storage_path',p_video||'metadata.json','mime_type','application/json','checksum_sha256',repeat('6',64))
+              )
+            );
+            select count(*) into package_count from public.acq_distribution_packages where render_job_id=j_video and platform='youtube_short' and status='ready';
+            if package_count <> 1 then raise exception 'Video package missing'; end if;
+
+            perform public.acq_complete_render_job_v3(
+              j_carousel,'ci-worker','{"passed":true}'::jsonb,'[]'::jsonb
+            );
+            select count(*) into package_count from public.acq_distribution_packages where render_job_id=j_carousel;
+            if package_count <> 1 then raise exception 'Idempotent carousel completion duplicated packages'; end if;
+          end
+          $$;
+          SQL
+
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup

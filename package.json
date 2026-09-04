@@ -13,6 +13,9 @@
     "typecheck": "next typegen && tsc --noEmit",
     "growth:render": "node scripts/growth/render-growth-video.mjs",
     "growth:qc": "node scripts/growth/validate-growth-video.mjs",
+    "growth:carousel": "node scripts/growth/render-growth-carousel.mjs",
+    "growth:static": "node scripts/growth/render-growth-static.mjs",
+    "growth:generative:benchmark": "node scripts/growth/benchmark-generative-provider.mjs",
     "release:smoke:local": "node scripts/launch/local-release-smoke.mjs",
     "security-master:build-sweden": "node scripts/security-master/build-swedish-snapshot.mjs",
     "market-data:smoke": "node scripts/market-data-smoke.mjs"

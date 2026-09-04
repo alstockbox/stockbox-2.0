@@ -12,6 +12,9 @@ export const DistributionPlatformSchema = z.enum([
 
 export type DistributionPlatform = z.infer<typeof DistributionPlatformSchema>;
 
+export const RenderJobKindSchema = z.enum(["video", "carousel", "static_image"]);
+export type RenderJobKind = z.infer<typeof RenderJobKindSchema>;
+
 export const RenderTemplateSchema = z.enum([
   "educational_checklist",
   "stock_analysis",
@@ -76,6 +79,10 @@ const SceneSchema = z.object({
   headline: z.string().max(220).optional(),
   body: z.string().max(1200).optional(),
   visualRef: z.string().max(500).optional(),
+  prompt: z.string().min(8).max(1200).optional(),
+  fallbackKind: z.literal("motion_graphic").optional(),
+  fallbackHeadline: z.string().min(1).max(220).optional(),
+  fallbackBody: z.string().min(1).max(1200).optional(),
 });
 
 const SubtitleSchema = z.object({
@@ -112,6 +119,23 @@ export const RenderSpecSchema = z
           path: ["scenes", index, "endMs"],
           message: "Scene endMs must be greater than startMs",
         });
+      }
+      if (scene.kind === "generated_micro_scene") {
+        const durationMs = scene.endMs - scene.startMs;
+        if (durationMs < 2_000 || durationMs > 5_000) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["scenes", index],
+            message: "Generated micro scenes must be 2-5 seconds",
+          });
+        }
+        if (!scene.prompt || scene.fallbackKind !== "motion_graphic" || !scene.fallbackHeadline || !scene.fallbackBody) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["scenes", index],
+            message: "Generated scenes require prompt and complete deterministic motion fallback",
+          });
+        }
       }
     }
 

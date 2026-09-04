@@ -25,6 +25,9 @@ export function TemplateLayout({
               kind={scene.kind}
               headline={scene.headline}
               body={scene.body}
+              visualRef={scene.visualRef}
+              fallbackHeadline={scene.fallbackHeadline}
+              fallbackBody={scene.fallbackBody}
               variantLabel={variantLabel}
             />
           </Sequence>
