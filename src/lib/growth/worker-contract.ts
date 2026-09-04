@@ -7,9 +7,11 @@ export type GrowthWorkerAsset = {
   checksumSha256: string;
 };
 
-export function validateWorkerToken(header: string | null | undefined, expected: string): boolean {
-  if (!expected || !header?.startsWith("Bearer ")) return false;
-  const supplied = header.slice("Bearer ".length).trim();
+// The deployed Edge API uses x-stockbox-growth-worker-token with the raw token
+// value (not an Authorization/Bearer wrapper). Keep the pure test contract in
+// sync with that boundary.
+export function validateWorkerToken(supplied: string | null | undefined, expected: string): boolean {
+  if (!expected || !supplied) return false;
   const suppliedBuffer = Buffer.from(supplied);
   const expectedBuffer = Buffer.from(expected);
   if (suppliedBuffer.length !== expectedBuffer.length) return false;
