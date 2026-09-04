@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/session";
+import { canTransitionDistributionPackage } from "@/lib/growth/ready-policy";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const RUN_MODES = new Set(["full", "discover", "score_select", "content", "repurpose", "seo", "creators", "metrics", "optimize", "brief", "status"]);
@@ -28,6 +29,34 @@ export async function setDistributionStatusAction(formData: FormData) {
   const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
   if (status === "posted") patch.published_at = new Date().toISOString();
   await supabase.from("acq_distribution_queue").update(patch).eq("id", id);
+  revalidatePath("/admin/growth");
+}
+
+export async function setDistributionPackageStatusAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") || "");
+  const nextStatus = String(formData.get("status") || "");
+  if (!id) return;
+
+  const supabase = createAdminClient();
+  if (!supabase) return;
+
+  const { data: current } = await supabase
+    .from("acq_distribution_packages")
+    .select("id,status")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!current || !canTransitionDistributionPackage(String(current.status || ""), nextStatus)) return;
+
+  const patch: Record<string, unknown> = {
+    status: nextStatus,
+    updated_at: new Date().toISOString(),
+  };
+  if (nextStatus === "posted") patch.published_at = new Date().toISOString();
+  if (nextStatus === "ready") patch.published_at = null;
+
+  await supabase.from("acq_distribution_packages").update(patch).eq("id", id);
   revalidatePath("/admin/growth");
 }
 
