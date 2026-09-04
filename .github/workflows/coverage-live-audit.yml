@@ -7,11 +7,14 @@ on:
     paths:
       - ".github/workflows/coverage-live-audit.yml"
       - "tests/diagnostics/live-coverage-batch.test.ts"
+      - "tests/data/adr-listing-basis.test.ts"
       - "src/lib/data/coverage-audit*.ts"
       - "src/lib/analysis/coverage-audit.ts"
       - "src/lib/data/company-search.ts"
       - "src/lib/data/company-search-core.ts"
       - "src/lib/data/security-classification.ts"
+      - "src/lib/data/provider.ts"
+      - "src/lib/data/provider-core.ts"
 
 permissions:
   contents: read
