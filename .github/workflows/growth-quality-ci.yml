@@ -12,6 +12,7 @@ on:
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/functions/stockbox-growth-engine-v3/**"
       - "supabase/functions/stockbox-growth-worker-api/**"
       - "supabase/migrations/*growth*"
       - ".github/workflows/growth-*.yml"
@@ -28,6 +29,7 @@ on:
       - "src/app/admin/growth/**"
       - "src/app/api/admin/growth/**"
       - "supabase/functions/stockbox-growth-engine/**"
+      - "supabase/functions/stockbox-growth-engine-v3/**"
       - "supabase/functions/stockbox-growth-worker-api/**"
       - "supabase/migrations/*growth*"
       - ".github/workflows/growth-*.yml"
@@ -42,7 +44,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts tests/growth-video-template-selection.test.ts tests/growth-media-qc.test.ts tests/growth-worker-contract.test.ts tests/growth-carousel-spec.test.ts tests/growth-carousel-render.test.ts tests/growth-generative-scenes.test.ts tests/growth-job-kind-contract.test.ts tests/growth-voice-provider.test.ts tests/growth-visual-source.test.ts tests/growth-retention-policy.test.ts tests/growth-existing-channel-regression.test.ts tests/growth-explore-exploit.test.ts tests/growth-growth-score.test.ts tests/growth-storyboard.test.ts tests/growth-manual-script-ideas.test.ts tests/growth-render-job-policy.test.ts tests/growth-v3-edge-parity.test.ts tests/growth-v3-orchestration.test.ts tests/growth-v3-provider-budget.test.ts
+      - run: npm test -- tests/growth-content-quality.test.ts tests/growth-publishing-package.test.ts tests/growth-budget-governor.test.ts tests/growth-budget-ledger.test.ts tests/growth-render-spec.test.ts tests/growth-asset-paths.test.ts tests/growth-render-adapter.test.ts tests/growth-video-template-selection.test.ts tests/growth-media-qc.test.ts tests/growth-worker-contract.test.ts tests/growth-carousel-spec.test.ts tests/growth-carousel-render.test.ts tests/growth-generative-scenes.test.ts tests/growth-job-kind-contract.test.ts tests/growth-voice-provider.test.ts tests/growth-visual-source.test.ts tests/growth-retention-policy.test.ts tests/growth-existing-channel-regression.test.ts tests/growth-explore-exploit.test.ts tests/growth-growth-score.test.ts tests/growth-storyboard.test.ts tests/growth-manual-script-ideas.test.ts tests/growth-render-job-policy.test.ts tests/growth-v3-edge-parity.test.ts tests/growth-v3-orchestration.test.ts tests/growth-v3-provider-budget.test.ts tests/growth-v3-canary-runtime.test.ts
       - name: Check growth worker scripts
         run: |
           node --check scripts/growth/render-growth-video.mjs
