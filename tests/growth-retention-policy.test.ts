@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { selectRetentionActions } from "@/lib/growth/retention-policy";
 
 const now = new Date("2026-09-04T20:00:00Z");
+const cleanupSource = readFileSync("supabase/functions/stockbox-growth-worker-api/retention.ts", "utf8");
+const cycleSource = readFileSync("scripts/growth/run-render-cycle.mjs", "utf8");
 
 describe("growth retention policy", () => {
   it("deletes staging intermediates for completed jobs", () => {
@@ -17,7 +20,7 @@ describe("growth retention policy", () => {
   });
 
   it("keeps assets linked to active or published packages", () => {
-    expect(selectRetentionActions({ now, readyRetentionDays: 1, assets: [{ id: "d", bucket: "growth-ready-assets", storagePath: "x/master.mp4", kind: "master_video", createdAt: "2026-08-01T10:00:00Z", renderState: "ready", packageStatus: "published" }] })).toEqual([]);
+    expect(selectRetentionActions({ now, readyRetentionDays: 1, assets: [{ id: "d", bucket: "growth-ready-assets", storagePath: "x/master.mp4", kind: "master_video", createdAt: "2026-08-01T10:00:00Z", renderState: "ready", packageStatus: "posted" }] })).toEqual([]);
   });
 
   it("deletes old unlinked ready assets", () => {
@@ -26,5 +29,12 @@ describe("growth retention policy", () => {
 
   it("never selects founder voice profile storage", () => {
     expect(selectRetentionActions({ now, readyRetentionDays: 1, assets: [{ id: "voice", bucket: "growth-voice-private", storagePath: "founder/reference.wav", kind: "voice_audio", createdAt: "2025-01-01T00:00:00Z", renderState: "ready", packageStatus: null }] })).toEqual([]);
+    expect(cleanupSource).toContain('["growth-render-staging", "growth-ready-assets"]');
+    expect(cleanupSource).not.toContain('.from("growth-voice-private")');
+  });
+
+  it("runs cleanup automatically as part of the cloud render cycle", () => {
+    expect(cycleSource).toContain('apiAction("cleanup")');
+    expect(cycleSource).toContain('apiAction("materialize")');
   });
 });
