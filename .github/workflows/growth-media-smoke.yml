@@ -1,0 +1,50 @@
+name: Growth Media Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/video/**"
+      - "src/lib/growth/media-qc.ts"
+      - "scripts/growth/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/growth-media-smoke.yml"
+
+jobs:
+  render-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Create deterministic smoke inputs
+        run: |
+          cat > /tmp/growth-spec.json <<'JSON'
+          {
+            "version":"v3",
+            "contentId":"smoke-content",
+            "renderJobId":"smoke-job",
+            "language":"sv",
+            "template":"educational_checklist",
+            "title":"Tre saker att kontrollera",
+            "hook":"Tre varningssignaler på 30 sekunder",
+            "script":"Första punkten är skuldsättningen.",
+            "voiceMode":"educational",
+            "scenes":[{"id":"scene-1","kind":"stockbox_ui","startMs":0,"endMs":30000,"headline":"Kontrollera skulden","body":"Jämför skuld, kassaflöde och räntetäckning."}],
+            "subtitles":[{"startMs":1000,"endMs":5000,"text":"Kontrollera skuldsättningen"}],
+            "cta":{"text":"Analysera bolaget i StockBox","url":"https://www.getstockbox.app/"}
+          }
+          JSON
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i "sine=frequency=220:duration=30" -ar 48000 -ac 1 /tmp/test-voice.wav
+      - name: Render real vertical MP4
+        run: npm run growth:render -- --spec /tmp/growth-spec.json --voice /tmp/test-voice.wav --out /tmp/growth-smoke.mp4
+      - name: Validate rendered MP4
+        run: npm run growth:qc -- --video /tmp/growth-smoke.mp4
