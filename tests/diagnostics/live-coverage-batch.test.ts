@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCoverageAuditBatches } from "../../src/lib/data/coverage-audit-batch";
 import { searchCompanies } from "../../src/lib/data/enhanced-provider";
+import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundamentals";
+import { yahooMarketDataProvider } from "../../src/lib/data/yahoo-market";
 
 const LIVE = process.env.RUN_LIVE_COVERAGE === "1";
 
@@ -46,6 +48,54 @@ const tickers = [
       providerCapabilities: company.providerCapabilities,
     }))));
     expect(candidates.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it("captures the live ADR reporting, valuation and share bases before eligibility changes", async () => {
+    const candidates = await searchCompanies("NVO");
+    const company = candidates.find((candidate) =>
+      candidate.canonicalTicker === "NVO" && candidate.primaryCandidate
+    ) ?? candidates.find((candidate) => candidate.canonicalTicker === "NVO");
+    expect(company).toBeTruthy();
+
+    const [fundamentals, market] = await Promise.all([
+      fetchYahooFundamentalsResult(company!),
+      yahooMarketDataProvider.fetchMarketData(company!),
+    ]);
+
+    const payload = {
+      securityType: company?.securityType,
+      companyCurrency: company?.currency ?? null,
+      fundamentals: fundamentals.ok ? {
+        ticker: fundamentals.data.ticker,
+        name: fundamentals.data.name,
+        reportingCurrency: fundamentals.data.trailingTwelveMonths?.currency
+          ?? fundamentals.data.annualPeriods?.at(-1)?.currency
+          ?? null,
+        reportedMarketCap: fundamentals.data.reportedMarketCap ?? null,
+        reportedMarketCapCurrency: fundamentals.data.reportedMarketCapCurrency ?? null,
+        reportedSharesOutstanding: fundamentals.data.reportedSharesOutstanding ?? null,
+        latestPeriodShares: fundamentals.data.trailingTwelveMonths?.currentSharesOutstanding
+          ?? fundamentals.data.trailingTwelveMonths?.sharesDiluted
+          ?? fundamentals.data.annualPeriods?.at(-1)?.currentSharesOutstanding
+          ?? fundamentals.data.annualPeriods?.at(-1)?.sharesDiluted
+          ?? null,
+        latestPeriodEps: fundamentals.data.trailingTwelveMonths?.epsDiluted
+          ?? fundamentals.data.annualPeriods?.at(-1)?.epsDiluted
+          ?? null,
+        reportedValuation: fundamentals.data.reportedValuation ?? null,
+      } : { error: fundamentals.reason, message: fundamentals.message },
+      market: market.ok ? {
+        price: market.data.price,
+        currency: market.data.currency,
+        date: market.data.date,
+        marketCap: market.data.marketCap ?? null,
+        sharesOutstanding: market.data.sharesOutstanding ?? null,
+      } : { error: market.reason, message: market.message },
+    };
+
+    console.log("ADR_BASIS_DIAGNOSTIC", JSON.stringify(payload));
+    expect(fundamentals.ok).toBe(true);
+    expect(market.ok).toBe(true);
   }, 120_000);
 
   it("audits a stratified 100-ticker global sample without aborting on individual failures", async () => {
