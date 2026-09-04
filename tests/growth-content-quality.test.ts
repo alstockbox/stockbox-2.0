@@ -53,6 +53,34 @@ describe("selectDailyContent", () => {
     expect(new Set(selected.map((item) => item.platform)).size).toBe(6);
     expect(selected.every((item) => item.qualityScore >= 72)).toBe(true);
   });
+
+  it("does not let one topic dominate the day when another strong topic is available", () => {
+    const candidates: DailyCandidate[] = [
+      { id: "a1", platform: "tiktok", contentId: "a", qualityScore: 100 },
+      { id: "a2", platform: "instagram_reel", contentId: "a", qualityScore: 100 },
+      { id: "a3", platform: "instagram_carousel", contentId: "a", qualityScore: 100 },
+      { id: "a4", platform: "youtube_short", contentId: "a", qualityScore: 100 },
+      { id: "a5", platform: "linkedin", contentId: "a", qualityScore: 100 },
+      { id: "a6", platform: "facebook", contentId: "a", qualityScore: 100 },
+      { id: "b1", platform: "tiktok", contentId: "b", qualityScore: 98 },
+      { id: "b2", platform: "instagram_reel", contentId: "b", qualityScore: 98 },
+      { id: "b3", platform: "instagram_carousel", contentId: "b", qualityScore: 98 },
+      { id: "b4", platform: "youtube_short", contentId: "b", qualityScore: 98 },
+      { id: "b5", platform: "linkedin", contentId: "b", qualityScore: 98 },
+      { id: "b6", platform: "facebook", contentId: "b", qualityScore: 98 },
+    ];
+
+    const selected = selectDailyContent(candidates, { limit: 6, minQuality: 72 });
+    const counts = selected.reduce<Record<string, number>>((acc, item) => {
+      acc[item.contentId] = (acc[item.contentId] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    expect(selected).toHaveLength(6);
+    expect(new Set(selected.map((item) => item.platform)).size).toBe(6);
+    expect(counts.a).toBeLessThanOrEqual(3);
+    expect(counts.b).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("isTransientAiStatus", () => {
