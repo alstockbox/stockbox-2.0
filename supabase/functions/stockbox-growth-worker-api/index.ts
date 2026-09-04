@@ -1,6 +1,7 @@
 // @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.112.3";
+import { runRetentionCleanup } from "./retention.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -433,6 +434,11 @@ async function handleFail(body: any) {
   return json({ job: data });
 }
 
+async function handleCleanup() {
+  const result = await runRetentionCleanup(supabase, configNumber);
+  return json({ retention: result });
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (!SUPABASE_URL || !SERVICE_KEY || !WORKER_TOKEN) return json({ error: "worker_api_not_configured" }, 503);
@@ -447,6 +453,7 @@ Deno.serve(async (request) => {
       case "claim": return await handleClaim(body);
       case "authorize_cost": return await handleAuthorizeCost(body);
       case "complete": return await handleComplete(body);
+      case "cleanup": return await handleCleanup();
       case "defer": return await handleDefer(body);
       case "fail": return await handleFail(body);
       default: return json({ error: "unsupported_action" }, 400);
