@@ -8,6 +8,7 @@ on:
       - ".github/workflows/coverage-live-audit.yml"
       - "tests/diagnostics/live-coverage-batch.test.ts"
       - "tests/diagnostics/live-reit-specialized.test.ts"
+      - "tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts"
       - "tests/data/adr-listing-basis.test.ts"
       - "src/lib/data/coverage-audit*.ts"
       - "src/lib/analysis/coverage-audit.ts"
@@ -47,7 +48,7 @@ jobs:
         env:
           RUN_LIVE_COVERAGE: "1"
           SEC_USER_AGENT: "StockBox/1.0 https://www.getstockbox.app/contact"
-        run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts tests/diagnostics/live-reit-specialized.test.ts --reporter=verbose
+        run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts tests/diagnostics/live-reit-specialized.test.ts tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts --reporter=verbose
 
       - name: Upload coverage diagnostic
         if: always()
