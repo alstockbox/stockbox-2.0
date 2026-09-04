@@ -1,5 +1,6 @@
 export type TopicInput = { topic?: string | null; type?: string | null; company?: string | null; ticker?: string | null };
 export type DailyCandidate = { id: string; platform: string; contentId: string; qualityScore: number };
+export type DailyQueuePlan = { id: string; status: "pending_approval" | "deferred"; dailyRank: number | null };
 
 const STRONG_STOCK_TERMS = ["aktie","börs","börsen","bolag","kvartalsrapport","årsrapport","rapport","resultat","utdelning","värdering","nyckeltal","p/e","roic","kassaflöde","marginal","skuldsättning","omsättning","vinst","vinstvarning","riktkurs","börsvärde","investmentbolag","balansräkning","lönsamhet","earnings","revenue","cash flow","valuation"];
 const SUPPORTING_TERMS = ["investering","investerare","analys","analytiker","risk","tillväxt","finans","marknad","sektor","industri","kapital"];
@@ -30,29 +31,23 @@ export function selectDailyContent(candidates: DailyCandidate[], options: { limi
   const limit = Math.max(0, Math.floor(options.limit)), minQuality = Number.isFinite(options.minQuality) ? options.minQuality : 72;
   const eligible = candidates.filter((item) => item.qualityScore >= minQuality).sort((a,b) => b.qualityScore - a.qualityScore || a.id.localeCompare(b.id));
   if (limit === 0 || eligible.length === 0) return [];
-
   const uniqueContentCount = new Set(eligible.map((item) => item.contentId)).size;
   const maxPerContent = uniqueContentCount <= 1 ? limit : Math.max(2, Math.ceil(limit / uniqueContentCount));
   const selected: DailyCandidate[] = [], usedPlatforms = new Set<string>(), usedIds = new Set<string>(), contentCounts = new Map<string, number>();
   const take = (item: DailyCandidate) => { selected.push(item); usedPlatforms.add(item.platform); usedIds.add(item.id); contentCounts.set(item.contentId, (contentCounts.get(item.contentId) ?? 0) + 1); };
-
-  for (const item of eligible) {
-    if (selected.length >= limit) break;
-    if (usedPlatforms.has(item.platform)) continue;
-    if ((contentCounts.get(item.contentId) ?? 0) >= maxPerContent) continue;
-    take(item);
-  }
-  for (const item of eligible) {
-    if (selected.length >= limit) break;
-    if (usedIds.has(item.id) || usedPlatforms.has(item.platform)) continue;
-    take(item);
-  }
-  for (const item of eligible) {
-    if (selected.length >= limit) break;
-    if (usedIds.has(item.id)) continue;
-    take(item);
-  }
+  for (const item of eligible) { if (selected.length >= limit) break; if (usedPlatforms.has(item.platform)) continue; if ((contentCounts.get(item.contentId) ?? 0) >= maxPerContent) continue; take(item); }
+  for (const item of eligible) { if (selected.length >= limit) break; if (usedIds.has(item.id) || usedPlatforms.has(item.platform)) continue; take(item); }
+  for (const item of eligible) { if (selected.length >= limit) break; if (usedIds.has(item.id)) continue; take(item); }
   return selected;
+}
+
+export function planDailyQueue(candidates: DailyCandidate[], options: { limit: number; minQuality: number }): DailyQueuePlan[] {
+  const selected = selectDailyContent(candidates, options);
+  const ranks = new Map(selected.map((item, index) => [item.id, index + 1]));
+  return candidates.map((item) => {
+    const rank = ranks.get(item.id) ?? null;
+    return { id: item.id, status: rank ? "pending_approval" : "deferred", dailyRank: rank };
+  });
 }
 
 export function isTransientAiStatus(status: number) { return status === 408 || status === 425 || status === 429 || status >= 500; }
