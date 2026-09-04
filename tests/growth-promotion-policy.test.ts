@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canPromoteRenderToReady } from "@/lib/growth/promotion-policy";
+import { canPromoteRenderToReadyEdge } from "../supabase/functions/stockbox-growth-worker-api/promotion-policy";
 
 const base = {
   shadowMode: false,
@@ -50,5 +51,20 @@ describe("growth render promotion policy", () => {
 
   it("does not require a founder clone for English generic-voice experiments", () => {
     expect(canPromoteRenderToReady({ ...base, language: "en", founderVoiceActive: false }).allowed).toBe(true);
+  });
+
+  it("keeps the edge worker promotion gate behavior identical to the app policy", () => {
+    const scenarios = [
+      base,
+      { ...base, shadowMode: true },
+      { ...base, founderVoiceActive: false },
+      { ...base, paidOperations: [{ provider: "voice", ledgerRecorded: false }] },
+      { ...base, assets: [{ kind: "master_video", qcStatus: "passed" }] },
+      { ...base, language: "en" as const, founderVoiceActive: false },
+    ];
+
+    for (const scenario of scenarios) {
+      expect(canPromoteRenderToReadyEdge(scenario)).toEqual(canPromoteRenderToReady(scenario));
+    }
   });
 });
