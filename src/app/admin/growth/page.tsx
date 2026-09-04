@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CopyButton } from "@/components/admin/copy-button";
 import { requireAdmin } from "@/lib/auth/session";
+import { buildPublishingPackage } from "@/lib/growth/publishing-package";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runGrowthEngineAction, setDistributionStatusAction, setOutreachStatusAction } from "./actions";
 
@@ -57,7 +58,7 @@ export default async function GrowthAdminPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b99b5f]">StockBox Traffic Machine</p>
           <h1 className="mt-2 text-3xl font-semibold">Growth Control Center</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">Motorn filtrerar bort irrelevanta ämnen och visar bara dagens högst prioriterade content som klarar kvalitetsgränsen.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9aa7b8]">Motorn hittar, filtrerar och prioriterar innehållet. Du gör bara sista publiceringssteget på respektive plattform.</p>
         </div>
         <form action={runGrowthEngineAction}>
           <input type="hidden" name="mode" value="full" />
@@ -69,6 +70,18 @@ export default async function GrowthAdminPage() {
         <Stat label="7-dagarssnitt" value={`${rolling}/dag`} />
         <Stat label="Mål" value={`${target}/dag`} />
         <Stat label="Dagens prioriterade" value={String(queue.length)} />
+      </section>
+
+      <section className="mt-8 rounded-xl border border-[#b99b5f]/30 bg-[#b99b5f]/[0.06] p-5">
+        <h2 className="text-lg font-semibold">Vad ska jag göra när motorn är färdig?</h2>
+        <p className="mt-2 text-sm leading-6 text-[#c7d0dc]">Börja med post <strong>#1 idag</strong>. Du behöver inte göra något tekniskt med motorn efter körningen.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <GuideStep number="1" title="Välj posten" text="Börja med #1 i listan. Den är högst prioriterad." />
+          <GuideStep number="2" title="Kopiera paketet" text="Tryck Kopiera färdigt paket. Då får du rätt manus, caption och en enda spårad länk." />
+          <GuideStep number="3" title="Publicera" text="Öppna TikTok, YouTube, Instagram, LinkedIn eller Facebook och lägg upp innehållet där." />
+          <GuideStep number="4" title="Markera klart" text="Kom tillbaka hit och tryck Jag har publicerat. Då vet motorn att posten är färdig." />
+        </div>
+        <p className="mt-4 text-xs leading-5 text-[#9aa7b8]">Video: använd MANUS + VIDEO-UPPLÄGG och cover-bilden. Carousel: använd SLIDES + bilden. LinkedIn/Facebook: klistra in INLÄGG. Själva publiceringen på sociala medier är fortfarande det sista manuella steget.</p>
       </section>
 
       <section className="mt-8 rounded-xl border border-white/10 bg-white/[0.03] p-5">
@@ -88,13 +101,21 @@ export default async function GrowthAdminPage() {
       <section className="mt-8">
         <div>
           <h2 className="text-xl font-semibold">1. Dagens bästa content</h2>
-          <p className="mt-1 max-w-3xl text-sm text-[#9aa7b8]">Max ett litet antal prioriterade poster. Låg kvalitet och gamla utkast visas inte här.</p>
+          <p className="mt-1 max-w-3xl text-sm text-[#9aa7b8]">Motorn visar bara dagens prioriterade poster. Börja med #1 och arbeta nedåt om du vill publicera fler.</p>
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           {queue.map((row) => {
             const content = row.content_id ? contentById.get(row.content_id) : null;
-            const postText = [row.caption, row.script ? `\n\nMANUS:\n${row.script}` : "", row.utm_url ? `\n\nLÄNK:\n${row.utm_url}` : ""].filter(Boolean).join("");
+            const postTitle = content?.title ?? content?.topic ?? "StockBox content";
+            const postText = buildPublishingPackage({
+              platform: row.platform,
+              title: postTitle,
+              caption: row.caption,
+              script: row.script,
+              mediaInstructions: row.media_instructions,
+              utmUrl: row.utm_url,
+            });
             const isVideo = ["tiktok", "instagram_reel", "youtube_short"].includes(row.platform);
             const rank = Number(row.daily_rank ?? 0);
             const quality = Number(row.quality_score ?? 0);
@@ -108,9 +129,9 @@ export default async function GrowthAdminPage() {
                       <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[11px] font-semibold text-emerald-200">Kvalitet {quality}/100</span>
                     </div>
                     <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[#b99b5f]">{row.platform}</p>
-                    <h3 className="mt-1 text-base font-semibold">{content?.title ?? content?.topic ?? "StockBox content"}</h3>
+                    <h3 className="mt-1 text-base font-semibold">{postTitle}</h3>
                   </div>
-                  <CopyButton text={postText} label="Kopiera allt" />
+                  <CopyButton text={postText} label="Kopiera färdigt paket" />
                 </div>
 
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[#c7d0dc]">{row.caption}</p>
@@ -138,7 +159,7 @@ export default async function GrowthAdminPage() {
                   <form action={setDistributionStatusAction}>
                     <input type="hidden" name="id" value={row.id} />
                     <input type="hidden" name="status" value="posted" />
-                    <button className="rounded-md bg-[#b99b5f] px-3 py-2 text-xs font-semibold text-[#07111f]">Jag har postat ✓</button>
+                    <button className="rounded-md bg-[#b99b5f] px-3 py-2 text-xs font-semibold text-[#07111f]">Jag har publicerat ✓</button>
                   </form>
                   <form action={setDistributionStatusAction}>
                     <input type="hidden" name="id" value={row.id} />
@@ -216,6 +237,16 @@ export default async function GrowthAdminPage() {
 
       <p className="mt-10 text-xs text-[#708095]">Quality v2: irrelevanta ämnen stoppas före produktion, AI-fel får automatiska retries och dagens lista hålls medvetet liten.</p>
     </main>
+  );
+}
+
+function GuideStep({ number, title, text }: { number: string; title: string; text: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/15 p-4">
+      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#b99b5f] text-xs font-bold text-[#07111f]">{number}</div>
+      <p className="mt-3 text-sm font-semibold">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-[#9aa7b8]">{text}</p>
+    </div>
   );
 }
 
