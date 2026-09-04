@@ -19,17 +19,11 @@ MAX_REFERENCE_BYTES = 25 * 1024 * 1024
 REFERENCE_TIMEOUT_SECONDS = 20.0
 ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis"}
 
-image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .pip_install_from_requirements("/root/requirements.txt")
-)
-
-# Modal automatically adds local source files to the image for deployed apps.
-# requirements.txt is included explicitly as a small immutable dependency manifest.
-image = image.add_local_file(
-    Path(__file__).with_name("requirements.txt"),
-    remote_path="/root/requirements.txt",
-    copy=True,
+# Modal expects pip_install_from_requirements() to receive a LOCAL file path.
+# It reads the manifest while building the image; no manual copy layer is needed.
+REQUIREMENTS_PATH = str(Path(__file__).with_name("requirements.txt"))
+image = modal.Image.debian_slim(python_version="3.11").pip_install_from_requirements(
+    REQUIREMENTS_PATH
 )
 
 app = modal.App(APP_NAME)
@@ -54,7 +48,6 @@ def _authorized(authorization: str | None) -> bool:
     supplied = authorization.removeprefix("Bearer ").strip()
     if len(supplied) != len(expected):
         return False
-    # Constant-time compare without another dependency.
     import hmac
 
     return hmac.compare_digest(supplied, expected)
@@ -65,8 +58,8 @@ def _validate_reference_url(raw_url: str) -> None:
     hostname = (parsed.hostname or "").lower()
     if parsed.scheme != "https" or not hostname or parsed.username or parsed.password:
         raise HTTPException(status_code=400, detail="invalid_reference_url")
-    # Founder reference audio is only ever read from a short-lived Supabase
-    # signed URL. This also closes the endpoint to generic SSRF targets.
+    # Founder reference audio is only read from a short-lived Supabase signed
+    # URL. Keeping this allowlist also closes the endpoint to generic SSRF.
     if not hostname.endswith(".supabase.co"):
         raise HTTPException(status_code=400, detail="invalid_reference_host")
 
@@ -98,7 +91,7 @@ def _download_reference(url: str, destination: Path) -> None:
 
 def _fake_wav(text: str) -> bytes:
     # Deterministic, valid PCM WAV for CI/contract tests. It intentionally does
-    # not imitate the founder's voice and must never be enabled in production.
+    # not imitate the founder's voice and must never be a production fallback.
     sample_rate = 24000
     duration = min(4.0, max(0.8, len(text) / 70.0))
     frame_count = int(sample_rate * duration)
@@ -122,8 +115,7 @@ def _synthesize_founder_voice(text: str, reference_path: Path, voice_mode: str) 
     model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 
     # Keep delivery-mode differences deliberately conservative so speaker
-    # identity stays stable. Timing/energy can be tuned after founder listening
-    # tests without replacing the voice identity.
+    # identity stays stable. Timing/energy can be tuned after listening tests.
     delivery_text = text.strip()
     wav = model.generate(
         delivery_text,
@@ -160,9 +152,8 @@ def synthesize(
 
     fake_mode = os.environ.get("VOICE_WORKER_FAKE") == "1"
     if fake_mode:
-        wav_bytes = _fake_wav(request.text)
         return Response(
-            content=wav_bytes,
+            content=_fake_wav(request.text),
             media_type="audio/wav",
             headers={"Cache-Control": "no-store", "X-Voice-Mode": "fake"},
         )
@@ -177,8 +168,6 @@ def synthesize(
                 request.voice_mode,
             )
         finally:
-            # TemporaryDirectory removes all files; explicit unlink keeps the
-            # privacy invariant clear even if cleanup behavior changes later.
             reference_path.unlink(missing_ok=True)
 
     return Response(
