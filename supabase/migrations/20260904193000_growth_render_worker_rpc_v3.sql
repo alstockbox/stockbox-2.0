@@ -14,12 +14,23 @@ begin
     raise exception 'worker_id_required';
   end if;
 
-  select *
+  select j.*
   into v_job
-  from public.acq_render_jobs
-  where state = 'queued'
-  order by created_at asc
-  for update skip locked
+  from public.acq_render_jobs j
+  where j.state = 'queued'
+    and j.render_spec is not null
+    and (
+      j.language <> 'sv'
+      or exists (
+        select 1
+        from public.acq_voice_profiles vp
+        where vp.id = j.voice_profile_id
+          and vp.status = 'active'
+          and vp.language = 'sv'
+      )
+    )
+  order by j.created_at asc
+  for update of j skip locked
   limit 1;
 
   if not found then
@@ -65,15 +76,9 @@ begin
   where id = p_job_id
   for update;
 
-  if not found then
-    raise exception 'render_job_not_found';
-  end if;
-  if v_job.state = 'ready' then
-    return v_job;
-  end if;
-  if v_job.worker_id is distinct from p_worker_id then
-    raise exception 'worker_mismatch';
-  end if;
+  if not found then raise exception 'render_job_not_found'; end if;
+  if v_job.state = 'ready' then return v_job; end if;
+  if v_job.worker_id is distinct from p_worker_id then raise exception 'worker_mismatch'; end if;
 
   v_next_state := case
     when p_retryable and v_job.attempt_count < p_max_attempts then 'queued'
@@ -116,21 +121,11 @@ begin
   where id = p_job_id
   for update;
 
-  if not found then
-    raise exception 'render_job_not_found';
-  end if;
-  if v_job.state = 'ready' then
-    return v_job;
-  end if;
-  if v_job.worker_id is distinct from p_worker_id then
-    raise exception 'worker_mismatch';
-  end if;
-  if coalesce((p_qc_summary ->> 'passed')::boolean, false) is not true then
-    raise exception 'qc_must_pass';
-  end if;
-  if jsonb_typeof(p_assets) <> 'array' then
-    raise exception 'assets_must_be_array';
-  end if;
+  if not found then raise exception 'render_job_not_found'; end if;
+  if v_job.state = 'ready' then return v_job; end if;
+  if v_job.worker_id is distinct from p_worker_id then raise exception 'worker_mismatch'; end if;
+  if coalesce((p_qc_summary ->> 'passed')::boolean, false) is not true then raise exception 'qc_must_pass'; end if;
+  if jsonb_typeof(p_assets) <> 'array' then raise exception 'assets_must_be_array'; end if;
 
   v_prefix := to_char((v_job.created_at at time zone 'utc')::date, 'YYYY-MM-DD')
     || '/' || v_job.content_id::text || '/' || v_job.id::text || '/';
@@ -152,31 +147,16 @@ begin
 
     if v_asset ->> 'kind' = 'master_video' then
       v_master_count := v_master_count + 1;
-      if v_asset ->> 'bucket' <> 'growth-ready-assets' then
-        raise exception 'master_video_must_be_ready_asset';
-      end if;
+      if v_asset ->> 'bucket' <> 'growth-ready-assets' then raise exception 'master_video_must_be_ready_asset'; end if;
     elsif v_asset ->> 'kind' = 'cover' then
       v_cover_count := v_cover_count + 1;
-      if v_asset ->> 'bucket' <> 'growth-ready-assets' then
-        raise exception 'cover_must_be_ready_asset';
-      end if;
+      if v_asset ->> 'bucket' <> 'growth-ready-assets' then raise exception 'cover_must_be_ready_asset'; end if;
     end if;
 
     insert into public.acq_media_assets (
-      idempotency_key,
-      content_id,
-      render_job_id,
-      kind,
-      bucket,
-      storage_path,
-      mime_type,
-      width,
-      height,
-      duration_ms,
-      checksum_sha256,
-      qc_status,
-      qc_summary,
-      metadata
+      idempotency_key, content_id, render_job_id, kind, bucket, storage_path,
+      mime_type, width, height, duration_ms, checksum_sha256, qc_status,
+      qc_summary, metadata
     ) values (
       v_job.id::text || ':' || (v_asset ->> 'kind'),
       v_job.content_id,
@@ -212,10 +192,7 @@ begin
   end if;
 
   update public.acq_render_jobs
-  set state = 'ready',
-      completed_at = now(),
-      failure_reason = null,
-      updated_at = now()
+  set state = 'ready', completed_at = now(), failure_reason = null, updated_at = now()
   where id = v_job.id
   returning * into v_job;
 
