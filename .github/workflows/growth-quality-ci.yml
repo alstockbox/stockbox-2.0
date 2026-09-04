@@ -47,6 +47,11 @@ jobs:
         run: |
           node --check scripts/growth/render-growth-video.mjs
           node --check scripts/growth/validate-growth-video.mjs
+          node --check scripts/growth/render-growth-carousel.mjs
+          node --check scripts/growth/render-growth-static.mjs
+          node --check scripts/growth/generative-provider.mjs
+          node --check scripts/growth/benchmark-generative-provider.mjs
+          node --check scripts/growth/run-render-cycle.mjs
           node --check scripts/growth/run-render-worker.mjs
       - name: Test founder voice contract in fake mode
         run: |
