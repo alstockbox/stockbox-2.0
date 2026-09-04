@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateAttributedGrowth,
   describeLearning,
   enqueueV3Renders,
   generateFounderScriptsV3,
@@ -87,5 +88,19 @@ describe("growth v3 orchestration", () => {
     const learning = describeLearning({ byContent: { risk: 3, valuation: 1 }, minSample: 12, labels: { risk: "riskanalys" } });
     expect(learning.confidence).toBe("low_sample");
     expect(learning.summary).toMatch(/lilla datamaterialet/i);
+  });
+
+  it("ignores non-UUID utm_content values before treating attribution as content ids", async () => {
+    const db = fakeDb();
+    const validContentId = "11111111-1111-4111-8111-111111111111";
+    db.rows.acq_events = [
+      { id: "bad", anonymous_id: "u-bad", utm_content: "step2" },
+      { id: "good", anonymous_id: "u-good", utm_content: validContentId },
+    ];
+
+    const attribution = await aggregateAttributedGrowth({ db, now: new Date("2026-09-04T12:00:00Z") });
+
+    expect(attribution.byContent).toEqual({ [validContentId]: 1 });
+    expect(attribution.totalAttributedQualifiedVisits).toBe(1);
   });
 });
