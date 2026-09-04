@@ -6,9 +6,9 @@ import {
 } from "../src/lib/growth/worker-contract";
 
 describe("growth worker contract", () => {
-  it("rejects an invalid worker token", () => {
-    expect(validateWorkerToken("Bearer wrong", "correct")).toBe(false);
-    expect(validateWorkerToken("Bearer correct", "correct")).toBe(true);
+  it("rejects an invalid raw worker token", () => {
+    expect(validateWorkerToken("wrong", "correct")).toBe(false);
+    expect(validateWorkerToken("correct", "correct")).toBe(true);
   });
 
   it("does not allow READY when QC failed", () => {
