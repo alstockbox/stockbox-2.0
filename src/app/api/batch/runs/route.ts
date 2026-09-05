@@ -72,7 +72,11 @@ export async function POST(request: Request) {
     });
     after(async () => { await triggerDurableBatchWorker({ baseUrl: new URL(request.url).origin }); });
     return Response.json({ ok: true, ...batch }, { status: 202 });
-  } catch {
+  } catch (error) {
+    console.error("[batch-create] Failed to queue batch", {
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ error: "The batch could not be queued." }, { status: 503 });
   }
 }
