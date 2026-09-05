@@ -72,6 +72,8 @@ declare
   v_currency text := upper(trim(p_base_currency));
   v_account_currency text;
   v_account_starting_cash numeric(30,10);
+  v_cash_value numeric(30,10);
+  v_positions_market_value numeric(30,10);
   v_equity numeric(30,10);
   v_profit_loss numeric(30,10);
   v_return_percent numeric(24,10);
@@ -127,7 +129,9 @@ begin
     raise exception 'paper snapshot starting capital invariant failed';
   end if;
 
-  v_equity := p_cash_value + p_positions_market_value;
+  v_cash_value := round(p_cash_value, 10);
+  v_positions_market_value := round(p_positions_market_value, 10);
+  v_equity := v_cash_value + v_positions_market_value;
   v_profit_loss := v_equity - v_account_starting_cash;
   v_return_percent := round((v_profit_loss / v_account_starting_cash) * 100, 10);
 
@@ -140,8 +144,8 @@ begin
     if v_snapshot.user_id is distinct from p_user_id
       or v_snapshot.base_currency is distinct from v_currency
       or v_snapshot.starting_cash is distinct from v_account_starting_cash
-      or v_snapshot.cash_value is distinct from p_cash_value
-      or v_snapshot.positions_market_value is distinct from p_positions_market_value
+      or v_snapshot.cash_value is distinct from v_cash_value
+      or v_snapshot.positions_market_value is distinct from v_positions_market_value
       or v_snapshot.open_position_count is distinct from p_open_position_count
       or v_snapshot.quote_count is distinct from p_quote_count
       or v_snapshot.oldest_quote_observed_at is distinct from p_oldest_quote_observed_at
@@ -172,8 +176,8 @@ begin
     p_user_id,
     v_currency,
     v_account_starting_cash,
-    p_cash_value,
-    p_positions_market_value,
+    v_cash_value,
+    v_positions_market_value,
     v_equity,
     v_profit_loss,
     v_return_percent,
@@ -201,8 +205,8 @@ begin
     if v_snapshot.user_id is distinct from p_user_id
       or v_snapshot.base_currency is distinct from v_currency
       or v_snapshot.starting_cash is distinct from v_account_starting_cash
-      or v_snapshot.cash_value is distinct from p_cash_value
-      or v_snapshot.positions_market_value is distinct from p_positions_market_value
+      or v_snapshot.cash_value is distinct from v_cash_value
+      or v_snapshot.positions_market_value is distinct from v_positions_market_value
       or v_snapshot.open_position_count is distinct from p_open_position_count
       or v_snapshot.quote_count is distinct from p_quote_count
       or v_snapshot.oldest_quote_observed_at is distinct from p_oldest_quote_observed_at
