@@ -125,6 +125,12 @@ function nearZero(value: number): number {
   return Math.abs(value) < 1e-9 ? 0 : value;
 }
 
+function approximatelyEqual(left: number, right: number): boolean {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  const scale = Math.max(1, Math.abs(left), Math.abs(right));
+  return Math.abs(left - right) <= scale * 1e-9;
+}
+
 function positionKey(ticker: string, currency: string): string {
   return `${ticker}|${currency}`;
 }
@@ -152,7 +158,7 @@ export function derivePaperTradingLedgerV3(fills: readonly PaperFillV3[]): Paper
       || !finiteNonnegative(fill.fee)
       || !Number.isFinite(executedAt)
       || !Number.isFinite(observedAt)
-      || fill.grossAmount !== fill.quantity * fill.price
+      || !approximatelyEqual(fill.grossAmount, fill.quantity * fill.price)
       || fill.pricingBasis !== "VERIFIED_OBSERVATION_EXACT"
     ) {
       return { ok: false, reason: "LEDGER_INVALID" };
