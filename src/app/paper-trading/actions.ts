@@ -61,7 +61,6 @@ export async function executePaperOrderAction(formData: FormData) {
   });
   if (!parsed.success) redirect("/paper-trading?tradeStatus=invalid");
 
-  const base = `/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}`;
   const result = await executePaperOrderServiceV3({
     userId: user.id,
     accountId: parsed.data.accountId,
@@ -74,10 +73,10 @@ export async function executePaperOrderAction(formData: FormData) {
   });
 
   revalidatePath("/paper-trading");
-  if (result.status === "FILLED") redirect(`${base}&tradeStatus=filled`);
-  if (result.status === "ALREADY_RECORDED") redirect(`${base}&tradeStatus=existing`);
-  if (result.status === "REJECTED") redirect(`${base}&tradeStatus=rejected&reason=${encodeURIComponent(result.reason)}`);
-  if (result.status === "KILLED") redirect(`${base}&tradeStatus=paused`);
+  if (result.status === "FILLED") redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=filled`);
+  if (result.status === "ALREADY_RECORDED") redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=existing`);
+  if (result.status === "REJECTED") redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=rejected&reason=${encodeURIComponent(result.reason)}`);
+  if (result.status === "KILLED") redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=paused`);
   if (result.status === "DISABLED") redirect("/dashboard");
-  redirect(`${base}&tradeStatus=error`);
+  redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=error`);
 }
