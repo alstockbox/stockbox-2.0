@@ -27,9 +27,11 @@ describe("durable batch worker chaining", () => {
     expect(workerRoute).toContain("runDurableBatchJobs(5)");
   });
 
-  it("self-heals a stranded queued batch when its status is polled", () => {
+  it("self-heals a stranded batch when queued items exist without active processing", () => {
     const statusRoute = readFileSync(resolve(process.cwd(), "src/app/api/batch/runs/[id]/route.ts"), "utf8");
-    expect(statusRoute).toContain('batch.run.status === "queued"');
+    expect(statusRoute).toContain('item.status === "queued"');
+    expect(statusRoute).toContain('item.status === "processing"');
+    expect(statusRoute).toContain("hasQueuedItems && !hasProcessingItems");
     expect(statusRoute).toContain("triggerDurableBatchWorker");
     expect(statusRoute).toContain("after(async ()");
     expect(statusRoute).toContain("new URL(request.url).origin");
