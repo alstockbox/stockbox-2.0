@@ -6,8 +6,16 @@ import {
   type GrowthDbAdapter,
 } from "../supabase/functions/stockbox-growth-engine/v3/orchestration";
 
-function fakeDb(): GrowthDbAdapter & { rows: Record<string, any[]> } {
-  const rows: Record<string, any[]> = {
+type GrowthRow = Record<string, unknown>;
+
+function asRow(value: unknown): GrowthRow {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as GrowthRow
+    : {};
+}
+
+function fakeDb(): GrowthDbAdapter & { rows: Record<string, GrowthRow[]> } {
+  const rows: Record<string, GrowthRow[]> = {
     acq_content: [
       { id: "c1", title: "Tre risker att kontrollera", topic: "hur hittar man risker i ett börsbolag", body: "Börja med skulden. Kontrollera kassaflödet. Jämför riskerna över tid.", language: "sv", cta: "Analysera i StockBox", utm_url: "https://www.getstockbox.app/?utm_content=c1", status: "repurposed", updated_at: "2026-09-04T10:00:00Z" },
       { id: "c2", title: "Så analyserar du lönsamhet", topic: "hur analyserar man lönsamhet i ett bolag", body: "Titta på marginaler. Jämför avkastning på kapital. Bedöm stabiliteten över tid.", language: "sv", cta: "Analysera i StockBox", utm_url: "https://www.getstockbox.app/?utm_content=c2", status: "repurposed", updated_at: "2026-09-04T09:00:00Z" },
@@ -27,12 +35,12 @@ function fakeDb(): GrowthDbAdapter & { rows: Record<string, any[]> } {
     rows,
     async select(table) { return structuredClone(rows[table] || []); },
     async insertIgnore(table, payload, onConflict) {
-      const incoming = Array.isArray(payload) ? payload : [payload];
+      const incoming = (Array.isArray(payload) ? payload : [payload]).map(asRow);
       rows[table] ||= [];
-      const inserted: any[] = [];
+      const inserted: GrowthRow[] = [];
       for (const item of incoming) {
-        const key = onConflict === "idempotency_key" ? item.idempotency_key : item[onConflict];
-        if (rows[table].some((existing) => (onConflict === "idempotency_key" ? existing.idempotency_key : existing[onConflict]) === key)) continue;
+        const key = item[onConflict];
+        if (rows[table].some((existing) => existing[onConflict] === key)) continue;
         rows[table].push(structuredClone(item));
         inserted.push(structuredClone(item));
       }
@@ -64,7 +72,7 @@ describe("growth v3 orchestration", () => {
     expect(first.shadowMode).toBe(true);
     expect(second.created).toBe(0);
     expect(db.rows.acq_render_jobs).toHaveLength(first.created);
-    expect(db.rows.acq_render_jobs.every((row) => row.metadata.expose_to_ready === false)).toBe(true);
+    expect(db.rows.acq_render_jobs.every((row) => asRow(row.metadata).expose_to_ready === false)).toBe(true);
   });
 
   it("selects zero paid video jobs at the 75 SEK hard cap", async () => {
