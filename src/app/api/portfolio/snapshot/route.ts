@@ -13,6 +13,7 @@ import {
   type ValuedPortfolioPosition,
 } from "@/lib/portfolio/portfolio-math";
 import { checkDistributedRateLimit, clientRateLimitKey, rateLimitExceededResponse } from "@/lib/security/rate-limit";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -237,7 +238,10 @@ export async function POST(request: Request) {
   const holdings = signals.map(({ position, signal }) => ({ ...position, signal }));
   const now = new Date().toISOString();
 
-  const { data: snapshot, error: snapshotError } = await supabase.from("portfolio_snapshots").insert({
+  const snapshotStore = createAdminClient();
+  if (!snapshotStore) return Response.json({ error: "Portfolio snapshot storage is unavailable." }, { status: 503 });
+
+  const { data: snapshot, error: snapshotError } = await snapshotStore.from("portfolio_snapshots").insert({
     portfolio_id: portfolio.id,
     user_id: user.id,
     base_currency: baseCurrency,
