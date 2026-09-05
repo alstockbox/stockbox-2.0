@@ -29,7 +29,7 @@ create table if not exists public.paper_performance_snapshots_v3 (
   ),
   check (equity = cash_value + positions_market_value),
   check (profit_loss = equity - starting_cash),
-  check (return_percent = (profit_loss / starting_cash) * 100),
+  check (return_percent = round((profit_loss / starting_cash) * 100, 10)),
   check (oldest_quote_observed_at is null or oldest_quote_observed_at <= evaluated_at + interval '30 seconds'),
   check (oldest_quote_observed_at is null or evaluated_at - oldest_quote_observed_at <= interval '20 minutes')
 );
@@ -129,7 +129,7 @@ begin
 
   v_equity := p_cash_value + p_positions_market_value;
   v_profit_loss := v_equity - v_account_starting_cash;
-  v_return_percent := (v_profit_loss / v_account_starting_cash) * 100;
+  v_return_percent := round((v_profit_loss / v_account_starting_cash) * 100, 10);
 
   select * into v_snapshot
   from public.paper_performance_snapshots_v3
