@@ -14,6 +14,21 @@ on:
       - ".github/workflows/stockbox-2-upgrade-ci.yml"
 
 jobs:
+  main-baseline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Main branch full test baseline
+        run: npm test
+
   app-quality:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -33,13 +48,28 @@ jobs:
       - name: Auth regression tests
         run: npm test -- tests/auth
       - name: Full unit and integration suite
+        id: full_tests
+        continue-on-error: true
         run: npm test
       - name: Typecheck
+        id: typecheck
+        continue-on-error: true
         run: npm run typecheck
       - name: Lint
+        id: lint
+        continue-on-error: true
         run: npm run lint
       - name: Production build
+        id: build
+        continue-on-error: true
         run: npm run build
+      - name: Verification gate
+        if: always()
+        run: |
+          test "${{ steps.full_tests.outcome }}" = "success"
+          test "${{ steps.typecheck.outcome }}" = "success"
+          test "${{ steps.lint.outcome }}" = "success"
+          test "${{ steps.build.outcome }}" = "success"
 
   portfolio-migration-smoke:
     runs-on: ubuntu-latest
@@ -56,6 +86,7 @@ jobs:
         run: |
           mkdir -p /tmp/stockbox-migrations
           cp supabase/migrations/20260820220000_initial_stockbox.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260905140500_portfolio_2_private_schema.sql /tmp/stockbox-migrations/
           cp supabase/migrations/20260905141000_portfolio_2_transactions_snapshots.sql /tmp/stockbox-migrations/
           rm -f supabase/migrations/*.sql
           supabase init --force
@@ -65,10 +96,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client
-      - name: Apply base schema and Portfolio 2 migration
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260820220000_initial_stockbox.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905141000_portfolio_2_transactions_snapshots.sql
+      - name: Apply base schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260820220000_initial_stockbox.sql
+      - name: Apply Portfolio 2 private schema prerequisite
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905140500_portfolio_2_private_schema.sql
+      - name: Apply Portfolio 2 transaction migration
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905141000_portfolio_2_transactions_snapshots.sql
       - name: Assert Portfolio 2 invariants
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -77,6 +110,7 @@ jobs:
             v_rls integer;
             v_indexes integer;
           begin
+            if to_regnamespace('private') is null then raise exception 'private schema missing'; end if;
             if to_regclass('public.portfolio_transactions') is null then raise exception 'portfolio_transactions missing'; end if;
             if to_regclass('public.portfolio_snapshots') is null then raise exception 'portfolio_snapshots missing'; end if;
             select count(*) into v_rls
