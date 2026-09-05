@@ -43,6 +43,33 @@ export type PortfolioTotals = {
   complete: boolean;
 };
 
+export type PortfolioLedgerIssueCode = "INVALID_BUY" | "INVALID_SELL" | "SELL_EXCEEDS_POSITION";
+
+export type PortfolioLedgerIssue = {
+  code: PortfolioLedgerIssueCode;
+  transactionId: string | null;
+  ticker: string;
+  currency: string;
+  executedAt: string;
+  requestedQuantity: number | null;
+  availableQuantity: number;
+};
+
+export type RealizedPortfolioCurrencyResult = {
+  currency: string;
+  grossProceeds: number;
+  costBasisSold: number;
+  sellFees: number;
+  realizedProfitLoss: number;
+  sales: number;
+};
+
+export type RealizedPortfolioPerformance = {
+  byCurrency: RealizedPortfolioCurrencyResult[];
+  issues: PortfolioLedgerIssue[];
+  complete: boolean;
+};
+
 const EPSILON = 1e-10;
 
 function finiteNonNegative(value: number | null | undefined) {
@@ -57,12 +84,16 @@ function normalizedCurrency(value: string) {
   return value.trim().toUpperCase();
 }
 
-export function buildPortfolioPositions(transactions: PortfolioTransactionInput[]): PortfolioPosition[] {
-  const sorted = [...transactions].sort((left, right) => {
+function sortedTransactions(transactions: PortfolioTransactionInput[]) {
+  return [...transactions].sort((left, right) => {
     const dateOrder = left.executedAt.localeCompare(right.executedAt);
     if (dateOrder !== 0) return dateOrder;
     return (left.id ?? "").localeCompare(right.id ?? "");
   });
+}
+
+export function buildPortfolioPositions(transactions: PortfolioTransactionInput[]): PortfolioPosition[] {
+  const sorted = sortedTransactions(transactions);
   const positions = new Map<string, PortfolioPosition>();
 
   for (const transaction of sorted) {
@@ -107,6 +138,109 @@ export function buildPortfolioPositions(transactions: PortfolioTransactionInput[
   }
 
   return [...positions.values()].sort((left, right) => left.ticker.localeCompare(right.ticker));
+}
+
+/**
+ * Calculates realized trading P/L without mixing currencies or inventing FX.
+ * Any invalid buy/sell or oversell makes the result incomplete and suppresses
+ * all monetary aggregates, so callers cannot accidentally present partial
+ * realized performance as authoritative.
+ */
+export function calculateRealizedPortfolioPerformance(
+  transactions: PortfolioTransactionInput[],
+): RealizedPortfolioPerformance {
+  const states = new Map<string, { quantity: number; costBasis: number }>();
+  const totals = new Map<string, RealizedPortfolioCurrencyResult>();
+  const issues: PortfolioLedgerIssue[] = [];
+
+  for (const transaction of sortedTransactions(transactions)) {
+    if (transaction.type !== "buy" && transaction.type !== "sell") continue;
+    const ticker = normalizedTicker(transaction.ticker);
+    const currency = normalizedCurrency(transaction.currency);
+    if (!ticker || !/^[A-Z]{3}$/.test(currency)) continue;
+    const key = `${ticker}:${currency}`;
+    const state = states.get(key) ?? { quantity: 0, costBasis: 0 };
+    const quantity = finiteNonNegative(transaction.quantity);
+    const price = finiteNonNegative(transaction.price);
+    const fees = finiteNonNegative(transaction.fees) ?? 0;
+
+    if (transaction.type === "buy") {
+      if (quantity === null || quantity <= 0 || price === null) {
+        issues.push({
+          code: "INVALID_BUY",
+          transactionId: transaction.id ?? null,
+          ticker,
+          currency,
+          executedAt: transaction.executedAt,
+          requestedQuantity: quantity,
+          availableQuantity: state.quantity,
+        });
+        continue;
+      }
+      state.quantity += quantity;
+      state.costBasis += quantity * price + fees;
+      states.set(key, state);
+      continue;
+    }
+
+    if (quantity === null || quantity <= 0 || price === null) {
+      issues.push({
+        code: "INVALID_SELL",
+        transactionId: transaction.id ?? null,
+        ticker,
+        currency,
+        executedAt: transaction.executedAt,
+        requestedQuantity: quantity,
+        availableQuantity: state.quantity,
+      });
+      continue;
+    }
+    if (state.quantity <= EPSILON || quantity - state.quantity > EPSILON) {
+      issues.push({
+        code: "SELL_EXCEEDS_POSITION",
+        transactionId: transaction.id ?? null,
+        ticker,
+        currency,
+        executedAt: transaction.executedAt,
+        requestedQuantity: quantity,
+        availableQuantity: state.quantity,
+      });
+      continue;
+    }
+
+    const averageCost = state.costBasis / state.quantity;
+    const costBasisSold = averageCost * quantity;
+    const grossProceeds = price * quantity;
+    const realizedProfitLoss = grossProceeds - fees - costBasisSold;
+    const currencyTotal = totals.get(currency) ?? {
+      currency,
+      grossProceeds: 0,
+      costBasisSold: 0,
+      sellFees: 0,
+      realizedProfitLoss: 0,
+      sales: 0,
+    };
+    currencyTotal.grossProceeds += grossProceeds;
+    currencyTotal.costBasisSold += costBasisSold;
+    currencyTotal.sellFees += fees;
+    currencyTotal.realizedProfitLoss += realizedProfitLoss;
+    currencyTotal.sales += 1;
+    totals.set(currency, currencyTotal);
+
+    state.quantity -= quantity;
+    state.costBasis = Math.max(0, state.costBasis - costBasisSold);
+    if (state.quantity <= EPSILON) states.delete(key);
+    else states.set(key, state);
+  }
+
+  if (issues.length > 0) {
+    return { byCurrency: [], issues, complete: false };
+  }
+  return {
+    byCurrency: [...totals.values()].sort((left, right) => left.currency.localeCompare(right.currency)),
+    issues: [],
+    complete: true,
+  };
 }
 
 export function valuePortfolioPosition(input: {
