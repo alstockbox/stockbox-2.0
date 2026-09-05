@@ -3,6 +3,7 @@ import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { AppNav } from "@/components/app-shell/nav";
 import { AppFooter } from "@/components/app-shell/footer";
+import { MobileBottomNav } from "@/components/app-shell/mobile-bottom-nav";
 import { BrowserAnalytics } from "@/components/analytics/browser-analytics";
 import { AcquisitionTracker } from "@/components/analytics/acquisition-tracker";
 import { getServerEnv } from "@/lib/env/server";
@@ -75,6 +76,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <AppNav />
         <main id="main-content" tabIndex={-1}>{children}</main>
         <AppFooter />
+        <MobileBottomNav />
         <BrowserAnalytics gaId={env.NEXT_PUBLIC_GA_ID || undefined} metaPixelId={env.NEXT_PUBLIC_META_PIXEL_ID || undefined} locale={locale} />
         <AcquisitionTracker />
         <Analytics />
