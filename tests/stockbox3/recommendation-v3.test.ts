@@ -31,7 +31,7 @@ function scoreFixture(overrides: Partial<ScoreResult> = {}): ScoreResult {
         contributors: [],
       } satisfies ScoreDimension,
     ]),
-  ) as Record<ScoreDimensionKey, ScoreDimension>;
+  ) as unknown as Record<ScoreDimensionKey, ScoreDimension>;
 
   return {
     stockBoxScore: 86,
