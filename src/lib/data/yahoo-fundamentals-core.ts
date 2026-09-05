@@ -314,6 +314,10 @@ function buildPeriod(
     }
   }
   if (capexFact) metricProvenance.capitalExpenditures = provenance(capexFact);
+  const directDilutedSharesFact = atDate(values, `${flowPrefix}DilutedAverageShares`, flowDate);
+  const dilutedSharesFact = directDilutedSharesFact
+    ?? (flowPrefix === "annual" ? atDate(values, "trailingDilutedAverageShares", flowDate) : null);
+  if (dilutedSharesFact) metricProvenance.sharesDiluted = provenance(dilutedSharesFact);
   const dividendFact = atDate(values, `${flowPrefix}CashDividendsPaid`, flowDate);
   if (dividendFact) metricProvenance.dividendsPaid = provenance(dividendFact);
   const parentEquity = balance("StockholdersEquity", "totalEquity");
@@ -386,7 +390,7 @@ function buildPeriod(
     dividendsPaid: dividendFact ? Math.abs(dividendFact.value) : null,
     stockBasedCompensation: flow("StockBasedCompensation", "stockBasedCompensation"),
     researchAndDevelopment: flow("ResearchAndDevelopment", "researchAndDevelopment"),
-    sharesDiluted: flow("DilutedAverageShares", "sharesDiluted"),
+    sharesDiluted: dilutedSharesFact?.value ?? null,
     totalAssets: balance("TotalAssets", "totalAssets"),
     totalLiabilities: balance("TotalLiabilitiesNetMinorityInterest", "totalLiabilities"),
     totalEquity: consolidatedEquity,
