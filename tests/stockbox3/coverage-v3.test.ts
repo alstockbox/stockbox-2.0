@@ -165,6 +165,7 @@ describe("assessCoverageV3", () => {
     input.specialized = {
       kind: "bank",
       netInterestMargin: { value: 0.031 },
+      netInterestIncome: { value: 500 },
       cet1CapitalRatio: { value: 0.17 },
       grossLoans: { value: 10_000 },
       deposits: { value: 11_000 },
