@@ -21,4 +21,27 @@ describe("durable batch worker chaining", () => {
     expect(workerRoute).toContain("nextDurableBatchWorkerDelayMs");
     expect(workerRoute).toContain("export const maxDuration = 300");
   });
+
+  it("drains several queued jobs per worker invocation", () => {
+    const workerRoute = readFileSync(resolve(process.cwd(), "src/app/api/jobs/batch/run/route.ts"), "utf8");
+    expect(workerRoute).toContain("runDurableBatchJobs(5)");
+  });
+
+  it("self-heals a stranded batch when queued items exist without active processing", () => {
+    const statusRoute = readFileSync(resolve(process.cwd(), "src/app/api/batch/runs/[id]/route.ts"), "utf8");
+    expect(statusRoute).toContain('item.status === "queued"');
+    expect(statusRoute).toContain('item.status === "processing"');
+    expect(statusRoute).toContain("hasQueuedItems && !hasProcessingItems");
+    expect(statusRoute).toContain("triggerDurableBatchWorker");
+    expect(statusRoute).toContain("after(async ()");
+    expect(statusRoute).toContain("new URL(request.url).origin");
+  });
+
+  it("removes queued background jobs when queued batch items are cancelled", () => {
+    const cleanup = readFileSync(resolve(process.cwd(), "src/lib/batch/job-cleanup.ts"), "utf8");
+    const cancelRoute = readFileSync(resolve(process.cwd(), "src/app/api/batch/runs/[id]/cancel/route.ts"), "utf8");
+    expect(cleanup).toContain("cancelQueuedBackgroundJobsByDedupeKeys");
+    expect(cleanup).toContain("batchJobDedupeKey");
+    expect(cancelRoute).toContain("cancelQueuedBatchJobsForBatch");
+  });
 });

@@ -83,6 +83,30 @@ export async function enqueueBackgroundJob(input: {
   };
 }
 
+export async function cancelQueuedBackgroundJobsByDedupeKeys(input: {
+  kind: string;
+  dedupeKeys: string[];
+}): Promise<number> {
+  const admin = createAdminClient();
+  const dedupeKeys = [...new Set(input.dedupeKeys.filter(Boolean))];
+  if (!admin || dedupeKeys.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const result = await admin.from("background_jobs").update({
+    status: "cancelled",
+    locked_at: null,
+    completed_at: now,
+    last_error: null,
+    updated_at: now,
+  }).eq("kind", input.kind)
+    .eq("status", "queued")
+    .in("dedupe_key", dedupeKeys)
+    .select("id");
+
+  if (result.error) return 0;
+  return result.data?.length ?? 0;
+}
+
 export async function claimBackgroundJobs(input: {
   kinds: string[];
   limit?: number;

@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth/session";
 import { cancelDurableBatch } from "@/lib/batch/durable";
+import { cancelQueuedBatchJobsForBatch } from "@/lib/batch/job-cleanup";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   const { id } = await context.params;
   try {
     const result = await cancelDurableBatch({ userId: user.id, batchId: id });
+    await cancelQueuedBatchJobsForBatch({ userId: user.id, batchId: id }).catch(() => 0);
     return Response.json({ ok: true, ...result });
   } catch {
     return Response.json({ error: "The batch could not be cancelled." }, { status: 503 });
