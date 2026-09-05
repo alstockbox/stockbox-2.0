@@ -137,6 +137,17 @@ begin
     and evaluated_at = p_evaluated_at
     and policy_version = 'stockbox-paper-performance-v3.0.0';
   if found then
+    if v_snapshot.user_id is distinct from p_user_id
+      or v_snapshot.base_currency is distinct from v_currency
+      or v_snapshot.starting_cash is distinct from v_account_starting_cash
+      or v_snapshot.cash_value is distinct from p_cash_value
+      or v_snapshot.positions_market_value is distinct from p_positions_market_value
+      or v_snapshot.open_position_count is distinct from p_open_position_count
+      or v_snapshot.quote_count is distinct from p_quote_count
+      or v_snapshot.oldest_quote_observed_at is distinct from p_oldest_quote_observed_at
+    then
+      raise exception 'paper snapshot idempotency conflict';
+    end if;
     return v_snapshot;
   end if;
 
@@ -182,10 +193,22 @@ begin
     where account_id = p_account_id
       and evaluated_at = p_evaluated_at
       and policy_version = 'stockbox-paper-performance-v3.0.0';
-  end if;
 
-  if v_snapshot.id is null then
-    raise exception 'paper snapshot persistence failed';
+    if v_snapshot.id is null then
+      raise exception 'paper snapshot persistence failed';
+    end if;
+
+    if v_snapshot.user_id is distinct from p_user_id
+      or v_snapshot.base_currency is distinct from v_currency
+      or v_snapshot.starting_cash is distinct from v_account_starting_cash
+      or v_snapshot.cash_value is distinct from p_cash_value
+      or v_snapshot.positions_market_value is distinct from p_positions_market_value
+      or v_snapshot.open_position_count is distinct from p_open_position_count
+      or v_snapshot.quote_count is distinct from p_quote_count
+      or v_snapshot.oldest_quote_observed_at is distinct from p_oldest_quote_observed_at
+    then
+      raise exception 'paper snapshot idempotency conflict';
+    end if;
   end if;
 
   return v_snapshot;
