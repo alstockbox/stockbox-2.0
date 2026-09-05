@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { captureServerEvent } from "@/lib/analytics/events";
 import { requireUser } from "@/lib/auth/session";
 import { upsertProfile } from "@/lib/db/repositories";
 
@@ -23,7 +24,7 @@ async function persistPreferences(input: {
   mode: z.infer<typeof uiModeSchema>;
 }) {
   const user = await requireUser();
-  return upsertProfile({ userId: user.id, email: user.email, ...input });
+  return { user, result: await upsertProfile({ userId: user.id, email: user.email, ...input }) };
 }
 
 export async function saveOnboardingAction(formData: FormData) {
@@ -32,12 +33,13 @@ export async function saveOnboardingAction(formData: FormData) {
     investmentProfile: formData.get("investmentProfile"),
   });
   if (!parsed.success) redirect("/onboarding?error=invalid");
-  const result = await persistPreferences({
+  const { user, result } = await persistPreferences({
     ...parsed.data,
     mode: parsed.data.experience === "advanced" ? "pro" : "simple",
   });
   if (!result.ok) redirect("/onboarding?error=save");
-  redirect("/dashboard?onboarding=complete");
+  captureServerEvent("onboarding_completed", { userId: user.id, experience: parsed.data.experience, investmentProfile: parsed.data.investmentProfile });
+  redirect("/analyze?onboarding=complete");
 }
 
 export async function saveProfilePreferencesAction(formData: FormData) {
@@ -47,7 +49,7 @@ export async function saveProfilePreferencesAction(formData: FormData) {
     uiMode: formData.get("uiMode"),
   });
   if (!parsed.success) return;
-  const result = await persistPreferences({
+  const { result } = await persistPreferences({
     experience: parsed.data.experience,
     investmentProfile: parsed.data.investmentProfile,
     mode: parsed.data.uiMode,
