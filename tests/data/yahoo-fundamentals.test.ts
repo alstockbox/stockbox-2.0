@@ -679,7 +679,7 @@ describe("Yahoo global fundamentals adapter", () => {
     expect(insurer.lossRatio.dataAsOf).toBe("2025-12-31");
   });
 
-  it("prefers Yahoo PurchaseOfPPE for canonical cash capex when available", async () => {
+  it("prefers Yahoo CapitalExpenditure over narrower PurchaseOfPPE when both are available", async () => {
     const payload = structuredClone(timeseriesPayload);
     payload.timeseries.result.push(
       series("annualPurchaseOfPPE", [annual("2024-12-31", -20_000), annual("2025-12-31", -21_000)]),
@@ -691,9 +691,9 @@ describe("Yahoo global fundamentals adapter", () => {
     const result = await fetchYahooFundamentalsResult(company);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.annualPeriods?.at(-1)?.capitalExpenditures).toBe(21_000);
-    expect(result.data.trailingTwelveMonths?.capitalExpenditures).toBe(22_000);
-    expect(result.data.annualPeriods?.at(-1)?.provenance?.capitalExpenditures?.concept).toBe("annualPurchaseOfPPE");
+    expect(result.data.annualPeriods?.at(-1)?.capitalExpenditures).toBe(26_130);
+    expect(result.data.trailingTwelveMonths?.capitalExpenditures).toBe(26_551);
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.capitalExpenditures?.concept).toBe("annualCapitalExpenditure");
   });
 
   it("maps Yahoo reported annual free cash flow into annual periods when cash-flow line items are sparse", async () => {
