@@ -7,6 +7,7 @@ import { captureServerEvent } from "@/lib/analytics/events";
 import { requireUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { searchCompanies } from "@/lib/data/provider";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -61,20 +62,64 @@ export async function addWatchlistItemAction(formData: FormData) {
 
 export async function updateWatchlistMonitoringAction(formData: FormData) {
   const user = await requireUser();
-  const parsed = z.object({ id: z.string().uuid(), frequency: z.enum(["daily", "weekly"]) }).safeParse({
+  const parsed = z.object({
+    id: z.string().uuid(),
+    frequency: z.enum(["daily", "weekly"]),
+  }).safeParse({
     id: formData.get("id"),
     frequency: formData.get("frequency") ?? "daily",
   });
   if (!parsed.success) return;
+
+  const v3Enabled = isFeatureEnabled("watchlistV3") && isFeatureEnabled("alerts");
+  const optionalPrice = z.preprocess(
+    (value) => typeof value === "string" && !value.trim() ? null : value,
+    z.coerce.number().finite().nonnegative().max(1_000_000_000).nullable(),
+  );
+  const v3 = z.object({
+    convictionDropMinimum: z.coerce.number().int().min(1).max(100),
+    dataQualityDropMinimum: z.coerce.number().int().min(1).max(100),
+    priceAbove: optionalPrice,
+    priceBelow: optionalPrice,
+  }).safeParse({
+    convictionDropMinimum: formData.get("convictionDropMinimum") ?? 20,
+    dataQualityDropMinimum: formData.get("dataQualityDropMinimum") ?? 15,
+    priceAbove: formData.get("priceAbove") ?? null,
+    priceBelow: formData.get("priceBelow") ?? null,
+  });
+  if (v3Enabled && !v3.success) redirect("/watchlist?error=monitoring_input");
+
   const supabase = await createClient();
-  await supabase?.from("watchlists").update({
+  if (!supabase) redirect("/watchlist?error=configuration");
+  const { data: existing } = await supabase
+    .from("watchlists")
+    .select("alert_preferences")
+    .eq("id", parsed.data.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const currentPreferences = existing?.alert_preferences && typeof existing.alert_preferences === "object" && !Array.isArray(existing.alert_preferences)
+    ? existing.alert_preferences as Record<string, unknown>
+    : {};
+  const alertPreferences: Record<string, unknown> = {
+    ...currentPreferences,
+    insider: formData.get("insiderAlerts") === "on",
+    shortInterest: formData.get("shortInterestAlerts") === "on",
+    filing: formData.get("filingAlerts") === "on",
+  };
+  if (v3Enabled && v3.success) {
+    Object.assign(alertPreferences, {
+      recommendationChanges: formData.get("recommendationAlerts") === "on",
+      convictionDropMinimum: v3.data.convictionDropMinimum,
+      dataQualityDropMinimum: v3.data.dataQualityDropMinimum,
+      priceAbove: v3.data.priceAbove,
+      priceBelow: v3.data.priceBelow,
+    });
+  }
+
+  await supabase.from("watchlists").update({
     monitoring_enabled: formData.get("monitoringEnabled") === "on",
     monitoring_frequency: parsed.data.frequency,
-    alert_preferences: {
-      insider: formData.get("insiderAlerts") === "on",
-      shortInterest: formData.get("shortInterestAlerts") === "on",
-      filing: formData.get("filingAlerts") === "on",
-    },
+    alert_preferences: alertPreferences,
     next_check_at: formData.get("monitoringEnabled") === "on" ? new Date().toISOString() : null,
     last_monitor_error: null,
   }).eq("id", parsed.data.id).eq("user_id", user.id);
