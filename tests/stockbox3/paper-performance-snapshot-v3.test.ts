@@ -15,6 +15,9 @@ describe("Paper Trading V3 performance snapshot persistence", () => {
     expect(migration).toContain("equity = cash_value + positions_market_value");
     expect(migration).toContain("profit_loss = equity - starting_cash");
     expect(migration).toContain("return_percent = round((profit_loss / starting_cash) * 100, 10)");
+    expect(migration).toContain("v_cash_value := round(p_cash_value, 10)");
+    expect(migration).toContain("v_positions_market_value := round(p_positions_market_value, 10)");
+    expect(migration).toContain("v_equity := v_cash_value + v_positions_market_value");
     expect(migration).toContain("v_return_percent := round((v_profit_loss / v_account_starting_cash) * 100, 10)");
   });
 
