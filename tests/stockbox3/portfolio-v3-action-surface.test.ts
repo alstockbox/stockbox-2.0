@@ -21,4 +21,19 @@ describe("Portfolio V3 server-action surface", () => {
     expect(page).toContain("updatePortfolioTransactionAction");
     expect(page).toContain("removePortfolioTransactionAction");
   });
+
+  it("records sales through the same guarded ledger after an owner-scoped position check", () => {
+    const sellStart = actions.indexOf("export async function sellHoldingAction");
+    const updateStart = actions.indexOf("export async function updatePortfolioTransactionAction");
+    const sellAction = actions.slice(sellStart, updateStart);
+
+    expect(sellStart).toBeGreaterThan(-1);
+    expect(sellAction).toContain("userOwnsPortfolio(user.id, parsed.data.portfolioId)");
+    expect(sellAction).toContain('.from("holdings")');
+    expect(sellAction).toContain('.eq("portfolio_id", parsed.data.portfolioId)');
+    expect(sellAction).toContain('p_transaction_type: "sell"');
+    expect(sellAction).toContain('rpc("record_portfolio_transaction"');
+    expect(sellAction).not.toContain('.from("portfolio_transactions").insert(');
+    expect(sellAction).not.toContain('.from("holdings").update(');
+  });
 });
