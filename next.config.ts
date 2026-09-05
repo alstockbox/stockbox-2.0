@@ -21,7 +21,7 @@ const contentSecurityPolicy = [
   ].join(" "),
   "frame-src 'self' https://checkout.stripe.com https://billing.stripe.com",
   "worker-src 'self' blob:",
-  "media-src 'self' data: blob:",
+  "media-src 'self' data: blob: https:",
   "manifest-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",

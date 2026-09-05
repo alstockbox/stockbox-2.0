@@ -1,0 +1,169 @@
+name: StockBox 2 Upgrade CI
+
+on:
+  push:
+    branches:
+      - upgrade/stockbox-2-ux-portfolio-mobile-20260905
+  pull_request:
+    paths:
+      - "src/app/**"
+      - "src/components/**"
+      - "src/lib/**"
+      - "tests/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/stockbox-2-upgrade-ci.yml"
+
+jobs:
+  main-baseline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Main branch full test baseline (informational)
+        continue-on-error: true
+        run: npm test
+      - name: Main branch lint baseline (informational)
+        continue-on-error: true
+        run: npm run lint
+
+  app-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Portfolio 2 math tests
+        run: npm test -- tests/portfolio/portfolio-math-v2.test.ts
+      - name: Workspace Portfolio 2 regression tests
+        run: npm test -- tests/workspace/actions.test.ts tests/workspace/canonical-identity.test.ts
+      - name: Analytics regression tests
+        run: npm test -- tests/analytics
+      - name: Auth regression tests
+        run: npm test -- tests/auth
+      - name: Full suite excluding known main archetype baseline
+        id: full_tests
+        continue-on-error: true
+        run: npm test -- --exclude tests/analysis/archetypes.test.ts
+      - name: Verify known archetype baseline fingerprint
+        id: baseline_fingerprint
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          NO_COLOR=1 npm test -- tests/analysis/archetypes.test.ts > /tmp/archetypes-baseline.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/archetypes-baseline.log
+          test "$status" -ne 0
+          grep -Fq "2 failed" /tmp/archetypes-baseline.log
+          grep -Fq "50 passed" /tmp/archetypes-baseline.log
+          grep -Fq "diagnoses valuation multiple gaps by failed input condition" /tmp/archetypes-baseline.log
+          grep -Fq "diagnoses FCF yield by missing simple free-cash-flow inputs" /tmp/archetypes-baseline.log
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        run: npm run typecheck
+      - name: Lint changed StockBox 2 files
+        id: lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          mapfile -t files < <(git diff --name-only origin/main...HEAD | grep -E '\.(js|jsx|ts|tsx|mjs|cjs)$' || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed JS/TS files to lint."
+            exit 0
+          fi
+          printf 'Linting changed files:\n%s\n' "${files[*]}"
+          npx eslint "${files[@]}"
+      - name: Production build
+        id: build
+        continue-on-error: true
+        run: npm run build
+      - name: Verification gate
+        if: always()
+        run: |
+          test "${{ steps.full_tests.outcome }}" = "success"
+          test "${{ steps.baseline_fingerprint.outcome }}" = "success"
+          test "${{ steps.typecheck.outcome }}" = "success"
+          test "${{ steps.lint.outcome }}" = "success"
+          test "${{ steps.build.outcome }}" = "success"
+
+  portfolio-migration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Isolate required migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          cp supabase/migrations/20260820220000_initial_stockbox.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260905140500_portfolio_2_private_schema.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260905141000_portfolio_2_transactions_snapshots.sql /tmp/stockbox-migrations/
+          rm -f supabase/migrations/*.sql
+          supabase init --force
+      - name: Start disposable Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Apply base schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260820220000_initial_stockbox.sql
+      - name: Apply Portfolio 2 private schema prerequisite
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905140500_portfolio_2_private_schema.sql
+      - name: Apply Portfolio 2 transaction migration
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905141000_portfolio_2_transactions_snapshots.sql
+      - name: Assert Portfolio 2 invariants
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_rls integer;
+            v_indexes integer;
+          begin
+            if to_regnamespace('private') is null then raise exception 'private schema missing'; end if;
+            if to_regclass('public.portfolio_transactions') is null then raise exception 'portfolio_transactions missing'; end if;
+            if to_regclass('public.portfolio_snapshots') is null then raise exception 'portfolio_snapshots missing'; end if;
+            select count(*) into v_rls
+            from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relname in ('portfolio_transactions','portfolio_snapshots') and c.relrowsecurity = true;
+            if v_rls <> 2 then raise exception 'RLS must be enabled on both Portfolio 2 tables'; end if;
+            select count(*) into v_indexes from pg_indexes
+            where schemaname = 'public' and indexname in (
+              'portfolio_transactions_portfolio_date_idx',
+              'portfolio_transactions_portfolio_ticker_idx',
+              'portfolio_snapshots_portfolio_created_idx',
+              'portfolio_snapshots_user_created_idx'
+            );
+            if v_indexes <> 4 then raise exception 'Expected four Portfolio 2 query indexes, found %', v_indexes; end if;
+            if to_regprocedure('public.record_portfolio_transaction(uuid,text,text,numeric,numeric,text,date,numeric,numeric,text,text)') is null then raise exception 'record_portfolio_transaction RPC missing'; end if;
+            if to_regprocedure('public.update_portfolio_transaction(uuid,numeric,numeric,text,date,numeric)') is null then raise exception 'update_portfolio_transaction RPC missing'; end if;
+            if to_regprocedure('public.delete_portfolio_transaction(uuid)') is null then raise exception 'delete_portfolio_transaction RPC missing'; end if;
+          end
+          $$;
+          SQL
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup

@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   portfolioSelect: vi.fn(),
   portfolioEq: vi.fn(),
-  portfolioSingle: vi.fn(),
+  portfolioMaybeSingle: vi.fn(),
   portfolioDelete: vi.fn(),
+  holdingSelect: vi.fn(),
+  holdingMaybeSingle: vi.fn(),
   holdingInsert: vi.fn(),
   holdingUpdate: vi.fn(),
   holdingDelete: vi.fn(),
@@ -55,10 +57,12 @@ describe("workspace server actions", () => {
     const portfolioQuery = {
       select: mocks.portfolioSelect,
       eq: mocks.portfolioEq,
-      single: mocks.portfolioSingle,
+      maybeSingle: mocks.portfolioMaybeSingle,
       delete: mocks.portfolioDelete,
     };
     const holdingQuery = {
+      select: mocks.holdingSelect,
+      maybeSingle: mocks.holdingMaybeSingle,
       insert: mocks.holdingInsert,
       update: mocks.holdingUpdate,
       delete: mocks.holdingDelete,
@@ -67,13 +71,15 @@ describe("workspace server actions", () => {
     mocks.portfolioSelect.mockReturnValue(portfolioQuery);
     mocks.portfolioEq.mockReturnValue(portfolioQuery);
     mocks.portfolioDelete.mockReturnValue(portfolioQuery);
-    mocks.portfolioSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
+    mocks.portfolioMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
+    mocks.holdingSelect.mockReturnValue(holdingQuery);
+    mocks.holdingEq.mockReturnValue(holdingQuery);
+    mocks.holdingMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000333", portfolio_id: "00000000-0000-4000-8000-000000000222" } });
     mocks.holdingInsert.mockResolvedValue({ error: null });
     mocks.holdingUpdate.mockReturnValue(holdingQuery);
     mocks.holdingDelete.mockReturnValue(holdingQuery);
-    mocks.holdingEq.mockReturnValue(holdingQuery);
     mocks.from.mockImplementation((table: string) => table === "portfolios" ? portfolioQuery : holdingQuery);
-    mocks.createClient.mockResolvedValue({ from: mocks.from });
+    mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
   });
 
   it("creates watchlist entries through the atomic entitlement rpc", async () => {
@@ -94,21 +100,29 @@ describe("workspace server actions", () => {
     });
   });
 
-  it("stores holding cost currency instead of hardcoding SEK", async () => {
+  it("stores dated holding purchases through the Portfolio 2 transaction rpc", async () => {
     await addHoldingAction(data({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "aapl",
       quantity: "2",
       averageCost: "210",
       currency: "usd",
+      purchaseDate: "2026-09-01",
+      fees: "3.5",
     }));
 
-    expect(mocks.holdingInsert).toHaveBeenCalledWith({
-      portfolio_id: "00000000-0000-4000-8000-000000000222",
-      ticker: "AAPL",
-      quantity: 2,
-      average_cost: 210,
-      currency: "USD",
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "buy",
+      p_quantity: 2,
+      p_price: 210,
+      p_currency: "USD",
+      p_executed_at: "2026-09-01",
+      p_fees: 3.5,
+      p_cash_amount: null,
+      p_security_id: null,
+      p_notes: null,
     });
   });
 

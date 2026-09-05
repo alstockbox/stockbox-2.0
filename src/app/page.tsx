@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileSearch, Scale, ShieldCheck } from "lucide-react";
+import { ArrowRight, FileSearch, Scale, ShieldCheck } from "lucide-react";
 import { AnalysisWorkbench } from "@/components/analysis/analysis-workbench";
-import { captureServerEvent } from "@/lib/analytics/events";
 import { StockBoxLogo } from "@/components/brand/stockbox-logo";
+import { PublicAnalysisPreview } from "@/components/landing/public-analysis-preview";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
+import { captureServerEvent } from "@/lib/analytics/events";
+import { getCurrentUser } from "@/lib/auth/session";
 import { isFinancialProviderConfigured } from "@/lib/env/server";
 import { getLocale } from "@/lib/i18n/server";
 import { getMarketingCopy } from "@/lib/i18n/marketing-copy";
@@ -16,13 +18,13 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-const sampleDimensions = [["Valuation", 28], ["Growth", 36], ["Profitability", 85], ["Financial health", 69], ["Quality", 100], ["Risk", 56]] as const;
-
 export default async function HomePage() {
   captureServerEvent("homepage_view");
-  const locale = await getLocale();
+  captureServerEvent("landing_view");
+  const [locale, user] = await Promise.all([getLocale(), getCurrentUser()]);
   const copy = getMarketingCopy(locale);
   const sv = locale === "sv";
+  const videoUrl = process.env.NEXT_PUBLIC_INTRO_VIDEO_URL?.trim() || null;
   const trustCards = [
     { icon: FileSearch, title: copy.sourceTitle, text: copy.sourceCopy },
     { icon: Scale, title: copy.deterministicTitle, text: copy.deterministicCopy },
@@ -31,37 +33,41 @@ export default async function HomePage() {
 
   return (
     <>
-      <Section className="subtle-grid border-b border-white/10 pb-8 pt-16 sm:pt-20">
+      <Section className="subtle-grid border-b border-white/10 pb-10 pt-10 sm:pt-14 lg:pt-16">
         <Container>
-          <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_.95fr]">
-            <div>
+          <div className="grid items-start gap-8 lg:grid-cols-[.92fr_1.08fr] lg:gap-10">
+            <div className="lg:pt-5">
               <div className="flex items-center gap-3">
                 <StockBoxLogo size={56} alt="" priority className="h-12 w-12 sm:h-14 sm:w-14" />
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#e1cb95]">{copy.kicker}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#e1cb95] sm:text-sm">{sv ? "Aktieanalys utan informationskaos" : "Stock research without information overload"}</p>
               </div>
-              <h1 className="serif mt-5 max-w-4xl text-4xl font-semibold leading-tight text-[#f4efe5] sm:text-5xl lg:text-6xl">{copy.heroTitle}</h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-[#c9d2df] sm:text-lg">{copy.heroCopy}</p>
-              <div className="mt-7 flex flex-wrap gap-3">
-                <ButtonLink href="#research">{copy.primaryCta}</ButtonLink>
-                <ButtonLink href="/sample-analysis" variant="secondary">{copy.sampleCta}</ButtonLink>
+              <h1 className="serif mt-5 max-w-3xl text-4xl font-semibold leading-[1.08] text-[#f4efe5] sm:text-5xl lg:text-[3.5rem]">
+                {sv ? "Förstå en aktie snabbare — med data, score och tydliga risker på ett ställe." : "Understand a stock faster — with data, scores and clear risks in one place."}
+              </h1>
+              <p className="mt-5 max-w-2xl text-base leading-7 text-[#c9d2df] sm:text-lg">
+                {sv ? "StockBox samlar verifierbar bolags- och marknadsdata, räknar fram värdering, tillväxt, lönsamhet, finansiell hälsa, kvalitet, risk och momentum och visar vad underlaget faktiskt räcker till." : "StockBox combines verifiable company and market data, calculates valuation, growth, profitability, financial health, quality, risk and momentum, and shows what the evidence actually supports."}
+              </p>
+              <div className="mt-7 flex flex-wrap items-center gap-3">
+                <ButtonLink href="#free-analysis" className="min-h-12 px-5 text-base">
+                  {sv ? "Gör en gratis analys" : "Run a free analysis"}<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </ButtonLink>
+                <Link href="/auth/signup?next=/analyze" className="inline-flex min-h-11 items-center px-2 text-sm font-semibold text-[#c9d2df] hover:text-white">
+                  {sv ? "Skapa gratis konto" : "Create free account"}
+                </Link>
               </div>
-              <p className="mt-5 text-xs leading-6 text-[#7f8b9b]">{sv ? "Ingen handel. Ingen individanpassad rådgivning. Rapportens datatäckning och konfidens visas öppet." : "No trade execution. No individualized financial advice. Report coverage and confidence stay visible."}</p>
+              <div className="mt-6 grid max-w-xl grid-cols-3 gap-2 text-xs sm:gap-3 sm:text-sm">
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><p className="font-semibold text-[#f4efe5]">9</p><p className="mt-1 text-[#8f9bac]">{sv ? "analysdimensioner" : "analysis dimensions"}</p></div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><p className="font-semibold text-[#f4efe5]">{sv ? "Synligt" : "Visible"}</p><p className="mt-1 text-[#8f9bac]">{sv ? "datatäckning" : "data coverage"}</p></div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3"><p className="font-semibold text-[#f4efe5]">{sv ? "Källor" : "Sources"}</p><p className="mt-1 text-[#8f9bac]">{sv ? "i rapporten" : "in the report"}</p></div>
+              </div>
+              <p className="mt-5 max-w-2xl text-xs leading-6 text-[#7f8b9b]">{sv ? "StockBox är analysstöd, inte personlig investeringsrådgivning eller en garanti om framtida avkastning. Datatäckning och konfidens visas öppet." : "StockBox is research support, not individualized investment advice or a guarantee of future returns. Data coverage and confidence remain visible."}</p>
             </div>
-            <Card className="border-[#e1cb95]/25 bg-[#0b1829] p-0">
-              <div className="border-b border-white/10 p-5">
-                <div className="flex items-center justify-between gap-3"><div><p className="font-mono text-sm text-[#e1cb95]">AAPL</p><h2 className="mt-1 text-xl font-semibold text-[#f4efe5]">Apple Inc.</h2></div><span className="rounded-full border border-[#e1cb95]/30 px-3 py-1 text-xs font-semibold text-[#e1cb95]">{sv ? "Stabil researchvy" : "Solid research view"}</span></div>
-                <div className="mt-5 grid grid-cols-3 gap-3"><div><p className="text-xs text-[#7f8b9b]">Score</p><p className="number mt-1 text-2xl font-semibold">67/100</p></div><div><p className="text-xs text-[#7f8b9b]">Confidence</p><p className="number mt-1 text-2xl font-semibold">90%</p></div><div><p className="text-xs text-[#7f8b9b]">Coverage</p><p className="number mt-1 text-2xl font-semibold">90%</p></div></div>
-              </div>
-              <div className="grid gap-3 p-5 sm:grid-cols-2">
-                {sampleDimensions.map(([label, score]) => <div key={label}><div className="flex justify-between text-xs"><span className="text-[#c9d2df]">{label}</span><span className="number text-[#e1cb95]">{score}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[#b99b5f]" style={{ width: `${score}%` }} /></div></div>)}
-              </div>
-              <div className="border-t border-white/10 px-5 py-4 text-xs text-[#7f8b9b]">{sv ? "Riktig snapshot · Engine v2.7.0 · 30 aug 2026" : "Real snapshot · Engine v2.7.0 · 30 Aug 2026"}</div>
-            </Card>
+            <PublicAnalysisPreview locale={locale} videoUrl={videoUrl} />
           </div>
         </Container>
       </Section>
 
-      <Section id="product" className="py-10">
+      <Section id="product" className="py-9 sm:py-10">
         <Container>
           <div className="grid gap-4 md:grid-cols-3">
             {trustCards.map((item) => (
@@ -74,15 +80,25 @@ export default async function HomePage() {
           </div>
         </Container>
       </Section>
+
       <Section id="research" className="py-10">
         <Container className="grid gap-8 lg:grid-cols-[.7fr_1.3fr]">
           <div>
-            <p className="text-sm font-semibold text-[#e1cb95]">{sv ? "Så fungerar det" : "How it works"}</p>
-            <h2 className="serif mt-2 text-3xl font-semibold text-[#f4efe5]">{sv ? "Sök, analysera, granska underlaget" : "Search, analyze, inspect the evidence"}</h2>
-            <p className="mt-4 text-sm leading-7 text-[#9aa7b8]">{sv ? "Välj ett riktigt börsnoterat bolag. StockBox identifierar rätt värdepapper, bygger rapporten från tillgänglig verifierbar data och visar tydligt när täckningen inte räcker." : "Choose a real listed company. StockBox resolves the security, builds the report from available verifiable data and clearly shows when coverage is not sufficient."}</p>
-            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Datakällor" : "Data sources"}</Link><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Metodik" : "Methodology"}</Link><Link href="/faq" className="font-semibold text-[#e1cb95] hover:text-white">FAQ</Link></div>
+            <p className="text-sm font-semibold text-[#e1cb95]">{sv ? "Från snabb överblick till full research" : "From fast overview to full research"}</p>
+            <h2 className="serif mt-2 text-3xl font-semibold text-[#f4efe5]">{sv ? "Sök, analysera och granska underlaget" : "Search, analyze and inspect the evidence"}</h2>
+            <p className="mt-4 text-sm leading-7 text-[#9aa7b8]">{sv ? "StockBox identifierar rätt börsnoterade värdepapper, bygger analysen från tillgänglig verifierbar data och markerar tydligt när data saknas i stället för att fylla hålen med påhittade värden." : "StockBox resolves the correct listed security, builds research from available verifiable data and marks missing data clearly instead of filling gaps with fabricated values."}</p>
+            <div className="mt-5 flex flex-wrap gap-4 text-sm"><Link href="/data-sources" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Datakällor" : "Data sources"}</Link><Link href="/docs/methodology" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Metodik" : "Methodology"}</Link><Link href="/sample-analysis" className="font-semibold text-[#e1cb95] hover:text-white">{sv ? "Exempelanalys" : "Sample analysis"}</Link></div>
           </div>
-          <AnalysisWorkbench financialConfigured={isFinancialProviderConfigured()} initialMode="simple" initialInvestmentProfile="balanced" locale={locale} />
+          {user ? (
+            <AnalysisWorkbench financialConfigured={isFinancialProviderConfigured()} initialMode="simple" initialInvestmentProfile="balanced" locale={locale} />
+          ) : (
+            <Card className="flex min-h-64 flex-col justify-center border-[#e1cb95]/20 bg-[#0b1829] p-6 sm:p-8">
+              <p className="text-sm font-semibold text-[#e1cb95]">{sv ? "Full funktionalitet" : "Full functionality"}</p>
+              <h3 className="serif mt-2 text-2xl font-semibold text-[#f4efe5]">{sv ? "Spara analyser, bygg historik och arbeta vidare i din workspace." : "Save analyses, build history and continue in your workspace."}</h3>
+              <p className="mt-3 text-sm leading-6 text-[#9aa7b8]">{sv ? "Testa gratisanalysen ovan först. När du vill spara resultatet eller fortsätta med fler verktyg skapar du ett gratis konto." : "Try the free preview above first. Create a free account when you want to save work or continue with the full toolset."}</p>
+              <ButtonLink href="/auth/signup?next=/analyze" className="mt-5 w-fit">{sv ? "Skapa gratis konto" : "Create free account"}</ButtonLink>
+            </Card>
+          )}
         </Container>
       </Section>
 

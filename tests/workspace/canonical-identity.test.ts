@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(), createAdminClient: vi.fn(), createClient: vi.fn(),
   searchCompanies: vi.fn(), resolveCanonicalCompanySelection: vi.fn(), rpc: vi.fn(),
-  from: vi.fn(), portfolioSelect: vi.fn(), portfolioEq: vi.fn(), portfolioSingle: vi.fn(), holdingInsert: vi.fn(),
+  from: vi.fn(), portfolioSelect: vi.fn(), portfolioEq: vi.fn(), portfolioMaybeSingle: vi.fn(), holdingInsert: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -32,13 +32,13 @@ describe("workspace canonical identity", () => {
     });
     mocks.rpc.mockResolvedValue({ data: { allowed: true }, error: null });
     mocks.createAdminClient.mockReturnValue({ rpc: mocks.rpc });
-    const portfolioQuery = { select: mocks.portfolioSelect, eq: mocks.portfolioEq, single: mocks.portfolioSingle };
+    const portfolioQuery = { select: mocks.portfolioSelect, eq: mocks.portfolioEq, maybeSingle: mocks.portfolioMaybeSingle };
     mocks.portfolioSelect.mockReturnValue(portfolioQuery);
     mocks.portfolioEq.mockReturnValue(portfolioQuery);
-    mocks.portfolioSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
+    mocks.portfolioMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
     mocks.holdingInsert.mockResolvedValue({ error: null });
     mocks.from.mockImplementation((table: string) => table === "portfolios" ? portfolioQuery : { insert: mocks.holdingInsert });
-    mocks.createClient.mockResolvedValue({ from: mocks.from });
+    mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
   });
 
   it("stores the resolver's canonical watchlist identity", async () => {
@@ -48,14 +48,18 @@ describe("workspace canonical identity", () => {
     }));
   });
 
-  it("stores the resolver's canonical holding ticker", async () => {
+  it("stores the resolver's canonical holding ticker in the transaction ledger", async () => {
     await addHoldingAction(form({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "true b",
       quantity: "2",
       averageCost: "45",
       currency: "sek",
+      purchaseDate: "2026-09-01",
     }));
-    expect(mocks.holdingInsert).toHaveBeenCalledWith(expect.objectContaining({ ticker: "TRUE-B.ST" }));
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", expect.objectContaining({
+      p_ticker: "TRUE-B.ST",
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+    }));
   });
 });
