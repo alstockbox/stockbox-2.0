@@ -1,4 +1,4 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { adminEmails } from "@/lib/env/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -28,7 +28,9 @@ export async function getCurrentUser(): Promise<AppUser | null> {
       .select("role")
       .eq("id", user.id)
       .single();
-    if (profile?.role === "affiliate_ambassador") role = "affiliate_ambassador";
+
+    if (profile?.role === "admin") role = "admin";
+    else if (profile?.role === "affiliate_ambassador") role = "affiliate_ambassador";
   }
 
   return {
