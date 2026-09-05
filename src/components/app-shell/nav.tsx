@@ -6,6 +6,7 @@ import {
   Gauge,
   History,
   LayoutDashboard,
+  Newspaper,
   Settings,
   ShieldCheck,
   UsersRound,
@@ -50,6 +51,8 @@ function Brand() {
 export async function AppNav() {
   const [user, locale] = await Promise.all([getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).nav;
+  const briefingEnabled = isFeatureEnabled("dailyBriefing");
+  const briefingLabel = locale === "sv" ? "Briefing" : "Briefing";
   const initial = user?.email?.trim().charAt(0).toUpperCase() || "S";
   const accountLabels = locale === "sv"
     ? { settings: "Inställningar", profile: "Profil", billing: "Betalning", security: "Säkerhet", feedback: "Ge feedback", contact: "Kontakt", menu: "Meny" }
@@ -76,6 +79,12 @@ export async function AppNav() {
                 {copy[item.labelKey]}
               </Link>
             ))}
+            {briefingEnabled ? (
+              <Link href="/briefing" className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                <Newspaper className="h-4 w-4" aria-hidden="true" />
+                {briefingLabel}
+              </Link>
+            ) : null}
           </nav>
         )}
 
@@ -98,6 +107,11 @@ export async function AppNav() {
                   {item.label}
                 </Link>
               ))}
+            {user && briefingEnabled ? (
+              <Link role="menuitem" href="/briefing" className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                {briefingLabel}
+              </Link>
+            ) : null}
             <div className="my-2 border-t border-white/10" />
             <div className="px-3 py-2"><LanguageSwitcher locale={locale} /></div>
           </TransientMenu>
