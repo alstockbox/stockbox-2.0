@@ -93,6 +93,10 @@ function normalizedLegacyRating(rating: string): RecommendationV3Rating {
   }
 }
 
+function shadowTicker(input: FinancialAnalysisInput): string {
+  return input.company.canonicalTicker?.trim() || input.company.ticker?.trim() || "UNKNOWN";
+}
+
 function defaultEmitter(event: RecommendationV3ShadowEvent | RecommendationV3ShadowFailureEvent) {
   // Shadow telemetry intentionally contains no user id, raw financial payload,
   // provider secret or personalized score. The feature is dark by default, so
@@ -145,7 +149,7 @@ export function evaluateRecommendationV3Shadow(
     event: {
       event: "stockbox.recommendation_v3_shadow",
       observedAt,
-      ticker: input.company.canonicalTicker ?? input.company.ticker,
+      ticker: shadowTicker(input),
       analysisFingerprint: result.canonicalInputFingerprint ?? null,
       analysisArchetype: result.analysisArchetype,
       legacyRating,
@@ -204,7 +208,7 @@ export function runRecommendationV3Shadow(
     const failureEvent: RecommendationV3ShadowFailureEvent = {
       event: "stockbox.recommendation_v3_shadow_failure",
       observedAt,
-      ticker: input.company.canonicalTicker ?? input.company.ticker,
+      ticker: shadowTicker(input),
       analysisFingerprint: result.canonicalInputFingerprint ?? null,
       errorName: error instanceof Error && error.name ? error.name : "UnknownError",
     };
