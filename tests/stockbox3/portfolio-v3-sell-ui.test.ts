@@ -36,7 +36,15 @@ describe("Portfolio V3 sale and realized P/L UI", () => {
     expect(page).toContain("Shown separately by transaction currency");
     expect(page).toContain("StockBox does not mix currencies without verified FX");
     expect(page).not.toContain("totalRealizedProfitLoss");
-    expect(page).not.toContain("realizedProfitLossBase");
+
+    const realizedStart = page.indexOf("realizedPerformance.complete");
+    const analyzerStart = page.indexOf("<PortfolioAnalyzer", realizedStart);
+    expect(realizedStart).toBeGreaterThan(-1);
+    expect(analyzerStart).toBeGreaterThan(realizedStart);
+    const realizedSection = page.slice(realizedStart, analyzerStart);
+    expect(realizedSection).toContain("realizedPerformance.byCurrency.map");
+    expect(realizedSection).not.toContain("realizedProfitLossBase");
+    expect(realizedSection).not.toContain(".reduce(");
   });
 
   it("fails closed in the UI when ledger integrity is not complete", () => {
