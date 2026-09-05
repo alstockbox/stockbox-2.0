@@ -1,5 +1,6 @@
 import { enqueueBackgroundJob, runBackgroundJobs, type BackgroundJob } from "@/lib/jobs/background-jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { currentOfficialMonitoringCostDecision } from "./cost-policy-v3";
 import {
   groupWatchlistRowsByCanonicalTicker,
   runWatchlistRowsMonitoring,
@@ -18,6 +19,9 @@ export function watchlistJobDedupeKey(ticker: string): string {
 export async function enqueueDueWatchlistMonitoringJobs(
   options: { limit?: number; now?: Date } = {},
 ): Promise<{ queued: number; deduplicated: number; failed: number }> {
+  const policy = currentOfficialMonitoringCostDecision();
+  if (!policy.allowed) return { queued: 0, deduplicated: 0, failed: 0 };
+
   const admin = createAdminClient();
   if (!admin) throw new Error("Supabase admin client is unavailable.");
   const now = options.now ?? new Date();
@@ -73,9 +77,31 @@ export async function handleWatchlistMonitoringJob(job: BackgroundJob): Promise<
   }
 }
 
+export type DurableWatchlistMonitoringResult = MonitoringRunResult & {
+  queued: number;
+  deduplicated: number;
+  jobsClaimed: number;
+  pausedReason?: "background_jobs_killed" | "provider_cost_review_required";
+};
+
 export async function runDurableWatchlistMonitoring(
   options: { enqueueLimit?: number; workerLimit?: number; now?: Date } = {},
-): Promise<MonitoringRunResult & { queued: number; deduplicated: number; jobsClaimed: number }> {
+): Promise<DurableWatchlistMonitoringResult> {
+  const policy = currentOfficialMonitoringCostDecision();
+  if (!policy.allowed) {
+    return {
+      checked: 0,
+      baselined: 0,
+      changed: 0,
+      notified: 0,
+      failed: 0,
+      queued: 0,
+      deduplicated: 0,
+      jobsClaimed: 0,
+      pausedReason: policy.reason,
+    };
+  }
+
   const queued = await enqueueDueWatchlistMonitoringJobs({
     limit: options.enqueueLimit,
     now: options.now,
