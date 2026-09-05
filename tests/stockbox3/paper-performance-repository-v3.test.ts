@@ -97,6 +97,21 @@ describe("Paper Trading V3 performance snapshot repository", () => {
     });
   });
 
+  it("accepts PostgreSQL negative half-tie rounding at ten decimals", () => {
+    const mapped = mapPaperPerformanceSnapshotV3(storedRow({
+      cash_value: "99999.9999999500",
+      positions_market_value: "0.0000000000",
+      equity: "99999.9999999500",
+      profit_loss: "-0.0000000500",
+      return_percent: "-0.0000000001",
+      open_position_count: 0,
+      quote_count: 0,
+      oldest_quote_observed_at: null,
+    }));
+    expect(mapped).not.toBeNull();
+    expect(mapped?.returnPercent).toBe(-0.0000000001);
+  });
+
   it("rejects tampered derived values and quote metadata", () => {
     expect(mapPaperPerformanceSnapshotV3(storedRow({ equity: "100101.0000000000" }))).toBeNull();
     expect(mapPaperPerformanceSnapshotV3(storedRow({ profit_loss: "101.0000000000" }))).toBeNull();
