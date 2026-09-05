@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROWTH_V3_CANARY_VERSION, configBool, parseConfigRows } from "../supabase/functions/stockbox-growth-engine-v3/runtime";
+import { GROWTH_V3_CANARY_VERSION, configBool, isUuid, parseConfigRows } from "../supabase/functions/stockbox-growth-engine-v3/runtime";
 
 describe("growth v3 canary runtime", () => {
   it("preserves null numeric cost config so unknown spend fails closed", () => {
@@ -19,6 +19,18 @@ describe("growth v3 canary runtime", () => {
     expect(cfg.growth_render_shadow_mode).toBe(true);
     expect(cfg.growth_english_voice_enabled).toBe(false);
     expect(configBool(cfg.growth_render_shadow_mode)).toBe(true);
+  });
+
+  it("only accepts canonical UUID values for acq_content UUID lookups", () => {
+    expect(isUuid("550e8400-e29b-41d4-a716-446655440000")).toBe(true);
+    expect(isUuid("550E8400-E29B-41D4-A716-446655440000")).toBe(true);
+    expect(isUuid("step2")).toBe(false);
+    expect(isUuid("campaign-demo")).toBe(false);
+    expect(isUuid("")).toBe(false);
+    expect(isUuid(null)).toBe(false);
+    expect(isUuid(undefined)).toBe(false);
+    expect(isUuid("550e8400-e29b-41d4-a716-44665544000")).toBe(false);
+    expect(isUuid("550e8400e29b41d4a716446655440000")).toBe(false);
   });
 
   it("has an explicit shadow-canary version identifier", () => {
