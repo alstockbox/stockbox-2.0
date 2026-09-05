@@ -34,13 +34,6 @@ async function userOwnsPortfolio(userId: string, portfolioId: string) {
   return Boolean(data);
 }
 
-async function ownedHolding(userId: string, holdingId: string) {
-  const supabase = await createClient();
-  const { data: holding } = await supabase?.from("holdings").select("id,portfolio_id").eq("id", holdingId).maybeSingle() ?? { data: null };
-  if (!holding) return null;
-  return await userOwnsPortfolio(userId, holding.portfolio_id) ? holding : null;
-}
-
 export async function addWatchlistItemAction(formData: FormData) {
   const user = await requireUser();
   const ticker = tickerSchema.safeParse(formData.get("ticker"));
@@ -232,34 +225,6 @@ export async function removePortfolioTransactionAction(formData: FormData) {
   const supabase = await createClient();
   const { data, error } = await supabase?.rpc("delete_portfolio_transaction", { p_transaction_id: id.data }) ?? { data: false, error: new Error("Supabase unavailable") };
   if (error || data !== true) redirect("/portfolio?error=transaction_delete");
-  revalidatePath("/portfolio");
-}
-
-export async function updateHoldingAction(formData: FormData) {
-  const user = await requireUser();
-  const parsed = z.object({
-    id: z.string().uuid(),
-    quantity: z.coerce.number().positive().max(1_000_000_000),
-    averageCost: z.coerce.number().nonnegative().max(1_000_000_000),
-    currency: currencySchema,
-  }).safeParse({
-    id: formData.get("id"),
-    quantity: formData.get("quantity"),
-    averageCost: formData.get("averageCost"),
-    currency: formData.get("currency"),
-  });
-  if (!parsed.success || !await ownedHolding(user.id, parsed.data.id)) return;
-  const supabase = await createClient();
-  await supabase?.from("holdings").update({ quantity: parsed.data.quantity, average_cost: parsed.data.averageCost, currency: parsed.data.currency }).eq("id", parsed.data.id);
-  revalidatePath("/portfolio");
-}
-
-export async function removeHoldingAction(formData: FormData) {
-  const user = await requireUser();
-  const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success || !await ownedHolding(user.id, id.data)) return;
-  const supabase = await createClient();
-  await supabase?.from("holdings").delete().eq("id", id.data);
   revalidatePath("/portfolio");
 }
 
