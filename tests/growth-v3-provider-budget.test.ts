@@ -5,6 +5,8 @@ import {
   monthGrowthSpend,
 } from "../supabase/functions/stockbox-growth-engine/v3/provider-budget";
 
+type RpcCall = { name: string; args: Record<string, unknown> };
+
 describe("growth v3 provider budget adapter", () => {
   it("uses actual cost when finalized and estimate otherwise", async () => {
     const spend = await monthGrowthSpend(async () => [
@@ -31,7 +33,7 @@ describe("growth v3 provider budget adapter", () => {
   });
 
   it("uses the serialized budget RPC when the local check allows the call", async () => {
-    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const calls: RpcCall[] = [];
     const decision = await authorizePaidGrowthCall({
       select: async () => [{ estimated_sek: 10, actual_sek: null }],
       rpc: async (name, args) => { calls.push({ name, args }); return { allowed: true, projected_monthly_sek: 10.2 }; },
@@ -64,7 +66,7 @@ describe("growth v3 provider budget adapter", () => {
   });
 
   it("finalizes known usage through the idempotent ledger RPC", async () => {
-    const calls: any[] = [];
+    const calls: RpcCall[] = [];
     await finalizeGrowthSpend({
       rpc: async (name, args) => { calls.push({ name, args }); return { ok: true }; },
       idempotencyKey: "voice:job-1",
@@ -74,7 +76,7 @@ describe("growth v3 provider budget adapter", () => {
       actualSek: 0.18,
       renderJobId: "job-1",
     });
-    expect(calls[0].name).toBe("acq_finalize_growth_usage_v3");
-    expect(calls[0].args.p_actual_sek).toBe(0.18);
+    expect(calls[0]?.name).toBe("acq_finalize_growth_usage_v3");
+    expect(calls[0]?.args.p_actual_sek).toBe(0.18);
   });
 });
