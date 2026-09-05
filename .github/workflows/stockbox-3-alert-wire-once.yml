@@ -1,18 +1,17 @@
 name: StockBox 3 Alert Wiring Once
 
-"on":
+on:
   push:
     branches:
       - stockbox-3.0
     paths:
-      - ".github/workflows/stockbox-3-alert-wire-once.yml"
+      - .github/workflows/stockbox-3-alert-wire-once.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.head_commit.message != 'feat(alerts): wire persisted V3 decisions into alerts'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,60 +19,65 @@ jobs:
           ref: stockbox-3.0
           fetch-depth: 0
       - name: Patch provider and analysis route
+        shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          provider = Path('src/lib/data/provider.ts')
+          provider = Path("src/lib/data/provider.ts")
           text = provider.read_text()
 
           old = 'import { runRecommendationV3Shadow } from "@/lib/analysis/recommendation-v3-shadow";'
           new = 'import { runRecommendationV3Shadow, type RecommendationV3ShadowResult } from "@/lib/analysis/recommendation-v3-shadow";\nimport { persistRecommendationV3ShadowAudit } from "@/lib/db/recommendation-v3-audit";'
           if text.count(old) != 1:
-              raise SystemExit(f'provider shadow import anchor count={text.count(old)}')
+              raise SystemExit(f"provider shadow import anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
 
           old = '| { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }'
           new = '| { ok: true; data: T; sources: AnalysisSource[]; warnings: string[]; stockbox3?: { recommendationV3Shadow: Extract<RecommendationV3ShadowResult, { status: "evaluated" }> } }'
           if text.count(old) != 1:
-              raise SystemExit(f'ProviderResult success anchor count={text.count(old)}')
+              raise SystemExit(f"ProviderResult success anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
 
-          old = '''  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.\n  // The canonical StockBox 2.x result is complete before this call and is never mutated.\n  runRecommendationV3Shadow(canonicalInput, engineResult);'''
-          new = '''  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.\n  // The canonical StockBox 2.x result is complete before this call and is never mutated.\n  const recommendationV3Shadow = runRecommendationV3Shadow(canonicalInput, engineResult);\n  if (recommendationV3Shadow.status === "evaluated") {\n    await persistRecommendationV3ShadowAudit(recommendationV3Shadow.event);\n  }'''
+          old = '  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.\n  // The canonical StockBox 2.x result is complete before this call and is never mutated.\n  runRecommendationV3Shadow(canonicalInput, engineResult);'
+          new = '  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.\n  // The canonical StockBox 2.x result is complete before this call and is never mutated.\n  const recommendationV3Shadow = runRecommendationV3Shadow(canonicalInput, engineResult);\n  if (recommendationV3Shadow.status === "evaluated") {\n    await persistRecommendationV3ShadowAudit(recommendationV3Shadow.event);\n  }'
           if text.count(old) != 1:
-              raise SystemExit(f'provider shadow call anchor count={text.count(old)}')
+              raise SystemExit(f"provider shadow call anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
 
-          old = '''  return {\n    ok: true,\n    data: report,\n    sources,\n    warnings\n  };'''
-          new = '''  return {\n    ok: true,\n    data: report,\n    sources,\n    warnings,\n    ...(recommendationV3Shadow.status === "evaluated"\n      ? { stockbox3: { recommendationV3Shadow } }\n      : {}),\n  };'''
+          old = '  return {\n    ok: true,\n    data: report,\n    sources,\n    warnings\n  };'
+          new = '  return {\n    ok: true,\n    data: report,\n    sources,\n    warnings,\n    ...(recommendationV3Shadow.status === "evaluated"\n      ? { stockbox3: { recommendationV3Shadow } }\n      : {}),\n  };'
           if text.count(old) != 1:
-              raise SystemExit(f'provider success return anchor count={text.count(old)}')
+              raise SystemExit(f"provider success return anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
           provider.write_text(text)
 
-          route = Path('src/app/api/analysis/route.ts')
+          route = Path("src/app/api/analysis/route.ts")
           text = route.read_text()
-          old = '''import {\n  completeAnalysisReservation,'''
-          new = '''import { recordAnalysisAlertsV3ForPersistedAnalysis } from "@/lib/db/analysis-alerts-v3";\nimport {\n  completeAnalysisReservation,'''
+          old = 'import {\n  completeAnalysisReservation,'
+          new = 'import { recordAnalysisAlertsV3ForPersistedAnalysis } from "@/lib/db/analysis-alerts-v3";\nimport {\n  completeAnalysisReservation,'
           if text.count(old) != 1:
-              raise SystemExit(f'route db import anchor count={text.count(old)}')
+              raise SystemExit(f"route db import anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
 
-          old = '''  await recordMaterialAnalysisChangesForPersistedAnalysis({\n    userId: user.id,\n    analysisId: result.data.id,\n    report: result.data,\n  }).catch(() => undefined);\n\n  const researchView = researchViewForReport(result.data);'''
-          new = '''  await recordMaterialAnalysisChangesForPersistedAnalysis({\n    userId: user.id,\n    analysisId: result.data.id,\n    report: result.data,\n  }).catch(() => undefined);\n\n  const recommendationV3Shadow = result.stockbox3?.recommendationV3Shadow;\n  if (recommendationV3Shadow) {\n    const alertOutcome = await recordAnalysisAlertsV3ForPersistedAnalysis({\n      userId: user.id,\n      analysisId: result.data.id,\n      report: result.data,\n      shadow: recommendationV3Shadow,\n    });\n    if (alertOutcome.status === "failed") {\n      await logApplicationError({\n        service: "analysis-alerts-v3",\n        message: sanitizeDiagnosticMessage(alertOutcome.error, "StockBox V3 alert persistence failed."),\n        userId: user.id,\n        context: { ticker: result.data.ticker, analysisId: result.data.id },\n      }).catch(() => undefined);\n    }\n  }\n\n  const researchView = researchViewForReport(result.data);'''
+          old = '  await recordMaterialAnalysisChangesForPersistedAnalysis({\n    userId: user.id,\n    analysisId: result.data.id,\n    report: result.data,\n  }).catch(() => undefined);\n\n  const researchView = researchViewForReport(result.data);'
+          new = '  await recordMaterialAnalysisChangesForPersistedAnalysis({\n    userId: user.id,\n    analysisId: result.data.id,\n    report: result.data,\n  }).catch(() => undefined);\n\n  const recommendationV3Shadow = result.stockbox3?.recommendationV3Shadow;\n  if (recommendationV3Shadow) {\n    const alertOutcome = await recordAnalysisAlertsV3ForPersistedAnalysis({\n      userId: user.id,\n      analysisId: result.data.id,\n      report: result.data,\n      shadow: recommendationV3Shadow,\n    });\n    if (alertOutcome.status === "failed") {\n      await logApplicationError({\n        service: "analysis-alerts-v3",\n        message: sanitizeDiagnosticMessage(alertOutcome.error, "StockBox V3 alert persistence failed."),\n        userId: user.id,\n        context: { ticker: result.data.ticker, analysisId: result.data.id },\n      }).catch(() => undefined);\n    }\n  }\n\n  const researchView = researchViewForReport(result.data);'
           if text.count(old) != 1:
-              raise SystemExit(f'route post-persistence anchor count={text.count(old)}')
+              raise SystemExit(f"route post-persistence anchor count={text.count(old)}")
           text = text.replace(old, new, 1)
           route.write_text(text)
           PY
           git diff --check
           git diff -- src/lib/data/provider.ts src/app/api/analysis/route.ts
       - name: Commit exact wiring patch
+        shell: bash
         run: |
           git config user.name "stockbox-ci"
           git config user.email "stockbox-ci@users.noreply.github.com"
           git add src/lib/data/provider.ts src/app/api/analysis/route.ts
-          git diff --cached --quiet && exit 0
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
           git commit -m "feat(alerts): wire persisted V3 decisions into alerts"
           git push origin HEAD:stockbox-3.0
