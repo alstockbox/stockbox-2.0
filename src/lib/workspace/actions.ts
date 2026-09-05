@@ -187,6 +187,63 @@ export async function addHoldingAction(formData: FormData) {
   revalidatePath("/portfolio");
 }
 
+export async function sellHoldingAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = z.object({
+    portfolioId: z.string().uuid(),
+    ticker: tickerSchema,
+    quantity: z.coerce.number().positive().max(1_000_000_000),
+    salePrice: z.coerce.number().nonnegative().max(1_000_000_000),
+    currency: currencySchema,
+    saleDate: transactionDateSchema,
+    fees: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
+  }).safeParse({
+    portfolioId: formData.get("portfolioId"),
+    ticker: formData.get("ticker"),
+    quantity: formData.get("quantity"),
+    salePrice: formData.get("salePrice"),
+    currency: formData.get("currency"),
+    saleDate: formData.get("saleDate"),
+    fees: formData.get("fees") || 0,
+  });
+  if (!parsed.success) redirect("/portfolio?error=transaction_input");
+  if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
+
+  const supabase = await createClient();
+  if (!supabase) redirect("/portfolio?error=configuration");
+  const { data: holding } = await supabase
+    .from("holdings")
+    .select("ticker,currency,quantity")
+    .eq("portfolio_id", parsed.data.portfolioId)
+    .eq("ticker", parsed.data.ticker)
+    .eq("currency", parsed.data.currency)
+    .maybeSingle();
+  const availableQuantity = typeof holding?.quantity === "number"
+    ? holding.quantity
+    : typeof holding?.quantity === "string"
+      ? Number(holding.quantity)
+      : Number.NaN;
+  if (!holding || !Number.isFinite(availableQuantity) || parsed.data.quantity > availableQuantity) {
+    redirect("/portfolio?error=transaction_sell_quantity");
+  }
+
+  const { error } = await supabase.rpc("record_portfolio_transaction", {
+    p_portfolio_id: parsed.data.portfolioId,
+    p_ticker: holding.ticker,
+    p_transaction_type: "sell",
+    p_quantity: parsed.data.quantity,
+    p_price: parsed.data.salePrice,
+    p_currency: holding.currency,
+    p_executed_at: parsed.data.saleDate,
+    p_fees: parsed.data.fees,
+    p_cash_amount: null,
+    p_security_id: null,
+    p_notes: null,
+  });
+  if (error) redirect("/portfolio?error=transaction_save");
+  revalidatePath("/portfolio");
+}
+
 export async function updatePortfolioTransactionAction(formData: FormData) {
   await requireUser();
   const parsed = z.object({
