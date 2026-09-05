@@ -1,0 +1,174 @@
+from pathlib import Path
+
+actions = Path("src/lib/workspace/actions.ts")
+text = actions.read_text()
+old = 'import { searchCompanies } from "@/lib/data/provider";'
+new = 'import { searchCompanies } from "@/lib/data/provider";\nimport { isFeatureEnabled } from "@/lib/feature-flags";'
+if text.count(old) != 1:
+    raise SystemExit(f"actions feature import anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+start = text.index('export async function updateWatchlistMonitoringAction(formData: FormData) {')
+end = text.index('\nexport async function removeWatchlistItemAction', start)
+replacement = '''export async function updateWatchlistMonitoringAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = z.object({
+    id: z.string().uuid(),
+    frequency: z.enum(["daily", "weekly"]),
+  }).safeParse({
+    id: formData.get("id"),
+    frequency: formData.get("frequency") ?? "daily",
+  });
+  if (!parsed.success) return;
+
+  const v3Enabled = isFeatureEnabled("watchlistV3") && isFeatureEnabled("alerts");
+  const optionalPrice = z.preprocess(
+    (value) => typeof value === "string" && !value.trim() ? null : value,
+    z.coerce.number().finite().nonnegative().max(1_000_000_000).nullable(),
+  );
+  const v3 = z.object({
+    convictionDropMinimum: z.coerce.number().int().min(1).max(100),
+    dataQualityDropMinimum: z.coerce.number().int().min(1).max(100),
+    priceAbove: optionalPrice,
+    priceBelow: optionalPrice,
+  }).safeParse({
+    convictionDropMinimum: formData.get("convictionDropMinimum") ?? 20,
+    dataQualityDropMinimum: formData.get("dataQualityDropMinimum") ?? 15,
+    priceAbove: formData.get("priceAbove") ?? null,
+    priceBelow: formData.get("priceBelow") ?? null,
+  });
+  if (v3Enabled && !v3.success) redirect("/watchlist?error=monitoring_input");
+
+  const supabase = await createClient();
+  if (!supabase) redirect("/watchlist?error=configuration");
+  const { data: existing } = await supabase
+    .from("watchlists")
+    .select("alert_preferences")
+    .eq("id", parsed.data.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const currentPreferences = existing?.alert_preferences && typeof existing.alert_preferences === "object" && !Array.isArray(existing.alert_preferences)
+    ? existing.alert_preferences as Record<string, unknown>
+    : {};
+  const alertPreferences: Record<string, unknown> = {
+    ...currentPreferences,
+    insider: formData.get("insiderAlerts") === "on",
+    shortInterest: formData.get("shortInterestAlerts") === "on",
+    filing: formData.get("filingAlerts") === "on",
+  };
+  if (v3Enabled && v3.success) {
+    Object.assign(alertPreferences, {
+      recommendationChanges: formData.get("recommendationAlerts") === "on",
+      convictionDropMinimum: v3.data.convictionDropMinimum,
+      dataQualityDropMinimum: v3.data.dataQualityDropMinimum,
+      priceAbove: v3.data.priceAbove,
+      priceBelow: v3.data.priceBelow,
+    });
+  }
+
+  await supabase.from("watchlists").update({
+    monitoring_enabled: formData.get("monitoringEnabled") === "on",
+    monitoring_frequency: parsed.data.frequency,
+    alert_preferences: alertPreferences,
+    next_check_at: formData.get("monitoringEnabled") === "on" ? new Date().toISOString() : null,
+    last_monitor_error: null,
+  }).eq("id", parsed.data.id).eq("user_id", user.id);
+  revalidatePath("/watchlist");
+}
+'''
+text = text[:start] + replacement + text[end:]
+actions.write_text(text)
+
+page = Path("src/app/watchlist/page.tsx")
+text = page.read_text()
+old = 'import { getCurrentUser } from "@/lib/auth/session";'
+new = 'import { getCurrentUser } from "@/lib/auth/session";\nimport { presentAnalysisAlertEventV3, type StoredAnalysisAlertEventV3 } from "@/lib/alerts/presentation-v3";\nimport { isFeatureEnabled } from "@/lib/feature-flags";'
+if text.count(old) != 1:
+    raise SystemExit(f"page import anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+old = '  alert_preferences?: { insider?: boolean; shortInterest?: boolean; filing?: boolean } | null;'
+new = '  alert_preferences?: { insider?: boolean; shortInterest?: boolean; filing?: boolean; recommendationChanges?: boolean; convictionDropMinimum?: number; dataQualityDropMinimum?: number; priceAbove?: number | null; priceBelow?: number | null } | null;'
+if text.count(old) != 1:
+    raise SystemExit(f"watch prefs type anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+old = '  const copy = getP0Copy(locale).watchlist;\n  const sv = locale === "sv";'
+new = '  const copy = getP0Copy(locale).watchlist;\n  const sv = locale === "sv";\n  const v3AlertsEnabled = isFeatureEnabled("watchlistV3") && isFeatureEnabled("alerts");'
+if text.count(old) != 1:
+    raise SystemExit(f"flag anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+old = '    : [{ data: [] }, { data: [] }];\n  const feedback = params.limit ? copy.limit : params.error ? copy.error : null;'
+new = '    : [{ data: [] }, { data: [] }];\n  const { data: stockboxEvents } = v3AlertsEnabled && supabase\n    ? await supabase.from("stockbox_alert_events_v3")\n      .select("ticker,alert_kind,severity,message_key,payload,observed_at")\n      .order("observed_at", { ascending: false })\n      .limit(10)\n    : { data: [] };\n  const feedback = params.limit ? copy.limit : params.error ? copy.error : null;'
+if text.count(old) != 1:
+    raise SystemExit(f"query anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+old = '''                  <div className="grid gap-2 text-sm text-[#d6deea] sm:grid-cols-3 lg:grid-cols-1">
+                    <label className="flex items-center gap-2"><input type="checkbox" name="insiderAlerts" defaultChecked={preferences.insider !== false} />{sv ? "Insider" : "Insider"}</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" name="shortInterestAlerts" defaultChecked={preferences.shortInterest !== false} />{sv ? "Blankning" : "Short interest"}</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" name="filingAlerts" defaultChecked={preferences.filing !== false} />{sv ? "Årsredovisningar" : "Filings"}</label>
+                  </div>
+                  <Button type="submit">{sv ? "Spara bevakning" : "Save monitoring"}</Button>'''
+new = '''                  <div className="space-y-4">
+                    <div className="grid gap-2 text-sm text-[#d6deea] sm:grid-cols-3 lg:grid-cols-1">
+                      <label className="flex items-center gap-2"><input type="checkbox" name="insiderAlerts" defaultChecked={preferences.insider !== false} />{sv ? "Insider" : "Insider"}</label>
+                      <label className="flex items-center gap-2"><input type="checkbox" name="shortInterestAlerts" defaultChecked={preferences.shortInterest !== false} />{sv ? "Blankning" : "Short interest"}</label>
+                      <label className="flex items-center gap-2"><input type="checkbox" name="filingAlerts" defaultChecked={preferences.filing !== false} />{sv ? "Årsredovisningar" : "Filings"}</label>
+                    </div>
+                    {v3AlertsEnabled ? (
+                      <div className="space-y-3 border-t border-white/10 pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[#e1cb95]">{sv ? "StockBox-signaler" : "StockBox signals"}</p>
+                        <label className="flex items-center gap-2 text-sm text-[#d6deea]"><input type="checkbox" name="recommendationAlerts" defaultChecked={preferences.recommendationChanges !== false} />{sv ? "Ratingändringar" : "Rating changes"}</label>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className="text-xs text-[#8391a4]">{sv ? "Minsta fall i övertygelse" : "Minimum conviction drop"}<input type="number" name="convictionDropMinimum" min="1" max="100" step="1" defaultValue={preferences.convictionDropMinimum ?? 20} className="mt-1 block h-9 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-white" /></label>
+                          <label className="text-xs text-[#8391a4]">{sv ? "Minsta fall i datakvalitet" : "Minimum data-quality drop"}<input type="number" name="dataQualityDropMinimum" min="1" max="100" step="1" defaultValue={preferences.dataQualityDropMinimum ?? 15} className="mt-1 block h-9 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-white" /></label>
+                          <label className="text-xs text-[#8391a4]">{sv ? "Pris över" : "Price above"}<input type="number" name="priceAbove" min="0" step="any" defaultValue={preferences.priceAbove ?? ""} placeholder={sv ? "Ingen gräns" : "No threshold"} className="mt-1 block h-9 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-white" /></label>
+                          <label className="text-xs text-[#8391a4]">{sv ? "Pris under" : "Price below"}<input type="number" name="priceBelow" min="0" step="any" defaultValue={preferences.priceBelow ?? ""} placeholder={sv ? "Ingen gräns" : "No threshold"} className="mt-1 block h-9 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-white" /></label>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button type="submit">{sv ? "Spara bevakning" : "Save monitoring"}</Button>'''
+if text.count(old) != 1:
+    raise SystemExit(f"settings UI anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+
+old = '''        </Card>
+      </>}
+    </Container></Section>'''
+new = '''        </Card>
+
+        {v3AlertsEnabled ? (
+          <Card className="mt-6">
+            <div className="flex items-center gap-2">
+              <Radar className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" />
+              <h2 className="serif text-xl font-semibold">{sv ? "Objektiva StockBox-signaler" : "Objective StockBox signals"}</h2>
+            </div>
+            <p className="mt-2 text-xs text-[#8391a4]">{sv ? "Bygger endast på sparade StockBox-analyser och påverkas inte av din investerarprofil." : "Derived only from saved StockBox analyses and never changed by your investor profile."}</p>
+            {(stockboxEvents as StoredAnalysisAlertEventV3[] | null)?.length ? (
+              <div className="mt-4 divide-y divide-white/10">
+                {(stockboxEvents as StoredAnalysisAlertEventV3[]).map((event, index) => {
+                  const presented = presentAnalysisAlertEventV3(event, locale);
+                  return (
+                    <div key={`${event.ticker}-${event.observed_at}-${event.alert_kind}-${index}`} className="py-4 first:pt-0 last:pb-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[#8391a4]">
+                        <span className="font-semibold text-[#e1cb95]">{event.ticker}</span>
+                        <span>{presented.kindLabel}</span><span>·</span><span>{dateLabel(event.observed_at, locale)}</span>
+                      </div>
+                      <p className="mt-1 text-sm font-medium text-white">{presented.title}</p>
+                      <p className="mt-1 text-sm text-[#aeb9c8]">{presented.body}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="mt-4 text-sm text-[#8391a4]">{sv ? "Inga StockBox-förändringssignaler ännu. Första sparade analysen skapar en baseline." : "No StockBox change signals yet. The first saved analysis creates a baseline."}</p>}
+          </Card>
+        ) : null}
+      </>}
+    </Container></Section>'''
+if text.count(old) != 1:
+    raise SystemExit(f"V3 card anchor count={text.count(old)}")
+text = text.replace(old, new, 1)
+page.write_text(text)
