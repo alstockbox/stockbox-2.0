@@ -54,12 +54,17 @@ function validIso(value: unknown): string | null {
   return candidate && Number.isFinite(Date.parse(candidate)) ? candidate : null;
 }
 
-function close(left: number, right: number, tolerance = 1e-8): boolean {
-  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
+function close(left: number, right: number, absoluteTolerance = 1e-8): boolean {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  const floatingPointTolerance = Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right)) * 8;
+  return Math.abs(left - right) <= Math.max(absoluteTolerance, floatingPointTolerance);
 }
 
-function round10(value: number): number {
-  return Math.round((value + Number.EPSILON) * 1e10) / 1e10;
+function withinPostgresRound10(persisted: number, rawValue: number): boolean {
+  // PostgreSQL round(numeric, 10) and JavaScript Math.round disagree on exact
+  // negative half ties. Compare the persisted DB value with the unrounded formula
+  // within half a 10-decimal unit instead of re-implementing DB rounding in JS.
+  return close(persisted, rawValue, 5.1e-11);
 }
 
 export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSnapshotRowV3 | null {
@@ -117,8 +122,12 @@ export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSna
 
   const expectedEquity = cashValue + positionsMarketValue;
   const expectedProfitLoss = expectedEquity - startingCash;
-  const expectedReturnPercent = round10((expectedProfitLoss / startingCash) * 100);
-  if (!close(equity, expectedEquity) || !close(profitLoss, expectedProfitLoss) || !close(returnPercent, expectedReturnPercent, 1e-10)) return null;
+  const rawExpectedReturnPercent = (expectedProfitLoss / startingCash) * 100;
+  if (
+    !close(equity, expectedEquity)
+    || !close(profitLoss, expectedProfitLoss)
+    || !withinPostgresRound10(returnPercent, rawExpectedReturnPercent)
+  ) return null;
 
   return {
     id,
@@ -196,7 +205,7 @@ function snapshotMatchesPerformance(
     && close(snapshot.positionsMarketValue, performance.positionsMarketValue)
     && close(snapshot.equity, performance.equity)
     && close(snapshot.profitLoss, performance.profitLoss)
-    && close(snapshot.returnPercent, round10(performance.returnPercent), 1e-10)
+    && withinPostgresRound10(snapshot.returnPercent, performance.returnPercent)
     && snapshot.openPositionCount === performance.openPositionCount
     && snapshot.quoteCount === performance.quoteCount
     && Date.parse(snapshot.evaluatedAt) === Date.parse(performance.evaluatedAt)
