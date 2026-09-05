@@ -26,6 +26,7 @@ import type {
 import { formatAnalysisTimestamp } from "@/lib/analysis/timestamp";
 import { localizedResearchView, researchViewForReport } from "@/lib/analysis/research-view";
 import { MAX_BATCH_ROWS, parseBatchInput } from "@/lib/batch/input";
+import { getBatchProgressState } from "@/lib/batch/progress-state";
 import { rankBatchResults } from "@/lib/batch/ranking";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import type { Locale } from "@/lib/i18n/types";
@@ -153,9 +154,9 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const parsed = useMemo(() => parseBatchInput(input), [input]);
   const completedRows = rows.filter((row) => row.status === "completed");
   const failedRows = rows.filter((row) => row.status === "failed");
-  const processedCount = rows.filter((row) => terminalStatuses.has(row.status)).length;
+  const batchProgress = useMemo(() => getBatchProgressState(rows), [rows]);
+  const { processedCount, progress, isActive: hasActiveAnalysis } = batchProgress;
   const issueCount = rows.filter((row) => terminalStatuses.has(row.status) && !["completed", "cancelled"].includes(row.status)).length;
-  const progress = rows.length ? Math.round((processedCount / rows.length) * 100) : 0;
   const readyCount = rows.filter((row) => row.status === "ready").length;
   const rankByInput = useMemo(() => rankBatchResults(rows.map((row) => ({
     key: row.input,
@@ -695,17 +696,31 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
                 ) : null}
               </div>
             </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-[#e1cb95]">{progress}%</span>
+              {isRunning || hasActiveAnalysis ? (
+                <span className="inline-flex items-center gap-2 text-[#c9d2df]">
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#e1cb95]" aria-hidden="true" />
+                  {locale === "sv" ? "Batchen bearbetas…" : "Batch processing…"}
+                </span>
+              ) : null}
+            </div>
             <div
-              className="mt-4 h-2 overflow-hidden rounded-full bg-white/8"
+              className="relative mt-2 h-3 overflow-hidden rounded-full border border-white/10 bg-white/8"
               role="progressbar"
               aria-valuenow={progress}
               aria-valuemin={0}
               aria-valuemax={100}
+              aria-busy={isRunning || hasActiveAnalysis}
+              aria-label={locale === "sv" ? `Batchförlopp ${progress} procent` : `Batch progress ${progress} percent`}
             >
               <div
-                className="h-full rounded-full bg-[#b99b5f] transition-all"
+                className="h-full rounded-full bg-[#b99b5f] transition-[width] duration-500 ease-out"
                 style={{ width: `${progress}%` }}
               />
+              {isRunning || hasActiveAnalysis ? (
+                <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/20 to-transparent" aria-hidden="true" />
+              ) : null}
             </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[#9aa7b8]">
               <span>{processedCount}/{rows.length} {copy.processed}</span>
