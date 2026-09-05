@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   BarChart3,
   Bell,
+  BookOpen,
   BriefcaseBusiness,
   Gauge,
   History,
@@ -52,7 +53,9 @@ export async function AppNav() {
   const [user, locale] = await Promise.all([getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).nav;
   const briefingEnabled = isFeatureEnabled("dailyBriefing");
+  const academyEnabled = isFeatureEnabled("academy");
   const briefingLabel = locale === "sv" ? "Briefing" : "Briefing";
+  const academyLabel = "Academy";
   const initial = user?.email?.trim().charAt(0).toUpperCase() || "S";
   const accountLabels = locale === "sv"
     ? { settings: "Inställningar", profile: "Profil", billing: "Betalning", security: "Säkerhet", feedback: "Ge feedback", contact: "Kontakt", menu: "Meny" }
@@ -85,6 +88,12 @@ export async function AppNav() {
                 {briefingLabel}
               </Link>
             ) : null}
+            {academyEnabled ? (
+              <Link href="/academy" className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                <BookOpen className="h-4 w-4" aria-hidden="true" />
+                {academyLabel}
+              </Link>
+            ) : null}
           </nav>
         )}
 
@@ -110,6 +119,11 @@ export async function AppNav() {
             {user && briefingEnabled ? (
               <Link role="menuitem" href="/briefing" className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
                 {briefingLabel}
+              </Link>
+            ) : null}
+            {user && academyEnabled ? (
+              <Link role="menuitem" href="/academy" className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                {academyLabel}
               </Link>
             ) : null}
             <div className="my-2 border-t border-white/10" />
