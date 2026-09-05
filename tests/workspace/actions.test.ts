@@ -35,8 +35,8 @@ import {
   addWatchlistItemAction,
   createPortfolioAction,
   deletePortfolioAction,
-  removeHoldingAction,
-  updateHoldingAction,
+  removePortfolioTransactionAction,
+  updatePortfolioTransactionAction,
 } from "../../src/lib/workspace/actions";
 
 function data(values: Record<string, string>) {
@@ -126,18 +126,40 @@ describe("workspace server actions", () => {
     });
   });
 
-  it("updates an owned holding through the RLS-protected holdings table", async () => {
+  it("updates an owned portfolio transaction through the guarded ledger rpc", async () => {
     const id = "00000000-0000-4000-8000-000000000333";
-    await updateHoldingAction(data({ id, quantity: "3.5", averageCost: "205.25", currency: "usd" }));
-    expect(mocks.holdingUpdate).toHaveBeenCalledWith({ quantity: 3.5, average_cost: 205.25, currency: "USD" });
-    expect(mocks.holdingEq).toHaveBeenCalledWith("id", id);
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
+
+    await updatePortfolioTransactionAction(data({
+      id,
+      quantity: "3.5",
+      price: "205.25",
+      currency: "usd",
+      purchaseDate: "2026-09-02",
+      fees: "1.25",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("update_portfolio_transaction", {
+      p_transaction_id: id,
+      p_quantity: 3.5,
+      p_price: 205.25,
+      p_currency: "USD",
+      p_executed_at: "2026-09-02",
+      p_fees: 1.25,
+    });
+    expect(mocks.holdingUpdate).not.toHaveBeenCalled();
   });
 
-  it("removes an owned holding through the RLS-protected holdings table", async () => {
+  it("removes an owned portfolio transaction through the guarded ledger rpc", async () => {
     const id = "00000000-0000-4000-8000-000000000333";
-    await removeHoldingAction(data({ id }));
-    expect(mocks.holdingDelete).toHaveBeenCalledTimes(1);
-    expect(mocks.holdingEq).toHaveBeenCalledWith("id", id);
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
+
+    await removePortfolioTransactionAction(data({ id }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("delete_portfolio_transaction", {
+      p_transaction_id: id,
+    });
+    expect(mocks.holdingDelete).not.toHaveBeenCalled();
   });
 
   it("deletes only the current user's portfolio", async () => {
