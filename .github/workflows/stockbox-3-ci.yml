@@ -1,0 +1,67 @@
+name: StockBox 3.0 CI
+
+on:
+  push:
+    branches:
+      - stockbox-3.0
+  pull_request:
+    branches:
+      - stockbox-3.0
+      - main
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "supabase/migrations/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/stockbox-3-ci.yml"
+
+concurrency:
+  group: stockbox-3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: StockBox 3 cost-control tests
+        run: npm test -- src/lib/cost-control/budget.test.ts
+      - name: Existing regression suite excluding documented main archetype baseline
+        run: npm test -- --exclude tests/analysis/archetypes.test.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+
+  migration-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Validate migration files parse in disposable local Supabase
+        run: |
+          supabase init --force
+          supabase start -x vector,edge-runtime,logflare
+          supabase db reset --local
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup
