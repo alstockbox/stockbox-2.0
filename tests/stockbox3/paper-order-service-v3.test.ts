@@ -1,16 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 import { executePaperOrderServiceV3 } from "@/lib/paper-trading/order-service-v3";
-import type { PaperFillV3 } from "@/lib/paper-trading/engine-v3";
+import type { PaperFillV3, PaperTradingRejectReasonV3 } from "@/lib/paper-trading/engine-v3";
+import { fetchYahooExecutionQuoteV3 } from "@/lib/paper-trading/execution-quote-v3";
+import {
+  findPaperOrderByIdempotencyV3,
+  loadPaperAccountStateV3,
+  persistPaperFillV3,
+  persistPaperRejectionV3,
+  type PaperOrderRowV3,
+} from "@/lib/paper-trading/repository-v3";
 
-function accountState() {
+type FindExistingResult = Awaited<ReturnType<typeof findPaperOrderByIdempotencyV3>>;
+type LoadAccountResult = Awaited<ReturnType<typeof loadPaperAccountStateV3>>;
+type QuoteResult = Awaited<ReturnType<typeof fetchYahooExecutionQuoteV3>>;
+type PersistFillResult = Awaited<ReturnType<typeof persistPaperFillV3>>;
+type PersistRejectionResult = Awaited<ReturnType<typeof persistPaperRejectionV3>>;
+
+function accountState(): Extract<LoadAccountResult, { ok: true }> {
   return {
-    ok: true as const,
+    ok: true,
     account: {
       id: "account-1",
       userId: "user-1",
       name: "Paper",
       baseCurrency: "USD",
-      status: "active" as const,
+      status: "active",
       createdAt: "2026-09-05T12:00:00.000Z",
       updatedAt: "2026-09-05T12:00:00.000Z",
     },
@@ -19,16 +33,16 @@ function accountState() {
   };
 }
 
-function existingOrder(status: "filled" | "rejected" = "filled") {
+function existingOrder(status: "filled" | "rejected" = "filled"): PaperOrderRowV3 {
   return {
     id: "order-existing",
     accountId: "account-1",
     idempotencyKey: "idem-1",
     ticker: "AAPL",
-    side: "buy" as const,
+    side: "buy",
     quantity: 1,
     status,
-    rejectionReason: status === "rejected" ? "MARKET_NOT_VERIFIED" as const : null,
+    rejectionReason: status === "rejected" ? "MARKET_NOT_VERIFIED" : null,
     submittedAt: "2026-09-05T12:10:00.000Z",
     policyVersion: "stockbox-paper-trading-v3.0.0",
   };
@@ -36,38 +50,48 @@ function existingOrder(status: "filled" | "rejected" = "filled") {
 
 function deps() {
   let id = 0;
+  const findExisting = vi.fn(async (): Promise<FindExistingResult> => ({ ok: true, order: null }));
+  const loadAccount = vi.fn(async (): Promise<LoadAccountResult> => accountState());
+  const fetchQuote = vi.fn(async (): Promise<QuoteResult> => ({
+    observation: {
+      ticker: "AAPL",
+      price: 100,
+      currency: "USD",
+      observedAt: "2026-09-05T12:09:30.000Z",
+      provider: "yahoo-chart-execution",
+      verification: "VERIFIED",
+    },
+    reason: null,
+  }));
+  const persistFill = vi.fn(async (input: { fill: PaperFillV3 }): Promise<PersistFillResult> => ({ ok: true, data: input.fill }));
+  const persistRejection = vi.fn(async (input: {
+    reason: PaperTradingRejectReasonV3;
+    intent: { idempotencyKey: string; ticker: string; side: "buy" | "sell"; quantity: number };
+    submittedAt: string;
+  }): Promise<PersistRejectionResult> => ({
+    ok: true,
+    data: {
+      id: "order-rejected",
+      accountId: "account-1",
+      idempotencyKey: input.intent.idempotencyKey,
+      ticker: input.intent.ticker,
+      side: input.intent.side,
+      quantity: input.intent.quantity,
+      status: "rejected",
+      rejectionReason: input.reason,
+      submittedAt: input.submittedAt,
+      policyVersion: "stockbox-paper-trading-v3.0.0",
+    },
+  }));
+
   return {
     featureEnabled: vi.fn(() => true),
     killed: vi.fn(() => false),
-    findExisting: vi.fn(async () => ({ ok: true as const, order: null })),
-    loadAccount: vi.fn(async () => accountState()),
-    fetchQuote: vi.fn(async () => ({
-      observation: {
-        ticker: "AAPL",
-        price: 100,
-        currency: "USD",
-        observedAt: "2026-09-05T12:09:30.000Z",
-        provider: "yahoo-chart-execution",
-        verification: "VERIFIED" as const,
-      },
-      reason: null,
-    })),
-    persistFill: vi.fn(async (input: { fill: PaperFillV3 }) => ({ ok: true as const, data: input.fill })),
-    persistRejection: vi.fn(async (input: { reason: string; intent: { idempotencyKey: string; ticker: string; side: "buy" | "sell"; quantity: number }; submittedAt: string }) => ({
-      ok: true as const,
-      data: {
-        id: "order-rejected",
-        accountId: "account-1",
-        idempotencyKey: input.intent.idempotencyKey,
-        ticker: input.intent.ticker,
-        side: input.intent.side,
-        quantity: input.intent.quantity,
-        status: "rejected" as const,
-        rejectionReason: input.reason as "MARKET_NOT_VERIFIED",
-        submittedAt: input.submittedAt,
-        policyVersion: "stockbox-paper-trading-v3.0.0",
-      },
-    })),
+    findExisting,
+    loadAccount,
+    fetchQuote,
+    persistFill,
+    persistRejection,
     now: vi.fn(() => "2026-09-05T12:10:00.000Z"),
     randomId: vi.fn(() => `generated-${++id}`),
   };
