@@ -71,15 +71,17 @@ describe("Academy V3", () => {
     expect(result.educationalOnly).toBe(true);
     expect(result.affectsObjectiveRecommendation).toBe(false);
     expect(result.affectsUserMatch).toBe(false);
+    expect(scoreSource).toContain("educational progress score only");
 
     for (const forbidden of [
       "personalizedScore",
       "userMatchScore",
       "stockBoxScore",
       "RecommendationV3",
-      "realizedProfitLoss",
-      "unrealizedProfitLoss",
-      "portfolio return",
+      "calculateRealizedPortfolioPerformance",
+      "PortfolioTransactionInput",
+      'from "@/lib/portfolio/',
+      'from "@/lib/analysis/recommendation',
       "riskTolerance",
     ]) {
       expect(scoreSource).not.toContain(forbidden);
