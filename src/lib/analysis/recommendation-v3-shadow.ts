@@ -1,7 +1,11 @@
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import { assessCoverageV3, type CoverageAssessment } from "./coverage-v3";
 import {
-  deriveRecommendationV3,
+  assessDataAnomaliesV3,
+  type DataAnomalyAssessmentV3,
+} from "./data-anomaly-v3";
+import { deriveRecommendationV3WithIntegrity } from "./recommendation-v3-integrity";
+import {
   RECOMMENDATION_V3_POLICY_VERSION,
   type RecommendationDecisionV3,
   type RecommendationV3Rating,
@@ -27,6 +31,7 @@ export type RecommendationV3ShadowEvent = {
   confidenceGateHardBlocked: boolean;
   reasonCodes: string[];
   coveragePolicyVersion: CoverageAssessment["policyVersion"];
+  anomalyPolicyVersion: DataAnomalyAssessmentV3["policyVersion"];
   recommendationPolicyVersion: typeof RECOMMENDATION_V3_POLICY_VERSION;
   coverageProfile: string;
   verifiedCoverage: number;
@@ -35,6 +40,10 @@ export type RecommendationV3ShadowEvent = {
   stockboxFailureCount: number;
   sourceUnavailableCount: number;
   recommendationEligible: boolean;
+  dataIntegrityScore: number;
+  blockingAnomalyCount: number;
+  anomalyCodes: string[];
+  recommendationIntegrityEligible: boolean;
   modelVersion: string;
 };
 
@@ -61,6 +70,7 @@ export type RecommendationV3ShadowResult =
       event: RecommendationV3ShadowEvent;
       decision: RecommendationDecisionV3;
       coverage: CoverageAssessment;
+      integrity: DataAnomalyAssessmentV3;
       emitted: boolean;
     }
   | { status: "failed"; errorCode: "SHADOW_EVALUATION_FAILED"; emitted: boolean };
@@ -112,9 +122,11 @@ export function evaluateRecommendationV3Shadow(
   event: RecommendationV3ShadowEvent;
   decision: RecommendationDecisionV3;
   coverage: CoverageAssessment;
+  integrity: DataAnomalyAssessmentV3;
 } {
   const coverage = assessCoverageV3(input, result);
-  const decision = deriveRecommendationV3(result.scores, coverage, {
+  const integrity = assessDataAnomaliesV3(input, result);
+  const decision = deriveRecommendationV3WithIntegrity(result.scores, coverage, integrity, {
     redFlags: result.redFlags,
     valuation: result.dcf,
     dataStatus: result.dataStatus,
@@ -128,6 +140,7 @@ export function evaluateRecommendationV3Shadow(
 
   return {
     coverage,
+    integrity,
     decision,
     event: {
       event: "stockbox.recommendation_v3_shadow",
@@ -148,6 +161,7 @@ export function evaluateRecommendationV3Shadow(
       confidenceGateHardBlocked: decision.confidenceGate.hardBlocked,
       reasonCodes: [...decision.audit.reasonCodes],
       coveragePolicyVersion: coverage.policyVersion,
+      anomalyPolicyVersion: integrity.policyVersion,
       recommendationPolicyVersion: RECOMMENDATION_V3_POLICY_VERSION,
       coverageProfile: coverage.profileId,
       verifiedCoverage: coverage.verifiedCoverage,
@@ -156,6 +170,10 @@ export function evaluateRecommendationV3Shadow(
       stockboxFailureCount: coverage.stockboxFailureCount,
       sourceUnavailableCount: coverage.sourceUnavailableCount,
       recommendationEligible: coverage.recommendationEligible,
+      dataIntegrityScore: integrity.integrityScore,
+      blockingAnomalyCount: integrity.blockingAnomalies.length,
+      anomalyCodes: [...new Set(integrity.anomalies.map((item) => item.code))],
+      recommendationIntegrityEligible: integrity.recommendationIntegrityEligible,
       modelVersion: result.modelVersion,
     },
   };
