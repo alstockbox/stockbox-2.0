@@ -17,6 +17,7 @@ on:
       - "tests/data/yahoo-global-beta-routing.test.ts"
       - "tests/data/yahoo-fundamentals.test.ts"
       - "tests/data/yahoo-ocf-derivation.test.ts"
+      - "tests/data/yahoo-diluted-shares-period-supplement.test.ts"
       - "tests/data/provider-history-diagnostics.test.ts"
       - "tests/data/provider-history-wiring.test.ts"
       - "src/lib/data/coverage-audit*.ts"
