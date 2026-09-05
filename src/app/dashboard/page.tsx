@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, BarChart3, Clock3, Newspaper, Search } from "lucide-react";
+import { ArrowRight, BarChart3, BookOpen, Clock3, Newspaper, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -17,6 +17,8 @@ export default async function DashboardPage() {
   const [user, locale] = await Promise.all([getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).dashboard;
   const dailyBriefingEnabled = isFeatureEnabled("dailyBriefing");
+  const academyEnabled = isFeatureEnabled("academy");
+  const investorScoreEnabled = isFeatureEnabled("investorScore");
   const [historyResult, subscriptionLookup] = await Promise.all([
     user
       ? getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 8 })
@@ -65,6 +67,21 @@ export default async function DashboardPage() {
                     </div>
                   </div>
                   <ButtonLink href="/briefing">{locale === "sv" ? "Öppna briefing" : "Open briefing"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
+                </div>
+              </Card>
+            ) : null}
+            {academyEnabled ? (
+              <Card className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <BookOpen className="mt-0.5 h-5 w-5 shrink-0 text-[#e1cb95]" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-semibold text-[#f4efe5]">StockBox Academy</p>
+                      <p className="mt-1 text-sm leading-6 text-[#9aa7b8]">{locale === "sv" ? "Träna bolagsanalys med korta lektioner och quiz. Din utbildningsprogress påverkar aldrig StockBox objektiva rating eller User Match." : "Train company analysis with short lessons and quizzes. Your learning progress never affects StockBox objective ratings or User Match."}</p>
+                      {investorScoreEnabled ? <p className="mt-1 text-xs text-[#7f8b9b]">{locale === "sv" ? "Investor Score finns inne i Academy och mäter endast utbildningsprogress." : "Investor Score is available inside Academy and measures learning progress only."}</p> : null}
+                    </div>
+                  </div>
+                  <ButtonLink href="/academy">{locale === "sv" ? "Öppna Academy" : "Open Academy"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
                 </div>
               </Card>
             ) : null}
