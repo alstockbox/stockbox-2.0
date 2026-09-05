@@ -36,8 +36,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: StockBox 3 cost-control tests
-        run: npm test -- src/lib/cost-control/budget.test.ts
+      - name: StockBox 3 policy tests
+        run: npm test -- tests/stockbox3/budget.test.ts tests/stockbox3/coverage-v3.test.ts
       - name: Existing regression suite excluding documented main archetype baseline
         run: npm test -- --exclude tests/analysis/archetypes.test.ts
       - name: Typecheck
