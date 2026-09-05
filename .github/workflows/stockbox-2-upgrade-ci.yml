@@ -16,7 +16,7 @@ on:
 jobs:
   app-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       NEXT_PUBLIC_APP_URL: http://localhost:3000
     steps:
@@ -26,7 +26,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Unit and integration tests
+      - name: Portfolio 2 math tests
+        run: npm test -- tests/portfolio/portfolio-math-v2.test.ts
+      - name: Analytics regression tests
+        run: npm test -- tests/analytics
+      - name: Auth regression tests
+        run: npm test -- tests/auth
+      - name: Full unit and integration suite
         run: npm test
       - name: Typecheck
         run: npm run typecheck
