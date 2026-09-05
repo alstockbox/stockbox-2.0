@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, BarChart3, BookOpen, Clock3, Newspaper, Search } from "lucide-react";
+import { ArrowRight, BarChart3, BookOpen, CircleDollarSign, Clock3, Newspaper, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -19,6 +19,7 @@ export default async function DashboardPage() {
   const dailyBriefingEnabled = isFeatureEnabled("dailyBriefing");
   const academyEnabled = isFeatureEnabled("academy");
   const investorScoreEnabled = isFeatureEnabled("investorScore");
+  const paperTradingEnabled = isFeatureEnabled("paperTrading");
   const [historyResult, subscriptionLookup] = await Promise.all([
     user
       ? getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 8 })
@@ -82,6 +83,20 @@ export default async function DashboardPage() {
                     </div>
                   </div>
                   <ButtonLink href="/academy">{locale === "sv" ? "Öppna Academy" : "Open Academy"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
+                </div>
+              </Card>
+            ) : null}
+            {paperTradingEnabled ? (
+              <Card className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <CircleDollarSign className="mt-0.5 h-5 w-5 shrink-0 text-[#e1cb95]" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-semibold text-[#f4efe5]">Paper Trading</p>
+                      <p className="mt-1 text-sm leading-6 text-[#9aa7b8]">{locale === "sv" ? "Träna köp- och säljbeslut med simulerat kapital. Inga riktiga affärer eller pengar används, och StockBox fyller bara simulerade order med verifierade färska marknadspriser." : "Practice buy and sell decisions with simulated capital. No real trades or money are used, and StockBox only fills simulated orders with verified fresh market prices."}</p>
+                    </div>
+                  </div>
+                  <ButtonLink href="/paper-trading">{locale === "sv" ? "Öppna Paper Trading" : "Open Paper Trading"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
                 </div>
               </Card>
             ) : null}
