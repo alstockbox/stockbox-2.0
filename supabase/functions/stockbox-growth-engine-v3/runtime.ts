@@ -31,4 +31,9 @@ export function configBool(value: unknown, fallback = false) {
   return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
 }
 
+export function isUuid(value: unknown) {
+  if (typeof value !== "string") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 export const GROWTH_V3_CANARY_VERSION = "growth-v3-shadow-canary";
