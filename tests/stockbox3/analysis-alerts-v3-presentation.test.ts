@@ -8,7 +8,7 @@ function event(overrides: Partial<StoredAnalysisAlertEventV3> = {}): StoredAnaly
     alert_kind: "RECOMMENDATION_CHANGE",
     severity: "important",
     message_key: "alerts.recommendationChanged",
-    payload: { from: "BUY", to: "WAIT" },
+    payload: { previousRating: "BUY", currentRating: "WAIT", previousScore: 74, currentScore: 52 },
     observed_at: "2026-09-05T20:00:00.000Z",
     ...overrides,
   };
@@ -35,7 +35,7 @@ describe("Analysis Alerts V3 presentation", () => {
     const result = presentAnalysisAlertEventV3(event({
       alert_kind: "DATA_QUALITY_DROP",
       message_key: "alerts.dataQualityDropped",
-      payload: { previous: 92, current: 61, drop: 31 },
+      payload: { previousDataQuality: 92, currentDataQuality: 61, drop: 31 },
     }), "sv");
     expect(result.body).toContain("datavarning");
     expect(result.body).toContain("inte ett bolagsbetyg");
@@ -52,7 +52,7 @@ describe("Analysis Alerts V3 presentation", () => {
     expect(result.body).toContain("400");
   });
 
-  it("accepts the actual message key emitted by the alert engine", () => {
+  it("accepts the actual message key and payload emitted by the alert engine", () => {
     const previous: AnalysisAlertSnapshotV3 = {
       ticker: "MSFT",
       analysisId: "a1",
@@ -73,6 +73,7 @@ describe("Analysis Alerts V3 presentation", () => {
     };
     const [engineEvent] = deriveAnalysisAlertsV3(previous, current, { recommendationChanges: true });
     expect(engineEvent?.messageKey).toBe("alerts.recommendationChanged");
+    expect(engineEvent?.payload).toMatchObject({ previousRating: "BUY", currentRating: "WAIT" });
     if (!engineEvent) throw new Error("expected recommendation-change event");
 
     const presented = presentAnalysisAlertEventV3({
