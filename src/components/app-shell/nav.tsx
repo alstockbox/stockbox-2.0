@@ -4,6 +4,7 @@ import {
   Bell,
   BookOpen,
   BriefcaseBusiness,
+  CircleDollarSign,
   Gauge,
   History,
   LayoutDashboard,
@@ -54,8 +55,10 @@ export async function AppNav() {
   const copy = getP0Copy(locale).nav;
   const briefingEnabled = isFeatureEnabled("dailyBriefing");
   const academyEnabled = isFeatureEnabled("academy");
+  const paperTradingEnabled = isFeatureEnabled("paperTrading");
   const briefingLabel = locale === "sv" ? "Briefing" : "Briefing";
   const academyLabel = "Academy";
+  const paperTradingLabel = locale === "sv" ? "Paper Trading" : "Paper Trading";
   const initial = user?.email?.trim().charAt(0).toUpperCase() || "S";
   const accountLabels = locale === "sv"
     ? { settings: "Inställningar", profile: "Profil", billing: "Betalning", security: "Säkerhet", feedback: "Ge feedback", contact: "Kontakt", menu: "Meny" }
@@ -94,6 +97,12 @@ export async function AppNav() {
                 {academyLabel}
               </Link>
             ) : null}
+            {paperTradingEnabled ? (
+              <Link href="/paper-trading" className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                <CircleDollarSign className="h-4 w-4" aria-hidden="true" />
+                {paperTradingLabel}
+              </Link>
+            ) : null}
           </nav>
         )}
 
@@ -124,6 +133,11 @@ export async function AppNav() {
             {user && academyEnabled ? (
               <Link role="menuitem" href="/academy" className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
                 {academyLabel}
+              </Link>
+            ) : null}
+            {user && paperTradingEnabled ? (
+              <Link role="menuitem" href="/paper-trading" className="block rounded-md px-3 py-2.5 text-sm text-[#c9d2df] hover:bg-white/8 hover:text-white">
+                {paperTradingLabel}
               </Link>
             ) : null}
             <div className="my-2 border-t border-white/10" />
