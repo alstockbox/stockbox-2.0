@@ -38,8 +38,10 @@ describe("durable batch worker chaining", () => {
   });
 
   it("removes queued background jobs when queued batch items are cancelled", () => {
-    const durable = readFileSync(resolve(process.cwd(), "src/lib/batch/durable.ts"), "utf8");
-    expect(durable).toContain("cancelQueuedBackgroundJobsByDedupeKeys");
-    expect(durable).toContain("batchJobDedupeKey");
+    const cleanup = readFileSync(resolve(process.cwd(), "src/lib/batch/job-cleanup.ts"), "utf8");
+    const cancelRoute = readFileSync(resolve(process.cwd(), "src/app/api/batch/runs/[id]/cancel/route.ts"), "utf8");
+    expect(cleanup).toContain("cancelQueuedBackgroundJobsByDedupeKeys");
+    expect(cleanup).toContain("batchJobDedupeKey");
+    expect(cancelRoute).toContain("cancelQueuedBatchJobsForBatch");
   });
 });
