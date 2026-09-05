@@ -1,8 +1,8 @@
-import type { AnalysisAlertEventKindV3, AnalysisAlertSeverityV3 } from "./analysis-alerts-v3";
+import type { AnalysisAlertKindV3, AnalysisAlertSeverityV3 } from "./analysis-alerts-v3";
 
 export type StoredAnalysisAlertEventV3 = {
   ticker: string;
-  alert_kind: AnalysisAlertEventKindV3;
+  alert_kind: AnalysisAlertKindV3;
   severity: AnalysisAlertSeverityV3;
   message_key: string;
   payload: Record<string, unknown> | null;
@@ -38,7 +38,7 @@ const ratingLabels: Record<AlertLocale, Record<string, string>> = {
   },
 };
 
-const kindLabels: Record<AlertLocale, Record<AnalysisAlertEventKindV3, string>> = {
+const kindLabels: Record<AlertLocale, Record<AnalysisAlertKindV3, string>> = {
   sv: {
     RECOMMENDATION_CHANGE: "Ratingändring",
     CONVICTION_DROP: "Lägre övertygelse",
@@ -83,7 +83,7 @@ export function presentAnalysisAlertEventV3(
   const ticker = event.ticker.trim().toUpperCase();
   const kindLabel = kindLabels[language][event.alert_kind];
 
-  if (event.message_key === "alerts.recommendation_change") {
+  if (event.message_key === "alerts.recommendationChanged") {
     const from = ratingLabel(payload.from, language);
     const to = ratingLabel(payload.to, language);
     return language === "sv"
@@ -91,7 +91,7 @@ export function presentAnalysisAlertEventV3(
       : { kindLabel, title: `${ticker}: StockBox rating changed`, body: `The objective rating changed from ${from} to ${to}.` };
   }
 
-  if (event.message_key === "alerts.conviction_drop") {
+  if (event.message_key === "alerts.convictionDropped") {
     const previous = numberLabel(payload.previous, language);
     const current = numberLabel(payload.current, language);
     return language === "sv"
@@ -99,7 +99,7 @@ export function presentAnalysisAlertEventV3(
       : { kindLabel, title: `${ticker}: lower model conviction`, body: `Conviction fell from ${previous} to ${current} out of 100.` };
   }
 
-  if (event.message_key === "alerts.data_quality_drop") {
+  if (event.message_key === "alerts.dataQualityDropped") {
     const previous = numberLabel(payload.previous, language);
     const current = numberLabel(payload.current, language);
     return language === "sv"
@@ -107,11 +107,11 @@ export function presentAnalysisAlertEventV3(
       : { kindLabel, title: `${ticker}: lower data quality`, body: `Data quality fell from ${previous} to ${current} out of 100. This is a data warning, not a company rating.` };
   }
 
-  if (event.message_key === "alerts.price_above" || event.message_key === "alerts.price_below") {
+  if (event.message_key === "alerts.priceCrossedAbove" || event.message_key === "alerts.priceCrossedBelow") {
     const price = numberLabel(payload.currentPrice, language, 4);
     const threshold = numberLabel(payload.threshold, language, 4);
     const currency = text(payload.currency)?.toUpperCase() ?? "";
-    const above = event.message_key === "alerts.price_above";
+    const above = event.message_key === "alerts.priceCrossedAbove";
     return language === "sv"
       ? {
           kindLabel,
