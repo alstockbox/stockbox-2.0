@@ -13,7 +13,7 @@ async function run(request: Request) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
   try {
-    const result = await runDurableBatchJobs(1);
+    const result = await runDurableBatchJobs(5);
     const nextDelayMs = await nextDurableBatchWorkerDelayMs();
     if (nextDelayMs !== null) {
       const baseUrl = new URL(request.url).origin;
