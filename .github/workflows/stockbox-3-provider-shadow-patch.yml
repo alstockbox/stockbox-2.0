@@ -1,0 +1,64 @@
+name: StockBox 3.0 Provider Shadow Patch
+
+on:
+  push:
+    branches:
+      - stockbox-3.0
+    paths:
+      - ".github/workflows/stockbox-3-provider-shadow-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stockbox-3.0
+          fetch-depth: 0
+      - name: Wire Recommendation V3 shadow runner at canonical provider boundary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/provider.ts")
+          text = path.read_text()
+
+          import_anchor = 'import { analyzeFinancials, presentAnalysisReport, toFinancialAnalysisInput } from "@/lib/analysis/engine";\n'
+          import_replacement = import_anchor + 'import { runRecommendationV3Shadow } from "@/lib/analysis/recommendation-v3-shadow";\n'
+          if 'recommendation-v3-shadow' not in text:
+              if import_anchor not in text:
+                  raise SystemExit("provider import anchor not found; refusing unsafe patch")
+              text = text.replace(import_anchor, import_replacement, 1)
+
+          call_anchor = '  const engineResult = analyzeFinancials(canonicalInput);\n  const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);\n'
+          call_replacement = (
+              '  const engineResult = analyzeFinancials(canonicalInput);\n'
+              '  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.\n'
+              '  // The canonical StockBox 2.x result is complete before this call and is never mutated.\n'
+              '  runRecommendationV3Shadow(canonicalInput, engineResult);\n'
+              '  const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);\n'
+          )
+          if 'runRecommendationV3Shadow(canonicalInput, engineResult);' not in text:
+              if call_anchor not in text:
+                  raise SystemExit("provider analysis anchor not found; refusing unsafe patch")
+              text = text.replace(call_anchor, call_replacement, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/lib/data/provider.ts
+      - name: Commit isolated provider wiring
+        run: |
+          git config user.name "stockbox-3-bot"
+          git config user.email "stockbox-3-bot@users.noreply.github.com"
+          git add src/lib/data/provider.ts
+          if git diff --cached --quiet; then
+            echo "Provider already wired; nothing to commit."
+            exit 0
+          fi
+          git commit -m "feat(stockbox-3): wire recommendation v3 shadow mode"
+          git push origin HEAD:stockbox-3.0
