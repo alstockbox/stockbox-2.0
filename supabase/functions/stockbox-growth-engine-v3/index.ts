@@ -8,7 +8,7 @@ import {
   generateFounderScriptsV3,
 } from "../stockbox-growth-engine/v3/orchestration.ts";
 import { monthGrowthSpend } from "../stockbox-growth-engine/v3/provider-budget.ts";
-import { GROWTH_V3_CANARY_VERSION, parseConfigRows } from "./runtime.ts";
+import { GROWTH_V3_CANARY_VERSION, isUuid, parseConfigRows } from "./runtime.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -91,7 +91,7 @@ function dbAdapter() {
 async function learningStage(cfg: Record<string, any>) {
   const now = new Date();
   const attribution = await aggregateAttributedGrowth({ db: dbAdapter(), now });
-  const ids = Object.keys(attribution.byContent);
+  const ids = Object.keys(attribution.byContent).filter(isUuid);
   const labels: Record<string, string> = {};
   if (ids.length) {
     const rows = await select("acq_content", `select=id,title,topic&id=in.(${ids.map((id) => encodeURIComponent(id)).join(",")})&limit=100`);
