@@ -52,10 +52,7 @@ export function PublicAnalysisPreview({ locale, videoUrl }: Props) {
   useEffect(() => {
     const value = query.trim();
     if (selected && value === `${selected.canonicalTicker ?? selected.ticker} — ${selected.name}`) return;
-    if (value.length < 2) {
-      setCompanies([]);
-      return;
-    }
+    if (value.length < 2) return;
     const current = ++requestId.current;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -79,6 +76,18 @@ export function PublicAnalysisPreview({ locale, videoUrl }: Props) {
     setCompanies([]);
     setPreview(null);
     setError(null);
+  }
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    setSelected(null);
+    setPreview(null);
+    setError(null);
+    if (value.trim().length < 2) {
+      requestId.current += 1;
+      setCompanies([]);
+      setSearching(false);
+    }
   }
 
   function analyze() {
@@ -118,7 +127,7 @@ export function PublicAnalysisPreview({ locale, videoUrl }: Props) {
           <input
             id="public-company-search"
             value={query}
-            onChange={(event) => { setQuery(event.target.value); setSelected(null); setPreview(null); setError(null); }}
+            onChange={(event) => handleQueryChange(event.target.value)}
             autoComplete="off"
             placeholder={sv ? "Sök t.ex. Investor, Apple eller AAPL" : "Search e.g. Apple, Investor or AAPL"}
             className="h-12 w-full rounded-lg border border-white/15 bg-[#07111f] pl-10 pr-3 text-sm text-[#f4efe5] outline-none ring-[#e1cb95]/50 placeholder:text-[#6f7b8c] focus:ring-2"
