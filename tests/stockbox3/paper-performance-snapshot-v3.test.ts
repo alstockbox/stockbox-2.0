@@ -14,7 +14,8 @@ describe("Paper Trading V3 performance snapshot persistence", () => {
     expect(migration).toContain("quote_count = open_position_count");
     expect(migration).toContain("equity = cash_value + positions_market_value");
     expect(migration).toContain("profit_loss = equity - starting_cash");
-    expect(migration).toContain("return_percent = (profit_loss / starting_cash) * 100");
+    expect(migration).toContain("return_percent = round((profit_loss / starting_cash) * 100, 10)");
+    expect(migration).toContain("v_return_percent := round((v_profit_loss / v_account_starting_cash) * 100, 10)");
   });
 
   it("fails closed on incomplete or stale quote coverage", () => {
