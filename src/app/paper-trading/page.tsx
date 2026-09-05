@@ -100,7 +100,7 @@ export default async function PaperTradingPage({ searchParams }: PageProps) {
     ? await loadPaperAccountStateV3(user.id, selectedAccount.id)
     : null;
   const ledger = stateResult?.ok ? derivePaperTradingLedgerV3(stateResult.state.fills) : null;
-  const verifiedState = Boolean(stateResult?.ok && ledger?.ok);
+  const verifiedState = stateResult?.ok && ledger?.ok ? stateResult.state : null;
   const positions = ledger?.ok
     ? ledger.positions.filter((position) => position.quantity > 1e-9)
     : [];
@@ -210,7 +210,7 @@ export default async function PaperTradingPage({ searchParams }: PageProps) {
                       <Card>
                         <p className="text-xs uppercase tracking-wide text-[#8391a4]">{sv ? "Kontant saldo" : "Cash balance"}</p>
                         <div className="mt-3 space-y-2">
-                          {stateResult.state.cash.length ? stateResult.state.cash.map((cash) => (
+                          {verifiedState.cash.length ? verifiedState.cash.map((cash) => (
                             <div key={cash.currency} className="flex items-center justify-between gap-3">
                               <span className="text-sm text-[#9aa7b8]">{cash.currency}</span>
                               <span className="number font-semibold text-[#f4efe5]">{numberLabel(cash.amount, locale)}</span>
