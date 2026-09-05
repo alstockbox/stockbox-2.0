@@ -6,6 +6,9 @@ const lesson = readFileSync("src/app/academy/[lessonId]/page.tsx", "utf8");
 const action = readFileSync("src/lib/academy/actions-v3.ts", "utf8");
 const repository = readFileSync("src/lib/academy/progress-repository-v3.ts", "utf8");
 const recommendation = readFileSync("src/lib/analysis/recommendation-v3.ts", "utf8");
+const nav = readFileSync("src/components/app-shell/nav.tsx", "utf8");
+const dashboard = readFileSync("src/app/dashboard/page.tsx", "utf8");
+const mobileNav = readFileSync("src/components/app-shell/mobile-bottom-nav.tsx", "utf8");
 
 describe("Academy V3 wiring", () => {
   it("dark-gates Academy pages before authenticated data is loaded", () => {
@@ -22,6 +25,42 @@ describe("Academy V3 wiring", () => {
   it("gates Investor Score independently from Academy content", () => {
     expect(overview).toContain('isFeatureEnabled("investorScore")');
     expect(overview).toContain("deriveInvestorScoreV3");
+    expect(dashboard).toContain('const investorScoreEnabled = isFeatureEnabled("investorScore")');
+    expect(dashboard).toContain("investorScoreEnabled ?");
+  });
+
+  it("only exposes Academy navigation behind the academy feature flag", () => {
+    const flagIndex = nav.indexOf('const academyEnabled = isFeatureEnabled("academy")');
+    const desktopLinkIndex = nav.indexOf('href="/academy"');
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(desktopLinkIndex).toBeGreaterThan(flagIndex);
+    expect(nav.slice(flagIndex, desktopLinkIndex)).toContain("academyEnabled ?");
+    expect(nav).toContain("user && academyEnabled ?");
+  });
+
+  it("only exposes the Academy dashboard CTA behind the academy feature flag", () => {
+    const flagIndex = dashboard.indexOf('const academyEnabled = isFeatureEnabled("academy")');
+    const linkIndex = dashboard.indexOf('href="/academy"');
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(linkIndex).toBeGreaterThan(flagIndex);
+    expect(dashboard.slice(flagIndex, linkIndex)).toContain("academyEnabled ?");
+  });
+
+  it("preserves the five existing mobile primary-navigation slots", () => {
+    expect(mobileNav).not.toContain('href: "/academy"');
+    expect(mobileNav).toContain("grid-cols-5");
+    for (const href of ["/dashboard", "/analyze", "/portfolio", "/history", "/settings"]) {
+      expect(mobileNav).toContain(`href: "${href}"`);
+    }
+  });
+
+  it("keeps Academy entry points recommendation-neutral", () => {
+    const relevant = `${overview}\n${dashboard}\n${nav}`;
+    expect(relevant).not.toContain('name="personalizedScore"');
+    expect(relevant).not.toContain('name="userMatchScore"');
+    expect(relevant).not.toContain('name="personalizedRating"');
+    expect(overview).toContain("påverkar aldrig StockBox objektiva rating, rekommendation eller User Match");
+    expect(overview).toContain("never affects StockBox objective ratings, recommendations or User Match");
   });
 
   it("only accepts lesson id and question answers from the browser", () => {
