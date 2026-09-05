@@ -1,12 +1,13 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, BarChart3, Clock3, Search } from "lucide-react";
+import { ArrowRight, BarChart3, Clock3, Newspaper, Search } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { localizedResearchView, overallResearchView } from "@/lib/analysis/research-view";
 import { getUserSubscription, subscriptionBillingState } from "@/lib/billing/subscriptions";
 import { getUserAnalysisHistory } from "@/lib/db/repositories";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import { getLocale } from "@/lib/i18n/server";
 
@@ -15,6 +16,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const [user, locale] = await Promise.all([getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).dashboard;
+  const dailyBriefingEnabled = isFeatureEnabled("dailyBriefing");
   const [historyResult, subscriptionLookup] = await Promise.all([
     user
       ? getUserAnalysisHistory({ userId: user.id, page: 1, pageSize: 8 })
@@ -52,6 +54,20 @@ export default async function DashboardPage() {
               <Card><Clock3 className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.currentAccess}</p><p className="mt-1 text-xl font-semibold">{planLabel}</p><Link href={billingState === "basic" || billingState === "basic_manage" ? "/settings/billing" : "/pricing"} className="mt-3 inline-flex text-xs font-semibold text-[#e1cb95] hover:text-white">{billingState === "basic_manage" ? copy.resolveBilling : billingState === "basic" ? copy.managePlan : copy.viewPlans}</Link></Card>
               <Card><Search className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" /><p className="mt-3 text-xs text-[#9aa7b8]">{copy.defaultWorkflow}</p><p className="mt-1 text-xl font-semibold">{copy.workflow}</p></Card>
             </div>
+            {dailyBriefingEnabled ? (
+              <Card className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <Newspaper className="mt-0.5 h-5 w-5 shrink-0 text-[#e1cb95]" aria-hidden="true" />
+                    <div>
+                      <p className="text-sm font-semibold text-[#f4efe5]">Daily Briefing</p>
+                      <p className="mt-1 text-sm leading-6 text-[#9aa7b8]">{locale === "sv" ? "Se verifierade StockBox-förändringar, officiell bevakning och sparade portföljfakta från de senaste 24 timmarna." : "See verified StockBox changes, official monitoring and saved portfolio facts from the last 24 hours."}</p>
+                    </div>
+                  </div>
+                  <ButtonLink href="/briefing">{locale === "sv" ? "Öppna briefing" : "Open briefing"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></ButtonLink>
+                </div>
+              </Card>
+            ) : null}
             <section className="mt-10"><h2 className="text-lg font-semibold text-[#f4efe5]">{copy.recentResearch}</h2>
               <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
                 {analyses?.length ? analyses.map((analysis) => (
