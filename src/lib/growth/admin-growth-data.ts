@@ -1,20 +1,23 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   GROWTH_BUDGET_HARD_CAP_SEK,
   GROWTH_BUDGET_TARGET_SEK,
 } from "@/lib/growth/budget-governor";
 import { classifyGrowthRun, type GrowthDiagnosticState } from "@/lib/growth/growth-diagnostics";
 
+type GrowthAdminRow = Record<string, unknown>;
+
 export type GrowthAdminDataSource = {
-  getMetrics(): Promise<any[]>;
-  getBudgetRows(): Promise<any[]>;
-  getReadyRenderJobs(): Promise<any[]>;
-  getContents(): Promise<any[]>;
-  getPassedAssets(): Promise<any[]>;
-  getReadyPackages(): Promise<any[]>;
-  getFounderScripts(): Promise<any[]>;
-  getLearningDecisions(): Promise<any[]>;
-  getWorkflowRuns(): Promise<any[]>;
-  getErrors(): Promise<any[]>;
+  getMetrics(): Promise<GrowthAdminRow[]>;
+  getBudgetRows(): Promise<GrowthAdminRow[]>;
+  getReadyRenderJobs(): Promise<GrowthAdminRow[]>;
+  getContents(): Promise<GrowthAdminRow[]>;
+  getPassedAssets(): Promise<GrowthAdminRow[]>;
+  getReadyPackages(): Promise<GrowthAdminRow[]>;
+  getFounderScripts(): Promise<GrowthAdminRow[]>;
+  getLearningDecisions(): Promise<GrowthAdminRow[]>;
+  getWorkflowRuns(): Promise<GrowthAdminRow[]>;
+  getErrors(): Promise<GrowthAdminRow[]>;
   getLegacyV2Count(): Promise<number>;
 };
 
@@ -102,6 +105,16 @@ function finite(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function nullableString(value: unknown): string | null {
+  return value === null || value === undefined || value === "" ? null : String(value);
+}
+
 function round(value: number, digits = 2) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
@@ -121,7 +134,7 @@ function addDays(date: Date, days: number) {
   return copy;
 }
 
-function packageView(row: any): GrowthPlatformPackage {
+function packageView(row: GrowthAdminRow): GrowthPlatformPackage {
   return {
     id: String(row.id),
     platform: String(row.platform || "unknown"),
@@ -134,21 +147,27 @@ function packageView(row: any): GrowthPlatformPackage {
   };
 }
 
-function isReadyPrivateAsset(row: any) {
-  return row?.bucket === "growth-ready-assets" && row?.qc_status === "passed";
+function isReadyPrivateAsset(row: GrowthAdminRow) {
+  return row.bucket === "growth-ready-assets" && row.qc_status === "passed";
 }
 
-function relatedErrorsForRun(run: any, errors: any[]) {
-  const workflow = String(run?.workflow || "").toLowerCase();
-  return (errors || []).filter((error) => {
-    const source = String(error?.source || "").toLowerCase();
-    if (!source) return false;
-    if (source === workflow || source.includes(workflow) || workflow.includes(source)) return true;
-    if (workflow.includes("sb-13") && source.includes("sb-ai")) return true;
-    if (workflow.includes("sb-10") && source.includes("sb-10")) return true;
-    if (workflow.includes("render") && (source.includes("render") || source.includes("growth-worker"))) return true;
-    return false;
-  });
+function relatedErrorsForRun(run: GrowthAdminRow, errors: GrowthAdminRow[]) {
+  const workflow = String(run.workflow || "").toLowerCase();
+  return errors
+    .filter((error) => {
+      const source = String(error.source || "").toLowerCase();
+      if (!source) return false;
+      if (source === workflow || source.includes(workflow) || workflow.includes(source)) return true;
+      if (workflow.includes("sb-13") && source.includes("sb-ai")) return true;
+      if (workflow.includes("sb-10") && source.includes("sb-10")) return true;
+      if (workflow.includes("render") && (source.includes("render") || source.includes("growth-worker"))) return true;
+      return false;
+    })
+    .map((error) => ({
+      source: nullableString(error.source),
+      error_type: nullableString(error.error_type),
+      message: nullableString(error.message),
+    }));
 }
 
 export async function loadGrowthAdminData(
@@ -182,15 +201,15 @@ export async function loadGrowthAdminData(
   ]);
 
   const today = dateISO(now);
-  const todaysMetric = (metrics || []).find((row) => row.metric_date === today) ?? null;
-  const latestMetric = (metrics || [])[0] ?? null;
+  const todaysMetric = metrics.find((row) => row.metric_date === today) ?? null;
+  const latestMetric = metrics[0] ?? null;
   const qualifiedVisitorsToday = finite(todaysMetric?.qualified_unique_visitors);
   const rolling7d = finite(latestMetric?.rolling_7d_avg);
 
   const previousStart = dateISO(addDays(now, -13));
   const previousEnd = dateISO(addDays(now, -7));
-  const previousValues = (metrics || [])
-    .filter((row) => row.metric_date >= previousStart && row.metric_date <= previousEnd)
+  const previousValues = metrics
+    .filter((row) => String(row.metric_date ?? "") >= previousStart && String(row.metric_date ?? "") <= previousEnd)
     .map((row) => finite(row.qualified_unique_visitors))
     .filter((value): value is number => value !== null);
   const previous7d = previousValues.length
@@ -200,24 +219,24 @@ export async function loadGrowthAdminData(
     ? round(((rolling7d - previous7d) / previous7d) * 100, 1)
     : null;
 
-  const monthlySpendSek = round((budgetRows || []).reduce((sum, row) => {
+  const monthlySpendSek = round(budgetRows.reduce((sum, row) => {
     const actual = finite(row.actual_sek);
     const estimated = finite(row.estimated_sek) ?? 0;
     return sum + (actual ?? estimated);
   }, 0), 6);
 
-  const contentById = new Map((contents || []).map((row) => [String(row.id), row] as const));
-  const assetsByJob = new Map<string, any[]>();
-  for (const asset of assets || []) {
-    if (!asset?.render_job_id || !isReadyPrivateAsset(asset)) continue;
+  const contentById = new Map(contents.map((row) => [String(row.id), row] as const));
+  const assetsByJob = new Map<string, GrowthAdminRow[]>();
+  for (const asset of assets) {
+    if (!asset.render_job_id || !isReadyPrivateAsset(asset)) continue;
     const jobId = String(asset.render_job_id);
     if (!assetsByJob.has(jobId)) assetsByJob.set(jobId, []);
     assetsByJob.get(jobId)!.push(asset);
   }
-  const packagesByJob = new Map<string, any[]>();
-  const packagesByContent = new Map<string, any[]>();
-  for (const pkg of packages || []) {
-    if (pkg?.status !== "ready") continue;
+  const packagesByJob = new Map<string, GrowthAdminRow[]>();
+  const packagesByContent = new Map<string, GrowthAdminRow[]>();
+  for (const pkg of packages) {
+    if (pkg.status !== "ready") continue;
     if (pkg.render_job_id) {
       const jobId = String(pkg.render_job_id);
       if (!packagesByJob.has(jobId)) packagesByJob.set(jobId, []);
@@ -231,8 +250,8 @@ export async function loadGrowthAdminData(
   }
 
   const readyVideos: GrowthReadyVideo[] = [];
-  for (const job of renderJobs || []) {
-    if (job?.state !== "ready" || !job?.id || !job?.content_id) continue;
+  for (const job of renderJobs) {
+    if (job.state !== "ready" || !job.id || !job.content_id) continue;
     const jobId = String(job.id);
     const jobAssets = assetsByJob.get(jobId) ?? [];
     const master = jobAssets.find((asset) => asset.kind === "master_video");
@@ -255,7 +274,7 @@ export async function loadGrowthAdminData(
   }
   readyVideos.sort((a, b) => (a.packages[0]?.dailyRank ?? 999) - (b.packages[0]?.dailyRank ?? 999));
 
-  const readyAssets: GrowthReadyAsset[] = (assets || [])
+  const readyAssets: GrowthReadyAsset[] = assets
     .filter((asset) => isReadyPrivateAsset(asset) && (asset.kind === "carousel_zip" || asset.kind === "static_image"))
     .map((asset) => {
       const contentId = String(asset.content_id || "");
@@ -269,9 +288,9 @@ export async function loadGrowthAdminData(
         packages: (packagesByContent.get(contentId) ?? []).map(packageView),
       };
     })
-    .filter((asset) => asset.contentId && asset.packages.length > 0);
+    .filter((asset) => Boolean(asset.contentId) && asset.packages.length > 0);
 
-  const founderScriptView: GrowthFounderScript[] = (founderScripts || []).map((row) => ({
+  const founderScriptView: GrowthFounderScript[] = founderScripts.map((row) => ({
     id: String(row.id),
     hook: String(row.hook || ""),
     script: String(row.script || ""),
@@ -283,13 +302,17 @@ export async function loadGrowthAdminData(
     expiresAt: row.expires_at ? String(row.expires_at) : null,
   }));
 
-  const learning = (learningDecisions || [])[0] ?? null;
-  const sample = finite(learning?.supporting_metrics?.sample);
+  const learning = learningDecisions[0] ?? null;
+  const sample = finite(record(learning?.supporting_metrics).sample);
 
-  const diagnosticItems = (workflowRuns || []).map((run) => {
+  const diagnosticItems = workflowRuns.map((run) => {
     const classified = classifyGrowthRun({
-      run,
-      relatedErrors: relatedErrorsForRun(run, errors || []),
+      run: {
+        workflow: nullableString(run.workflow),
+        status: nullableString(run.status),
+        detail: record(run.detail),
+      },
+      relatedErrors: relatedErrorsForRun(run, errors),
     });
     return {
       workflow: String(run.workflow || "growth-workflow"),
@@ -329,7 +352,7 @@ export async function loadGrowthAdminData(
   };
 }
 
-export function createSupabaseGrowthAdminDataSource(client: any, now = new Date()): GrowthAdminDataSource {
+export function createSupabaseGrowthAdminDataSource(client: SupabaseClient, now = new Date()): GrowthAdminDataSource {
   const startOfMonth = monthStartISO(now);
   const today = dateISO(now);
   const minScriptExpiry = now.toISOString();
@@ -342,7 +365,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("metric_date", { ascending: false })
         .limit(14);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getBudgetRows() {
       const { data, error } = await client
@@ -352,7 +375,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(1000);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getReadyRenderJobs() {
       const { data, error } = await client
@@ -362,7 +385,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getContents() {
       const { data, error } = await client
@@ -372,7 +395,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(120);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getPassedAssets() {
       const { data, error } = await client
@@ -383,7 +406,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(250);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getReadyPackages() {
       const { data, error } = await client
@@ -393,7 +416,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("daily_rank", { ascending: true, nullsFirst: false })
         .limit(250);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getFounderScripts() {
       const { data, error } = await client
@@ -405,7 +428,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: true })
         .limit(10);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getLearningDecisions() {
       const { data, error } = await client
@@ -415,7 +438,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(3);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getWorkflowRuns() {
       const since = addDays(now, -1).toISOString();
@@ -426,7 +449,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("created_at", { ascending: false })
         .limit(30);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getErrors() {
       const since = addDays(now, -1).toISOString();
@@ -437,7 +460,7 @@ export function createSupabaseGrowthAdminDataSource(client: any, now = new Date(
         .order("occurred_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as GrowthAdminRow[];
     },
     async getLegacyV2Count() {
       const { count, error } = await client
