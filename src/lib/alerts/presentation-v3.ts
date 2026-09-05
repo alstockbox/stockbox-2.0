@@ -84,24 +84,24 @@ export function presentAnalysisAlertEventV3(
   const kindLabel = kindLabels[language][event.alert_kind];
 
   if (event.message_key === "alerts.recommendationChanged") {
-    const from = ratingLabel(payload.from, language);
-    const to = ratingLabel(payload.to, language);
+    const from = ratingLabel(payload.previousRating, language);
+    const to = ratingLabel(payload.currentRating, language);
     return language === "sv"
       ? { kindLabel, title: `${ticker}: StockBox-ratingen ändrades`, body: `Den objektiva ratingen ändrades från ${from} till ${to}.` }
       : { kindLabel, title: `${ticker}: StockBox rating changed`, body: `The objective rating changed from ${from} to ${to}.` };
   }
 
   if (event.message_key === "alerts.convictionDropped") {
-    const previous = numberLabel(payload.previous, language);
-    const current = numberLabel(payload.current, language);
+    const previous = numberLabel(payload.previousConviction, language);
+    const current = numberLabel(payload.currentConviction, language);
     return language === "sv"
       ? { kindLabel, title: `${ticker}: lägre modellövertygelse`, body: `Övertygelsen sjönk från ${previous} till ${current} av 100.` }
       : { kindLabel, title: `${ticker}: lower model conviction`, body: `Conviction fell from ${previous} to ${current} out of 100.` };
   }
 
   if (event.message_key === "alerts.dataQualityDropped") {
-    const previous = numberLabel(payload.previous, language);
-    const current = numberLabel(payload.current, language);
+    const previous = numberLabel(payload.previousDataQuality, language);
+    const current = numberLabel(payload.currentDataQuality, language);
     return language === "sv"
       ? { kindLabel, title: `${ticker}: lägre datakvalitet`, body: `Datakvaliteten sjönk från ${previous} till ${current} av 100. Det är en datavarning, inte ett bolagsbetyg.` }
       : { kindLabel, title: `${ticker}: lower data quality`, body: `Data quality fell from ${previous} to ${current} out of 100. This is a data warning, not a company rating.` };
