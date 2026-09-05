@@ -6,6 +6,7 @@ import { researchViewForReport } from "@/lib/analysis/research-view";
 import { getCurrentUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { analyzeCompany, searchCompanies, supportsUniversalSecurityAnalysis } from "@/lib/data/universal-security-live-provider";
+import { recordAnalysisAlertsV3ForPersistedAnalysis } from "@/lib/db/analysis-alerts-v3";
 import {
   completeAnalysisReservation,
   getAnalysisReplay,
@@ -303,6 +304,24 @@ export async function POST(request: Request) {
     analysisId: result.data.id,
     report: result.data,
   }).catch(() => undefined);
+
+  const recommendationV3Shadow = result.stockbox3?.recommendationV3Shadow;
+  if (recommendationV3Shadow) {
+    const alertOutcome = await recordAnalysisAlertsV3ForPersistedAnalysis({
+      userId: user.id,
+      analysisId: result.data.id,
+      report: result.data,
+      shadow: recommendationV3Shadow,
+    });
+    if (alertOutcome.status === "failed") {
+      await logApplicationError({
+        service: "analysis-alerts-v3",
+        message: sanitizeDiagnosticMessage(alertOutcome.error, "StockBox V3 alert persistence failed."),
+        userId: user.id,
+        context: { ticker: result.data.ticker, analysisId: result.data.id },
+      }).catch(() => undefined);
+    }
+  }
 
   const researchView = researchViewForReport(result.data);
   await recordUsageEvent({

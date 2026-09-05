@@ -1,5 +1,6 @@
 import { analyzeFinancials, presentAnalysisReport, toFinancialAnalysisInput } from "@/lib/analysis/engine";
-import { runRecommendationV3Shadow } from "@/lib/analysis/recommendation-v3-shadow";
+import { runRecommendationV3Shadow, type RecommendationV3ShadowResult } from "@/lib/analysis/recommendation-v3-shadow";
+import { persistRecommendationV3ShadowAudit } from "@/lib/db/recommendation-v3-audit";
 import { dataDateStatus, DATA_FRESHNESS_THRESHOLDS_DAYS } from "@/lib/analysis/freshness";
 import { attachInstitutionalResearch } from "@/lib/analysis/research";
 import type {
@@ -35,7 +36,7 @@ import { canAttemptConfiguredFundamentals } from "./security-classification";
 import { PROVIDER_ADAPTER_VERSIONS, providerAdapterVersion } from "./provider-versions";
 
 export type ProviderResult<T> =
-  | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[] }
+  | { ok: true; data: T; sources: AnalysisSource[]; warnings: string[]; stockbox3?: { recommendationV3Shadow: Extract<RecommendationV3ShadowResult, { status: "evaluated" }> } }
   | { ok: false; error: string; sources: AnalysisSource[]; warnings: string[]; providerDiagnostics: ProviderDiagnostic[] };
 
 type FundamentalsResolution = {
@@ -911,7 +912,10 @@ export async function analyzeCompany({
   const engineResult = analyzeFinancials(canonicalInput);
   // StockBox 3.0 shadow evaluation is side-channel only and fail-open.
   // The canonical StockBox 2.x result is complete before this call and is never mutated.
-  runRecommendationV3Shadow(canonicalInput, engineResult);
+  const recommendationV3Shadow = runRecommendationV3Shadow(canonicalInput, engineResult);
+  if (recommendationV3Shadow.status === "evaluated") {
+    await persistRecommendationV3ShadowAudit(recommendationV3Shadow.event);
+  }
   const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);
   report.sources = sources;
   if (report.engine) {
@@ -977,6 +981,9 @@ export async function analyzeCompany({
     ok: true,
     data: report,
     sources,
-    warnings
+    warnings,
+    ...(recommendationV3Shadow.status === "evaluated"
+      ? { stockbox3: { recommendationV3Shadow } }
+      : {}),
   };
 }
