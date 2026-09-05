@@ -1,4 +1,5 @@
 import { analyzeFinancials, presentAnalysisReport, toFinancialAnalysisInput } from "@/lib/analysis/engine";
+import { runRecommendationV3Shadow } from "@/lib/analysis/recommendation-v3-shadow";
 import { dataDateStatus, DATA_FRESHNESS_THRESHOLDS_DAYS } from "@/lib/analysis/freshness";
 import { attachInstitutionalResearch } from "@/lib/analysis/research";
 import type {
@@ -908,6 +909,9 @@ export async function analyzeCompany({
   };
   const canonicalInput = toFinancialAnalysisInput(legacyInput);
   const engineResult = analyzeFinancials(canonicalInput);
+  // StockBox 3.0 shadow evaluation is side-channel only and fail-open.
+  // The canonical StockBox 2.x result is complete before this call and is never mutated.
+  runRecommendationV3Shadow(canonicalInput, engineResult);
   const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);
   report.sources = sources;
   if (report.engine) {
