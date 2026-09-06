@@ -4,7 +4,7 @@ import { parseAlphaVantageEtfProfile } from "../../src/lib/data/alpha-vantage-et
 const company = { ticker: "QQQ", name: "Invesco QQQ Trust", securityType: "ETF/Fund" as const };
 
 describe("Alpha Vantage ETF profile normalization", () => {
-  it("normalizes percentage-point fields and holdings into StockBox fractions", () => {
+  it("normalizes percentage-point fields and holdings into StockBox fractions without inventing full-portfolio HHI", () => {
     const parsed = parseAlphaVantageEtfProfile({
       net_assets: "323000000000",
       net_expense_ratio: "0.20",
@@ -31,7 +31,32 @@ describe("Alpha Vantage ETF profile normalization", () => {
     expect(parsed?.holdings?.[0]?.weight).toBeCloseTo(0.12);
     expect(parsed?.top10Weight).toBeCloseTo(0.2);
     expect(parsed?.largestHoldingWeight).toBeCloseTo(0.12);
+    expect(parsed?.holdingsHhi).toBeNull();
     expect(parsed?.sectorHhi).toBeCloseTo(0.5);
+  });
+
+  it("computes holdings HHI when the profile covers at least 95% of portfolio weight", () => {
+    const parsed = parseAlphaVantageEtfProfile({
+      holdings: [
+        { symbol: "A", description: "A", weight: "50.00" },
+        { symbol: "B", description: "B", weight: "30.00" },
+        { symbol: "C", description: "C", weight: "15.00" },
+      ],
+    }, company);
+
+    expect(parsed?.holdingsHhi).toBeCloseTo(0.3625, 8);
+  });
+
+  it("does not compute sector HHI from a materially incomplete sector allocation", () => {
+    const parsed = parseAlphaVantageEtfProfile({
+      portfolio_turnover: "5.00",
+      sectors: [
+        { sector: "Technology", weight: "20.00" },
+        { sector: "Healthcare", weight: "10.00" },
+      ],
+    }, company);
+
+    expect(parsed?.sectorHhi).toBeNull();
   });
 
   it("fails closed on provider information/rate-limit payloads", () => {
