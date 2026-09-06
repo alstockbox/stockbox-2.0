@@ -10,8 +10,9 @@ import {
   type PaperCompetitionCommonValuationResultV3,
 } from "./competition-valuation-v3";
 import { fetchYahooFinalCutoffQuoteV3 } from "./final-cutoff-quote-v3";
-import { persistVerifiedPaperPerformanceSnapshotV3 } from "./performance-repository-v3";
-import { loadPaperCompetitionStandingsV3 } from "./standings-repository-v3";
+import { derivePaperFinalPerformanceV3 } from "./final-performance-v3";
+import { persistVerifiedPaperFinalPerformanceSnapshotV3 } from "./performance-repository-v3";
+import { loadPaperCompetitionFinalStandingsV3 } from "./standings-repository-v3";
 import {
   claimFinalPaperCompetitionValuationV3,
   completePaperCompetitionValuationV3,
@@ -55,8 +56,9 @@ async function runChallengeFinalValuationAtV3(trustedFinal: {
   }, {
     loadEvidence: loadPaperCompetitionValuationEvidenceV3,
     fetchQuote: (ticker) => fetchYahooFinalCutoffQuoteV3(ticker, evaluationCutoff),
-    persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
-    loadStandings: loadPaperCompetitionStandingsV3,
+    derivePerformance: derivePaperFinalPerformanceV3,
+    persistSnapshot: persistVerifiedPaperFinalPerformanceSnapshotV3,
+    loadStandings: loadPaperCompetitionFinalStandingsV3,
   });
 }
 
@@ -74,8 +76,9 @@ async function runPrivateLeagueFinalValuationAtV3(trustedFinal: {
   }, {
     loadEvidence: loadPrivatePaperLeagueValuationEvidenceV3,
     fetchQuote: (ticker) => fetchYahooFinalCutoffQuoteV3(ticker, evaluationCutoff),
-    persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
-    loadStandings: loadPaperCompetitionStandingsV3,
+    derivePerformance: derivePaperFinalPerformanceV3,
+    persistSnapshot: persistVerifiedPaperFinalPerformanceSnapshotV3,
+    loadStandings: loadPaperCompetitionFinalStandingsV3,
   });
 }
 
