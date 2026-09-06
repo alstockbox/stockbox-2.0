@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseCreadesOfficialNav,
   parseIndustrivardenOfficialNav,
   parseInvestorOfficialNav,
   parseLatourOfficialNav,
+  parseLundbergsOfficialNav,
+  parseSvolderOfficialNav,
 } from "../../src/lib/data/official-investment-company-nav";
 
 describe("official investment-company NAV parsing", () => {
@@ -39,9 +42,45 @@ describe("official investment-company NAV parsing", () => {
     });
   });
 
+  it("parses Svolder weekly NAV per share from official release listings", () => {
+    const html = `<article><h2>Svolders substansvärde 2026-08-28: 60 SEK per aktie</h2></article>`;
+    expect(parseSvolderOfficialNav(html)).toEqual({
+      reportedNav: null,
+      reportedNavPerShare: 60,
+      navAsOf: "2026-08-28",
+    });
+  });
+
+  it("parses Creades monthly NAV and total NAV when both are present", () => {
+    const html = `
+      <main>
+        <h1>Substansvärde per 2026-08-31</h1>
+        <p>Creades substansvärde per 31 augusti uppgår till 96 kronor per aktie.</p>
+        <table><tr><td>Totalt</td><td>13 027</td><td>96</td><td>100</td></tr></table>
+      </main>
+    `;
+    expect(parseCreadesOfficialNav(html)).toEqual({
+      reportedNav: 13_027_000_000,
+      reportedNavPerShare: 96,
+      navAsOf: "2026-08-31",
+    });
+  });
+
+  it("parses Lundbergs current total NAV from the official homepage wording", () => {
+    const html = `<section><h2>Substansvärde</h2><strong>164 Mdkr</strong><time>2026-08-25</time></section>`;
+    expect(parseLundbergsOfficialNav(html)).toEqual({
+      reportedNav: 164_000_000_000,
+      reportedNavPerShare: null,
+      navAsOf: "2026-08-25",
+    });
+  });
+
   it("fails closed when official text does not contain a verifiable NAV", () => {
     expect(parseInvestorOfficialNav("<p>Investor update without NAV figures.</p>")).toBeNull();
     expect(parseLatourOfficialNav("<p>Latour update without a substansvärde table.</p>")).toBeNull();
     expect(parseIndustrivardenOfficialNav("<p>Industrivärden update without NAV.</p>")).toBeNull();
+    expect(parseSvolderOfficialNav("<p>Svolder update without NAV.</p>")).toBeNull();
+    expect(parseCreadesOfficialNav("<p>Creades update without NAV.</p>")).toBeNull();
+    expect(parseLundbergsOfficialNav("<p>Lundbergs update without NAV.</p>")).toBeNull();
   });
 });
