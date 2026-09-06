@@ -42,6 +42,7 @@ import {
 } from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
@@ -440,12 +441,35 @@ async function enrichInvestmentCompanyReport(
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
   const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
     || shareholderReturns.shareholderReturn5yCagr !== null;
-  const investmentHoldings: EtfHolding[] | undefined = holdingsComparable
+  let investmentHoldings: EtfHolding[] | undefined = holdingsComparable
     ? officialHoldings.data.holdings.map((holding) => ({
       name: holding.name,
       weight: holding.weight,
     }))
     : undefined;
+  const holdingsQualitySources: AnalysisSource[] = [];
+  const holdingsQualityDiagnostics: ProviderDiagnostic[] = [];
+  let holdingsQualityMessage: string | null = null;
+
+  if (investmentHoldings?.length) {
+    const enrichment = await enrichInvestmentCompanyHoldingsQuality(
+      investmentHoldings,
+      {
+        searchCompanies,
+        fetchHoldingFundamentals: fetchYahooEtfHoldingFundamentals,
+      },
+      { maxSearches: 12 },
+    );
+    investmentHoldings = enrichment.holdings;
+    holdingsQualitySources.push(...enrichment.sources);
+    holdingsQualityDiagnostics.push(...enrichment.diagnostics);
+    if (!enrichment.targetReached) {
+      holdingsQualityMessage = enrichment.budgetExhausted
+        ? "Investment-company holdings-quality enrichment reached its search budget before 80% of total portfolio weight had verified quality evidence; unresolved and private holdings remain in the denominator and holdings quality stays N/A."
+        : "Investment-company holdings quality could not be verified across 80% of total official portfolio weight; unresolved and private holdings remain in the denominator and holdings quality stays N/A.";
+    }
+  }
+
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
@@ -485,6 +509,16 @@ async function enrichInvestmentCompanyReport(
       && source.version === holdingsSource.version
     ))) {
       report.sources = [...report.sources, holdingsSource];
+    }
+  }
+
+  for (const qualitySource of holdingsQualitySources) {
+    if (!report.sources.some((source) => (
+      source.provider === qualitySource.provider
+      && source.url === qualitySource.url
+      && source.version === qualitySource.version
+    ))) {
+      report.sources = [...report.sources, qualitySource];
     }
   }
 
@@ -533,6 +567,16 @@ async function enrichInvestmentCompanyReport(
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), holdingsDiagnostic];
   }
 
+  for (const qualityDiagnostic of holdingsQualityDiagnostics) {
+    if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+      diagnostic.provider === qualityDiagnostic.provider
+      && diagnostic.status === qualityDiagnostic.status
+      && diagnostic.reason === qualityDiagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), qualityDiagnostic];
+    }
+  }
+
   if (longHistory) {
     const historyDiagnostic: ProviderDiagnostic = longHistory.ok && !shareholderReturnContributes
       ? {
@@ -557,11 +601,12 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       ...(navFreshnessMessage ? [navFreshnessMessage] : []),
       ...(holdingsFreshnessMessage ? [holdingsFreshnessMessage] : []),
+      ...(holdingsQualityMessage ? [holdingsQualityMessage] : []),
       ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
       ...(gateMessage ? [gateMessage] : []),
     ])];
