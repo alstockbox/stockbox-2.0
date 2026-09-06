@@ -1,6 +1,7 @@
 import type { MetricProvenance, ProviderReportedValuation } from "@/lib/analysis/types";
 import {
   convertWithComparisonFxContext,
+  resolveComparisonFxContexts,
   type ComparisonFxContext,
 } from "./ecb-fx";
 
@@ -10,6 +11,8 @@ export type FxNormalizedProviderReportedValuation = ProviderReportedValuation & 
   freeCashFlowYield?: number | null;
   freeCashFlowYieldProvenance?: MetricProvenance;
 };
+
+type FcfYieldFxContextResolver = typeof resolveComparisonFxContexts;
 
 function normalizedCurrency(value: string | null | undefined) {
   const normalized = value?.trim().toUpperCase();
@@ -88,4 +91,12 @@ export function deriveFxNormalizedProviderFcfYield(
       note: `Provider free cash flow was converted from ${freeCashFlowCurrency} to ${marketCapCurrency} with the dated ECB reference rate before division by provider market cap. Raw provider values and currencies were preserved.`,
     },
   };
+}
+
+export async function enrichProviderReportedValuationWithEcbFcfYield(
+  reported: ProviderReportedValuation,
+  resolveContexts: FcfYieldFxContextResolver = resolveComparisonFxContexts,
+): Promise<FxNormalizedProviderReportedValuation> {
+  void resolveContexts;
+  return reported;
 }

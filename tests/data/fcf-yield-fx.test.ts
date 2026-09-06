@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProviderReportedValuation } from "@/lib/analysis/types";
 import type { ComparisonFxContext } from "@/lib/data/ecb-fx";
-import { deriveFxNormalizedProviderFcfYield } from "@/lib/data/fcf-yield-fx";
+import {
+  deriveFxNormalizedProviderFcfYield,
+  enrichProviderReportedValuationWithEcbFcfYield,
+} from "@/lib/data/fcf-yield-fx";
 
 const baseValuation: ProviderReportedValuation = {
   provider: "Yahoo Finance fundamentals timeseries",
@@ -106,5 +109,37 @@ describe("provider FCF yield ECB normalization", () => {
       targetRatePerEuro: null,
     }));
     expect(result).toEqual(baseValuation);
+  });
+
+  it("resolves exactly one dated ECB context only for explicit cross-currency provider valuation", async () => {
+    const resolver = vi.fn(async () => new Map([["provider-fcf-yield", context()]]));
+
+    const result = await enrichProviderReportedValuationWithEcbFcfYield(baseValuation, resolver);
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith([
+      { id: "provider-fcf-yield", currency: "USD", date: "2026-08-30" },
+    ], "EUR");
+    expect(result.freeCashFlowYield).toBeCloseTo(0.1, 10);
+  });
+
+  it("does not resolve ECB context for same-currency provider valuation", async () => {
+    const resolver = vi.fn(async () => new Map<string, ComparisonFxContext>());
+    const sameCurrency = { ...baseValuation, marketCapCurrency: "USD" };
+
+    const result = await enrichProviderReportedValuationWithEcbFcfYield(sameCurrency, resolver);
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(result).toEqual(sameCurrency);
+  });
+
+  it("does not resolve ECB context when required provider facts are missing", async () => {
+    const resolver = vi.fn(async () => new Map<string, ComparisonFxContext>());
+    const incomplete = { ...baseValuation, marketCap: null };
+
+    const result = await enrichProviderReportedValuationWithEcbFcfYield(incomplete, resolver);
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(result).toEqual(incomplete);
   });
 });
