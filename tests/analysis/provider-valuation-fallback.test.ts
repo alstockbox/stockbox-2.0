@@ -46,6 +46,24 @@ function annualFallbackFxValuation() {
   };
 }
 
+function reportedTtmProvenance() {
+  const metric = {
+    source: "Test provider",
+    provider: "test",
+    valueKind: "reported" as const,
+    periodEnd: "2026-06-30",
+    periodBasis: "TTM_REPORTED" as const,
+  };
+  return {
+    revenue: metric,
+    grossProfit: metric,
+    operatingIncome: metric,
+    netIncome: metric,
+    operatingCashFlow: metric,
+    capitalExpenditures: metric,
+  };
+}
+
 describe("provider-reported valuation fallback", () => {
   it("uses fresh provider ratios when cross-currency blocks StockBox-derived valuation", () => {
     const result = analyzeFinancials(inputWithMarket());
@@ -131,7 +149,7 @@ describe("provider-reported valuation fallback", () => {
     expect(result.metrics.valuation.freeCashFlowYield).toBeCloseTo(0.086, 8);
   });
 
-  it("keeps the shorter financial-flow freshness window when a TTM period exists", () => {
+  it("keeps the shorter financial-flow freshness window when a valid TTM period exists", () => {
     const result = analyzeFinancials({
       ...inputWithMarket(annualFallbackFxValuation()),
       analysisDate: "2026-09-06T00:00:00.000Z",
@@ -140,6 +158,7 @@ describe("provider-reported valuation fallback", () => {
         form: "TTM",
         periodBasis: "TTM_REPORTED",
         periodEndDate: "2026-06-30",
+        provenance: reportedTtmProvenance(),
       },
     });
 
