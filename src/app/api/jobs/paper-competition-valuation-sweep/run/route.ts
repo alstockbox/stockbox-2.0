@@ -1,6 +1,6 @@
 import { isPayoutCronAuthorized } from "@/lib/affiliate/payouts";
 import { getServerEnv } from "@/lib/env/server";
-import { runPaperCompetitionValuationSweepV3 } from "@/lib/paper-trading/competition-valuation-sweep-v3";
+import { runPaperCompetitionValuationRuntimeV3 } from "@/lib/paper-trading/competition-valuation-runtime-v3";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -11,16 +11,16 @@ async function run(request: Request) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  let result: Awaited<ReturnType<typeof runPaperCompetitionValuationSweepV3>>;
+  let result: Awaited<ReturnType<typeof runPaperCompetitionValuationRuntimeV3>>;
   try {
-    result = await runPaperCompetitionValuationSweepV3();
+    result = await runPaperCompetitionValuationRuntimeV3();
   } catch {
     return Response.json({ status: "ERROR" }, { status: 503 });
   }
 
   const status = result.status === "ERROR"
     ? 503
-    : result.errors > 0
+    : result.status === "COMPLETED" && result.errors > 0
       ? 207
       : 200;
 
