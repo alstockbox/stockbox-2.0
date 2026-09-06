@@ -1,4 +1,8 @@
-import { derivePaperTradingLedgerV3, type PaperMarketObservationV3 } from "./engine-v3";
+import {
+  derivePaperTradingLedgerV3,
+  type PaperMarketObservationV3,
+  type PaperTradingAccountStateV3,
+} from "./engine-v3";
 import {
   loadPaperCompetitionValuationEvidenceV3,
   loadPrivatePaperLeagueValuationEvidenceV3,
@@ -6,6 +10,7 @@ import {
   type PaperCompetitionValuationKindV3,
 } from "./competition-valuation-repository-v3";
 import { fetchYahooExecutionQuoteV3 } from "./execution-quote-v3";
+import type { PaperFinalPerformanceResultV3 } from "./final-performance-v3";
 import {
   derivePaperPerformanceV3,
   derivePaperStateAtCutoffV3,
@@ -16,10 +21,29 @@ import { loadPaperCompetitionStandingsV3 } from "./standings-repository-v3";
 
 export const PAPER_COMPETITION_COMMON_VALUATION_MAX_UNIQUE_TICKERS_V3 = 500;
 
-export type PaperCompetitionCommonValuationDependenciesV3 = {
+export type PaperCompetitionValuationPerformanceV3 =
+  | PaperPerformanceResultV3
+  | PaperFinalPerformanceResultV3;
+
+export type PaperCompetitionPerformanceDerivationInputV3 = {
+  baseCurrency: string;
+  startingCash: number;
+  state: PaperTradingAccountStateV3;
+  quotes: readonly PaperMarketObservationV3[];
+  evaluatedAt: string;
+};
+
+export type PaperCompetitionCommonValuationDependenciesV3<
+  TPerformance extends PaperCompetitionValuationPerformanceV3 = PaperPerformanceResultV3,
+> = {
   loadEvidence: typeof loadPaperCompetitionValuationEvidenceV3;
   fetchQuote: typeof fetchYahooExecutionQuoteV3;
-  persistSnapshot: typeof persistVerifiedPaperPerformanceSnapshotV3;
+  derivePerformance: (input: PaperCompetitionPerformanceDerivationInputV3) => TPerformance;
+  persistSnapshot: (input: {
+    userId: string;
+    accountId: string;
+    performance: TPerformance;
+  }) => Promise<{ ok: boolean }>;
   loadStandings: typeof loadPaperCompetitionStandingsV3;
 };
 
@@ -53,8 +77,6 @@ type PreparedParticipant = {
   state: Extract<ReturnType<typeof derivePaperStateAtCutoffV3>, { ok: true }>;
 };
 
-type VerifiedPerformance = Extract<PaperPerformanceResultV3, { status: "VERIFIED" }>;
-
 function unavailable(reason: PaperCompetitionCommonValuationUnavailableReasonV3): PaperCompetitionCommonValuationResultV3 {
   return { status: "UNAVAILABLE", reason };
 }
@@ -87,19 +109,25 @@ function evidenceMatchesRequest(
 /**
  * Produces one competition valuation from one server-owned cutoff.
  *
+ * The performance policy is an injected server dependency so active valuations
+ * and immutable finals can share the exact same evidence/coverage algorithm
+ * without sharing their pricing semantics. The browser never selects it.
+ *
  * The function is deliberately fail-closed:
  * - the browser never supplies the cutoff;
  * - every participant is reconstructed and valued before the first snapshot write;
- * - one fresh provider observation is fetched per unique open-position ticker;
+ * - one provider observation is fetched per unique open-position ticker;
  * - if any participant cannot be verified, no snapshot is written;
  * - standings are returned only after exact-cutoff persistence has full coverage.
  */
-async function orchestratePaperCompetitionCommonValuationForKindV3(
+async function orchestratePaperCompetitionCommonValuationForKindV3<
+  TPerformance extends PaperCompetitionValuationPerformanceV3,
+>(
   input: {
     competitionId: string;
     serverNow: Date;
   },
-  dependencies: PaperCompetitionCommonValuationDependenciesV3,
+  dependencies: PaperCompetitionCommonValuationDependenciesV3<TPerformance>,
   expectedKind: PaperCompetitionValuationKindV3,
 ): Promise<PaperCompetitionCommonValuationResultV3> {
   const competitionId = normalizedIdentity(input.competitionId);
@@ -108,7 +136,7 @@ async function orchestratePaperCompetitionCommonValuationForKindV3(
 
   const evaluationCutoff = new Date(serverNowMs).toISOString();
 
-  let evidenceResult: Awaited<ReturnType<PaperCompetitionCommonValuationDependenciesV3["loadEvidence"]>>;
+  let evidenceResult: Awaited<ReturnType<PaperCompetitionCommonValuationDependenciesV3<TPerformance>["loadEvidence"]>>;
   try {
     evidenceResult = await dependencies.loadEvidence({ competitionId, evaluationCutoff });
   } catch {
@@ -169,11 +197,11 @@ async function orchestratePaperCompetitionCommonValuationForKindV3(
   const verifiedPerformances: Array<{
     userId: string;
     accountId: string;
-    performance: VerifiedPerformance;
+    performance: TPerformance;
   }> = [];
 
   for (const participant of prepared) {
-    const performance = derivePaperPerformanceV3({
+    const performance = dependencies.derivePerformance({
       baseCurrency: evidence.competition.baseCurrency,
       startingCash: evidence.competition.startingCash,
       state: participant.state.state,
@@ -211,7 +239,7 @@ async function orchestratePaperCompetitionCommonValuationForKindV3(
     ? { scope: "public" as const }
     : { scope: "member" as const, userId: prepared[0].userId };
 
-  let standings: Awaited<ReturnType<PaperCompetitionCommonValuationDependenciesV3["loadStandings"]>>;
+  let standings: Awaited<ReturnType<PaperCompetitionCommonValuationDependenciesV3<TPerformance>["loadStandings"]>>;
   try {
     standings = await dependencies.loadStandings({
       competitionId,
@@ -246,36 +274,42 @@ async function orchestratePaperCompetitionCommonValuationForKindV3(
   };
 }
 
-export async function orchestratePaperCompetitionCommonValuationV3(
+export async function orchestratePaperCompetitionCommonValuationV3<
+  TPerformance extends PaperCompetitionValuationPerformanceV3,
+>(
   input: {
     competitionId: string;
     serverNow: Date;
   },
-  dependencies: PaperCompetitionCommonValuationDependenciesV3,
+  dependencies: PaperCompetitionCommonValuationDependenciesV3<TPerformance>,
 ): Promise<PaperCompetitionCommonValuationResultV3> {
   return orchestratePaperCompetitionCommonValuationForKindV3(input, dependencies, "challenge");
 }
 
-export async function orchestratePrivatePaperLeagueCommonValuationV3(
+export async function orchestratePrivatePaperLeagueCommonValuationV3<
+  TPerformance extends PaperCompetitionValuationPerformanceV3,
+>(
   input: {
     competitionId: string;
     serverNow: Date;
   },
-  dependencies: PaperCompetitionCommonValuationDependenciesV3,
+  dependencies: PaperCompetitionCommonValuationDependenciesV3<TPerformance>,
 ): Promise<PaperCompetitionCommonValuationResultV3> {
   return orchestratePaperCompetitionCommonValuationForKindV3(input, dependencies, "private_league");
 }
 
-const liveDependencies: PaperCompetitionCommonValuationDependenciesV3 = {
+const liveDependencies: PaperCompetitionCommonValuationDependenciesV3<PaperPerformanceResultV3> = {
   loadEvidence: loadPaperCompetitionValuationEvidenceV3,
   fetchQuote: fetchYahooExecutionQuoteV3,
+  derivePerformance: derivePaperPerformanceV3,
   persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
   loadStandings: loadPaperCompetitionStandingsV3,
 };
 
-const privateLeagueLiveDependencies: PaperCompetitionCommonValuationDependenciesV3 = {
+const privateLeagueLiveDependencies: PaperCompetitionCommonValuationDependenciesV3<PaperPerformanceResultV3> = {
   loadEvidence: loadPrivatePaperLeagueValuationEvidenceV3,
   fetchQuote: fetchYahooExecutionQuoteV3,
+  derivePerformance: derivePaperPerformanceV3,
   persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
   loadStandings: loadPaperCompetitionStandingsV3,
 };
