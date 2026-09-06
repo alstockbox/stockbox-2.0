@@ -4,6 +4,7 @@ import { yahooSymbolForCompany } from "./yahoo-fundamentals";
 
 const PROVIDER_ID = "yahoo-etf";
 const REQUEST_TIMEOUT_MS = 10_000;
+const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"] as const;
 
 type JsonObject = Record<string, unknown>;
 
@@ -50,6 +51,11 @@ function firstString(...values: unknown[]): string | null {
   return null;
 }
 
+function normalizeFraction(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.abs(value) > 1.5 ? value / 100 : value;
+}
+
 function providerDiagnostic(status: ProviderDiagnostic["status"], reason?: string): ProviderDiagnostic {
   return {
     provider: "Yahoo Finance ETF metadata",
@@ -79,6 +85,14 @@ async function getJson(url: string): Promise<JsonObject | null> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function getYahooJson(path: string): Promise<JsonObject | null> {
+  for (const host of YAHOO_HOSTS) {
+    const payload = await getJson(`https://${host}${path}`);
+    if (payload) return payload;
+  }
+  return null;
 }
 
 function quoteSummaryResult(payload: JsonObject | null): JsonObject | null {
@@ -112,12 +126,46 @@ function parseSectorHhi(topHoldings: JsonObject | null): number | null {
     const row = object(entry);
     if (!row) return [];
     const weight = firstNumber(...Object.values(row));
-    return weight !== null && weight >= 0 ? [weight] : [];
+    const normalized = normalizeFraction(weight);
+    return normalized !== null && normalized >= 0 ? [normalized] : [];
   });
   if (!weights.length) return null;
   const total = weights.reduce((sum, value) => sum + value, 0);
   if (total <= 0) return null;
   return weights.reduce((sum, value) => sum + (value / total) ** 2, 0);
+}
+
+function parseBondCreditWeights(topHoldings: JsonObject | null): {
+  investmentGradeWeight: number | null;
+  highYieldWeight: number | null;
+} {
+  const values = Array.isArray(topHoldings?.bondRatings) ? topHoldings.bondRatings : [];
+  let investmentGradeWeight = 0;
+  let highYieldWeight = 0;
+  let investmentGradeSeen = false;
+  let highYieldSeen = false;
+
+  for (const entry of values) {
+    const row = object(entry);
+    if (!row) continue;
+    for (const [rawKey, rawValue] of Object.entries(row)) {
+      const value = normalizeFraction(numberValue(rawValue));
+      if (value === null || value < 0) continue;
+      const key = rawKey.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (/^(aaa|aa|a|bbb|investmentgrade)/.test(key)) {
+        investmentGradeWeight += value;
+        investmentGradeSeen = true;
+      } else if (/^(bb|b|ccc|cc|c|belowinvestmentgrade|highyield)/.test(key)) {
+        highYieldWeight += value;
+        highYieldSeen = true;
+      }
+    }
+  }
+
+  return {
+    investmentGradeWeight: investmentGradeSeen ? investmentGradeWeight : null,
+    highYieldWeight: highYieldSeen ? highYieldWeight : null,
+  };
 }
 
 function holdingConcentration(holdings: EtfHolding[]) {
@@ -144,12 +192,26 @@ function bidAskSpread(quote: JsonObject | null): number | null {
   return midpoint > 0 ? (ask - bid) / midpoint : null;
 }
 
+function explicitLeverageFactor(company: CompanySearchResult, category: string | null): number | null {
+  const text = `${company.name} ${category ?? ""}`;
+  const match = text.match(/(?:^|\s)(-?\d(?:\.\d+)?)\s*[x×](?:\s|$)/i)
+    ?? text.match(/(?:^|\s)(-?\d(?:\.\d+)?)\s*times?(?:\s|$)/i);
+  if (!match) return null;
+  const parsed = Number.parseFloat(match[1]);
+  return Number.isFinite(parsed) && Math.abs(parsed) > 1 ? parsed : null;
+}
+
+function explicitDailyReset(company: CompanySearchResult, category: string | null): boolean | null {
+  const text = `${company.name} ${category ?? ""}`;
+  return /\bdaily\b|daily[-\s]?reset|daily target/i.test(text) ? true : null;
+}
+
 export async function fetchYahooEtfData(company: CompanySearchResult): Promise<YahooEtfResult> {
   const symbol = yahooSymbolForCompany(company);
   const modules = ["fundProfile", "topHoldings", "summaryDetail", "defaultKeyStatistics", "fundPerformance", "risk"].join(",");
-  const summaryUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${encodeURIComponent(modules)}`;
-  const quoteUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-  const [summaryPayload, quotePayload] = await Promise.all([getJson(summaryUrl), getJson(quoteUrl)]);
+  const summaryPath = `/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${encodeURIComponent(modules)}`;
+  const quotePath = `/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+  const [summaryPayload, quotePayload] = await Promise.all([getYahooJson(summaryPath), getYahooJson(quotePath)]);
   const summary = quoteSummaryResult(summaryPayload);
   const quote = quoteResult(quotePayload);
   if (!summary && !quote) {
@@ -169,6 +231,7 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const riskOverviewStatistics = object(fundPerformance?.riskOverviewStatistics);
   const fees = object(fundProfile?.feesExpensesInvestment);
   const equityHoldings = object(topHoldings?.equityHoldings);
+  const bondHoldings = object(topHoldings?.bondHoldings);
   const holdings = (Array.isArray(topHoldings?.holdings) ? topHoldings.holdings : []).flatMap((entry) => {
     const holding = parseHolding(entry);
     return holding ? [holding] : [];
@@ -190,17 +253,29 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const averageDailyDollarVolume = averageVolume !== null && price !== null ? averageVolume * price : null;
   const inceptionTimestamp = firstNumber(fundProfile?.fundInceptionDate, keyStatistics?.fundInceptionDate, quote?.fundInceptionDate);
   const sharpeRatio3y = firstNumber(risk?.sharpeRatio3y, risk?.threeYearSharpeRatio, riskOverviewStatistics?.sharpeRatio3y);
-  const volatility3y = firstNumber(risk?.standardDeviation3y, risk?.threeYearStandardDeviation);
+  const volatility3y = firstNumber(risk?.standardDeviation3y, risk?.threeYearStandardDeviation, riskOverviewStatistics?.standardDeviation3y);
+  const maxDrawdown3y = firstNumber(risk?.maximumDrawdown3y, risk?.maxDrawdown3y, risk?.threeYearMaxDrawdown, fundPerformance?.maximumDrawdown3y);
+  const trackingDifference = firstNumber(fundPerformance?.trackingDifference, risk?.trackingDifference, riskOverviewStatistics?.trackingDifference);
+  const trackingError = firstNumber(fundPerformance?.trackingError3y, risk?.trackingError, risk?.threeYearTrackingError, riskOverviewStatistics?.trackingError3y);
   const weightedForwardPe = firstNumber(equityHoldings?.priceToEarnings, equityHoldings?.forwardPE);
   const weightedPriceBook = firstNumber(equityHoldings?.priceToBook);
+  const weightedEpsGrowth = firstNumber(equityHoldings?.threeYearEarningsGrowth, equityHoldings?.earningsGrowth);
   const distributionYield = firstNumber(summaryDetail?.yield, quote?.yield, summaryDetail?.trailingAnnualDividendYield);
+  const turnover = firstNumber(fees?.annualHoldingsTurnover, fundProfile?.annualHoldingsTurnover, keyStatistics?.annualHoldingsTurnover);
   const numberOfHoldings = firstNumber(topHoldings?.holdingCount, topHoldings?.numberOfHoldings) ?? (holdings.length || null);
+  const bondCredit = parseBondCreditWeights(topHoldings);
+  const yieldToMaturity = firstNumber(bondHoldings?.yieldToMaturity, bondHoldings?.yieldToWorst, topHoldings?.yieldToMaturity);
+  const effectiveDuration = firstNumber(bondHoldings?.effectiveDuration, bondHoldings?.duration, bondHoldings?.modifiedDuration, topHoldings?.effectiveDuration);
+  const leverageFactor = classification.kind === "leveraged_inverse_etf" ? explicitLeverageFactor(company, category) : null;
+  const dailyReset = classification.kind === "leveraged_inverse_etf" ? explicitDailyReset(company, category) : null;
 
   const input: EtfAnalysisInput = {
     subtype: classification.kind === "operating_company" || classification.kind === "investment_company" || classification.kind === "bank" || classification.kind === "insurance" || classification.kind === "reit" || classification.kind === "real_estate" || classification.kind === "utility" || classification.kind === "commodity_mining" || classification.kind === "pre_profit_growth"
       ? "equity_etf"
       : classification.kind,
     expenseRatio,
+    trackingDifference,
+    trackingError,
     bidAskSpread: bidAskSpread(quote),
     assetsUnderManagement,
     averageDailyDollarVolume,
@@ -212,14 +287,23 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
     sectorHhi: parseSectorHhi(topHoldings),
     sharpeRatio3y,
     volatility3y,
+    maxDrawdown3y,
     weightedForwardPe,
     weightedPriceBook,
+    weightedEpsGrowth,
     distributionYield,
+    turnover,
+    yieldToMaturity,
+    effectiveDuration,
+    investmentGradeWeight: bondCredit.investmentGradeWeight,
+    highYieldWeight: bondCredit.highYieldWeight,
+    leverageFactor,
+    dailyReset,
     holdings,
   };
 
   const availableCount = Object.values(input).filter((value) => value !== null && value !== undefined && (!(Array.isArray(value)) || value.length > 0)).length;
-  const status: ProviderDiagnostic["status"] = availableCount >= 7 ? "available" : "partial";
+  const status: ProviderDiagnostic["status"] = availableCount >= 10 ? "available" : "partial";
   return {
     ok: true,
     data: {
@@ -231,11 +315,11 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
         name: "Yahoo Finance ETF metadata",
         url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`,
         accessedAt: new Date().toISOString(),
-        freshness: "Fund metadata, holdings and quote statistics are fetched live when Yahoo exposes them.",
+        freshness: "Fund metadata, holdings, risk statistics, bond characteristics and quote statistics are fetched live when Yahoo exposes them. StockBox tries both Yahoo query hosts before declaring the provider unavailable.",
         provider: PROVIDER_ID,
         capability: "specialized",
         dataAsOf: null,
-        version: "yahoo-etf-v1",
+        version: "yahoo-etf-v2",
       },
       diagnostic: providerDiagnostic(status, status === "partial" ? "partial_etf_metadata" : undefined),
     },
