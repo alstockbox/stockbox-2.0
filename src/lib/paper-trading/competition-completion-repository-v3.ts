@@ -23,7 +23,8 @@ export async function completeDuePaperCompetitionsV3(): Promise<PaperCompetition
       : typeof data === "string" && data.trim()
         ? Number(data)
         : Number.NaN;
-    if (!Number.isInteger(completed) || completed < 0) {
+    const validCompleted = Number.isInteger(completed) && completed >= 0;
+    if (!validCompleted) {
       return { ok: false, error: "PAPER_COMPETITION_COMPLETION_INVALID_RESULT" };
     }
 
