@@ -1,6 +1,7 @@
 name: StockBox Live Coverage Audit
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - fix/coverage-engine-root-cause
