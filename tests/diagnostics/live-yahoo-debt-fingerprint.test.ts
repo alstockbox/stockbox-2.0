@@ -10,6 +10,8 @@ const DEBT_GAP_TICKERS = ["BESTE.IS", "CASH3.SA", "B.V"] as const;
 const DEBT_TYPES = [
   "annualTotalDebt",
   "quarterlyTotalDebt",
+  "annualNetDebt",
+  "quarterlyNetDebt",
   "annualLongTermDebtAndCapitalLeaseObligation",
   "quarterlyLongTermDebtAndCapitalLeaseObligation",
   "annualCurrentDebtAndCapitalLeaseObligation",
