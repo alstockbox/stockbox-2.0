@@ -42,6 +42,7 @@ import {
 } from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
 import { deriveInvestmentCompanyDividendQuality } from "./investment-company-dividend-quality";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
@@ -444,6 +445,14 @@ async function enrichInvestmentCompanyReport(
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
   const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
     || shareholderReturns.shareholderReturn5yCagr !== null;
+  const capitalAllocation = officialKeyRatios.ok
+    ? deriveInvestmentCompanyCapitalAllocation(officialKeyRatios.data.years)
+    : null;
+  const capitalAllocationMessage = officialKeyRatios.ok && capitalAllocation?.score === null
+    ? `Official investment-company key ratios could not support capital allocation because ${
+      (capitalAllocation.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
+    }. Capital allocation remains N/A.`
+    : null;
   const dividendQuality = officialKeyRatios.ok
     ? deriveInvestmentCompanyDividendQuality(officialKeyRatios.data.years)
     : null;
@@ -488,6 +497,7 @@ async function enrichInvestmentCompanyReport(
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
     ...shareholderReturns,
+    capitalAllocationScore: capitalAllocation?.score ?? null,
     dividendQualityScore: dividendQuality?.score ?? null,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
@@ -641,12 +651,13 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage || dividendQualityMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       ...(navFreshnessMessage ? [navFreshnessMessage] : []),
       ...(holdingsFreshnessMessage ? [holdingsFreshnessMessage] : []),
       ...(holdingsQualityMessage ? [holdingsQualityMessage] : []),
+      ...(capitalAllocationMessage ? [capitalAllocationMessage] : []),
       ...(dividendQualityMessage ? [dividendQualityMessage] : []),
       ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
       ...(gateMessage ? [gateMessage] : []),
