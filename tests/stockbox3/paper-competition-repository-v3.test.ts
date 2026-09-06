@@ -34,9 +34,9 @@ describe("Paper Trading V3 competition repository boundary", () => {
     expect(source).toContain('.rpc("join_paper_competition_v3", {');
     expect(source).toContain("p_user_id: normalizedUserId");
     expect(source).toContain("p_competition_id: normalizedCompetitionId");
-    expect(source).not.toContain("startingCash:");
-    expect(source).not.toContain("baseCurrency:");
-    expect(source).not.toContain("accountId:");
+    expect(source).not.toContain("p_starting_cash");
+    expect(source).not.toContain("p_base_currency");
+    expect(source).not.toContain("p_account_id");
   });
 
   it("never writes competition tables directly", () => {
