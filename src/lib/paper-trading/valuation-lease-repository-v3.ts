@@ -27,6 +27,20 @@ export type PaperCompetitionValuationClaimResultV3 =
         | "SUPABASE_ADMIN_NOT_CONFIGURED";
     };
 
+export type PaperCompetitionValuationCompletionOutcomeV3 = "verified" | "unavailable" | "error";
+
+export type PaperCompetitionValuationCompleteResultV3 =
+  | { ok: true; completed: true }
+  | {
+      ok: false;
+      error:
+        | "PAPER_COMPETITION_VALUATION_COMPLETE_INVALID_INPUT"
+        | "PAPER_COMPETITION_VALUATION_COMPLETE_INVALID_RESULT"
+        | "PAPER_COMPETITION_VALUATION_COMPLETE_REJECTED"
+        | "PAPER_COMPETITION_VALUATION_COMPLETE_FAILED"
+        | "SUPABASE_ADMIN_NOT_CONFIGURED";
+    };
+
 type JsonRow = Record<string, unknown>;
 
 function text(value: unknown): string | null {
@@ -104,5 +118,49 @@ export async function claimPaperCompetitionValuationV3(
     return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
   } catch {
     return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_FAILED" };
+  }
+}
+
+/**
+ * Completes exactly the lease that established a valuation cutoff. The database
+ * remains authoritative for token ownership and cutoff equality; this adapter
+ * only validates/normalizes the server-side evidence before invoking the RPC.
+ */
+export async function completePaperCompetitionValuationV3(input: {
+  competitionId: string;
+  leaseToken: string;
+  evaluationCutoff: string;
+  outcome: PaperCompetitionValuationCompletionOutcomeV3;
+}): Promise<PaperCompetitionValuationCompleteResultV3> {
+  const competitionId = input.competitionId.trim();
+  const leaseToken = input.leaseToken.trim();
+  const evaluationCutoff = timestamp(input.evaluationCutoff);
+  const outcome = input.outcome;
+
+  if (
+    !UUID_PATTERN.test(competitionId)
+    || !UUID_PATTERN.test(leaseToken)
+    || !evaluationCutoff
+    || !(["verified", "unavailable", "error"] as const).includes(outcome)
+  ) {
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_COMPLETE_INVALID_INPUT" };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const { data, error } = await supabase.rpc("complete_paper_competition_valuation_v3", {
+      p_competition_id: competitionId,
+      p_lease_token: leaseToken,
+      p_evaluation_cutoff: evaluationCutoff,
+      p_outcome: outcome,
+    });
+    if (error) return { ok: false, error: "PAPER_COMPETITION_VALUATION_COMPLETE_FAILED" };
+    if (data === true) return { ok: true, completed: true };
+    if (data === false) return { ok: false, error: "PAPER_COMPETITION_VALUATION_COMPLETE_REJECTED" };
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_COMPLETE_INVALID_RESULT" };
+  } catch {
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_COMPLETE_FAILED" };
   }
 }
