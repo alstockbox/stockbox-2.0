@@ -47,6 +47,7 @@ function diagnostic(
     capability: "fundamentals",
     status,
     reason,
+    observedAt: new Date().toISOString(),
   };
 }
 
@@ -155,6 +156,7 @@ function targetMissingDebtPeriod(fundamentals: CompanyFundamentals) {
   const trailing = fundamentals.trailingTwelveMonths;
   if (
     trailing
+    && trailing.periodEndDate
     && !finite(trailing.totalDebt)
     && trailing.currency?.trim().toUpperCase() === "BRL"
   ) {
@@ -163,10 +165,11 @@ function targetMissingDebtPeriod(fundamentals: CompanyFundamentals) {
 
   const annual = [...(fundamentals.annualPeriods ?? [])]
     .filter((period) => (
-      !finite(period.totalDebt)
+      Boolean(period.periodEndDate)
+      && !finite(period.totalDebt)
       && period.currency?.trim().toUpperCase() === "BRL"
     ))
-    .sort((left, right) => left.periodEndDate.localeCompare(right.periodEndDate))
+    .sort((left, right) => (left.periodEndDate ?? "").localeCompare(right.periodEndDate ?? ""))
     .at(-1);
   return annual ?? null;
 }
@@ -191,6 +194,13 @@ export async function enrichBrazilFundamentalsWithCvmDebt(
   }
 
   const targetPeriodEnd = targetPeriod.periodEndDate;
+  if (!targetPeriodEnd) {
+    return {
+      fundamentals,
+      supplemented: false,
+      diagnostic: diagnostic("partial", "invalid_target_period"),
+    };
+  }
   const year = /^\d{4}-\d{2}-\d{2}$/.test(targetPeriodEnd)
     ? targetPeriodEnd.slice(0, 4)
     : null;
