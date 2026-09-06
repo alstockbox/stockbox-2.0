@@ -27,7 +27,10 @@ vi.mock("@/lib/env/server", () => ({
   getServerEnv: vi.fn(() => ({ ALPHA_VANTAGE_API_KEY: "" })),
 }));
 
-import { analyzeCompany } from "../../src/lib/data/universal-security-provider";
+import {
+  analyzeCompany,
+  type UniversalSecurityReport,
+} from "../../src/lib/data/universal-security-provider";
 
 const observedAt = "2026-09-06T16:50:00.000Z";
 
@@ -110,16 +113,17 @@ describe("universal ETF production look-through", () => {
 
     expect(mocks.fetchYahooEtfHoldingFundamentals.mock.calls.map(([holding]) => holding.ticker)).toEqual(["A", "B"]);
 
-    const etf = result.data.securityAnalysis?.etf;
+    const report = result.data as UniversalSecurityReport;
+    const etf = report.securityAnalysis?.etf;
     expect(etf).toBeDefined();
     expect(etf?.lookThrough.qualityCoveredWeight).toBeCloseTo(0.8, 8);
     expect(etf?.lookThrough.stockBoxQuality).not.toBeNull();
     expect(etf?.score.factors.find((factor) => factor.key === "holdings_quality")?.status).toBe("available");
 
-    expect(result.data.sources.map((item) => item.provider)).toContain("yahoo-holding-fixture");
-    expect(result.data.providerDiagnostics?.filter((item) => item.provider === "Yahoo Holding Fixture")).toHaveLength(1);
+    expect(report.sources.map((item) => item.provider)).toContain("yahoo-holding-fixture");
+    expect(report.providerDiagnostics?.filter((item) => item.provider === "Yahoo Holding Fixture")).toHaveLength(1);
 
-    expect(result.data.dataCoverage).toBeLessThan(0.99);
-    expect(result.data.recommendation).toBe("No Rating");
+    expect(report.dataCoverage).toBeLessThan(0.99);
+    expect(report.recommendation).toBe("No Rating");
   });
 });
