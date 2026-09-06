@@ -4,6 +4,7 @@ import { getDurableBatchRun } from "@/lib/batch/durable";
 import { triggerDurableBatchWorker } from "@/lib/batch/worker-trigger";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
