@@ -53,6 +53,15 @@ export type PrivatePaperLeagueInviteListResultV3 =
   | { ok: true; invites: PrivatePaperLeagueInviteMetadataV3[] }
   | { ok: false; error: string; invites: [] };
 
+export type PrivatePaperLeagueMemberV3 = {
+  userId: string;
+  role: PrivatePaperLeagueRoleV3;
+};
+
+export type PrivatePaperLeagueMemberListResultV3 =
+  | { ok: true; members: PrivatePaperLeagueMemberV3[] }
+  | { ok: false; error: string; members: [] };
+
 function normalizeIdentity(value: string): string | null {
   const normalized = value.trim();
   return UUID_PATTERN.test(normalized) ? normalized.toLowerCase() : null;
@@ -354,5 +363,78 @@ export async function listPrivatePaperLeagueInvitesV3(
     return { ok: true, invites };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "PRIVATE_LEAGUE_INVITES_FAILED", invites: [] };
+  }
+}
+
+export async function listPrivatePaperLeagueMembersV3(
+  userId: string,
+  competitionId: string,
+): Promise<PrivatePaperLeagueMemberListResultV3> {
+  const normalizedUserId = normalizeIdentity(userId);
+  const normalizedCompetitionId = normalizeIdentity(competitionId);
+  if (!normalizedUserId || !normalizedCompetitionId) {
+    return { ok: false, error: "PRIVATE_LEAGUE_IDENTITY_INVALID", members: [] };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED", members: [] };
+
+  try {
+    const membershipResult = await supabase
+      .from("paper_private_league_members_v3")
+      .select("competition_id,user_id,role")
+      .eq("competition_id", normalizedCompetitionId)
+      .eq("user_id", normalizedUserId)
+      .maybeSingle();
+    if (membershipResult.error) return { ok: false, error: membershipResult.error.message, members: [] };
+    if (!membershipResult.data) return { ok: false, error: "PRIVATE_LEAGUE_FORBIDDEN", members: [] };
+    const role = mapRole((membershipResult.data as JsonRow).role);
+    if (role !== "owner" && role !== "admin") {
+      return { ok: false, error: "PRIVATE_LEAGUE_FORBIDDEN", members: [] };
+    }
+
+    const seenUserIds = new Set<string>();
+    const members: PrivatePaperLeagueMemberV3[] = [];
+    let ownerCount = 0;
+    for (let from = 0; ; from += PRIVATE_LEAGUE_MEMBER_PAGE_SIZE) {
+      const to = from + PRIVATE_LEAGUE_MEMBER_PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from("paper_private_league_members_v3")
+        .select("competition_id,user_id,role")
+        .eq("competition_id", normalizedCompetitionId)
+        .order("user_id", { ascending: true })
+        .range(from, to);
+      if (error) return { ok: false, error: error.message, members: [] };
+
+      const rows = data ?? [];
+      for (const rawRow of rows) {
+        const row = rawRow as JsonRow;
+        const rowCompetitionId = normalizeIdentity(String(row.competition_id ?? ""));
+        const memberUserId = normalizeIdentity(String(row.user_id ?? ""));
+        const memberRole = mapRole(row.role);
+        if (
+          rowCompetitionId !== normalizedCompetitionId
+          || !memberUserId
+          || !memberRole
+          || seenUserIds.has(memberUserId)
+        ) {
+          return { ok: false, error: "PRIVATE_LEAGUE_MEMBERS_INVALID", members: [] };
+        }
+        seenUserIds.add(memberUserId);
+        if (memberRole === "owner") ownerCount += 1;
+        members.push({ userId: memberUserId, role: memberRole });
+      }
+      if (rows.length < PRIVATE_LEAGUE_MEMBER_PAGE_SIZE) break;
+    }
+
+    if (members.length === 0 || ownerCount !== 1) {
+      return { ok: false, error: "PRIVATE_LEAGUE_MEMBERS_INVALID", members: [] };
+    }
+
+    const roleOrder: Record<PrivatePaperLeagueRoleV3, number> = { owner: 0, admin: 1, member: 2 };
+    members.sort((left, right) => roleOrder[left.role] - roleOrder[right.role] || left.userId.localeCompare(right.userId));
+    return { ok: true, members };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "PRIVATE_LEAGUE_MEMBERS_FAILED", members: [] };
   }
 }
