@@ -44,9 +44,11 @@ import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
 import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
 import { deriveInvestmentCompanyDividendQuality } from "./investment-company-dividend-quality";
+import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import { fetchOfficialInvestmentCompanyKeyRatios } from "./official-investment-company-key-ratios";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
@@ -417,11 +419,12 @@ async function enrichInvestmentCompanyReport(
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.market?.date ?? null;
-  const [officialNav, longHistory, officialHoldings, officialKeyRatios] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialGovernance] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
     fetchOfficialInvestmentCompanyHoldings(company),
     fetchOfficialInvestmentCompanyKeyRatios(company),
+    fetchOfficialInvestmentCompanyGovernance(company),
   ]);
   const navComparable = officialNav.ok && isOfficialDisclosureComparable(
     officialNav.data.navAsOf,
@@ -461,6 +464,14 @@ async function enrichInvestmentCompanyReport(
       (dividendQuality.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
     }. Dividend quality remains N/A.`
     : null;
+  const governance = officialGovernance.ok
+    ? deriveInvestmentCompanyGovernance(officialGovernance.data.directors)
+    : null;
+  const governanceMessage = officialGovernance.ok && governance?.score === null
+    ? `Official governance evidence could not support governance scoring because ${
+      (governance.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
+    }. Governance remains N/A.`
+    : null;
   let investmentHoldings: EtfHolding[] | undefined = holdingsComparable
     ? officialHoldings.data.holdings.map((holding) => ({
       name: holding.name,
@@ -498,6 +509,7 @@ async function enrichInvestmentCompanyReport(
     ...navGrowth,
     ...shareholderReturns,
     capitalAllocationScore: capitalAllocation?.score ?? null,
+    managementGovernanceScore: governance?.score ?? null,
     dividendQualityScore: dividendQuality?.score ?? null,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
@@ -542,6 +554,18 @@ async function enrichInvestmentCompanyReport(
       && source.version === keyRatioSource.version
     ))) {
       report.sources = [...report.sources, keyRatioSource];
+    }
+  }
+
+  if (officialGovernance.ok) {
+    for (const governanceSource of officialGovernance.data.sources) {
+      if (!report.sources.some((source) => (
+        source.provider === governanceSource.provider
+        && source.url === governanceSource.url
+        && source.version === governanceSource.version
+      ))) {
+        report.sources = [...report.sources, governanceSource];
+      }
     }
   }
 
@@ -617,6 +641,17 @@ async function enrichInvestmentCompanyReport(
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), keyRatioDiagnostic];
   }
 
+  const governanceDiagnostic = officialGovernance.ok
+    ? officialGovernance.data.diagnostic
+    : officialGovernance.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === governanceDiagnostic.provider
+    && diagnostic.status === governanceDiagnostic.status
+    && diagnostic.reason === governanceDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), governanceDiagnostic];
+  }
+
   for (const qualityDiagnostic of holdingsQualityDiagnostics) {
     if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
       diagnostic.provider === qualityDiagnostic.provider
@@ -651,7 +686,7 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage || governanceMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       ...(navFreshnessMessage ? [navFreshnessMessage] : []),
@@ -659,6 +694,7 @@ async function enrichInvestmentCompanyReport(
       ...(holdingsQualityMessage ? [holdingsQualityMessage] : []),
       ...(capitalAllocationMessage ? [capitalAllocationMessage] : []),
       ...(dividendQualityMessage ? [dividendQualityMessage] : []),
+      ...(governanceMessage ? [governanceMessage] : []),
       ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
       ...(gateMessage ? [gateMessage] : []),
     ])];
