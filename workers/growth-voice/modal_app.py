@@ -19,6 +19,7 @@ from voice_contract import (
     torchaudio_save_kwargs,
     validate_reference_url,
     validate_voice_request,
+    voice_generation_kwargs,
 )
 
 APP_NAME = "stockbox-growth-voice"
@@ -46,6 +47,7 @@ class VoiceRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
     language: str
     voice_mode: str
+    style_intensity: int | None = Field(default=None, ge=0, le=100)
     reference_audio_url: str = Field(min_length=10, max_length=4096)
 
 
@@ -74,7 +76,12 @@ def _download_reference(url: str, destination: Path) -> None:
                 handle.write(chunk)
 
 
-def _synthesize_founder_voice(text: str, reference_path: Path, voice_mode: str) -> bytes:
+def _synthesize_founder_voice(
+    text: str,
+    reference_path: Path,
+    voice_mode: str,
+    style_intensity: int | None,
+) -> bytes:
     import torch
     import torchaudio
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
@@ -88,6 +95,7 @@ def _synthesize_founder_voice(text: str, reference_path: Path, voice_mode: str) 
         text.strip(),
         language_id="sv",
         audio_prompt_path=str(reference_path),
+        **voice_generation_kwargs(voice_mode, style_intensity),
     )
     audio = wav.detach().cpu()
     if audio.ndim == 1:
@@ -130,7 +138,12 @@ def synthesize(
         reference_path = Path(temp_dir) / f"reference{suffix}"
         _download_reference(request.reference_audio_url, reference_path)
         try:
-            wav_bytes = _synthesize_founder_voice(request.text, reference_path, request.voice_mode)
+            wav_bytes = _synthesize_founder_voice(
+                request.text,
+                reference_path,
+                request.voice_mode,
+                request.style_intensity,
+            )
         finally:
             reference_path.unlink(missing_ok=True)
 

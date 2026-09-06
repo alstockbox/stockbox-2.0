@@ -146,6 +146,7 @@ async function synthesizeVoice(job, outputPath) {
         text: String(spec.script || "").slice(0, 1500),
         language: "sv",
         voice_mode: spec.voiceMode || "educational",
+        style_intensity: Number.isInteger(spec.voiceStyleIntensity) ? spec.voiceStyleIntensity : null,
         reference_audio_url: job.voice_reference_url,
       }),
     });
