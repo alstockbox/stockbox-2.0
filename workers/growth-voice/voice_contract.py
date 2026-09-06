@@ -38,6 +38,10 @@ def chatterbox_model_kwargs() -> dict[str, str]:
     return {"t3_model": CHATTERBOX_T3_MODEL}
 
 
+def torchaudio_save_kwargs() -> dict[str, str | int]:
+    return {"format": "wav", "encoding": "PCM_S", "bits_per_sample": 16}
+
+
 def validate_voice_request(language: str, voice_mode: str, text: str) -> None:
     if language != "sv":
         raise ValueError("unsupported_language")
