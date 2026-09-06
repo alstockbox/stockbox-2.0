@@ -1,5 +1,5 @@
 modal==1.5.5
-chatterbox-tts==0.1.7
+chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@65b18437192794391a0308a8f705b1e33e633948
 fastapi==0.116.1
 httpx==0.28.1
 torchaudio==2.6.0
