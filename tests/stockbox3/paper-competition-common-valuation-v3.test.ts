@@ -4,6 +4,7 @@ import {
   orchestratePaperCompetitionCommonValuationV3,
   type PaperCompetitionCommonValuationDependenciesV3,
 } from "../../src/lib/paper-trading/competition-valuation-v3";
+import { derivePaperPerformanceV3 } from "../../src/lib/paper-trading/performance-v3";
 
 function fill(input: {
   fillId: string;
@@ -100,6 +101,7 @@ function dependencies(input: {
         reason: null,
       };
     },
+    derivePerformance: derivePaperPerformanceV3,
     persistSnapshot: async ({ accountId, performance }) => {
       calls.persistedAccounts.push(accountId);
       return input.persistOk === false
