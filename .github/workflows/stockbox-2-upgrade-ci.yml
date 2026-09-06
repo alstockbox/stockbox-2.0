@@ -124,6 +124,7 @@ jobs:
           cp supabase/migrations/20260820220000_initial_stockbox.sql /tmp/stockbox-migrations/
           cp supabase/migrations/20260905140500_portfolio_2_private_schema.sql /tmp/stockbox-migrations/
           cp supabase/migrations/20260905141000_portfolio_2_transactions_snapshots.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260906141500_portfolio_sell_chain_guard.sql /tmp/stockbox-migrations/
           rm -f supabase/migrations/*.sql
           supabase init --force
       - name: Start disposable Supabase
@@ -138,6 +139,8 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905140500_portfolio_2_private_schema.sql
       - name: Apply Portfolio 2 transaction migration
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905141000_portfolio_2_transactions_snapshots.sql
+      - name: Apply Portfolio 2 sell guard migration
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260906141500_portfolio_sell_chain_guard.sql
       - name: Assert Portfolio 2 invariants
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
