@@ -52,6 +52,7 @@ const envSchema = z.object({
   MARKET_DATA_FALLBACK_PROVIDERS: providerListSchema,
   GLOBAL_SYMBOL_SEARCH_PROVIDER: z.enum(["twelve_data", "disabled"]).default("disabled"),
   TWELVE_DATA_API_KEY: z.string().optional().or(z.literal("")),
+  ALPHA_VANTAGE_API_KEY: z.string().optional().or(z.literal("")),
   NEWS_PROVIDER: z.string().default("disabled"),
   NEWS_API_KEY: z.string().optional().or(z.literal("")),
   AI_PROVIDER: z.string().default("disabled"),
