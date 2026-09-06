@@ -95,10 +95,10 @@ begin
     v_now
   )
   on conflict (competition_id) do update
-    set last_claimed_at = excluded.last_claimed_at,
-        lease_token = excluded.lease_token,
-        lease_expires_at = excluded.lease_expires_at,
-        updated_at = excluded.updated_at;
+    set last_claimed_at = v_now,
+        lease_token = v_lease_token,
+        lease_expires_at = v_now + interval '10 minutes',
+        updated_at = v_now;
 
   return query select true, v_lease_token, v_now, v_now + interval '10 minutes';
 end;
