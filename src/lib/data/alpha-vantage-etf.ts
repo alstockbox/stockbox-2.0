@@ -1,5 +1,6 @@
 import type { EtfAnalysisInput, EtfHolding } from "@/lib/analysis/universal-security";
 import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
+import { ETF_HHI_MIN_REPRESENTED_WEIGHT, summarizeEtfHoldingConcentration } from "./etf-holdings-math";
 
 const PROVIDER_ID = "alpha-vantage-etf";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -50,11 +51,11 @@ function diagnostic(status: ProviderDiagnostic["status"], reason?: string): Prov
   };
 }
 
-function hhi(weights: number[]): number | null {
+function completeDistributionHhi(weights: number[]): number | null {
   const valid = weights.filter((weight) => Number.isFinite(weight) && weight > 0);
-  const total = valid.reduce((sum, weight) => sum + weight, 0);
-  if (total <= 0) return null;
-  return valid.reduce((sum, weight) => sum + (weight / total) ** 2, 0);
+  const representedWeight = valid.reduce((sum, weight) => sum + weight, 0);
+  if (representedWeight < ETF_HHI_MIN_REPRESENTED_WEIGHT) return null;
+  return valid.reduce((sum, weight) => sum + weight ** 2, 0);
 }
 
 function parseHoldings(payload: JsonObject): EtfHolding[] {
@@ -78,7 +79,7 @@ function parseSectorHhi(payload: JsonObject): number | null {
     const weight = percentFraction(row.weight);
     return weight !== null && weight >= 0 ? [weight] : [];
   });
-  return hhi(weights);
+  return completeDistributionHhi(weights);
 }
 
 function fundAgeYears(inceptionDate: string | null): number | null {
@@ -87,16 +88,6 @@ function fundAgeYears(inceptionDate: string | null): number | null {
   if (!Number.isFinite(timestamp)) return null;
   const years = (Date.now() - timestamp) / (365.2425 * 86_400_000);
   return Number.isFinite(years) && years >= 0 ? years : null;
-}
-
-function concentration(holdings: EtfHolding[]) {
-  const weights = holdings.map((holding) => holding.weight).sort((a, b) => b - a);
-  return {
-    numberOfHoldings: holdings.length || null,
-    top10Weight: weights.length ? weights.slice(0, 10).reduce((sum, weight) => sum + weight, 0) : null,
-    largestHoldingWeight: weights[0] ?? null,
-    holdingsHhi: hhi(weights),
-  };
 }
 
 function symbolForAlphaVantage(company: CompanySearchResult): string {
@@ -112,7 +103,7 @@ export function parseAlphaVantageEtfProfile(payload: unknown, company: CompanySe
   if (root["Error Message"] || root.Note || root.Information) return null;
 
   const holdings = parseHoldings(root);
-  const holdingsConcentration = concentration(holdings);
+  const holdingsConcentration = summarizeEtfHoldingConcentration(holdings);
   const inceptionDate = stringValue(root.inception_date);
   const leveraged = stringValue(root.leveraged)?.toUpperCase() === "YES";
 
@@ -122,7 +113,7 @@ export function parseAlphaVantageEtfProfile(payload: unknown, company: CompanySe
     distributionYield: percentFraction(root.dividend_yield),
     assetsUnderManagement: numberValue(root.net_assets),
     fundAgeYears: fundAgeYears(inceptionDate),
-    numberOfHoldings: holdingsConcentration.numberOfHoldings,
+    numberOfHoldings: holdings.length || null,
     top10Weight: holdingsConcentration.top10Weight,
     largestHoldingWeight: holdingsConcentration.largestHoldingWeight,
     holdingsHhi: holdingsConcentration.holdingsHhi,
@@ -195,11 +186,11 @@ export async function fetchAlphaVantageEtfData(
           name: "Alpha Vantage ETF Profile & Holdings",
           url: `https://www.alphavantage.co/query?function=ETF_PROFILE&symbol=${encodeURIComponent(symbol)}`,
           accessedAt,
-          freshness: "ETF profile, holdings, sector allocation and fund metadata are fetched from Alpha Vantage when the optional fallback is configured.",
+          freshness: "ETF profile, holdings, sector allocation and fund metadata are fetched from Alpha Vantage when the optional fallback is configured. Holdings/sector HHI is emitted only when parsed weights represent at least 95% of the relevant distribution; partial allocations remain N/A instead of being renormalized into false completeness.",
           provider: PROVIDER_ID,
           capability: "specialized",
           dataAsOf: null,
-          version: "alpha-vantage-etf-v1",
+          version: "alpha-vantage-etf-v2",
         },
         diagnostic: diagnostic("available"),
       },
