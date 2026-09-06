@@ -11,6 +11,7 @@ import {
   listPrivatePaperLeagueMembersV3,
   loadPrivatePaperLeagueWorkspaceV3,
 } from "@/lib/paper-trading/private-league-read-repository-v3";
+import { paperTradingServerNowMsV3 } from "@/lib/paper-trading/server-clock-v3";
 import { PrivateLeagueManagementForms } from "./management-forms";
 
 export const metadata: Metadata = { title: "Manage Private Paper Trading League" };
@@ -56,6 +57,7 @@ export default async function PrivatePaperLeagueManagementPage({ params }: PageP
   const killed = isKilled("paperTrading");
   const evidenceVerified = invitesResult.ok && membersResult.ok;
   const mutationsEnabled = !killed && evidenceVerified;
+  const nowMs = paperTradingServerNowMsV3();
 
   return (
     <Section>
@@ -136,6 +138,7 @@ export default async function PrivatePaperLeagueManagementPage({ params }: PageP
               invites={invitesResult.invites}
               members={membersResult.members}
               canEditRoles={workspace.role === "owner"}
+              nowMs={nowMs}
               sv={sv}
             />
           </div>
