@@ -113,6 +113,7 @@ export async function addHoldingAction(formData: FormData) {
   const parsed = z.object({
     portfolioId: z.string().uuid(),
     ticker: tickerSchema,
+    companyName: z.string().trim().min(1).max(160),
     quantity: z.coerce.number().positive().max(1_000_000_000),
     averageCost: z.coerce.number().nonnegative().max(1_000_000_000),
     currency: currencySchema,
@@ -121,15 +122,19 @@ export async function addHoldingAction(formData: FormData) {
   }).safeParse({
     portfolioId: formData.get("portfolioId"),
     ticker: formData.get("ticker"),
+    companyName: formData.get("companyName"),
     quantity: formData.get("quantity"),
     averageCost: formData.get("averageCost"),
     currency: formData.get("currency"),
     purchaseDate: formData.get("purchaseDate"),
     fees: formData.get("fees") || 0,
   });
-  if (!parsed.success) redirect("/portfolio?error=transaction_input");
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
   if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
-  const company = await resolveWorkspaceCompany(parsed.data.ticker);
+  const company = await resolveWorkspaceCompany(parsed.data.ticker, parsed.data.companyName);
   if (!company) redirect("/portfolio?error=holding_identity");
   const supabase = await createClient();
   const { error } = await supabase?.rpc("record_portfolio_transaction", {
