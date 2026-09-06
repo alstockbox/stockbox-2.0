@@ -1,5 +1,6 @@
 import { classifyUniversalSecurity, type EtfAnalysisInput, type EtfHolding } from "@/lib/analysis/universal-security";
 import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
+import { summarizeEtfHoldingConcentration } from "./etf-holdings-math";
 import { yahooSymbolForCompany } from "./yahoo-fundamentals";
 
 const PROVIDER_ID = "yahoo-etf";
@@ -168,15 +169,6 @@ function parseBondCreditWeights(topHoldings: JsonObject | null): {
   };
 }
 
-function holdingConcentration(holdings: EtfHolding[]) {
-  const weights = holdings.map((holding) => holding.weight > 1.5 ? holding.weight / 100 : holding.weight).sort((a, b) => b - a);
-  return {
-    top10Weight: weights.length ? weights.slice(0, 10).reduce((sum, value) => sum + value, 0) : null,
-    largestHoldingWeight: weights[0] ?? null,
-    holdingsHhi: weights.length ? weights.reduce((sum, value) => sum + value ** 2, 0) : null,
-  };
-}
-
 function inceptionAgeYears(timestamp: number | null): number | null {
   if (timestamp === null) return null;
   const milliseconds = timestamp > 10_000_000_000 ? timestamp : timestamp * 1000;
@@ -236,7 +228,7 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
     const holding = parseHolding(entry);
     return holding ? [holding] : [];
   });
-  const concentration = holdingConcentration(holdings);
+  const concentration = summarizeEtfHoldingConcentration(holdings);
   const category = firstString(fundProfile?.categoryName, fundProfile?.category, quote?.category);
   const fundFamily = firstString(fundProfile?.family, quote?.fundFamily);
   const quoteType = firstString(quote?.quoteType);
@@ -313,11 +305,11 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
         name: "Yahoo Finance ETF metadata",
         url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`,
         accessedAt: new Date().toISOString(),
-        freshness: "Fund metadata, holdings, risk statistics, bond characteristics and quote statistics are fetched live when Yahoo exposes them. StockBox tries both Yahoo query hosts before declaring the provider unavailable.",
+        freshness: "Fund metadata, holdings, risk statistics, bond characteristics and quote statistics are fetched live when Yahoo exposes them. Holdings HHI is emitted only when parsed holdings represent at least 95% of the portfolio; partial top-holdings lists remain usable for top-weight concentration without pretending to be complete. StockBox tries both Yahoo query hosts before declaring the provider unavailable.",
         provider: PROVIDER_ID,
         capability: "specialized",
         dataAsOf: null,
-        version: "yahoo-etf-v2",
+        version: "yahoo-etf-v3",
       },
       diagnostic: providerDiagnostic(status, status === "partial" ? "partial_etf_metadata" : undefined),
     },
