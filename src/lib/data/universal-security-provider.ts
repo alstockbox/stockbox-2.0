@@ -28,13 +28,14 @@ import type {
   ScoreDimensionKey,
   StockBoxScore,
 } from "@/lib/analysis/types";
+import { getServerEnv } from "@/lib/env/server";
 import {
   analyzeCompany as analyzeOperatingCompany,
   fetchConfiguredMarketData,
   searchCompanies,
 } from "./enhanced-provider";
+import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { inferSecurityType } from "./security-classification";
-import { fetchYahooEtfData } from "./yahoo-etf";
 
 export { searchCompanies };
 
@@ -200,15 +201,16 @@ function describeEtf(result: EtfAnalysisResult, company: CompanySearchResult): {
     : ` Coverage is below the ${(SPECIALIST_COVERAGE_TARGET * 100).toFixed(0)}% verified-data rating gate, so the recommendation is No Rating.`;
   return {
     oneSentence: `${company.name} is analyzed as ${type} with StockBox ETF score ${score} at ${coverage}% factor coverage.`,
-    summary: `StockBox used the ETF-specific model instead of corporate revenue, margin and P/E scoring. The model evaluates underlying holdings where available, look-through valuation, cost, diversification, liquidity, tracking quality, risk-adjusted returns, concentration, fund stability and product structure.${missing}${gate}`,
+    summary: `StockBox used the ETF-specific model instead of corporate revenue, margin and P/E scoring. The model evaluates underlying holdings where available, look-through valuation, cost, diversification, liquidity, tracking quality, risk-adjusted returns, concentration and fund stability. Investor-jurisdiction tax treatment is excluded unless explicit context is available.${missing}${gate}`,
   };
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
+  const env = getServerEnv();
   const [marketResult, etfResult] = await Promise.all([
     fetchConfiguredMarketData(args.company),
-    fetchYahooEtfData(args.company),
+    fetchEtfProviderChain(args.company, env.ALPHA_VANTAGE_API_KEY),
   ]);
   const market = marketResult.ok ? marketResult.data : null;
   if (!etfResult.ok) {
@@ -216,8 +218,8 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
       ok: false,
       error: "ETF-specific metadata is unavailable for this security.",
       sources: [],
-      warnings: [etfResult.message],
-      providerDiagnostics: [marketResult.diagnostic, etfResult.diagnostic],
+      warnings: etfResult.warnings.length ? etfResult.warnings : [etfResult.message],
+      providerDiagnostics: [marketResult.diagnostic, ...etfResult.diagnostics],
     };
   }
 
@@ -236,8 +238,9 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     quoteType: etfResult.data.quoteType,
     category: etfResult.data.category,
   });
-  const sources = [etfResult.data.source];
-  const providerDiagnostics: ProviderDiagnostic[] = [marketResult.diagnostic, etfResult.data.diagnostic];
+  const sources = etfResult.data.sources;
+  const providerDiagnostics: ProviderDiagnostic[] = [marketResult.diagnostic, ...etfResult.data.diagnostics];
+  const reportWarnings = [...new Set([...etfResult.data.warnings, ...analysis.warnings])];
   const report: UniversalSecurityReport = {
     id: randomUUID(),
     ticker: args.company.ticker,
@@ -272,12 +275,12 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     securityClassification: classification,
     securityAnalysis: { etf: analysis },
   };
-  report.score.missingData = [...new Set([...report.score.missingData, ...analysis.warnings])];
+  report.score.missingData = [...new Set([...report.score.missingData, ...reportWarnings])];
   return {
     ok: true,
     data: report,
     sources,
-    warnings: analysis.warnings,
+    warnings: reportWarnings,
   };
 }
 
