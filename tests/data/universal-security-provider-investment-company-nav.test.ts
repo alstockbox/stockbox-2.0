@@ -166,6 +166,7 @@ describe("investment-company official NAV production wiring", () => {
     expect(analysis?.nav.discountPremium).toBeCloseTo(-0.25, 8);
     expect(navFactor?.status).toBe("available");
     expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
+    expect(result.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
     expect(report.providerDiagnostics?.some((item) => item.provider === "Official investment-company NAV" && item.status === "available")).toBe(true);
     expect(report.dataCoverage).toBeLessThan(0.99);
     expect(report.recommendation).toBe("No Rating");
