@@ -1,7 +1,5 @@
-import {
-  PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS,
-  type PaperMarketObservationV3,
-} from "./engine-v3";
+import type { PaperMarketObservationV3 } from "./engine-v3";
+import { PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS } from "./final-performance-v3";
 
 const YAHOO_CHART_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
 const PAPER_FINAL_CUTOFF_QUOTE_TIMEOUT_MS = 8_000;
@@ -129,7 +127,7 @@ export function parseYahooFinalCutoffQuoteV3(
 
     const observedMs = timestampSeconds * 1000;
     if (observedMs > cutoff.ms) continue;
-    if (cutoff.ms - observedMs > PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS) continue;
+    if (cutoff.ms - observedMs > PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS) continue;
 
     const price = numberValue(closes[index]);
     if (price === null || price <= 0 || price > MAX_PRICE) continue;
@@ -175,7 +173,7 @@ export async function fetchYahooFinalCutoffQuoteV3(
 
   const symbol = yahooSymbol(ticker);
   const url = new URL(`${YAHOO_CHART_BASE_URL}/${encodeURIComponent(symbol)}`);
-  url.searchParams.set("period1", String(Math.floor((cutoff.ms - PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS) / 1000)));
+  url.searchParams.set("period1", String(Math.floor((cutoff.ms - PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS) / 1000)));
   url.searchParams.set("period2", String(Math.floor(cutoff.ms / 1000) + 60));
   url.searchParams.set("interval", "1m");
   url.searchParams.set("includePrePost", "false");
