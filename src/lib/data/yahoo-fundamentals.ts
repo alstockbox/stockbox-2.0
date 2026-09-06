@@ -1,6 +1,7 @@
 import type {
   CompanyFundamentals,
   CompanySearchResult,
+  MetricProvenance,
   ProviderDiagnostic,
 } from "@/lib/analysis/types";
 import {
@@ -11,6 +12,10 @@ import { enrichSpecializedFundamentals } from "./specialized-enrichment";
 import type { AdapterResult, FundamentalsProvider } from "./providers";
 
 export * from "./yahoo-fundamentals-core";
+
+type ReportedValuationWithFcfBasis = NonNullable<CompanyFundamentals["reportedValuation"]> & {
+  freeCashFlowPeriodBasis?: MetricProvenance["periodBasis"];
+};
 
 function diagnosticKey(diagnostic: ProviderDiagnostic): string {
   return [
@@ -46,6 +51,11 @@ function appendUniqueDiagnostics(
   };
 }
 
+function normalizedCurrency(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toUpperCase();
+  return normalized || null;
+}
+
 function alignReportedValuationFcfWithAnnualFallback(
   fundamentals: CompanyFundamentals,
 ): CompanyFundamentals {
@@ -64,8 +74,8 @@ function alignReportedValuationFcfWithAnnualFallback(
   const period = fundamentals.annualPeriods?.find((item) => item.periodEndDate === flowDate);
   const freeCashFlow = period?.freeCashFlow;
   const provenance = period?.provenance?.freeCashFlow;
-  const periodCurrency = period?.currency?.trim().toUpperCase() ?? null;
-  const provenanceCurrency = provenance?.unit?.trim().toUpperCase() ?? null;
+  const periodCurrency = normalizedCurrency(period?.currency);
+  const provenanceCurrency = normalizedCurrency(provenance?.unit);
 
   if (
     !period
@@ -80,14 +90,61 @@ function alignReportedValuationFcfWithAnnualFallback(
     return fundamentals;
   }
 
+  const reportedWithBasis: ReportedValuationWithFcfBasis = {
+    ...reported,
+    freeCashFlow: freeCashFlow as number,
+    freeCashFlowCurrency: periodCurrency,
+    freeCashFlowDate: flowDate,
+    freeCashFlowPeriodBasis: "FY",
+  };
+
   return {
     ...fundamentals,
-    reportedValuation: {
-      ...reported,
-      freeCashFlow: freeCashFlow as number,
-      freeCashFlowCurrency: periodCurrency,
-      freeCashFlowDate: flowDate,
-    },
+    reportedValuation: reportedWithBasis,
+  };
+}
+
+function attachReportedValuationFcfPeriodBasis(
+  fundamentals: CompanyFundamentals,
+): CompanyFundamentals {
+  const reported = fundamentals.reportedValuation as ReportedValuationWithFcfBasis | undefined;
+  const reportedFcfCurrency = normalizedCurrency(reported?.freeCashFlowCurrency);
+  if (
+    !reported
+    || !Number.isFinite(reported.freeCashFlow)
+    || !reported.freeCashFlowDate
+    || !reportedFcfCurrency
+    || reported.freeCashFlowPeriodBasis
+  ) {
+    return fundamentals;
+  }
+
+  const periods = [
+    fundamentals.trailingTwelveMonths,
+    ...(fundamentals.annualPeriods ?? []),
+  ].filter((period): period is NonNullable<typeof period> => Boolean(period));
+
+  const matchingPeriod = periods.find((period) => {
+    const provenance = period.provenance?.freeCashFlow;
+    return period.periodEndDate === reported.freeCashFlowDate
+      && Number.isFinite(period.freeCashFlow)
+      && period.freeCashFlow === reported.freeCashFlow
+      && normalizedCurrency(period.currency) === reportedFcfCurrency
+      && normalizedCurrency(provenance?.unit) === reportedFcfCurrency
+      && provenance?.valueKind === "reported"
+      && provenance.provider === "yahoo-fundamentals"
+      && Boolean(provenance.periodBasis);
+  });
+  const periodBasis = matchingPeriod?.provenance?.freeCashFlow?.periodBasis;
+  if (!periodBasis) return fundamentals;
+
+  const reportedWithBasis: ReportedValuationWithFcfBasis = {
+    ...reported,
+    freeCashFlowPeriodBasis: periodBasis,
+  };
+  return {
+    ...fundamentals,
+    reportedValuation: reportedWithBasis,
   };
 }
 
@@ -98,7 +155,8 @@ export async function fetchYahooFundamentalsResult(
   if (!core.ok) return core;
 
   const aligned = alignReportedValuationFcfWithAnnualFallback(core.data);
-  const enrichment = await enrichSpecializedFundamentals(company, aligned);
+  const withFcfBasis = attachReportedValuationFcfPeriodBasis(aligned);
+  const enrichment = await enrichSpecializedFundamentals(company, withFcfBasis);
   return {
     ...core,
     data: appendUniqueDiagnostics(
