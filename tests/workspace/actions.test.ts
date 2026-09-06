@@ -104,6 +104,7 @@ describe("workspace server actions", () => {
     await addHoldingAction(data({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "aapl",
+      companyName: "Apple Inc.",
       quantity: "2",
       averageCost: "210",
       currency: "usd",
