@@ -79,12 +79,15 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
     providerDiagnostics: [],
     analysisArchetype: "holding_company",
     market: {
+      ticker: "INVE-B.ST",
       price: 150,
       currency: "SEK",
       date: "2026-09-05",
       volume: null,
       marketCap: 450_000_000_000,
       sharesOutstanding: 3_000_000_000,
+      yearHigh: null,
+      yearLow: null,
       performance: { "1D": undefined, "1W": undefined, "1M": undefined, "3M": undefined, "6M": undefined, "YTD": undefined, "1Y": undefined },
     },
     engine: {
