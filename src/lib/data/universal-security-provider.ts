@@ -231,6 +231,35 @@ function holdingFundamentalDataContributes(
   });
 }
 
+const INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS = 120;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseIsoDay(value: string | null | undefined): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return timestamp;
+}
+
+function isOfficialNavComparable(navAsOf: string | null, marketAsOf: string | null | undefined): boolean {
+  const navDay = parseIsoDay(navAsOf);
+  const marketDay = parseIsoDay(marketAsOf);
+  if (navDay === null || marketDay === null) return false;
+  const ageDays = (marketDay - navDay) / DAY_MS;
+  return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS;
+}
+
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
   const env = getServerEnv();
@@ -380,11 +409,18 @@ async function enrichInvestmentCompanyReport(
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const officialNav = await fetchOfficialInvestmentCompanyNav(company);
+  const navComparable = officialNav.ok && isOfficialNavComparable(
+    officialNav.data.navAsOf,
+    report.market?.date ?? null,
+  );
+  const navFreshnessMessage = officialNav.ok && !navComparable
+    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${report.market?.date ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    : null;
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
-    reportedNav: officialNav.ok ? officialNav.data.reportedNav : null,
-    reportedNavPerShare: officialNav.ok ? officialNav.data.reportedNavPerShare : null,
+    reportedNav: navComparable ? officialNav.data.reportedNav : null,
+    reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
   });
@@ -408,7 +444,15 @@ async function enrichInvestmentCompanyReport(
     }
   }
 
-  const navDiagnostic = officialNav.ok ? officialNav.data.diagnostic : officialNav.diagnostic;
+  const navDiagnostic: ProviderDiagnostic = officialNav.ok
+    ? navComparable
+      ? officialNav.data.diagnostic
+      : {
+        ...officialNav.data.diagnostic,
+        status: "partial",
+        reason: "official_nav_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialNav.diagnostic;
   if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
     diagnostic.provider === navDiagnostic.provider
     && diagnostic.status === navDiagnostic.status
@@ -424,9 +468,10 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
+      ...(navFreshnessMessage ? [navFreshnessMessage] : []),
       ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
       ...(gateMessage ? [gateMessage] : []),
     ])];
