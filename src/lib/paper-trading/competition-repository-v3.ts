@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadPaperAccountBoundaryV3 } from "./repository-v3";
 
 export type PaperCompetitionV3 = {
   id: string;
@@ -33,6 +34,17 @@ export type PaperCompetitionEntryListResultV3 =
 
 export type PaperCompetitionJoinResultV3 =
   | { ok: true; entry: PaperCompetitionEntryV3 }
+  | { ok: false; error: string };
+
+export type PaperChallengeTradingContextV3 = {
+  competitionId: string;
+  accountId: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+export type PaperChallengeTradingContextResultV3 =
+  | { ok: true; context: PaperChallengeTradingContextV3 }
   | { ok: false; error: string };
 
 type JsonRow = Record<string, unknown>;
@@ -179,6 +191,95 @@ export async function listPaperCompetitionEntriesV3(userId: string): Promise<Pap
       error: error instanceof Error ? error.message : "PAPER_COMPETITION_ENTRY_LIST_FAILED",
       entries: [],
     };
+  }
+}
+
+export async function loadPaperChallengeTradingContextV3(
+  userId: string,
+  competitionId: string,
+  now = new Date(),
+): Promise<PaperChallengeTradingContextResultV3> {
+  const normalizedUserId = normalizeIdentity(userId);
+  const normalizedCompetitionId = normalizeIdentity(competitionId);
+  const nowMs = now.getTime();
+  if (!normalizedUserId || !normalizedCompetitionId) {
+    return { ok: false, error: "PAPER_COMPETITION_IDENTITY_REQUIRED" };
+  }
+  if (!Number.isFinite(nowMs)) return { ok: false, error: "PAPER_COMPETITION_TIME_INVALID" };
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const competitionResult = await supabase
+      .from("paper_competitions_v3")
+      .select("id,kind,status,starts_at,ends_at")
+      .eq("id", normalizedCompetitionId)
+      .maybeSingle();
+    if (competitionResult.error) return { ok: false, error: competitionResult.error.message };
+    if (!competitionResult.data) return { ok: false, error: "PAPER_CHALLENGE_NOT_FOUND" };
+
+    const competitionRow = competitionResult.data as JsonRow;
+    const competition = {
+      id: text(competitionRow.id),
+      kind: text(competitionRow.kind),
+      status: text(competitionRow.status),
+      startsAt: validTimestamp(competitionRow.starts_at),
+      endsAt: validTimestamp(competitionRow.ends_at),
+    };
+    if (
+      competition.id !== normalizedCompetitionId
+      || !competition.kind
+      || !competition.status
+      || !competition.startsAt
+      || !competition.endsAt
+    ) return { ok: false, error: "PAPER_CHALLENGE_INVALID" };
+    if (competition.kind !== "challenge" || competition.status === "cancelled" || competition.status === "completed") {
+      return { ok: false, error: "PAPER_CHALLENGE_NOT_TRADING" };
+    }
+
+    const startsAtMs = Date.parse(competition.startsAt);
+    const endsAtMs = Date.parse(competition.endsAt);
+    if (!Number.isFinite(startsAtMs) || !Number.isFinite(endsAtMs) || endsAtMs <= startsAtMs) {
+      return { ok: false, error: "PAPER_CHALLENGE_INVALID" };
+    }
+    if (nowMs < startsAtMs || nowMs > endsAtMs) {
+      return { ok: false, error: "PAPER_CHALLENGE_NOT_TRADING" };
+    }
+
+    const entryResult = await supabase
+      .from("paper_competition_entries_v3")
+      .select("id,competition_id,user_id,account_id,joined_at")
+      .eq("user_id", normalizedUserId)
+      .eq("competition_id", normalizedCompetitionId)
+      .maybeSingle();
+    if (entryResult.error) return { ok: false, error: entryResult.error.message };
+    if (!entryResult.data) return { ok: false, error: "PAPER_CHALLENGE_ENTRY_NOT_FOUND" };
+
+    const entry = mapEntry(entryResult.data as JsonRow);
+    if (!entry || entry.userId !== normalizedUserId || entry.competitionId !== normalizedCompetitionId) {
+      return { ok: false, error: "PAPER_CHALLENGE_ENTRY_INVALID" };
+    }
+
+    const boundary = await loadPaperAccountBoundaryV3(normalizedUserId, entry.accountId);
+    if (
+      !boundary.ok
+      || boundary.account.accountType !== "competition"
+      || boundary.account.competitionId !== normalizedCompetitionId
+      || boundary.account.status !== "active"
+    ) return { ok: false, error: "PAPER_CHALLENGE_ACCOUNT_INVALID" };
+
+    return {
+      ok: true,
+      context: {
+        competitionId: normalizedCompetitionId,
+        accountId: entry.accountId,
+        startsAt: competition.startsAt,
+        endsAt: competition.endsAt,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "PAPER_CHALLENGE_CONTEXT_FAILED" };
   }
 }
 
