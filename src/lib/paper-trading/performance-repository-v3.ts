@@ -1,11 +1,17 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS,
+  PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION,
+  PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS,
+  type PaperFinalPerformanceResultV3,
+} from "./final-performance-v3";
+import {
   PAPER_PERFORMANCE_V3_POLICY_VERSION,
   PAPER_TRADING_V3_FIXED_STARTING_CASH,
   type PaperPerformanceResultV3,
 } from "./performance-v3";
 
-export type PaperPerformanceSnapshotRowV3 = {
+export type PaperComparablePerformanceSnapshotRowV3 = {
   id: string;
   accountId: string;
   userId: string;
@@ -20,13 +26,25 @@ export type PaperPerformanceSnapshotRowV3 = {
   quoteCount: number;
   evaluatedAt: string;
   oldestQuoteObservedAt: string | null;
+  createdAt: string;
+};
+
+export type PaperPerformanceSnapshotRowV3 = PaperComparablePerformanceSnapshotRowV3 & {
   policyVersion: typeof PAPER_PERFORMANCE_V3_POLICY_VERSION;
   pricingBasis: "VERIFIED_MARK_TO_MARKET";
-  createdAt: string;
+};
+
+export type PaperFinalPerformanceSnapshotRowV3 = PaperComparablePerformanceSnapshotRowV3 & {
+  policyVersion: typeof PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION;
+  pricingBasis: typeof PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS;
 };
 
 export type PaperPerformanceSnapshotWriteResultV3 =
   | { ok: true; snapshot: PaperPerformanceSnapshotRowV3 }
+  | { ok: false; error: string };
+
+export type PaperFinalPerformanceSnapshotWriteResultV3 =
+  | { ok: true; snapshot: PaperFinalPerformanceSnapshotRowV3 }
   | { ok: false; error: string };
 
 export type PaperPerformanceSnapshotListResultV3 =
@@ -34,6 +52,30 @@ export type PaperPerformanceSnapshotListResultV3 =
   | { ok: false; error: string; snapshots: [] };
 
 type JsonRow = Record<string, unknown>;
+
+type SnapshotPolicyV3 =
+  | {
+      policyVersion: typeof PAPER_PERFORMANCE_V3_POLICY_VERSION;
+      pricingBasis: "VERIFIED_MARK_TO_MARKET";
+      maxQuoteAgeMs: number;
+    }
+  | {
+      policyVersion: typeof PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION;
+      pricingBasis: typeof PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS;
+      maxQuoteAgeMs: number;
+    };
+
+const ACTIVE_SNAPSHOT_POLICY: SnapshotPolicyV3 = {
+  policyVersion: PAPER_PERFORMANCE_V3_POLICY_VERSION,
+  pricingBasis: "VERIFIED_MARK_TO_MARKET",
+  maxQuoteAgeMs: 20 * 60_000,
+};
+
+const FINAL_SNAPSHOT_POLICY: SnapshotPolicyV3 = {
+  policyVersion: PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION,
+  pricingBasis: PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS,
+  maxQuoteAgeMs: PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS,
+};
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -67,7 +109,10 @@ function withinPostgresRound10(persisted: number, rawValue: number): boolean {
   return close(persisted, rawValue, 5.1e-11);
 }
 
-export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSnapshotRowV3 | null {
+function mapPaperPerformanceSnapshotForPolicyV3(
+  row: JsonRow,
+  expected: SnapshotPolicyV3,
+): (PaperPerformanceSnapshotRowV3 | PaperFinalPerformanceSnapshotRowV3) | null {
   const id = text(row.id);
   const accountId = text(row.account_id);
   const userId = text(row.user_id);
@@ -109,15 +154,15 @@ export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSna
     || quoteCount !== openPositionCount
     || !evaluatedAt
     || !createdAt
-    || policyVersion !== PAPER_PERFORMANCE_V3_POLICY_VERSION
-    || pricingBasis !== "VERIFIED_MARK_TO_MARKET"
+    || policyVersion !== expected.policyVersion
+    || pricingBasis !== expected.pricingBasis
   ) return null;
 
   if ((quoteCount === 0 && oldestQuoteObservedAt !== null) || (quoteCount > 0 && !oldestQuoteObservedAt)) return null;
   if (oldestQuoteObservedAt) {
     const evaluatedMs = Date.parse(evaluatedAt);
     const observedMs = Date.parse(oldestQuoteObservedAt);
-    if (observedMs > evaluatedMs + 30_000 || evaluatedMs - observedMs > 20 * 60_000) return null;
+    if (observedMs > evaluatedMs + 30_000 || evaluatedMs - observedMs > expected.maxQuoteAgeMs) return null;
   }
 
   const expectedEquity = cashValue + positionsMarketValue;
@@ -144,24 +189,32 @@ export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSna
     quoteCount,
     evaluatedAt,
     oldestQuoteObservedAt,
-    policyVersion: PAPER_PERFORMANCE_V3_POLICY_VERSION,
-    pricingBasis: "VERIFIED_MARK_TO_MARKET",
+    policyVersion: expected.policyVersion,
+    pricingBasis: expected.pricingBasis,
     createdAt,
-  };
+  } as PaperPerformanceSnapshotRowV3 | PaperFinalPerformanceSnapshotRowV3;
 }
 
-export function toPaperPerformanceSnapshotRpcParamsV3(input: {
+export function mapPaperPerformanceSnapshotV3(row: JsonRow): PaperPerformanceSnapshotRowV3 | null {
+  return mapPaperPerformanceSnapshotForPolicyV3(row, ACTIVE_SNAPSHOT_POLICY) as PaperPerformanceSnapshotRowV3 | null;
+}
+
+export function mapPaperFinalPerformanceSnapshotV3(row: JsonRow): PaperFinalPerformanceSnapshotRowV3 | null {
+  return mapPaperPerformanceSnapshotForPolicyV3(row, FINAL_SNAPSHOT_POLICY) as PaperFinalPerformanceSnapshotRowV3 | null;
+}
+
+function basicVerifiedSnapshotParams(input: {
   userId: string;
   accountId: string;
-  performance: PaperPerformanceResultV3;
+  performance: Extract<PaperPerformanceResultV3 | PaperFinalPerformanceResultV3, { status: "VERIFIED" }>;
 }) {
   const userId = input.userId.trim();
   const accountId = input.accountId.trim();
   const performance = input.performance;
-  if (!userId || !accountId || performance.status !== "VERIFIED" || !performance.rankEligible) return null;
   if (
-    performance.policyVersion !== PAPER_PERFORMANCE_V3_POLICY_VERSION
-    || performance.pricingBasis !== "VERIFIED_MARK_TO_MARKET"
+    !userId
+    || !accountId
+    || !performance.rankEligible
     || performance.startingCash !== PAPER_TRADING_V3_FIXED_STARTING_CASH
     || !/^[A-Z]{3}$/.test(performance.baseCurrency)
     || !Number.isFinite(performance.cashValue)
@@ -192,9 +245,54 @@ export function toPaperPerformanceSnapshotRpcParamsV3(input: {
   } as const;
 }
 
+export function toPaperPerformanceSnapshotRpcParamsV3(input: {
+  userId: string;
+  accountId: string;
+  performance: PaperPerformanceResultV3;
+}) {
+  const performance = input.performance;
+  if (
+    performance.status !== "VERIFIED"
+    || !performance.rankEligible
+    || performance.policyVersion !== PAPER_PERFORMANCE_V3_POLICY_VERSION
+    || performance.pricingBasis !== "VERIFIED_MARK_TO_MARKET"
+  ) return null;
+  return basicVerifiedSnapshotParams({ ...input, performance });
+}
+
+export function toPaperFinalPerformanceSnapshotRpcParamsV3(input: {
+  userId: string;
+  accountId: string;
+  performance: PaperFinalPerformanceResultV3;
+}) {
+  const performance = input.performance;
+  if (
+    performance.status !== "VERIFIED"
+    || !performance.rankEligible
+    || performance.policyVersion !== PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION
+    || performance.pricingBasis !== PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS
+  ) return null;
+
+  const evaluatedMs = Date.parse(performance.evaluatedAt);
+  if (performance.oldestQuoteObservedAt) {
+    const observedMs = Date.parse(performance.oldestQuoteObservedAt);
+    if (
+      !Number.isFinite(observedMs)
+      || observedMs > evaluatedMs + 30_000
+      || evaluatedMs - observedMs > PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS
+    ) return null;
+  }
+
+  return basicVerifiedSnapshotParams({ ...input, performance });
+}
+
 function snapshotMatchesPerformance(
-  snapshot: PaperPerformanceSnapshotRowV3,
-  input: { userId: string; accountId: string; performance: Extract<PaperPerformanceResultV3, { status: "VERIFIED" }> },
+  snapshot: PaperComparablePerformanceSnapshotRowV3,
+  input: {
+    userId: string;
+    accountId: string;
+    performance: Extract<PaperPerformanceResultV3 | PaperFinalPerformanceResultV3, { status: "VERIFIED" }>;
+  },
 ): boolean {
   const performance = input.performance;
   return snapshot.userId === input.userId.trim()
@@ -240,6 +338,34 @@ export async function persistVerifiedPaperPerformanceSnapshotV3(input: {
     return { ok: true, snapshot };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "PAPER_PERFORMANCE_SNAPSHOT_WRITE_FAILED" };
+  }
+}
+
+export async function persistVerifiedPaperFinalPerformanceSnapshotV3(input: {
+  userId: string;
+  accountId: string;
+  performance: PaperFinalPerformanceResultV3;
+}): Promise<PaperFinalPerformanceSnapshotWriteResultV3> {
+  const params = toPaperFinalPerformanceSnapshotRpcParamsV3(input);
+  if (!params || input.performance.status !== "VERIFIED") {
+    return { ok: false, error: "PAPER_FINAL_PERFORMANCE_NOT_VERIFIED" };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const { data, error } = await supabase.rpc("record_paper_final_performance_snapshot_v3", params);
+    if (error) return { ok: false, error: error.message };
+    const raw = Array.isArray(data) ? data[0] : data;
+    const snapshot = raw && typeof raw === "object" ? mapPaperFinalPerformanceSnapshotV3(raw as JsonRow) : null;
+    if (!snapshot) return { ok: false, error: "PAPER_FINAL_PERFORMANCE_SNAPSHOT_INVALID_RESULT" };
+    if (!snapshotMatchesPerformance(snapshot, { ...input, performance: input.performance })) {
+      return { ok: false, error: "PAPER_FINAL_PERFORMANCE_SNAPSHOT_MISMATCH" };
+    }
+    return { ok: true, snapshot };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "PAPER_FINAL_PERFORMANCE_SNAPSHOT_WRITE_FAILED" };
   }
 }
 
