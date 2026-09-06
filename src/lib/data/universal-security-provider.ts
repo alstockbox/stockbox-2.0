@@ -444,5 +444,10 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<CoreAnalyzeResu
   if (securityType === "ETF/Fund") return analyzeEtfSecurity(args);
   const core = await analyzeOperatingCompany(args);
   if (!core.ok) return core;
-  return { ...core, data: await enrichInvestmentCompanyReport(core.data as UniversalSecurityReport, args.company) };
+  const report = await enrichInvestmentCompanyReport(core.data as UniversalSecurityReport, args.company);
+  return {
+    ...core,
+    data: report,
+    sources: report.sources,
+  };
 }
