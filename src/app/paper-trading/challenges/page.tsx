@@ -163,8 +163,16 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
                   </dl>
 
                   {joined ? (
-                    <div className="mt-5 rounded-lg border border-emerald-300/15 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-100">
-                      {sv ? "Du är redan registrerad i den här utmaningen." : "You are already registered for this challenge."}
+                    <div className="mt-5 space-y-3">
+                      <div className="rounded-lg border border-emerald-300/15 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-100">
+                        {sv ? "Du är redan registrerad i den här utmaningen." : "You are already registered for this challenge."}
+                      </div>
+                      <Link
+                        href={`/paper-trading/challenges/${encodeURIComponent(competition.id)}`}
+                        className="inline-flex h-10 w-full items-center justify-center rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 px-4 text-sm font-semibold text-[#f4efe5] transition hover:bg-[#b99b5f]/15"
+                      >
+                        {sv ? "Öppna challenge" : "Open challenge"}
+                      </Link>
                     </div>
                   ) : joinEnabled && !joinedCompetitionIds.has(competition.id) ? (
                     <form action={joinPaperChallengeAction} className="mt-5">
