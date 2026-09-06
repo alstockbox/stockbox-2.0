@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const migrationPath = "supabase/migrations/20260905223500_paper_competitions_v3.sql";
 const migration = existsSync(migrationPath) ? readFileSync(migrationPath, "utf8") : "";
+const accountsService = readFileSync("src/lib/paper-trading/accounts-v3.ts", "utf8");
 
 describe("Paper Trading V3 competition account foundation", () => {
   it("separates personal accounts from dedicated competition accounts", () => {
@@ -48,6 +49,10 @@ describe("Paper Trading V3 competition account foundation", () => {
   it("keeps personal account quota independent from competition accounts", () => {
     expect(migration).toContain("and account_type = 'personal'");
     expect(migration).toContain("values (p_user_id, v_name, v_currency, 100000, 'personal', null)");
+  });
+
+  it("keeps competition accounts out of the ordinary personal account list", () => {
+    expect(accountsService).toContain('.eq("account_type", "personal")');
   });
 
   it("rejects competition fills outside the official trading window", () => {
