@@ -134,6 +134,14 @@ export async function enrichFundamentalsWithEcbFcfYield(
   fundamentals: CompanyFundamentals,
   resolveContexts: FcfYieldFxContextResolver = resolveComparisonFxContexts,
 ): Promise<FxNormalizedCompanyFundamentals> {
-  void resolveContexts;
-  return fundamentals;
+  const reported = fundamentals.reportedValuation;
+  if (!reported) return fundamentals;
+
+  const enrichedValuation = await enrichProviderReportedValuationWithEcbFcfYield(reported, resolveContexts);
+  if (enrichedValuation === reported) return fundamentals;
+
+  return {
+    ...fundamentals,
+    reportedValuation: enrichedValuation,
+  };
 }
