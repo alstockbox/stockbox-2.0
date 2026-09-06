@@ -1,12 +1,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION } from "./final-performance-v3";
 import {
   derivePaperCompetitionLeaderboardV3,
   type PaperCompetitionLeaderboardEntryV3,
   type PaperCompetitionLeaderboardStandingV3,
 } from "./leaderboard-v3";
 import {
+  mapPaperFinalPerformanceSnapshotV3,
   mapPaperPerformanceSnapshotV3,
-  type PaperPerformanceSnapshotRowV3,
+  type PaperComparablePerformanceSnapshotRowV3,
 } from "./performance-repository-v3";
 import { PAPER_PERFORMANCE_V3_POLICY_VERSION } from "./performance-v3";
 
@@ -52,6 +54,12 @@ type CompetitionTerms = {
   startsAt: string;
   endsAt: string;
   maxParticipants: number;
+};
+
+type PaperCompetitionStandingsInputV3 = {
+  competitionId: string;
+  evaluationCutoff: string;
+  viewer: PaperCompetitionStandingsViewerV3;
 };
 
 function text(value: unknown): string | null {
@@ -208,10 +216,14 @@ async function loadExactCutoffSnapshots(
   competition: CompetitionTerms,
   evaluationCutoff: string,
   entries: readonly PaperCompetitionLeaderboardEntryV3[],
-): Promise<PaperPerformanceSnapshotRowV3[] | null> {
-  const snapshots: PaperPerformanceSnapshotRowV3[] = [];
+  expectedSnapshotPolicy: "active" | "final",
+): Promise<PaperComparablePerformanceSnapshotRowV3[] | null> {
+  const snapshots: PaperComparablePerformanceSnapshotRowV3[] = [];
   const seenSnapshotAccounts = new Set<string>();
   const cutoffMs = Date.parse(evaluationCutoff);
+  const expectedPolicyVersion = expectedSnapshotPolicy === "final"
+    ? PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION
+    : PAPER_PERFORMANCE_V3_POLICY_VERSION;
 
   for (let offset = 0; offset < entries.length; offset += PAPER_STANDINGS_V3_SNAPSHOT_CHUNK_SIZE) {
     const accountIds = entries
@@ -224,12 +236,14 @@ async function loadExactCutoffSnapshots(
       .select("id,account_id,user_id,base_currency,starting_cash,cash_value,positions_market_value,equity,profit_loss,return_percent,open_position_count,quote_count,evaluated_at,oldest_quote_observed_at,policy_version,pricing_basis,created_at")
       .eq("evaluated_at", evaluationCutoff)
       .eq("base_currency", competition.baseCurrency)
-      .eq("policy_version", PAPER_PERFORMANCE_V3_POLICY_VERSION)
+      .eq("policy_version", expectedPolicyVersion)
       .in("account_id", accountIds);
     if (error) return null;
 
     for (const rawRow of data ?? []) {
-      const snapshot = mapPaperPerformanceSnapshotV3(rawRow as JsonRow);
+      const snapshot = expectedSnapshotPolicy === "final"
+        ? mapPaperFinalPerformanceSnapshotV3(rawRow as JsonRow)
+        : mapPaperPerformanceSnapshotV3(rawRow as JsonRow);
       if (
         !snapshot
         || Date.parse(snapshot.evaluatedAt) !== cutoffMs
@@ -245,17 +259,13 @@ async function loadExactCutoffSnapshots(
 }
 
 /**
- * Loads the exact persisted evidence required by the pure leaderboard engine.
- * Public access is intentionally limited to challenges. Private leagues require
- * an authoritative private-league membership row for the requesting user before
- * any standings data is loaded. No quote fetching, FX conversion or performance
- * recomputation is allowed in this repository.
+ * Shared trusted standings loader. Snapshot policy is selected only by the
+ * server-side wrapper exports below and is never accepted from browser input.
  */
-export async function loadPaperCompetitionStandingsV3(input: {
-  competitionId: string;
-  evaluationCutoff: string;
-  viewer: PaperCompetitionStandingsViewerV3;
-}): Promise<PaperCompetitionStandingsLoadResultV3> {
+async function loadPaperCompetitionStandingsForPolicyV3(
+  input: PaperCompetitionStandingsInputV3,
+  expectedSnapshotPolicy: "active" | "final",
+): Promise<PaperCompetitionStandingsLoadResultV3> {
   const competitionId = identity(input.competitionId);
   const cutoffMs = Date.parse(input.evaluationCutoff);
   if (!competitionId || !Number.isFinite(cutoffMs)) {
@@ -288,6 +298,15 @@ export async function loadPaperCompetitionStandingsV3(input: {
     if (cutoffMs < Date.parse(competition.startsAt) || cutoffMs > Date.parse(competition.endsAt)) {
       return { ok: false, error: "PAPER_COMPETITION_STANDINGS_INVALID_INPUT", standings: [] };
     }
+    if (
+      expectedSnapshotPolicy === "final"
+      && (
+        competition.status !== "completed"
+        || Date.parse(competition.endsAt) !== cutoffMs
+      )
+    ) {
+      return { ok: false, error: "PAPER_COMPETITION_STANDINGS_INVALID_INPUT", standings: [] };
+    }
 
     if (competition.kind === "private_league") {
       if (input.viewer.scope !== "member") {
@@ -305,7 +324,13 @@ export async function loadPaperCompetitionStandingsV3(input: {
     const entries = await loadAllCompetitionEntries(supabase, competitionId, competition.maxParticipants);
     if (!entries) return { ok: false, error: "PAPER_COMPETITION_STANDINGS_INVALID_DATA", standings: [] };
 
-    const snapshots = await loadExactCutoffSnapshots(supabase, competition, evaluationCutoff, entries);
+    const snapshots = await loadExactCutoffSnapshots(
+      supabase,
+      competition,
+      evaluationCutoff,
+      entries,
+      expectedSnapshotPolicy,
+    );
     if (!snapshots) return { ok: false, error: "PAPER_COMPETITION_STANDINGS_INVALID_DATA", standings: [] };
 
     const leaderboard = derivePaperCompetitionLeaderboardV3({
@@ -332,4 +357,24 @@ export async function loadPaperCompetitionStandingsV3(input: {
   } catch {
     return { ok: false, error: "PAPER_COMPETITION_STANDINGS_LOAD_FAILED", standings: [] };
   }
+}
+
+/**
+ * Active/current standings use only the original 20-minute mark-to-market
+ * snapshot policy. Existing callers keep the same API and semantics.
+ */
+export async function loadPaperCompetitionStandingsV3(
+  input: PaperCompetitionStandingsInputV3,
+): Promise<PaperCompetitionStandingsLoadResultV3> {
+  return loadPaperCompetitionStandingsForPolicyV3(input, "active");
+}
+
+/**
+ * Final standings use only the explicit final snapshot policy. A final result is
+ * readable only for a completed competition at its exact authoritative endsAt.
+ */
+export async function loadPaperCompetitionFinalStandingsV3(
+  input: PaperCompetitionStandingsInputV3,
+): Promise<PaperCompetitionStandingsLoadResultV3> {
+  return loadPaperCompetitionStandingsForPolicyV3(input, "final");
 }
