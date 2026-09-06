@@ -6,6 +6,7 @@ import {
 } from "./ecb-fx";
 
 const MAX_FX_LAG_DAYS = 7;
+const PROVIDER_FCF_YIELD_FX_ID = "provider-fcf-yield";
 
 export type FxNormalizedProviderReportedValuation = ProviderReportedValuation & {
   freeCashFlowYield?: number | null;
@@ -97,6 +98,30 @@ export async function enrichProviderReportedValuationWithEcbFcfYield(
   reported: ProviderReportedValuation,
   resolveContexts: FcfYieldFxContextResolver = resolveComparisonFxContexts,
 ): Promise<FxNormalizedProviderReportedValuation> {
-  void resolveContexts;
-  return reported;
+  const marketCap = reported.marketCap;
+  const freeCashFlow = reported.freeCashFlow;
+  const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);
+  const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);
+  const valuationDate = reported.asOfDate?.slice(0, 10) ?? null;
+
+  if (
+    !Number.isFinite(marketCap)
+    || (marketCap ?? 0) <= 0
+    || !Number.isFinite(freeCashFlow)
+    || !marketCapCurrency
+    || !freeCashFlowCurrency
+    || marketCapCurrency === freeCashFlowCurrency
+    || !valuationDate
+  ) {
+    return reported;
+  }
+
+  const contexts = await resolveContexts([
+    { id: PROVIDER_FCF_YIELD_FX_ID, currency: freeCashFlowCurrency, date: valuationDate },
+  ], marketCapCurrency);
+
+  return deriveFxNormalizedProviderFcfYield(
+    reported,
+    contexts.get(PROVIDER_FCF_YIELD_FX_ID),
+  );
 }
