@@ -93,7 +93,10 @@ export function parseIndustrivardenOfficialBoardRoster(html: string): string[] |
   const directorPattern = /([\p{Lu}][\p{L}\p{M}.'’\-]+(?:\s+[\p{Lu}][\p{L}\p{M}.'’\-]+){1,4})\s*\((?:19|20)\d{2}\)/gu;
   let match: RegExpExecArray | null;
   while ((match = directorPattern.exec(boardText)) !== null) {
-    const name = match[1].trim().replace(/\s+/g, " ");
+    const name = match[1]
+      .trim()
+      .replace(/^Board\s+/u, "")
+      .replace(/\s+/g, " ");
     const normalized = normalizeDirectorName(name);
     if (!seen.has(normalized)) {
       names.push(name);
