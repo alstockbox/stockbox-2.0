@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS } from "@/lib/paper-trading/engine-v3";
+import { PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS } from "@/lib/paper-trading/final-performance-v3";
 import {
   fetchYahooFinalCutoffQuoteV3,
   parseYahooFinalCutoffQuoteV3,
@@ -84,9 +84,9 @@ describe("Paper Trading V3 final cutoff Yahoo quote", () => {
     expect(source.toLowerCase()).not.toContain("interpolat");
   });
 
-  it("fails closed when the latest genuine pre-cutoff bar is stale", () => {
+  it("fails closed when the latest genuine pre-cutoff bar is outside the final lookback", () => {
     const result = parseYahooFinalCutoffQuoteV3("AAPL", CUTOFF, payload({
-      timestamps: [second(cutoffMs - PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS - 1_000)],
+      timestamps: [second(cutoffMs - PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS - 1_000)],
       closes: [100],
     }));
 
@@ -161,7 +161,7 @@ describe("Paper Trading V3 final cutoff Yahoo quote", () => {
     const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(requested.pathname).toContain("/BRK-B");
     expect(requested.searchParams.get("interval")).toBe("1m");
-    expect(requested.searchParams.get("period1")).toBe(String(second(cutoffMs - PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS)));
+    expect(requested.searchParams.get("period1")).toBe(String(second(cutoffMs - PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS)));
     expect(requested.searchParams.get("period2")).toBe(String(second(cutoffMs) + 60));
     expect(requested.searchParams.has("range")).toBe(false);
     expect(result.observation.ticker).toBe("BRK.B");
