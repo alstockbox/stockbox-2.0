@@ -177,6 +177,7 @@ function classifyMissingStatus(
   }
   if (/invalid|impossible|non-finite/.test(reason)) return { status: "INVALID", diagnostics: [] };
   if (/specialized (?:reit|bank|insurer) data/.test(reason)) return { status: "PROVIDER_MISSING", diagnostics: [] };
+  if (/\bnot (?:separately )?reported\b/.test(reason)) return { status: "PROVIDER_MISSING", diagnostics: [] };
 
   const diagnostics = providerDiagnosticsForReason(reason, providerDiagnostics);
   for (const diagnostic of diagnostics) {
