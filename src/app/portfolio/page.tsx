@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AlertTriangle, BriefcaseBusiness, CalendarDays, Plus, Save, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { PortfolioAnalyzer } from "@/components/portfolio/portfolio-analyzer";
+import { PortfolioPurchaseForm } from "@/components/portfolio/portfolio-purchase-form";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -152,14 +153,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
   const feedback = params.limit
     ? copy.limit
     : params.error === "transaction_input"
-      ? (sv ? "Kontrollera antal, pris, datum, avgift och valuta." : "Check quantity, price, date, fee and currency.")
-      : params.error === "transaction_save"
-        ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
-        : params.error === "transaction_delete"
-          ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
-          : params.error
-            ? copy.error
-            : null;
+      ? (sv ? "Välj ett bolag från sökresultaten och kontrollera antal, pris, datum, avgift och valuta." : "Select a company from the search results and check quantity, price, date, fee and currency.")
+      : params.error === "holding_identity"
+        ? (sv ? "Bolaget kunde inte verifieras. Sök igen och välj rätt bolag från listan." : "The company could not be verified. Search again and select the correct company from the list.")
+        : params.error === "transaction_save"
+          ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
+          : params.error === "transaction_delete"
+            ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
+            : params.error
+              ? copy.error
+              : null;
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -198,19 +201,14 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
               <Card>
                 <h2 className="font-semibold">{sv ? "Registrera ett köp" : "Record a purchase"}</h2>
-                <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Flera köp i samma aktie sparas separat och räknas ihop till korrekt genomsnittligt inköpspris." : "Multiple purchases of the same stock are stored separately and combined into the correct average purchase price."}</p>
+                <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Sök efter bolaget och välj rätt aktie innan du registrerar köpet. Flera köp i samma aktie sparas separat och räknas ihop till korrekt genomsnittligt inköpspris." : "Search for the company and select the correct security before recording the purchase. Multiple purchases of the same stock are stored separately and combined into the correct average purchase price."}</p>
                 {portfolios.length ? (
-                  <form action={addHoldingAction} className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <select name="portfolioId" required aria-label={copy.portfolio} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3">
-                      {portfolios.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                    <input name="ticker" required maxLength={16} placeholder={copy.ticker} aria-label={copy.ticker} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3 uppercase" />
-                    <input name="quantity" required type="number" min="0.000001" step="any" placeholder={copy.quantity} aria-label={copy.quantity} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <input name="averageCost" required type="number" min="0" step="any" placeholder={sv ? "Pris per aktie" : "Price per share"} aria-label={sv ? "Pris per aktie" : "Price per share"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <input name="purchaseDate" required type="date" max={today} defaultValue={today} aria-label={sv ? "Inköpsdatum" : "Purchase date"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <div className="grid grid-cols-[1fr_1.2fr] gap-2"><input name="currency" required defaultValue="SEK" maxLength={3} pattern="[A-Za-z]{3}" aria-label={copy.currency} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3 uppercase" /><input name="fees" type="number" min="0" step="any" defaultValue="0" aria-label={sv ? "Avgift" : "Fee"} placeholder={sv ? "Avgift" : "Fee"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" /></div>
-                    <Button className="min-h-11 sm:col-span-2 xl:col-span-3"><Plus className="h-4 w-4" aria-hidden="true" />{sv ? "Lägg till köp" : "Add purchase"}</Button>
-                  </form>
+                  <PortfolioPurchaseForm
+                    portfolios={portfolios.map((item) => ({ id: item.id, name: item.name, baseCurrency: item.base_currency }))}
+                    locale={locale}
+                    today={today}
+                    action={addHoldingAction}
+                  />
                 ) : <p className="mt-3 text-sm text-[#9aa7b8]">{copy.createFirst}</p>}
               </Card>
             </div>
