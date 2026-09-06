@@ -1,7 +1,9 @@
 name: Growth Founder Voice Canary Once
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - canary/growth-voice-20260906-v1
 
 permissions:
   contents: read
@@ -67,7 +69,7 @@ jobs:
           with open('request.json', 'w', encoding='utf-8') as fh:
               json.dump(payload, fh, ensure_ascii=False)
           PY
-          http_code=$(curl --location --max-redirs 20 --silent --show-error \
+          http_code=$(curl --location --max-redirs 20 --max-time 420 --silent --show-error \
             -D response-headers.txt \
             -o founder-voice-canary.wav \
             -w '%{http_code}' \
