@@ -82,6 +82,40 @@ describe("Yahoo ETF holding fundamentals", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("query2.finance.yahoo.com");
   });
 
+  it("reuses a successful warm-instance snapshot for the same ticker", async () => {
+    const fetchMock = vi.fn(async () => yahooSummary({
+      financialData: {
+        revenueGrowth: { raw: 0.1 },
+        operatingMargins: { raw: 0.21 },
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const holding: EtfHolding = { ticker: "CACHE-UNIQUE", name: "Cached", weight: 0.05 };
+    const first = await fetchYahooEtfHoldingFundamentals(holding);
+    const second = await fetchYahooEtfHoldingFundamentals(holding);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (!first.ok || !second.ok) return;
+    expect(second.data).toEqual(first.data);
+    expect(second.source.url).toBe(first.source.url);
+  });
+
+  it("does not cache upstream failures", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({}) } as Response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const holding: EtfHolding = { ticker: "FAIL-UNIQUE", name: "Failure", weight: 0.05 };
+    const first = await fetchYahooEtfHoldingFundamentals(holding);
+    const second = await fetchYahooEtfHoldingFundamentals(holding);
+
+    expect(first.ok).toBe(false);
+    expect(second.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("fails closed when Yahoo returns no useful verified holding fields", async () => {
     const fetchMock = vi.fn(async () => yahooSummary({
       financialData: {
