@@ -315,9 +315,9 @@ function perHoldingQualityScore(holding: LookThroughHolding): number | null {
   if (isFiniteNumber(holding.stockBoxScore)) return clamp(holding.stockBoxScore, 0, 100);
   const growth = isFiniteNumber(holding.epsGrowth) ? holding.epsGrowth : holding.revenueGrowth;
   const components = [
-    scoreHigherIsBetter(holding.roic, 0.02, 0.2),
-    scoreHigherIsBetter(growth, -0.05, 0.15),
-    scoreHigherIsBetter(holding.operatingMargin, 0.04, 0.25),
+    scoreHigherIsBetter(holding.roic ?? null, 0.02, 0.2),
+    scoreHigherIsBetter(growth ?? null, -0.05, 0.15),
+    scoreHigherIsBetter(holding.operatingMargin ?? null, 0.04, 0.25),
   ].filter(isFiniteNumber);
   if (components.length < 2) return null;
   return components.reduce((sum, score) => sum + score, 0) / components.length;
@@ -537,10 +537,15 @@ function etfValuationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetr
 
 function etfDiversificationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
   const concentration = resolvedEtfConcentration(input, lookThrough);
+  const hasConcentrationEvidence = isFiniteNumber(concentration.holdingsHhi)
+    || isFiniteNumber(concentration.sectorHhi)
+    || isFiniteNumber(concentration.countryHhi);
+  if (!hasConcentrationEvidence) return null;
   const countScore = scoreByAnchors(input.numberOfHoldings ?? null, [[10, 20], [30, 50], [100, 80], [500, 95]]);
   const hhiScore = scoreByAnchors(concentration.holdingsHhi, [[0.02, 100], [0.05, 85], [0.1, 65], [0.2, 35], [0.4, 10]]);
   const sectorScore = scoreByAnchors(concentration.sectorHhi, [[0.1, 95], [0.2, 75], [0.4, 45], [0.7, 15]]);
-  const scores = [countScore, hhiScore, sectorScore].filter(isFiniteNumber);
+  const countryScore = scoreByAnchors(concentration.countryHhi, [[0.1, 95], [0.2, 75], [0.4, 45], [0.7, 15]]);
+  const scores = [countScore, hhiScore, sectorScore, countryScore].filter(isFiniteNumber);
   return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
 }
 
@@ -668,7 +673,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "diversification", label: "Diversification", weight: 0.12, value: input.holdingsHhi ?? lookThrough.holdingsHhi,
       score: diversification, status: isFiniteNumber(diversification) ? "available" : "missing",
-      rationale: "Diversification uses concentration mathematics only when the underlying allocation is sufficiently representative; holding count alone is not treated as full concentration evidence.",
+      rationale: "Diversification requires actual concentration evidence; holding count can refine a score but cannot establish coverage by itself.",
     },
     {
       key: "liquidity", label: "Liquidity / tradability", weight: 0.10, value: normalizeFraction(input.bidAskSpread),
