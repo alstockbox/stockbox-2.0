@@ -1,0 +1,98 @@
+name: One-off FCF basis GREEN patch
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - ".github/workflows/fcf-basis-green-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply exact FCF-basis patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          metrics_path = Path("src/lib/analysis/metrics.ts")
+          metrics = metrics_path.read_text()
+          old_metrics = '''  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
+            && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
+          const fcfFreshnessThreshold = input.trailingTwelveMonths
+            ? DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow
+            : DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow;
+          const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
+          const reportedWithVerifiedFx = reported as typeof reported & {
+            freeCashFlowYield?: number | null;
+            freeCashFlowYieldProvenance?: MetricProvenance;
+          };
+          '''
+          new_metrics = '''  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
+            && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
+          const reportedWithVerifiedFx = reported as typeof reported & {
+            freeCashFlowPeriodBasis?: MetricProvenance["periodBasis"];
+            freeCashFlowYield?: number | null;
+            freeCashFlowYieldProvenance?: MetricProvenance;
+          };
+          const fcfFreshnessThreshold = reportedWithVerifiedFx.freeCashFlowPeriodBasis === "FY"
+            ? DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow
+            : DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow;
+          const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
+          '''
+          if metrics.count(old_metrics) != 1:
+              raise SystemExit(f"Expected exactly one metrics block, found {metrics.count(old_metrics)}")
+          metrics_path.write_text(metrics.replace(old_metrics, new_metrics, 1))
+
+          test_path = Path("tests/analysis/provider-valuation-fallback.test.ts")
+          test = test_path.read_text()
+          old_test = '''    const { freeCashFlowPeriodBasis: _basis, ...valuationWithoutBasis } = annualFallbackFxValuation();
+          '''
+          new_test = '''    const valuationWithoutBasis = {
+              ...annualFallbackFxValuation(),
+              freeCashFlowPeriodBasis: undefined,
+            };
+          '''
+          if test.count(old_test) != 1:
+              raise SystemExit(f"Expected exactly one lint-cleanup block, found {test.count(old_test)}")
+          test_path.write_text(test.replace(old_test, new_test, 1))
+
+      - name: Verify patch diff
+        run: |
+          git diff --check
+          git diff -- src/lib/analysis/metrics.ts tests/analysis/provider-valuation-fallback.test.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted FCF tests
+        run: npx vitest run tests/analysis/provider-valuation-fallback.test.ts tests/data/yahoo-reported-valuation-fcf-fallback.test.ts tests/data/fcf-yield-fx.test.ts tests/data/provider-fcf-yield-wiring.test.ts
+
+      - name: Commit verified patch
+        run: |
+          git config user.name "alstockbox"
+          git config user.email "alwatchbox@gmail.com"
+          git add src/lib/analysis/metrics.ts tests/analysis/provider-valuation-fallback.test.ts
+          git diff --cached --check
+          git commit -m "fix: use explicit provider FCF basis for freshness"
+          git push origin HEAD:fix/coverage-engine-root-cause
