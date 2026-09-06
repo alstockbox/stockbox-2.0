@@ -55,7 +55,7 @@ function timestamp(value: unknown): string | null {
 }
 
 /**
- * Claims one DB-owned competition valuation window. No caller-controlled clock,
+ * Claims one DB-owned challenge valuation window. No caller-controlled clock,
  * cooldown or lease duration is accepted here; those invariants live in the
  * service-role-only database RPC.
  */
@@ -72,6 +72,73 @@ export async function claimPaperCompetitionValuationV3(
 
   try {
     const { data, error } = await supabase.rpc("claim_paper_competition_valuation_v3", {
+      p_competition_id: competitionId,
+    });
+    if (error) return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_FAILED" };
+
+    const raw = Array.isArray(data) ? data[0] : data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    const row = raw as JsonRow;
+    const claimed = row.claimed;
+    const claimedAt = timestamp(row.claimed_at);
+    const leaseToken = row.lease_token === null ? null : text(row.lease_token);
+    const leaseExpiresAt = row.lease_expires_at === null ? null : timestamp(row.lease_expires_at);
+    if (!claimedAt || (claimed !== true && claimed !== false)) {
+      return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    if (claimed === false) {
+      if (leaseToken === null && leaseExpiresAt === null) {
+        return {
+          ok: true,
+          claim: { claimed: false, leaseToken: null, claimedAt, leaseExpiresAt: null },
+        };
+      }
+      return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    if (claimed === true) {
+      if (
+        leaseToken
+        && UUID_PATTERN.test(leaseToken)
+        && leaseExpiresAt
+        && Date.parse(leaseExpiresAt) > Date.parse(claimedAt)
+      ) {
+        return {
+          ok: true,
+          claim: { claimed: true, leaseToken, claimedAt, leaseExpiresAt },
+        };
+      }
+      return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
+  } catch {
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_FAILED" };
+  }
+}
+
+/**
+ * Claims one DB-owned private-league valuation window. The private RPC owns the
+ * competition-kind check while this adapter keeps the same strict result shape
+ * as the challenge path and accepts only the competition id.
+ */
+export async function claimPrivatePaperLeagueValuationV3(
+  competitionIdInput: string,
+): Promise<PaperCompetitionValuationClaimResultV3> {
+  const competitionId = competitionIdInput.trim();
+  if (!UUID_PATTERN.test(competitionId)) {
+    return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_INPUT" };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const { data, error } = await supabase.rpc("claim_private_paper_league_valuation_v3", {
       p_competition_id: competitionId,
     });
     if (error) return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_FAILED" };
