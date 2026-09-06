@@ -1,10 +1,12 @@
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import {
   runPaperCompetitionCommonValuationAtV3,
+  runPrivatePaperLeagueCommonValuationAtV3,
   type PaperCompetitionCommonValuationResultV3,
 } from "./competition-valuation-v3";
 import {
   claimPaperCompetitionValuationV3,
+  claimPrivatePaperLeagueValuationV3,
   completePaperCompetitionValuationV3,
   type PaperCompetitionValuationCompletionOutcomeV3,
 } from "./valuation-lease-repository-v3";
@@ -28,6 +30,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 function valuationEnabled(): boolean {
   return isFeatureEnabled("paperTrading")
     && isFeatureEnabled("challenges")
+    && isFeatureEnabled("leaderboards");
+}
+
+function privateLeagueValuationEnabled(): boolean {
+  return isFeatureEnabled("paperTrading")
+    && isFeatureEnabled("privateLeagues")
     && isFeatureEnabled("leaderboards");
 }
 
@@ -69,6 +77,78 @@ export async function runPaperCompetitionValuationServiceV3(
   const competitionId = input.competitionId.trim();
   if (!UUID_PATTERN.test(competitionId)) return { status: "INVALID_INPUT" };
   if (!valuationEnabled()) return { status: "DISABLED" };
+  if (isKilled("paperTrading") || isKilled("backgroundJobs")) return { status: "KILLED" };
+
+  let claimResult: Awaited<ReturnType<PaperCompetitionValuationServiceDependenciesV3["claimValuation"]>>;
+  try {
+    claimResult = await dependencies.claimValuation(competitionId);
+  } catch {
+    return { status: "ERROR" };
+  }
+  if (!claimResult.ok) return { status: "ERROR" };
+  if (!claimResult.claim.claimed) return { status: "THROTTLED" };
+
+  const claimedAtMs = Date.parse(claimResult.claim.claimedAt);
+  if (!Number.isFinite(claimedAtMs)) return { status: "ERROR" };
+
+  const completionEvidence = {
+    competitionId,
+    leaseToken: claimResult.claim.leaseToken,
+    evaluationCutoff: claimResult.claim.claimedAt,
+  };
+
+  let valuation: PaperCompetitionCommonValuationResultV3;
+  try {
+    valuation = await dependencies.runValuationAt({
+      competitionId,
+      serverNow: new Date(claimedAtMs),
+    });
+  } catch {
+    await completeGrantedLease(dependencies, {
+      ...completionEvidence,
+      outcome: "error",
+    });
+    return { status: "ERROR" };
+  }
+
+  if (valuation.status === "VERIFIED" && valuation.evaluationCutoff !== claimResult.claim.claimedAt) {
+    await completeGrantedLease(dependencies, {
+      ...completionEvidence,
+      outcome: "error",
+    });
+    return { status: "ERROR" };
+  }
+
+  const outcome: PaperCompetitionValuationCompletionOutcomeV3 = valuation.status === "VERIFIED"
+    ? "verified"
+    : "unavailable";
+  const completed = await completeGrantedLease(dependencies, {
+    ...completionEvidence,
+    outcome,
+  });
+  if (!completed) return { status: "ERROR" };
+
+  return valuation;
+}
+
+/**
+ * Internal-only private-league valuation boundary. The caller supplies only a
+ * competition id; the dedicated private-league claim RPC establishes the sole
+ * authoritative cutoff before any provider work. Terminal completion uses the
+ * same exact lease evidence as challenges, while feature authority remains
+ * private-league-specific.
+ */
+export async function runPrivatePaperLeagueValuationServiceV3(
+  input: { competitionId: string },
+  dependencies: PaperCompetitionValuationServiceDependenciesV3 = {
+    claimValuation: claimPrivatePaperLeagueValuationV3,
+    completeValuation: completePaperCompetitionValuationV3,
+    runValuationAt: runPrivatePaperLeagueCommonValuationAtV3,
+  },
+): Promise<PaperCompetitionValuationServiceResultV3> {
+  const competitionId = input.competitionId.trim();
+  if (!UUID_PATTERN.test(competitionId)) return { status: "INVALID_INPUT" };
+  if (!privateLeagueValuationEnabled()) return { status: "DISABLED" };
   if (isKilled("paperTrading") || isKilled("backgroundJobs")) return { status: "KILLED" };
 
   let claimResult: Awaited<ReturnType<PaperCompetitionValuationServiceDependenciesV3["claimValuation"]>>;
