@@ -59,6 +59,9 @@ export type PaperChallengeWorkspaceResultV3 =
 
 type JsonRow = Record<string, unknown>;
 
+const PAPER_COMPETITION_ID_CHUNK_SIZE = 100;
+const PAPER_COMPETITION_SELECT = "id,name,kind,status,base_currency,starting_cash,starts_at,join_deadline,ends_at,max_participants,created_at,updated_at";
+
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -152,7 +155,7 @@ export async function listOpenPaperChallengesV3(now = new Date()): Promise<Paper
   try {
     const { data, error } = await supabase
       .from("paper_competitions_v3")
-      .select("id,name,kind,status,base_currency,starting_cash,starts_at,join_deadline,ends_at,max_participants,created_at,updated_at")
+      .select(PAPER_COMPETITION_SELECT)
       .eq("kind", "challenge")
       .eq("status", "open")
       .gt("join_deadline", nowIso)
@@ -204,6 +207,61 @@ export async function listPaperCompetitionEntriesV3(userId: string): Promise<Pap
   }
 }
 
+export async function listJoinedPaperChallengesV3(userId: string): Promise<PaperCompetitionListResultV3> {
+  const normalizedUserId = normalizeIdentity(userId);
+  if (!normalizedUserId) return { ok: false, error: "PAPER_USER_ID_REQUIRED", competitions: [] };
+
+  const entriesResult = await listPaperCompetitionEntriesV3(normalizedUserId);
+  if (!entriesResult.ok) {
+    return { ok: false, error: "PAPER_JOINED_CHALLENGE_LIST_INVALID", competitions: [] };
+  }
+
+  const competitionIds = [...new Set(entriesResult.entries.map((entry) => entry.competitionId))];
+  if (competitionIds.length === 0) return { ok: true, competitions: [] };
+
+  const requestedCompetitionIds = new Set(competitionIds);
+  const seenCompetitionIds = new Set<string>();
+  const competitions: PaperCompetitionV3[] = [];
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED", competitions: [] };
+
+  try {
+    for (let index = 0; index < competitionIds.length; index += PAPER_COMPETITION_ID_CHUNK_SIZE) {
+      const chunk = competitionIds.slice(index, index + PAPER_COMPETITION_ID_CHUNK_SIZE);
+      const { data, error } = await supabase
+        .from("paper_competitions_v3")
+        .select(PAPER_COMPETITION_SELECT)
+        .in("id", chunk)
+        .eq("kind", "challenge");
+      if (error) return { ok: false, error: error.message, competitions: [] };
+
+      for (const row of data ?? []) {
+        const competition = mapCompetition(row as JsonRow);
+        if (
+          !competition
+          || competition.kind !== "challenge"
+          || seenCompetitionIds.has(competition.id)
+          || !requestedCompetitionIds.has(competition.id)
+        ) return { ok: false, error: "PAPER_JOINED_CHALLENGE_LIST_INVALID", competitions: [] };
+        seenCompetitionIds.add(competition.id);
+        competitions.push(competition);
+      }
+    }
+
+    competitions.sort((left, right) => {
+      const byStart = Date.parse(right.startsAt) - Date.parse(left.startsAt);
+      return byStart !== 0 ? byStart : left.id.localeCompare(right.id);
+    });
+    return { ok: true, competitions };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "PAPER_JOINED_CHALLENGE_LIST_FAILED",
+      competitions: [],
+    };
+  }
+}
+
 export async function loadPaperChallengeWorkspaceV3(
   userId: string,
   competitionId: string,
@@ -220,7 +278,7 @@ export async function loadPaperChallengeWorkspaceV3(
   try {
     const competitionResult = await supabase
       .from("paper_competitions_v3")
-      .select("id,name,kind,status,base_currency,starting_cash,starts_at,join_deadline,ends_at,max_participants,created_at,updated_at")
+      .select(PAPER_COMPETITION_SELECT)
       .eq("id", normalizedCompetitionId)
       .maybeSingle();
     if (competitionResult.error) return { ok: false, error: competitionResult.error.message };
