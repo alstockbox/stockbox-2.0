@@ -66,6 +66,50 @@ describe("provider-reported valuation fallback", () => {
     }));
     expect(result.metrics.valuation.freeCashFlowYield).toBeCloseTo(0.1, 5);
   });
+
+  it("uses an explicit ECB-normalized provider FCF yield without rewriting the raw currencies", () => {
+    const result = analyzeFinancials(inputWithMarket({
+      marketCap: 1_000,
+      marketCapCurrency: "EUR",
+      freeCashFlow: 100,
+      freeCashFlowCurrency: "USD",
+      freeCashFlowDate: "2026-06-30",
+      freeCashFlowYield: 0.086,
+      freeCashFlowYieldProvenance: {
+        source: "ECB foreign exchange reference rates",
+        provider: "ecb",
+        valueKind: "derived",
+        periodEnd: "2026-08-27",
+        inputs: [
+          "providerReportedFreeCashFlow:USD",
+          "providerReportedMarketCap:EUR",
+          "ecbRateDate:2026-08-27",
+        ],
+        note: "Provider free cash flow converted from USD to EUR at the dated ECB reference rate before division by provider market cap.",
+      },
+    }));
+
+    expect(result.metrics.valuation.freeCashFlowYield).toBeCloseTo(0.086, 8);
+    expect(result.metrics.provenance.freeCashFlowYield).toMatchObject({
+      source: "ECB foreign exchange reference rates",
+      provider: "ecb",
+      valueKind: "derived",
+      periodEnd: "2026-08-27",
+    });
+  });
+
+  it("does not trust a cross-currency precomputed FCF yield without explicit FX provenance", () => {
+    const result = analyzeFinancials(inputWithMarket({
+      marketCap: 1_000,
+      marketCapCurrency: "EUR",
+      freeCashFlow: 100,
+      freeCashFlowCurrency: "USD",
+      freeCashFlowDate: "2026-06-30",
+      freeCashFlowYield: 0.086,
+    }));
+    expect(result.metrics.valuation.freeCashFlowYield).toBeNull();
+  });
+
   it("refuses stale provider valuation ratios", () => {
     const result = analyzeFinancials(inputWithMarket({ asOfDate: "2025-01-01" }));
     expect(result.metrics.valuation.priceEarnings).toBeNull();
