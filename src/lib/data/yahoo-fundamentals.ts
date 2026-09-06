@@ -46,13 +46,59 @@ function appendUniqueDiagnostics(
   };
 }
 
+function alignReportedValuationFcfWithAnnualFallback(
+  fundamentals: CompanyFundamentals,
+): CompanyFundamentals {
+  const reported = fundamentals.reportedValuation;
+  const flowDate = fundamentals.diagnostics?.financialFlowPeriodEnd ?? null;
+  if (
+    !reported
+    || fundamentals.trailingTwelveMonths
+    || fundamentals.diagnostics?.financialFlowPeriodBasis !== "FY"
+    || !flowDate
+    || Number.isFinite(reported.freeCashFlow)
+  ) {
+    return fundamentals;
+  }
+
+  const period = fundamentals.annualPeriods?.find((item) => item.periodEndDate === flowDate);
+  const freeCashFlow = period?.freeCashFlow;
+  const provenance = period?.provenance?.freeCashFlow;
+  const periodCurrency = period?.currency?.trim().toUpperCase() ?? null;
+  const provenanceCurrency = provenance?.unit?.trim().toUpperCase() ?? null;
+
+  if (
+    !period
+    || period.periodBasis !== "FY"
+    || !Number.isFinite(freeCashFlow)
+    || provenance?.valueKind !== "reported"
+    || provenance.provider !== "yahoo-fundamentals"
+    || !periodCurrency
+    || !provenanceCurrency
+    || periodCurrency !== provenanceCurrency
+  ) {
+    return fundamentals;
+  }
+
+  return {
+    ...fundamentals,
+    reportedValuation: {
+      ...reported,
+      freeCashFlow: freeCashFlow as number,
+      freeCashFlowCurrency: periodCurrency,
+      freeCashFlowDate: flowDate,
+    },
+  };
+}
+
 export async function fetchYahooFundamentalsResult(
   company: CompanySearchResult,
 ): Promise<AdapterResult<CompanyFundamentals>> {
   const core = await fetchCoreYahooFundamentalsResult(company);
   if (!core.ok) return core;
 
-  const enrichment = await enrichSpecializedFundamentals(company, core.data);
+  const aligned = alignReportedValuationFcfWithAnnualFallback(core.data);
+  const enrichment = await enrichSpecializedFundamentals(company, aligned);
   return {
     ...core,
     data: appendUniqueDiagnostics(
