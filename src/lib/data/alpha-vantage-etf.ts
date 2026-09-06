@@ -166,7 +166,7 @@ export async function fetchAlphaVantageEtfData(
       return {
         ok: false,
         message: `Alpha Vantage ETF profile returned HTTP ${response.status}.`,
-        diagnostic: diagnostic("unavailable", `http_${response.status}`),
+        diagnostic: diagnostic("unavailable", response.status === 429 ? "rate_limited" : `http_${response.status}`),
       };
     }
     const payload = await response.json().catch(() => null);
@@ -175,7 +175,7 @@ export async function fetchAlphaVantageEtfData(
       return {
         ok: false,
         message: "Alpha Vantage ETF profile is rate-limited or unavailable for this key.",
-        diagnostic: diagnostic("rate_limited", "provider_rate_limit_or_information_response"),
+        diagnostic: diagnostic("unavailable", "rate_limited"),
       };
     }
     const input = parseAlphaVantageEtfProfile(payload, company);
