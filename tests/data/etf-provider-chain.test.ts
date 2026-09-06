@@ -66,6 +66,12 @@ const alphaAvailable = {
   },
 };
 
+const yahooUnavailable = {
+  ok: false as const,
+  message: "Yahoo ETF metadata unavailable",
+  diagnostic: diagnostic("Yahoo ETF", "unavailable"),
+};
+
 describe("ETF specialist provider chain", () => {
   it("does not call Alpha Vantage when no API key is configured", async () => {
     const yahoo = vi.fn(async () => yahooAvailable);
@@ -100,11 +106,6 @@ describe("ETF specialist provider chain", () => {
   });
 
   it("uses Alpha Vantage as a full specialist fallback when Yahoo ETF metadata is unavailable", async () => {
-    const yahooUnavailable = {
-      ok: false as const,
-      message: "Yahoo ETF metadata unavailable",
-      diagnostic: diagnostic("Yahoo ETF", "unavailable"),
-    };
     const yahoo = vi.fn(async () => yahooUnavailable);
     const alphaVantage = vi.fn(async () => alphaAvailable);
 
@@ -117,6 +118,22 @@ describe("ETF specialist provider chain", () => {
     expect(result.data.sources.map((item) => item.provider)).toEqual(["alpha-vantage-etf"]);
     expect(result.data.diagnostics.map((item) => item.provider)).toEqual(["Yahoo ETF", "Alpha ETF"]);
     expect(result.data.warnings.join(" ")).toContain("Yahoo ETF metadata unavailable");
+  });
+
+  it.each([
+    ["BND", "Vanguard Total Bond Market ETF", "bond_etf"],
+    ["GLD", "SPDR Gold Shares Commodity ETF", "commodity_etf"],
+    ["TQQQ", "ProShares UltraPro QQQ 3x Leveraged ETF", "leveraged_inverse_etf"],
+  ] as const)("preserves %s specialist subtype when Alpha is the only available ETF provider", async (ticker, name, expectedSubtype) => {
+    const alphaOnlyCompany: CompanySearchResult = { ticker, name, securityType: "ETF/Fund" };
+    const yahoo = vi.fn(async () => yahooUnavailable);
+    const alphaVantage = vi.fn(async () => alphaAvailable);
+
+    const result = await fetchEtfProviderChain(alphaOnlyCompany, "alpha-key", { yahoo, alphaVantage });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.input.subtype).toBe(expectedSubtype);
   });
 
   it("does not spend an Alpha Vantage call when Yahoo already covers every field Alpha can enrich", async () => {
