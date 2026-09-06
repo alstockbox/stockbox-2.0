@@ -103,6 +103,33 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
   };
 }
 
+function officialNavSuccess(navAsOf = "2026-09-05") {
+  return {
+    ok: true as const,
+    data: {
+      reportedNav: 600_000_000_000,
+      reportedNavPerShare: 200,
+      navAsOf,
+      source: {
+        name: "Investor AB official NAV disclosure",
+        url: "https://example.com/investor-nav",
+        accessedAt: observedAt,
+        freshness: "official fixture",
+        provider: "official-investment-company-nav",
+        capability: "specialized" as const,
+        dataAsOf: navAsOf,
+        version: "official-investment-company-nav-v2",
+      },
+      diagnostic: {
+        provider: "Official investment-company NAV",
+        capability: "specialized" as const,
+        status: "available" as const,
+        observedAt,
+      },
+    },
+  };
+}
+
 describe("investment-company official NAV production wiring", () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
@@ -113,30 +140,7 @@ describe("investment-company official NAV production wiring", () => {
       sources: report.sources,
       warnings: [],
     });
-    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValue({
-      ok: true,
-      data: {
-        reportedNav: 600_000_000_000,
-        reportedNavPerShare: 200,
-        navAsOf: "2026-09-05",
-        source: {
-          name: "Investor AB official NAV disclosure",
-          url: "https://example.com/investor-nav",
-          accessedAt: observedAt,
-          freshness: "official fixture",
-          provider: "official-investment-company-nav",
-          capability: "specialized",
-          dataAsOf: "2026-09-05",
-          version: "official-investment-company-nav-v2",
-        },
-        diagnostic: {
-          provider: "Official investment-company NAV",
-          capability: "specialized",
-          status: "available",
-          observedAt,
-        },
-      },
-    });
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValue(officialNavSuccess());
   });
 
   it("uses verified official NAV/share in the investment-company model and preserves the 99% No Rating gate", async () => {
@@ -169,6 +173,46 @@ describe("investment-company official NAV production wiring", () => {
     expect(result.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
     expect(report.providerDiagnostics?.some((item) => item.provider === "Official investment-company NAV" && item.status === "available")).toBe(true);
     expect(report.dataCoverage).toBeLessThan(0.99);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("accepts official NAV that is exactly 120 days older than the market price", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2026-05-08"));
+
+    const result = await analyzeCompany({
+      company: { ticker: "INVE-B.ST", name: "Investor AB", securityType: "Common Stock" },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const analysis = (result.data as UniversalSecurityReport).securityAnalysis?.investmentCompany;
+    expect(analysis?.nav.source).toBe("reported_nav_per_share");
+    expect(analysis?.score.factors.find((factor) => factor.key === "nav_valuation")?.status).toBe("available");
+  });
+
+  it("keeps stale official NAV as provenance but excludes it from NAV valuation coverage", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2026-05-07"));
+
+    const result = await analyzeCompany({
+      company: { ticker: "INVE-B.ST", name: "Investor AB", securityType: "Common Stock" },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const analysis = report.securityAnalysis?.investmentCompany;
+    const navFactor = analysis?.score.factors.find((factor) => factor.key === "nav_valuation");
+
+    expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
+    expect(analysis?.nav.source).toBe("unavailable");
+    expect(analysis?.nav.perShare).toBeNull();
+    expect(navFactor?.status).toBe("missing");
+    expect(report.score.missingData.some((item) => /official nav/i.test(item) && /stale|120 days/i.test(item))).toBe(true);
     expect(report.recommendation).toBe("No Rating");
   });
 
