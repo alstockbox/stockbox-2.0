@@ -270,7 +270,7 @@ function syncLegacyAnnual(
     if (annual.interestExpense !== null || !annual.periodEndDate) return annual;
     const period = periodsByDate.get(annual.periodEndDate);
     const interestProvenance = period?.provenance?.interestExpense;
-    if (!period || period.interestExpense === null || !interestProvenance) return annual;
+    if (!period || typeof period.interestExpense !== "number" || !interestProvenance) return annual;
     return {
       ...annual,
       interestExpense: period.interestExpense,
