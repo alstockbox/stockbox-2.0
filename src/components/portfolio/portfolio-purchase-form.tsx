@@ -98,12 +98,15 @@ export function PortfolioPurchaseForm({ portfolios, locale, today, action }: Pro
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7f8b9b]" aria-hidden="true" />
             <input
               id="portfolio-company-search"
+              role="combobox"
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
               autoComplete="off"
               placeholder={sv ? "Sök t.ex. Investor, Volvo, Apple eller AAPL" : "Search e.g. Investor, Volvo, Apple or AAPL"}
               aria-autocomplete="list"
+              aria-controls="portfolio-company-search-results"
               aria-expanded={companies.length > 0}
+              aria-haspopup="listbox"
               className="h-12 w-full rounded-lg border border-white/15 bg-[#07111f] pl-10 pr-3 text-sm text-[#f4efe5] outline-none ring-[#e1cb95]/50 placeholder:text-[#6f7b8c] focus:ring-2"
             />
           </div>
@@ -111,7 +114,7 @@ export function PortfolioPurchaseForm({ portfolios, locale, today, action }: Pro
           {searching ? <p className="mt-1.5 text-xs text-[#9aa7b8]">{sv ? "Söker bolag…" : "Searching companies…"}</p> : null}
 
           {companies.length ? (
-            <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-white/12 bg-[#07111f] p-1 shadow-2xl shadow-black/40" role="listbox">
+            <div id="portfolio-company-search-results" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-white/12 bg-[#07111f] p-1 shadow-2xl shadow-black/40" role="listbox">
               {companies.slice(0, 7).map((company) => (
                 <button
                   key={`${company.securityId ?? ""}-${displayTicker(company)}-${company.exchange ?? ""}`}
