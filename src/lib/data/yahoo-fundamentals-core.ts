@@ -10,6 +10,7 @@ import type {
   SpecializedCompanyData,
   SpecializedMetric,
 } from "@/lib/analysis/types";
+import { deriveYahooInterestExpenseFromFacts } from "./yahoo-interest-expense-enrichment";
 import { inferSecurityType } from "./security-classification";
 import {
   providerDiagnostic,
@@ -61,7 +62,8 @@ type YahooMetadata = {
 const FLOW_FIELDS = [
   "TotalRevenue", "CostOfRevenue", "GrossProfit", "TotalOperatingIncomeAsReported", "OperatingIncome", "EBITDA", "NetIncome",
   "NetIncomeCommonStockholders", "DilutedNIAvailtoComStockholders", "DilutedEPS",
-  "OperatingCashFlow", "FreeCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "InterestExpenseNonOperating", "PretaxIncome",
+  "OperatingCashFlow", "FreeCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "InterestExpenseNonOperating",
+  "InterestIncomeNonOperating", "NetNonOperatingInterestIncomeExpense", "PretaxIncome",
   "TaxProvision", "CashDividendsPaid", "StockBasedCompensation", "ResearchAndDevelopment",
   "DilutedAverageShares",
 ] as const;
@@ -281,6 +283,22 @@ function buildPeriod(
     metricProvenance[output] = provenance(fact);
     return fact.value;
   };
+  const directInterestExpenseFact = atDate(values, `${flowPrefix}InterestExpense`, flowDate)
+    ?? atDate(values, `${flowPrefix}InterestExpenseNonOperating`, flowDate);
+  let interestExpense = directInterestExpenseFact?.value ?? null;
+  if (directInterestExpenseFact) metricProvenance.interestExpense = provenance(directInterestExpenseFact);
+  if (interestExpense === null) {
+    const derivedInterestExpense = deriveYahooInterestExpenseFromFacts(values, {
+      prefix: flowPrefix,
+      date: flowDate,
+      periodCurrency: currency.currency,
+      periodBasis: flowPrefix === "trailing" ? "TTM_REPORTED" : "FY",
+    });
+    if (derivedInterestExpense) {
+      interestExpense = derivedInterestExpense.value;
+      metricProvenance.interestExpense = derivedInterestExpense.provenance;
+    }
+  }
   const capitalExpenditureFact = atDate(values, `${flowPrefix}CapitalExpenditure`, flowDate);
   const purchaseOfPpeFact = atDate(values, `${flowPrefix}PurchaseOfPPE`, flowDate);
   const capexFact = capitalExpenditureFact ?? purchaseOfPpeFact;
@@ -384,7 +402,7 @@ function buildPeriod(
     operatingCashFlow,
     capitalExpenditures: normalizedCapex(capexFact),
     freeCashFlow: freeCashFlowFact?.value ?? null,
-    interestExpense: flow("InterestExpense", "interestExpense") ?? flow("InterestExpenseNonOperating", "interestExpense"),
+    interestExpense,
     pretaxIncome: flow("PretaxIncome", "pretaxIncome"),
     incomeTaxExpense: flow("TaxProvision", "incomeTaxExpense"),
     dividendsPaid: dividendFact ? Math.abs(dividendFact.value) : null,
