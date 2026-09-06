@@ -285,6 +285,26 @@ function hasOperatingAssetManagerFinancialSignature(input: FinancialAnalysisInpu
   return operatingLike.length >= 2;
 }
 
+function hasDecisiveInvestmentHoldingOverride(input: FinancialAnalysisInput): boolean {
+  const periods = [...input.annualPeriods].filter((period) => period.fiscalYear !== undefined || period.periodEndDate).slice(-3);
+  if (periods.length < 2) return false;
+  const decisive = periods.filter((period) => {
+    if (
+      !isFiniteNumber(period.revenue)
+      || !isFiniteNumber(period.netIncome)
+      || !isFiniteNumber(period.totalAssets)
+      || !isFiniteNumber(period.totalEquity)
+      || period.totalAssets <= 0
+    ) return false;
+    const stronglyEquityHeavy = period.totalEquity / period.totalAssets >= 0.8;
+    const netIncomeExceedsRevenue = Math.abs(period.netIncome) >= Math.max(Math.abs(period.revenue), 1);
+    const lowOperatingCashConversion = !isFiniteNumber(period.operatingCashFlow)
+      || Math.abs(period.operatingCashFlow) <= Math.abs(period.netIncome) * 0.25;
+    return stronglyEquityHeavy && netIncomeExceedsRevenue && lowOperatingCashConversion;
+  });
+  return decisive.length >= 2;
+}
+
 function hasConventionalOperatingFinancialSignature(input: FinancialAnalysisInput): boolean {
   const diagnostics = input.company.classificationDiagnostics;
   if (diagnostics?.source !== "fallback" || diagnostics.ambiguous || diagnostics.confidence > 0.35) return false;
@@ -344,7 +364,11 @@ export function resolveFinancialClassificationDiagnostics(input: FinancialAnalys
 export function resolveFinancialArchetype(input: FinancialAnalysisInput): AnalysisArchetype {
   const base = resolveArchetype(input.company);
   if (base === "pre_revenue_biotech") return base;
-  if (base === "asset_manager" && hasOperatingAssetManagerFinancialSignature(input)) return base;
+  if (
+    base === "asset_manager"
+    && hasOperatingAssetManagerFinancialSignature(input)
+    && !hasDecisiveInvestmentHoldingOverride(input)
+  ) return base;
   if ((base === "unknown" || base === "asset_manager") && hasInvestmentHoldingFinancialSignature(input)) return "holding_company";
   if (base === "unknown" && hasConfidentUnresolvedSpecialistStop(input)) return base;
   if (base === "unknown" && hasOperatingAssetManagerFinancialSignature(input)) return "asset_manager";
