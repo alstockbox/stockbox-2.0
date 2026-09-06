@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const migrationPath = path.join(process.cwd(), "supabase/migrations/20260905224900_paper_final_performance_snapshots_v3.sql");
 const migration = fs.existsSync(migrationPath) ? fs.readFileSync(migrationPath, "utf8") : "";
+const finalPerformancePolicy = fs.readFileSync("src/lib/paper-trading/final-performance-v3.ts", "utf8");
 const performanceRepository = fs.readFileSync("src/lib/paper-trading/performance-repository-v3.ts", "utf8");
 const standingsRepository = fs.readFileSync("src/lib/paper-trading/standings-repository-v3.ts", "utf8");
 
@@ -49,7 +50,8 @@ describe("Paper Trading V3 final snapshot persistence and standings authority", 
     expect(performanceRepository).toContain("persistVerifiedPaperFinalPerformanceSnapshotV3");
     expect(performanceRepository).toContain("PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION");
     expect(performanceRepository).toContain("PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS");
-    expect(performanceRepository).toContain("VERIFIED_LAST_TRADE_AT_OR_BEFORE_CUTOFF");
+    expect(performanceRepository).toContain("PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS");
+    expect(finalPerformancePolicy).toContain('PAPER_FINAL_PERFORMANCE_V3_PRICING_BASIS = "VERIFIED_LAST_TRADE_AT_OR_BEFORE_CUTOFF"');
     expect(performanceRepository).toContain('supabase.rpc("record_paper_final_performance_snapshot_v3", params)');
   });
 
