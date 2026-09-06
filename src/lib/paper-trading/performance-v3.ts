@@ -2,12 +2,33 @@ import {
   derivePaperTradingLedgerV3,
   PAPER_TRADING_V3_DEFAULT_MAX_QUOTE_AGE_MS,
   PAPER_TRADING_V3_MAX_FUTURE_SKEW_MS,
+  PAPER_TRADING_V3_POLICY_VERSION,
+  type PaperFillV3,
   type PaperMarketObservationV3,
   type PaperTradingAccountStateV3,
 } from "./engine-v3";
 
 export const PAPER_TRADING_V3_FIXED_STARTING_CASH = 100_000;
 export const PAPER_PERFORMANCE_V3_POLICY_VERSION = "stockbox-paper-performance-v3.0.0";
+
+export type PaperCutoffStateUnavailableReasonV3 =
+  | "INVALID_INPUT"
+  | "FILL_TIMESTAMP_INVALID"
+  | "FILL_CURRENCY_MISMATCH"
+  | "LEDGER_INVALID"
+  | "CASH_LEDGER_INVALID";
+
+export type PaperCutoffStateResultV3 =
+  | {
+      ok: true;
+      state: PaperTradingAccountStateV3;
+      includedFillCount: number;
+      evaluationCutoff: string;
+    }
+  | {
+      ok: false;
+      reason: PaperCutoffStateUnavailableReasonV3;
+    };
 
 export type PaperPerformanceUnavailableReasonV3 =
   | "INVALID_ACCOUNT"
@@ -74,6 +95,91 @@ function finiteNonnegative(value: number): boolean {
 
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+function nearZero(value: number): number {
+  return Math.abs(value) < 1e-9 ? 0 : value;
+}
+
+/**
+ * Reconstructs the authoritative account state as-of one evaluation cutoff.
+ * Current cash balances are deliberately not accepted as input because they may
+ * include fills that happened after the requested cutoff. The state is rebuilt
+ * from the fixed starting capital and only fills whose execution time is at or
+ * before the cutoff.
+ */
+export function derivePaperStateAtCutoffV3(input: {
+  baseCurrency: string;
+  startingCash: number;
+  fills: readonly PaperFillV3[];
+  evaluationCutoff: string;
+}): PaperCutoffStateResultV3 {
+  const baseCurrency = normalizedCurrency(input.baseCurrency);
+  const cutoffMs = Date.parse(input.evaluationCutoff);
+  if (
+    !baseCurrency
+    || input.startingCash !== PAPER_TRADING_V3_FIXED_STARTING_CASH
+    || !Number.isFinite(cutoffMs)
+  ) {
+    return { ok: false, reason: "INVALID_INPUT" };
+  }
+
+  const timestamped: Array<{ fill: PaperFillV3; executedAtMs: number }> = [];
+  for (const fill of input.fills) {
+    const executedAtMs = Date.parse(fill.executedAt);
+    if (!Number.isFinite(executedAtMs)) {
+      return { ok: false, reason: "FILL_TIMESTAMP_INVALID" };
+    }
+    timestamped.push({ fill, executedAtMs });
+  }
+
+  const includedFills = timestamped
+    .filter(({ executedAtMs }) => executedAtMs <= cutoffMs)
+    .map(({ fill }) => fill)
+    .sort((left, right) => {
+      const timeDifference = Date.parse(left.executedAt) - Date.parse(right.executedAt);
+      return timeDifference !== 0 ? timeDifference : left.fillId.localeCompare(right.fillId);
+    });
+
+  for (const fill of includedFills) {
+    if (normalizedCurrency(fill.currency) !== baseCurrency) {
+      return { ok: false, reason: "FILL_CURRENCY_MISMATCH" };
+    }
+    if (fill.policyVersion !== PAPER_TRADING_V3_POLICY_VERSION) {
+      return { ok: false, reason: "LEDGER_INVALID" };
+    }
+  }
+
+  const ledger = derivePaperTradingLedgerV3(includedFills);
+  if (!ledger.ok) return { ok: false, reason: "LEDGER_INVALID" };
+
+  let cashAmount = input.startingCash;
+  for (const fill of includedFills) {
+    if (!Number.isFinite(fill.grossAmount) || !Number.isFinite(fill.fee) || fill.fee < 0) {
+      return { ok: false, reason: "CASH_LEDGER_INVALID" };
+    }
+    if (fill.side === "buy") {
+      cashAmount -= fill.grossAmount + fill.fee;
+    } else if (fill.side === "sell") {
+      cashAmount += fill.grossAmount - fill.fee;
+    } else {
+      return { ok: false, reason: "LEDGER_INVALID" };
+    }
+    if (!Number.isFinite(cashAmount) || cashAmount < -1e-9) {
+      return { ok: false, reason: "CASH_LEDGER_INVALID" };
+    }
+    cashAmount = nearZero(cashAmount);
+  }
+
+  return {
+    ok: true,
+    state: {
+      cash: [{ currency: baseCurrency, amount: cashAmount }],
+      fills: includedFills,
+    },
+    includedFillCount: includedFills.length,
+    evaluationCutoff: new Date(cutoffMs).toISOString(),
+  };
 }
 
 /**
