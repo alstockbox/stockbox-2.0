@@ -8,6 +8,7 @@ export type OfficialInvestmentCompanyNavData = {
   reportedNav: number | null;
   reportedNavPerShare: number | null;
   navAsOf: string | null;
+  navPerShareHistory: NavPerShareObservation[];
   source: AnalysisSource;
   diagnostic: ProviderDiagnostic;
 };
@@ -22,10 +23,16 @@ type ParsedNav = {
   navAsOf: string | null;
 };
 
+type OfficialNavFetchResult = {
+  parsed: ParsedNav | null;
+  url: string;
+  navPerShareHistory: NavPerShareObservation[];
+};
+
 type OfficialNavRegistryEntry = {
   id: "investor" | "latour" | "industrivarden" | "svolder" | "creades" | "lundbergs";
   matches: (company: CompanySearchResult) => boolean;
-  fetch: () => Promise<{ parsed: ParsedNav | null; url: string }>;
+  fetch: () => Promise<OfficialNavFetchResult>;
 };
 
 function diagnostic(status: ProviderDiagnostic["status"], reason?: string): ProviderDiagnostic {
@@ -259,17 +266,25 @@ async function fetchText(url: string): Promise<string | null> {
   }
 }
 
-async function investorFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function investorFetcher(): Promise<OfficialNavFetchResult> {
   const year = new Date().getUTCFullYear();
   const url = `https://www.investorab.com/investors-media/reports-presentations/${year}`;
   const html = await fetchText(url);
-  return { parsed: html ? parseInvestorOfficialNav(html) : null, url };
+  return {
+    parsed: html ? parseInvestorOfficialNav(html) : null,
+    url,
+    navPerShareHistory: [],
+  };
 }
 
-async function latourFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function latourFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://www.latour.se/sv/investerare/substansvarde";
   const html = await fetchText(url);
-  return { parsed: html ? parseLatourOfficialNav(html) : null, url };
+  return {
+    parsed: html ? parseLatourOfficialNav(html) : null,
+    url,
+    navPerShareHistory: html ? parseLatourOfficialNavHistory(html) : [],
+  };
 }
 
 function absoluteIndustrivardenUrl(href: string): string {
@@ -280,7 +295,7 @@ function absoluteIndustrivardenUrl(href: string): string {
   }
 }
 
-async function industrivardenFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function industrivardenFetcher(): Promise<OfficialNavFetchResult> {
   const releasesUrl = "https://www.industrivarden.se/en-gb/media/press-releases/";
   const releasesHtml = await fetchText(releasesUrl);
   if (releasesHtml) {
@@ -289,31 +304,47 @@ async function industrivardenFetcher(): Promise<{ parsed: ParsedNav | null; url:
     for (const url of [...new Set(hrefs)].slice(0, 4)) {
       const html = await fetchText(url);
       const parsed = html ? parseIndustrivardenOfficialNav(html) : null;
-      if (parsed) return { parsed, url };
+      if (parsed) return { parsed, url, navPerShareHistory: [] };
     }
   }
 
   const fallbackUrl = "https://www.industrivarden.se/en-gb/";
   const fallbackHtml = await fetchText(fallbackUrl);
-  return { parsed: fallbackHtml ? parseIndustrivardenOfficialNav(fallbackHtml) : null, url: fallbackUrl };
+  return {
+    parsed: fallbackHtml ? parseIndustrivardenOfficialNav(fallbackHtml) : null,
+    url: fallbackUrl,
+    navPerShareHistory: [],
+  };
 }
 
-async function svolderFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function svolderFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://svolder.se/pressreleaser/";
   const html = await fetchText(url);
-  return { parsed: html ? parseSvolderOfficialNav(html) : null, url };
+  return {
+    parsed: html ? parseSvolderOfficialNav(html) : null,
+    url,
+    navPerShareHistory: [],
+  };
 }
 
-async function creadesFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function creadesFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://www.creades.se/innehav/substansvarde/";
   const html = await fetchText(url);
-  return { parsed: html ? parseCreadesOfficialNav(html) : null, url };
+  return {
+    parsed: html ? parseCreadesOfficialNav(html) : null,
+    url,
+    navPerShareHistory: [],
+  };
 }
 
-async function lundbergsFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+async function lundbergsFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://www.lundbergforetagen.se/sv";
   const html = await fetchText(url);
-  return { parsed: html ? parseLundbergsOfficialNav(html) : null, url };
+  return {
+    parsed: html ? parseLundbergsOfficialNav(html) : null,
+    url,
+    navPerShareHistory: [],
+  };
 }
 
 const REGISTRY: OfficialNavRegistryEntry[] = [
@@ -359,7 +390,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
     };
   }
 
-  const { parsed, url } = await entry.fetch();
+  const { parsed, url, navPerShareHistory } = await entry.fetch();
   if (!parsed || (parsed.reportedNav === null && parsed.reportedNavPerShare === null)) {
     return {
       ok: false,
@@ -373,6 +404,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
     ok: true,
     data: {
       ...parsed,
+      navPerShareHistory,
       source: {
         name: `${company.name} official NAV disclosure`,
         url,
@@ -381,7 +413,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
         provider: PROVIDER_ID,
         capability: "specialized",
         dataAsOf: parsed.navAsOf,
-        version: "official-investment-company-nav-v2",
+        version: "official-investment-company-nav-v3",
       },
       diagnostic: diagnostic("available"),
     },
