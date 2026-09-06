@@ -27,6 +27,17 @@ export type PaperCompetitionValuationClaimResultV3 =
         | "SUPABASE_ADMIN_NOT_CONFIGURED";
     };
 
+export type PaperCompetitionFinalValuationClaimResultV3 =
+  | { ok: true; claim: PaperCompetitionValuationClaimV3 }
+  | {
+      ok: false;
+      error:
+        | "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_INPUT"
+        | "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_RESULT"
+        | "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_FAILED"
+        | "SUPABASE_ADMIN_NOT_CONFIGURED";
+    };
+
 export type PaperCompetitionValuationCompletionOutcomeV3 = "verified" | "unavailable" | "error";
 
 export type PaperCompetitionValuationCompleteResultV3 =
@@ -185,6 +196,70 @@ export async function claimPrivatePaperLeagueValuationV3(
     return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_INVALID_RESULT" };
   } catch {
     return { ok: false, error: "PAPER_COMPETITION_VALUATION_CLAIM_FAILED" };
+  }
+}
+
+/**
+ * Claims the immutable final competition cutoff. The database derives that
+ * cutoff from competition ends_at and owns all status, kind, lease and retry
+ * policy; the server caller supplies only the trusted competition id.
+ */
+export async function claimFinalPaperCompetitionValuationV3(
+  competitionIdInput: string,
+): Promise<PaperCompetitionFinalValuationClaimResultV3> {
+  const competitionId = competitionIdInput.trim();
+  if (!UUID_PATTERN.test(competitionId)) {
+    return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_INPUT" };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const { data, error } = await supabase.rpc("claim_final_paper_competition_valuation_v3", {
+      p_competition_id: competitionId,
+    });
+    if (error) return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_FAILED" };
+
+    const raw = Array.isArray(data) ? data[0] : data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    const row = raw as JsonRow;
+    const claimed = row.claimed;
+    const claimedAt = timestamp(row.claimed_at);
+    const leaseToken = row.lease_token === null ? null : text(row.lease_token);
+    const leaseExpiresAt = row.lease_expires_at === null ? null : timestamp(row.lease_expires_at);
+    if (!claimedAt || (claimed !== true && claimed !== false)) {
+      return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    if (claimed === false) {
+      if (leaseToken === null && leaseExpiresAt === null) {
+        return {
+          ok: true,
+          claim: { claimed: false, leaseToken: null, claimedAt, leaseExpiresAt: null },
+        };
+      }
+      return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_RESULT" };
+    }
+
+    if (
+      leaseToken
+      && UUID_PATTERN.test(leaseToken)
+      && leaseExpiresAt
+      && Date.parse(leaseExpiresAt) > Date.parse(claimedAt)
+    ) {
+      return {
+        ok: true,
+        claim: { claimed: true, leaseToken, claimedAt, leaseExpiresAt },
+      };
+    }
+
+    return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_INVALID_RESULT" };
+  } catch {
+    return { ok: false, error: "PAPER_COMPETITION_FINAL_VALUATION_CLAIM_FAILED" };
   }
 }
 
