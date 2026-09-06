@@ -47,6 +47,16 @@ export type PaperChallengeTradingContextResultV3 =
   | { ok: true; context: PaperChallengeTradingContextV3 }
   | { ok: false; error: string };
 
+export type PaperChallengeWorkspaceV3 = {
+  competition: PaperCompetitionV3;
+  accountId: string;
+  accountStatus: "active" | "archived";
+};
+
+export type PaperChallengeWorkspaceResultV3 =
+  | { ok: true; workspace: PaperChallengeWorkspaceV3 }
+  | { ok: false; error: string };
+
 type JsonRow = Record<string, unknown>;
 
 function text(value: unknown): string | null {
@@ -191,6 +201,67 @@ export async function listPaperCompetitionEntriesV3(userId: string): Promise<Pap
       error: error instanceof Error ? error.message : "PAPER_COMPETITION_ENTRY_LIST_FAILED",
       entries: [],
     };
+  }
+}
+
+export async function loadPaperChallengeWorkspaceV3(
+  userId: string,
+  competitionId: string,
+): Promise<PaperChallengeWorkspaceResultV3> {
+  const normalizedUserId = normalizeIdentity(userId);
+  const normalizedCompetitionId = normalizeIdentity(competitionId);
+  if (!normalizedUserId || !normalizedCompetitionId) {
+    return { ok: false, error: "PAPER_COMPETITION_IDENTITY_REQUIRED" };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const competitionResult = await supabase
+      .from("paper_competitions_v3")
+      .select("id,name,kind,status,base_currency,starting_cash,starts_at,join_deadline,ends_at,max_participants,created_at,updated_at")
+      .eq("id", normalizedCompetitionId)
+      .maybeSingle();
+    if (competitionResult.error) return { ok: false, error: competitionResult.error.message };
+    if (!competitionResult.data) return { ok: false, error: "PAPER_CHALLENGE_NOT_FOUND" };
+
+    const competition = mapCompetition(competitionResult.data as JsonRow);
+    if (!competition || competition.id !== normalizedCompetitionId || competition.kind !== "challenge") {
+      return { ok: false, error: "PAPER_CHALLENGE_INVALID" };
+    }
+
+    const entryResult = await supabase
+      .from("paper_competition_entries_v3")
+      .select("id,competition_id,user_id,account_id,joined_at")
+      .eq("user_id", normalizedUserId)
+      .eq("competition_id", normalizedCompetitionId)
+      .maybeSingle();
+    if (entryResult.error) return { ok: false, error: entryResult.error.message };
+    if (!entryResult.data) return { ok: false, error: "PAPER_CHALLENGE_ENTRY_NOT_FOUND" };
+
+    const entry = mapEntry(entryResult.data as JsonRow);
+    if (!entry || entry.userId !== normalizedUserId || entry.competitionId !== normalizedCompetitionId) {
+      return { ok: false, error: "PAPER_CHALLENGE_ENTRY_INVALID" };
+    }
+
+    const boundary = await loadPaperAccountBoundaryV3(normalizedUserId, entry.accountId);
+    if (
+      !boundary.ok
+      || boundary.account.accountType !== "competition"
+      || boundary.account.competitionId !== normalizedCompetitionId
+    ) return { ok: false, error: "PAPER_CHALLENGE_ACCOUNT_INVALID" };
+
+    return {
+      ok: true,
+      workspace: {
+        competition,
+        accountId: entry.accountId,
+        accountStatus: boundary.account.status,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "PAPER_CHALLENGE_WORKSPACE_FAILED" };
   }
 }
 
