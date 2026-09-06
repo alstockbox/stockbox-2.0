@@ -37,8 +37,8 @@ function parseIsoDay(value: string): number | null {
   return timestamp;
 }
 
-function validObservations(observations: NavPerShareObservation[]): ValidObservation[] {
-  return observations.flatMap((observation) => {
+function validObservations(observations: NavPerShareObservation[] | null | undefined): ValidObservation[] {
+  return (observations ?? []).flatMap((observation) => {
     const timestamp = parseIsoDay(observation.date);
     if (
       timestamp === null
@@ -105,7 +105,7 @@ function periodGrowth(
 }
 
 export function deriveInvestmentCompanyNavGrowth(
-  observations: NavPerShareObservation[],
+  observations: NavPerShareObservation[] | null | undefined,
   referenceDate: string,
 ): InvestmentCompanyNavGrowth {
   const empty: InvestmentCompanyNavGrowth = {
