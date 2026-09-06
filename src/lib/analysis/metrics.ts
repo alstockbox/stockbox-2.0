@@ -372,9 +372,37 @@ function providerReportedValuation(input: FinancialAnalysisInput): ValuationMetr
   const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
     && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
   const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow);
+  const reportedWithVerifiedFx = reported as typeof reported & {
+    freeCashFlowYield?: number | null;
+    freeCashFlowYieldProvenance?: MetricProvenance;
+  };
+  const fxProvenance = reportedWithVerifiedFx.freeCashFlowYieldProvenance;
+  const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);
+  const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);
+  const fxRateTime = fxProvenance?.periodEnd ? Date.parse(fxProvenance.periodEnd) : Number.NaN;
+  const valuationTime = reported.asOfDate ? Date.parse(reported.asOfDate) : Number.NaN;
+  const fxRateAtOrBeforeValuation = Number.isFinite(fxRateTime)
+    && Number.isFinite(valuationTime)
+    && fxRateTime <= valuationTime;
+  const fxRateCurrent = fxProvenance?.periodEnd && reported.asOfDate
+    ? dataDateStatus(fxProvenance.periodEnd, reported.asOfDate, 7).status === "current"
+    : false;
+  const verifiedFxYield = positive(reported.marketCap) !== null
+    && isFiniteNumber(reported.freeCashFlow)
+    && marketCapCurrency !== null
+    && freeCashFlowCurrency !== null
+    && marketCapCurrency !== freeCashFlowCurrency
+    && isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
+    && fxProvenance?.source === "ECB foreign exchange reference rates"
+    && fxProvenance.provider === "ecb"
+    && fxProvenance.valueKind === "derived"
+    && fxRateAtOrBeforeValuation
+    && fxRateCurrent
+      ? reportedWithVerifiedFx.freeCashFlowYield
+      : null;
   const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
     ? safeDivide(reported.freeCashFlow, reported.marketCap)
-    : null;
+    : fcfCurrent ? verifiedFxYield : null;
   return {
     marketCap: null,
     enterpriseValue: null,
@@ -601,6 +629,19 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       return derivedProvenance("StockBox deterministic formula", latest?.periodEndDate, ["marketCap", String(metric)]);
     }
     if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
+      if (metric === "freeCashFlowYield") {
+        const reportedWithVerifiedFx = input.reportedValuation as typeof input.reportedValuation & {
+          freeCashFlowYield?: number | null;
+          freeCashFlowYieldProvenance?: MetricProvenance;
+        };
+        if (
+          isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
+          && reportedValuationFallback.freeCashFlowYield === reportedWithVerifiedFx.freeCashFlowYield
+          && reportedWithVerifiedFx.freeCashFlowYieldProvenance
+        ) {
+          return reportedWithVerifiedFx.freeCashFlowYieldProvenance;
+        }
+      }
       return {
         source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
         periodEnd: input.reportedValuation.asOfDate ?? undefined,
