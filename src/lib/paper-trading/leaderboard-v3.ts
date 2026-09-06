@@ -1,4 +1,4 @@
-import type { PaperPerformanceSnapshotRowV3 } from "./performance-repository-v3";
+import type { PaperComparablePerformanceSnapshotRowV3 } from "./performance-repository-v3";
 
 export type PaperCompetitionLeaderboardEntryV3 = {
   competitionId: string;
@@ -93,7 +93,7 @@ export function derivePaperCompetitionLeaderboardV3(input: {
   baseCurrency: string;
   evaluationCutoff: string;
   entries: readonly PaperCompetitionLeaderboardEntryV3[];
-  snapshots: readonly PaperPerformanceSnapshotRowV3[];
+  snapshots: readonly PaperComparablePerformanceSnapshotRowV3[];
 }): PaperCompetitionLeaderboardResultV3 {
   const competitionId = normalizeIdentity(input.competitionId);
   const baseCurrency = normalizeCurrency(input.baseCurrency);
@@ -125,7 +125,7 @@ export function derivePaperCompetitionLeaderboardV3(input: {
     seenAccounts.add(accountId);
   }
 
-  const snapshotsByAccount = new Map<string, PaperPerformanceSnapshotRowV3[]>();
+  const snapshotsByAccount = new Map<string, PaperComparablePerformanceSnapshotRowV3[]>();
   for (const snapshot of input.snapshots) {
     const accountId = normalizeIdentity(snapshot.accountId);
     if (!accountId) continue;
