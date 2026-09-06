@@ -79,6 +79,13 @@ export function PortfolioPurchaseForm({ portfolios, locale, today, action }: Pro
     <form action={action} className="mt-4 grid gap-3">
       <input type="hidden" name="ticker" value={selected ? displayTicker(selected) : ""} />
       <input type="hidden" name="companyName" value={selected?.name ?? ""} />
+      <input type="hidden" name="securityId" value={selected?.securityId ?? ""} />
+      <input type="hidden" name="issuerId" value={selected?.issuerId ?? ""} />
+      <input type="hidden" name="entityId" value={selected?.entityId ?? ""} />
+      <input type="hidden" name="isin" value={selected?.isin ?? ""} />
+      <input type="hidden" name="figi" value={selected?.figi ?? ""} />
+      <input type="hidden" name="lei" value={selected?.lei ?? ""} />
+      <input type="hidden" name="cik" value={selected?.cik ?? ""} />
 
       <div className="grid gap-2 sm:grid-cols-[minmax(0,.8fr)_minmax(0,1.4fr)]">
         <div>
