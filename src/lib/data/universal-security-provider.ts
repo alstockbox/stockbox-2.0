@@ -43,9 +43,11 @@ import {
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
 import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
+import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
+import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
 
@@ -409,23 +411,33 @@ async function enrichInvestmentCompanyReport(
   if (report.analysisArchetype !== "holding_company") return report;
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
-  const officialNav = await fetchOfficialInvestmentCompanyNav(company);
+  const marketDate = report.market?.date ?? null;
+  const [officialNav, longHistory] = await Promise.all([
+    fetchOfficialInvestmentCompanyNav(company),
+    marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
+  ]);
   const navComparable = officialNav.ok && isOfficialNavComparable(
     officialNav.data.navAsOf,
-    report.market?.date ?? null,
+    marketDate,
   );
   const navFreshnessMessage = officialNav.ok && !navComparable
-    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${report.market?.date ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${marketDate ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
     : null;
   const navGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : { navGrowth1y: null, navGrowth3yCagr: null, navGrowth5yCagr: null };
+  const shareholderReturns = longHistory?.ok && marketDate
+    ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
+    : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
+  const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
+    || shareholderReturns.shareholderReturn5yCagr !== null;
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
+    ...shareholderReturns,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
   });
@@ -449,6 +461,17 @@ async function enrichInvestmentCompanyReport(
     }
   }
 
+  if (longHistory?.ok && shareholderReturnContributes) {
+    const historySource = longHistory.source;
+    if (!report.sources.some((source) => (
+      source.provider === historySource.provider
+      && source.url === historySource.url
+      && source.version === historySource.version
+    ))) {
+      report.sources = [...report.sources, historySource];
+    }
+  }
+
   const navDiagnostic: ProviderDiagnostic = officialNav.ok
     ? navComparable
       ? officialNav.data.diagnostic
@@ -464,6 +487,23 @@ async function enrichInvestmentCompanyReport(
     && diagnostic.reason === navDiagnostic.reason
   ))) {
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), navDiagnostic];
+  }
+
+  if (longHistory) {
+    const historyDiagnostic: ProviderDiagnostic = longHistory.ok && !shareholderReturnContributes
+      ? {
+        ...longHistory.diagnostic,
+        status: "partial",
+        reason: "adjusted_close_history_insufficient_for_3y_5y_shareholder_returns",
+      }
+      : longHistory.diagnostic;
+    if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+      diagnostic.provider === historyDiagnostic.provider
+      && diagnostic.status === historyDiagnostic.status
+      && diagnostic.reason === historyDiagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), historyDiagnostic];
+    }
   }
 
   if (analysis.score.score !== null) {
