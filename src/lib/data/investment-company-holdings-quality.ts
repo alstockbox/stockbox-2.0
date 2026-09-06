@@ -134,7 +134,8 @@ export async function enrichInvestmentCompanyHoldingsQuality(
 
     let searchResults: CompanySearchResult[];
     try {
-      searchResults = await dependencies.searchCompanies(candidate.holding.name);
+      const rawSearchResults = await dependencies.searchCompanies(candidate.holding.name);
+      searchResults = Array.isArray(rawSearchResults) ? rawSearchResults : [];
     } catch {
       continue;
     }
