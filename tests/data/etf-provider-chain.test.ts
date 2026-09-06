@@ -88,6 +88,7 @@ describe("ETF specialist provider chain", () => {
     const result = await fetchEtfProviderChain(company, "alpha-key", { yahoo, alphaVantage });
 
     expect(result.ok).toBe(true);
+    expect(alphaVantage).toHaveBeenCalledTimes(1);
     if (!result.ok) return;
     expect(result.data.input.expenseRatio).toBe(0.001);
     expect(result.data.input.assetsUnderManagement).toBe(100_000_000);
@@ -110,6 +111,7 @@ describe("ETF specialist provider chain", () => {
     const result = await fetchEtfProviderChain(company, "alpha-key", { yahoo, alphaVantage });
 
     expect(result.ok).toBe(true);
+    expect(alphaVantage).toHaveBeenCalledTimes(1);
     if (!result.ok) return;
     expect(result.data.input.assetsUnderManagement).toBe(100_000_000);
     expect(result.data.sources.map((item) => item.provider)).toEqual(["alpha-vantage-etf"]);
@@ -117,7 +119,7 @@ describe("ETF specialist provider chain", () => {
     expect(result.data.warnings.join(" ")).toContain("Yahoo ETF metadata unavailable");
   });
 
-  it("does not claim Alpha provenance when Alpha contributes no data", async () => {
+  it("does not spend an Alpha Vantage call when Yahoo already covers every field Alpha can enrich", async () => {
     const completeYahoo = {
       ...yahooAvailable,
       data: {
@@ -126,6 +128,13 @@ describe("ETF specialist provider chain", () => {
           ...yahooAvailable.data.input,
           assetsUnderManagement: 200_000_000,
           turnover: 0.02,
+          distributionYield: 0.006,
+          fundAgeYears: 20,
+          numberOfHoldings: 2,
+          top10Weight: 1,
+          largestHoldingWeight: 0.6,
+          holdingsHhi: 0.52,
+          sectorHhi: 0.5,
         },
       },
     };
@@ -135,6 +144,7 @@ describe("ETF specialist provider chain", () => {
     const result = await fetchEtfProviderChain(company, "alpha-key", { yahoo, alphaVantage });
 
     expect(result.ok).toBe(true);
+    expect(alphaVantage).not.toHaveBeenCalled();
     if (!result.ok) return;
     expect(result.data.fallbackFields).toEqual([]);
     expect(result.data.sources.map((item) => item.provider)).toEqual(["yahoo-etf"]);
