@@ -40,9 +40,20 @@ describe("look-through portfolio math", () => {
     ]);
 
     expect(metrics.stockBoxQuality).toBeCloseTo(82, 8);
+    expect(metrics.qualityCoveredWeight).toBeCloseTo(1, 8);
     expect(metrics.roic).toBeCloseTo(0.16, 8);
     expect(metrics.forwardPe).toBeCloseTo(25, 8);
     expect(metrics.holdingsHhi).toBeCloseTo(0.52, 8);
+  });
+
+  it("does not present a portfolio-wide StockBox quality metric from a non-representative subset", () => {
+    const metrics = computeLookThroughMetrics([
+      { name: "Unscored majority", weight: 0.9 },
+      { name: "Scored minority", weight: 0.1, stockBoxScore: 95 },
+    ]);
+
+    expect(metrics.qualityCoveredWeight).toBeCloseTo(0.1, 8);
+    expect(metrics.stockBoxQuality).toBeNull();
   });
 });
 
@@ -143,6 +154,36 @@ describe("ETF model", () => {
     expect(result.score.score).not.toBeNull();
     expect(result.score.score).toBeGreaterThan(0);
     expect(result.score.missing).toContain("Tracking quality");
+  });
+
+  it("keeps holdings-quality factor missing below 80% representative quality coverage", () => {
+    const result = analyzeEtf({
+      subtype: "index_etf",
+      holdings: [
+        { name: "Unscored majority", weight: 0.81 },
+        { name: "Scored minority", weight: 0.19, stockBoxScore: 95 },
+      ],
+    });
+
+    expect(result.lookThrough.qualityCoveredWeight).toBeCloseTo(0.19, 8);
+    expect(result.score.factors.find((factor) => factor.key === "holdings_quality")).toMatchObject({
+      status: "missing",
+      score: null,
+    });
+  });
+
+  it("allows holdings-quality scoring when verified quality metrics cover at least 80% of portfolio weight", () => {
+    const result = analyzeEtf({
+      subtype: "index_etf",
+      holdings: [
+        { name: "Scored A", weight: 0.5, stockBoxScore: 90 },
+        { name: "Scored B", weight: 0.3, stockBoxScore: 70 },
+        { name: "Unscored tail", weight: 0.2 },
+      ],
+    });
+
+    expect(result.lookThrough.qualityCoveredWeight).toBeCloseTo(0.8, 8);
+    expect(result.score.factors.find((factor) => factor.key === "holdings_quality")?.status).toBe("available");
   });
 
   it("does not count investor-jurisdiction structure/tax context as missing specialist data", () => {
