@@ -23,6 +23,18 @@ describe("deterministic growth storyboard", () => {
     expect(RenderSpecSchema.parse(spec).version).toBe("v3");
   });
 
+  it("defaults Swedish delivery to educational intensity 50", () => {
+    const spec = buildGrowthStoryboard(input);
+    expect(spec.voiceMode).toBe("educational");
+    expect(spec.voiceStyleIntensity).toBe(50);
+  });
+
+  it("preserves an explicit dynamic Swedish delivery choice", () => {
+    const spec = buildGrowthStoryboard({ ...input, voiceMode: "excited", voiceStyleIntensity: 85 });
+    expect(spec.voiceMode).toBe("excited");
+    expect(spec.voiceStyleIntensity).toBe(85);
+  });
+
   it("keeps the CTA in the final 3-5 seconds", () => {
     const spec = buildGrowthStoryboard(input);
     const final = spec.scenes.at(-1)!;
