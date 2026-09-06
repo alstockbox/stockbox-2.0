@@ -42,6 +42,7 @@ import {
 } from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
 
@@ -371,22 +372,51 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
   };
 }
 
-function enrichInvestmentCompanyReport(report: UniversalSecurityReport): UniversalSecurityReport {
+async function enrichInvestmentCompanyReport(
+  report: UniversalSecurityReport,
+  company: CompanySearchResult,
+): Promise<UniversalSecurityReport> {
   if (report.analysisArchetype !== "holding_company") return report;
+
   const latest = report.engine?.metrics.latestPeriod ?? null;
+  const officialNav = await fetchOfficialInvestmentCompanyNav(company);
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
+    reportedNav: officialNav.ok ? officialNav.data.reportedNav : null,
+    reportedNavPerShare: officialNav.ok ? officialNav.data.reportedNavPerShare : null,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
   });
+
   report.securityClassification = classifyUniversalSecurity({
-    company: { ticker: report.ticker, name: report.companyName, securityType: "Common Stock" },
+    company,
     analysisArchetype: "holding_company",
   });
   report.securityAnalysis = { ...(report.securityAnalysis ?? {}), investmentCompany: analysis };
   report.dataCoverage = analysis.score.coverage;
   report.recommendation = recommendationForScore(analysis.score.score, analysis.score.coverage);
+
+  if (officialNav.ok) {
+    const navSource = officialNav.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === navSource.provider
+      && source.url === navSource.url
+      && source.version === navSource.version
+    ))) {
+      report.sources = [...report.sources, navSource];
+    }
+  }
+
+  const navDiagnostic = officialNav.ok ? officialNav.data.diagnostic : officialNav.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === navDiagnostic.provider
+    && diagnostic.status === navDiagnostic.status
+    && diagnostic.reason === navDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), navDiagnostic];
+  }
+
   if (analysis.score.score !== null) {
     report.score.score = analysis.score.score;
     report.score.personalizedScore = analysis.score.score;
@@ -414,5 +444,5 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<CoreAnalyzeResu
   if (securityType === "ETF/Fund") return analyzeEtfSecurity(args);
   const core = await analyzeOperatingCompany(args);
   if (!core.ok) return core;
-  return { ...core, data: enrichInvestmentCompanyReport(core.data as UniversalSecurityReport) };
+  return { ...core, data: await enrichInvestmentCompanyReport(core.data as UniversalSecurityReport, args.company) };
 }
