@@ -119,9 +119,13 @@ function attachReportedValuationFcfPeriodBasis(
     return fundamentals;
   }
 
+  // At a fiscal-year endpoint Yahoo can publish the exact same direct FCF fact
+  // under both annual and trailing concepts. Prefer the independently reported
+  // FY match only when date, value and currency all reconcile exactly; otherwise
+  // the trailing basis remains authoritative.
   const periods = [
-    fundamentals.trailingTwelveMonths,
     ...(fundamentals.annualPeriods ?? []),
+    fundamentals.trailingTwelveMonths,
   ].filter((period): period is NonNullable<typeof period> => Boolean(period));
 
   const matchingPeriod = periods.find((period) => {
