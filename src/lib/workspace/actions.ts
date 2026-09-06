@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import type { CompanySearchResult } from "@/lib/analysis/types";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { requireUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
@@ -12,15 +13,28 @@ import { createClient } from "@/lib/supabase/server";
 
 const tickerSchema = z.string().trim().min(1).max(16).transform((value) => value.toUpperCase());
 const currencySchema = z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase());
+const optionalIdentitySchema = z.preprocess(
+  (value) => typeof value === "string" && value.trim() ? value.trim() : undefined,
+  z.string().max(256).optional(),
+);
 const transactionDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const time = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(time) && time <= Date.now() + 86_400_000;
 });
 
-async function resolveWorkspaceCompany(ticker: string, name?: string) {
+async function resolveWorkspaceCompany(
+  ticker: string,
+  name?: string,
+  identity: Partial<CompanySearchResult> = {},
+) {
   try {
     const candidates = await searchCompanies(ticker);
-    const resolution = resolveCanonicalCompanySelection({ ticker, canonicalTicker: ticker, name: name ?? ticker }, candidates);
+    const resolution = resolveCanonicalCompanySelection({
+      ticker,
+      canonicalTicker: ticker,
+      name: name ?? ticker,
+      ...identity,
+    }, candidates);
     return resolution.ok ? resolution.company : null;
   } catch {
     return null;
@@ -114,6 +128,13 @@ export async function addHoldingAction(formData: FormData) {
     portfolioId: z.string().uuid(),
     ticker: tickerSchema,
     companyName: z.string().trim().min(1).max(160),
+    securityId: optionalIdentitySchema,
+    issuerId: optionalIdentitySchema,
+    entityId: optionalIdentitySchema,
+    isin: optionalIdentitySchema,
+    figi: optionalIdentitySchema,
+    lei: optionalIdentitySchema,
+    cik: optionalIdentitySchema,
     quantity: z.coerce.number().positive().max(1_000_000_000),
     averageCost: z.coerce.number().nonnegative().max(1_000_000_000),
     currency: currencySchema,
@@ -123,6 +144,13 @@ export async function addHoldingAction(formData: FormData) {
     portfolioId: formData.get("portfolioId"),
     ticker: formData.get("ticker"),
     companyName: formData.get("companyName"),
+    securityId: formData.get("securityId"),
+    issuerId: formData.get("issuerId"),
+    entityId: formData.get("entityId"),
+    isin: formData.get("isin"),
+    figi: formData.get("figi"),
+    lei: formData.get("lei"),
+    cik: formData.get("cik"),
     quantity: formData.get("quantity"),
     averageCost: formData.get("averageCost"),
     currency: formData.get("currency"),
@@ -134,7 +162,15 @@ export async function addHoldingAction(formData: FormData) {
     return;
   }
   if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
-  const company = await resolveWorkspaceCompany(parsed.data.ticker, parsed.data.companyName);
+  const company = await resolveWorkspaceCompany(parsed.data.ticker, parsed.data.companyName, {
+    securityId: parsed.data.securityId,
+    issuerId: parsed.data.issuerId,
+    entityId: parsed.data.entityId,
+    isin: parsed.data.isin,
+    figi: parsed.data.figi,
+    lei: parsed.data.lei,
+    cik: parsed.data.cik,
+  });
   if (!company) redirect("/portfolio?error=holding_identity");
   const supabase = await createClient();
   const { error } = await supabase?.rpc("record_portfolio_transaction", {
