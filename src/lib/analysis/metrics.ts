@@ -371,14 +371,15 @@ function providerReportedValuation(input: FinancialAnalysisInput): ValuationMetr
   const pe = positive(reported.priceEarnings);
   const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
     && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
-  const fcfFreshnessThreshold = input.trailingTwelveMonths
-    ? DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow
-    : DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow;
-  const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
   const reportedWithVerifiedFx = reported as typeof reported & {
+    freeCashFlowPeriodBasis?: MetricProvenance["periodBasis"];
     freeCashFlowYield?: number | null;
     freeCashFlowYieldProvenance?: MetricProvenance;
   };
+  const fcfFreshnessThreshold = reportedWithVerifiedFx.freeCashFlowPeriodBasis === "FY"
+    ? DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow
+    : DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow;
+  const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
   const fxProvenance = reportedWithVerifiedFx.freeCashFlowYieldProvenance;
   const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);
   const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);

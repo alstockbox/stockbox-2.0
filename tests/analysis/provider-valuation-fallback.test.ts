@@ -169,7 +169,10 @@ describe("provider-reported valuation fallback", () => {
   });
 
   it("does not infer FY freshness merely because the TTM period object is unavailable", () => {
-    const { freeCashFlowPeriodBasis: _basis, ...valuationWithoutBasis } = annualFallbackFxValuation();
+    const valuationWithoutBasis = {
+      ...annualFallbackFxValuation(),
+      freeCashFlowPeriodBasis: undefined,
+    };
     const result = analyzeFinancials({
       ...inputWithMarket(valuationWithoutBasis),
       analysisDate: "2026-09-06T00:00:00.000Z",
