@@ -34,12 +34,7 @@ export function PortfolioPurchaseForm({ portfolios, locale, today, action }: Pro
   useEffect(() => {
     const value = query.trim();
     if (selected && value === `${displayTicker(selected)} — ${selected.name}`) return;
-    if (value.length < 2) {
-      requestId.current += 1;
-      setCompanies([]);
-      setSearching(false);
-      return;
-    }
+    if (value.length < 2) return;
 
     const current = ++requestId.current;
     const controller = new AbortController();
