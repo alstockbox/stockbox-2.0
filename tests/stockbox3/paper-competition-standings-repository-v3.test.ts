@@ -38,12 +38,15 @@ describe("Paper Trading V3 competition standings repository", () => {
     expect(source).toContain('accountType: "competition"');
   });
 
-  it("loads persisted snapshots only at the exact common evaluation cutoff", () => {
+  it("loads persisted snapshots only at the exact common evaluation cutoff and server-selected policy", () => {
     expect(source).toContain('.from("paper_performance_snapshots_v3")');
     expect(source).toContain('.eq("evaluated_at", evaluationCutoff)');
     expect(source).toContain('.eq("base_currency", competition.baseCurrency)');
-    expect(source).toContain('.eq("policy_version", PAPER_PERFORMANCE_V3_POLICY_VERSION)');
+    expect(source).toContain("PAPER_PERFORMANCE_V3_POLICY_VERSION");
+    expect(source).toContain("PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION");
+    expect(source).toContain('.eq("policy_version", expectedPolicyVersion)');
     expect(source).toContain('.in("account_id", accountIds)');
+    expect(source).not.toContain("input.snapshotPolicy");
   });
 
   it("chunks snapshot account ids instead of relying on an unbounded IN query", () => {
@@ -53,6 +56,7 @@ describe("Paper Trading V3 competition standings repository", () => {
 
   it("fails closed on malformed, duplicate or incomplete repository evidence", () => {
     expect(source).toContain("mapPaperPerformanceSnapshotV3");
+    expect(source).toContain("mapPaperFinalPerformanceSnapshotV3");
     expect(source).toContain("PAPER_COMPETITION_STANDINGS_INVALID_DATA");
     expect(source).toContain("seenEntryAccounts");
     expect(source).toContain("seenSnapshotAccounts");
