@@ -25,6 +25,7 @@ on:
       - "tests/data/provider-history-wiring.test.ts"
       - "src/lib/data/coverage-audit*.ts"
       - "src/lib/analysis/coverage-audit.ts"
+      - "src/lib/analysis/metrics.ts"
       - "src/lib/data/company-search.ts"
       - "src/lib/data/company-search-core.ts"
       - "src/lib/data/security-classification.ts"
