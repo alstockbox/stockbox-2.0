@@ -11,16 +11,16 @@ import {
 
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 
-const FCF_CURRENCY_GAP_TICKERS = [
-  "SIP.BR", "EMBLA.CO", "0352.HK", "AP4.SI", "ORA.TA", "PXT.TO", "BHP.AX",
+const FCF_VALUATION_FINGERPRINT_TICKERS = [
+  "SIP.BR", "EMBLA.CO", "0352.HK", "AP4.SI", "ORA.TA", "PXT.TO", "BHP.AX", "BESTE.IS",
 ] as const;
 
-liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
-  it("traces provider market-cap, FCF and ECB currency bases", async () => {
+liveDescribe("live Yahoo FCF-yield valuation fingerprint", () => {
+  it("traces provider market-cap, FCF, financial-period and ECB currency bases", async () => {
     const ecbHistory = await fetchEcbReferenceRateHistory();
     const rows: Array<Record<string, unknown>> = [];
 
-    for (const ticker of FCF_CURRENCY_GAP_TICKERS) {
+    for (const ticker of FCF_VALUATION_FINGERPRINT_TICKERS) {
       const candidates = await searchCompanies(ticker);
       const company = candidates.find((candidate) =>
         (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker
@@ -43,7 +43,9 @@ liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
       const freeCashFlow = reported?.freeCashFlow ?? null;
       const freeCashFlowCurrency = reported?.freeCashFlowCurrency ?? null;
       const freeCashFlowDate = reported?.freeCashFlowDate ?? null;
-      const latestPeriod = fundamentals.data.trailingTwelveMonths ?? fundamentals.data.annualPeriods?.at(-1) ?? null;
+      const latestAnnual = fundamentals.data.annualPeriods?.at(-1) ?? null;
+      const latestPeriod = fundamentals.data.trailingTwelveMonths ?? latestAnnual;
+      const latestAnnualFcfProvenance = latestAnnual?.provenance?.freeCashFlow ?? null;
       const ecbObservation = marketCapDate ? selectEcbRatesAtOrBefore(ecbHistory, marketCapDate) : null;
       const convertedFcfToMarketCurrency = (
         ecbObservation
@@ -74,8 +76,16 @@ liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
           sharesOutstanding: market.data.sharesOutstanding ?? null,
         },
         fundamentals: {
+          hasTrailingTwelveMonths: Boolean(fundamentals.data.trailingTwelveMonths),
+          financialFlowPeriodBasis: fundamentals.data.diagnostics?.financialFlowPeriodBasis ?? null,
+          financialFlowPeriodEnd: fundamentals.data.diagnostics?.financialFlowPeriodEnd ?? null,
+          annualPeriodCount: fundamentals.data.annualPeriods?.length ?? 0,
           selectedPeriodCurrency: latestPeriod?.currency ?? null,
           selectedPeriodEnd: latestPeriod?.periodEndDate ?? null,
+          latestAnnualPeriodEnd: latestAnnual?.periodEndDate ?? null,
+          latestAnnualFreeCashFlow: latestAnnual?.freeCashFlow ?? null,
+          latestAnnualFreeCashFlowCurrency: latestAnnual?.currency ?? null,
+          latestAnnualFreeCashFlowProvenance: latestAnnualFcfProvenance,
           reportedMarketCap: marketCap,
           reportedMarketCapCurrency: marketCapCurrency,
           reportedMarketCapDate: marketCapDate,
@@ -100,13 +110,13 @@ liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
       });
     }
 
-    console.log(`YAHOO_FCF_CURRENCY_FINGERPRINT ${JSON.stringify(rows)}`);
+    console.log(`YAHOO_FCF_VALUATION_FINGERPRINT ${JSON.stringify(rows)}`);
     await mkdir("artifacts/coverage-live", { recursive: true });
     await writeFile(
       "artifacts/coverage-live/yahoo-fcf-currency-fingerprint.json",
       `${JSON.stringify(rows, null, 2)}\n`,
       "utf8",
     );
-    expect(rows).toHaveLength(FCF_CURRENCY_GAP_TICKERS.length);
+    expect(rows).toHaveLength(FCF_VALUATION_FINGERPRINT_TICKERS.length);
   }, 240_000);
 });
