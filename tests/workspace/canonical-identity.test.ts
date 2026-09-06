@@ -64,6 +64,41 @@ describe("workspace canonical identity", () => {
     }));
   });
 
+  it("passes the selected security's stable identifiers into canonical verification", async () => {
+    await addHoldingAction(form({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "META.ST",
+      companyName: "Metacon AB",
+      securityId: "security:metacon-stockholm",
+      isin: "SE0003086214",
+      figi: "BBG000FAKE01",
+      lei: "549300FAKELEI0000001",
+      entityId: "issuer:metacon",
+      issuerId: "issuer:metacon",
+      cik: "0001234567",
+      quantity: "3",
+      averageCost: "2.5",
+      currency: "SEK",
+      purchaseDate: "2026-09-06",
+    }));
+
+    expect(mocks.resolveCanonicalCompanySelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticker: "META.ST",
+        canonicalTicker: "META.ST",
+        name: "Metacon AB",
+        securityId: "security:metacon-stockholm",
+        isin: "SE0003086214",
+        figi: "BBG000FAKE01",
+        lei: "549300FAKELEI0000001",
+        entityId: "issuer:metacon",
+        issuerId: "issuer:metacon",
+        cik: "0001234567",
+      }),
+      expect.any(Array),
+    );
+  });
+
   it("requires a selected company identity before recording a portfolio purchase", async () => {
     await addHoldingAction(form({
       portfolioId: "00000000-0000-4000-8000-000000000222",
