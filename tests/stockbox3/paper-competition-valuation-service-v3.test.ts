@@ -52,6 +52,7 @@ function dependencies(claimed = true) {
           leaseExpiresAt: null,
         },
       });
+  const completeValuation = vi.fn(async () => ({ ok: true as const, completed: true as const }));
   const runValuationAt = vi.fn(async ({ competitionId, serverNow }: { competitionId: string; serverNow: Date }) => ({
     status: "VERIFIED" as const,
     competitionId,
@@ -60,14 +61,18 @@ function dependencies(claimed = true) {
     rankedCount: 2,
     baseCurrency: "USD",
   }));
-  const deps: PaperCompetitionValuationServiceDependenciesV3 = { claimValuation, runValuationAt };
-  return { deps, claimValuation, runValuationAt, claimedAt };
+  const deps: PaperCompetitionValuationServiceDependenciesV3 = {
+    claimValuation,
+    completeValuation,
+    runValuationAt,
+  };
+  return { deps, claimValuation, completeValuation, runValuationAt, claimedAt };
 }
 
 describe("Paper Trading V3 competition valuation service boundary", () => {
   it("is dark by default and never claims or calls the live valuation runner", async () => {
     for (const key of ENV_KEYS) delete process.env[key];
-    const { deps, claimValuation, runValuationAt } = dependencies();
+    const { deps, claimValuation, completeValuation, runValuationAt } = dependencies();
 
     const result = await runPaperCompetitionValuationServiceV3({
       competitionId: "11111111-1111-4111-8111-111111111111",
@@ -75,13 +80,14 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
 
     expect(result).toEqual({ status: "DISABLED" });
     expect(claimValuation).not.toHaveBeenCalled();
+    expect(completeValuation).not.toHaveBeenCalled();
     expect(runValuationAt).not.toHaveBeenCalled();
   });
 
   it("requires paperTrading, challenges and leaderboards together", async () => {
     enableAll();
     process.env.FEATURE_LEADERBOARDS = "false";
-    const { deps, claimValuation, runValuationAt } = dependencies();
+    const { deps, claimValuation, completeValuation, runValuationAt } = dependencies();
 
     const result = await runPaperCompetitionValuationServiceV3({
       competitionId: "11111111-1111-4111-8111-111111111111",
@@ -89,6 +95,7 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
 
     expect(result).toEqual({ status: "DISABLED" });
     expect(claimValuation).not.toHaveBeenCalled();
+    expect(completeValuation).not.toHaveBeenCalled();
     expect(runValuationAt).not.toHaveBeenCalled();
   });
 
@@ -100,6 +107,7 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
       competitionId: "11111111-1111-4111-8111-111111111111",
     }, first.deps)).toEqual({ status: "KILLED" });
     expect(first.claimValuation).not.toHaveBeenCalled();
+    expect(first.completeValuation).not.toHaveBeenCalled();
     expect(first.runValuationAt).not.toHaveBeenCalled();
 
     enableAll();
@@ -109,29 +117,32 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
       competitionId: "11111111-1111-4111-8111-111111111111",
     }, second.deps)).toEqual({ status: "KILLED" });
     expect(second.claimValuation).not.toHaveBeenCalled();
+    expect(second.completeValuation).not.toHaveBeenCalled();
     expect(second.runValuationAt).not.toHaveBeenCalled();
   });
 
   it("rejects malformed competition identity before any database or provider work", async () => {
     enableAll();
-    const { deps, claimValuation, runValuationAt } = dependencies();
+    const { deps, claimValuation, completeValuation, runValuationAt } = dependencies();
 
     const result = await runPaperCompetitionValuationServiceV3({ competitionId: "not-a-uuid" }, deps);
 
     expect(result).toEqual({ status: "INVALID_INPUT" });
     expect(claimValuation).not.toHaveBeenCalled();
+    expect(completeValuation).not.toHaveBeenCalled();
     expect(runValuationAt).not.toHaveBeenCalled();
   });
 
   it("returns THROTTLED and performs zero provider valuation work when the database does not grant a claim", async () => {
     enableAll();
-    const { deps, claimValuation, runValuationAt } = dependencies(false);
+    const { deps, claimValuation, completeValuation, runValuationAt } = dependencies(false);
     const competitionId = "11111111-1111-4111-8111-111111111111";
 
     const result = await runPaperCompetitionValuationServiceV3({ competitionId }, deps);
 
     expect(result).toEqual({ status: "THROTTLED" });
     expect(claimValuation).toHaveBeenCalledWith(competitionId);
+    expect(completeValuation).not.toHaveBeenCalled();
     expect(runValuationAt).not.toHaveBeenCalled();
   });
 
@@ -148,12 +159,13 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
     }, setup.deps);
 
     expect(result).toEqual({ status: "ERROR" });
+    expect(setup.completeValuation).not.toHaveBeenCalled();
     expect(setup.runValuationAt).not.toHaveBeenCalled();
   });
 
   it("uses the database claimedAt as the only common valuation cutoff and ignores caller-supplied time fields", async () => {
     enableAll();
-    const { deps, claimValuation, runValuationAt, claimedAt } = dependencies(true);
+    const { deps, claimValuation, completeValuation, runValuationAt, claimedAt } = dependencies(true);
     const competitionId = "11111111-1111-4111-8111-111111111111";
 
     const result = await runPaperCompetitionValuationServiceV3({
@@ -169,6 +181,12 @@ describe("Paper Trading V3 competition valuation service boundary", () => {
     expect(runValuationAt).toHaveBeenCalledWith({
       competitionId,
       serverNow: new Date(claimedAt),
+    });
+    expect(completeValuation).toHaveBeenCalledWith({
+      competitionId,
+      leaseToken: "22222222-2222-4222-8222-222222222222",
+      evaluationCutoff: claimedAt,
+      outcome: "verified",
     });
   });
 });
