@@ -5,7 +5,9 @@ import JSZip from "jszip";
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 
 const CVM_ITR_2026_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/ITR/DADOS/itr_cia_aberta_2026.zip";
+const CVM_FCA_2026_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_2026.zip";
 const MELIUZ_CNPJ = "14110585000107";
+const MELIUZ_TICKER = "CASH3";
 
 function digits(value: string | undefined): string {
   return (value ?? "").replace(/\D/g, "");
@@ -46,6 +48,15 @@ function parseCsv(text: string): Array<Record<string, string>> {
     const values = parseDelimitedLine(line);
     return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
   });
+}
+
+async function fetchZip(url: string): Promise<JSZip> {
+  const response = await fetch(url, {
+    headers: { accept: "application/zip", "user-agent": "StockBox/1.0 https://www.getstockbox.app/contact" },
+  });
+  expect(response.ok, `CVM download failed for ${url} with ${response.status}`).toBe(true);
+  if (!response.ok) throw new Error(`CVM download failed with ${response.status}`);
+  return JSZip.loadAsync(await response.arrayBuffer());
 }
 
 async function readZipCsv(zip: JSZip, matcher: RegExp): Promise<{ name: string; rows: Array<Record<string, string>> } | null> {
@@ -91,20 +102,18 @@ function compact(row: Record<string, string>) {
 }
 
 liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
-  it("extracts current Meliuz debt and cash evidence from the official 2026 ITR dataset", async () => {
-    const response = await fetch(CVM_ITR_2026_URL, {
-      headers: { accept: "application/zip", "user-agent": "StockBox/1.0 https://www.getstockbox.app/contact" },
-    });
-    expect(response.ok, `CVM ITR download failed with ${response.status}`).toBe(true);
-    if (!response.ok) return;
+  it("extracts current Meliuz debt/cash evidence and proves a generic FCA ticker-to-CNPJ mapping", async () => {
+    const [itrZip, fcaZip] = await Promise.all([
+      fetchZip(CVM_ITR_2026_URL),
+      fetchZip(CVM_FCA_2026_URL),
+    ]);
 
-    const zip = await JSZip.loadAsync(await response.arrayBuffer());
-    const entries = Object.keys(zip.files).sort();
+    const entries = Object.keys(itrZip.files).sort();
     const [bppCon, bppInd, bpaCon, bpaInd] = await Promise.all([
-      readZipCsv(zip, /itr_cia_aberta_BPP_con_2026\.csv$/i),
-      readZipCsv(zip, /itr_cia_aberta_BPP_ind_2026\.csv$/i),
-      readZipCsv(zip, /itr_cia_aberta_BPA_con_2026\.csv$/i),
-      readZipCsv(zip, /itr_cia_aberta_BPA_ind_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_BPP_con_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_BPP_ind_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_BPA_con_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_BPA_ind_2026\.csv$/i),
     ]);
 
     expect(bppCon || bppInd, "Expected at least one CVM BPP statement file").toBeTruthy();
@@ -132,12 +141,32 @@ liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
       };
     });
 
+    const fcaEntries = Object.keys(fcaZip.files).filter((entry) => entry.toLowerCase().endsWith(".csv")).sort();
+    const securityMapMatches: Array<{ file: string; row: Record<string, string> }> = [];
+    for (const entry of fcaEntries) {
+      const bytes = await fcaZip.file(entry)?.async("uint8array");
+      if (!bytes) continue;
+      const rows = parseCsv(new TextDecoder("latin1").decode(bytes));
+      for (const row of rows) {
+        const values = Object.values(row);
+        const hasTicker = values.some((value) => value.trim().toUpperCase() === MELIUZ_TICKER);
+        const hasCnpj = values.some((value) => digits(value) === MELIUZ_CNPJ);
+        if (hasTicker || hasCnpj) securityMapMatches.push({ file: entry, row });
+      }
+    }
+
     const result = {
       source: CVM_ITR_2026_URL,
+      securityMapSource: CVM_FCA_2026_URL,
       cnpj: MELIUZ_CNPJ,
+      ticker: MELIUZ_TICKER,
       zipEntryCount: entries.length,
       relevantZipEntries: entries.filter((entry) => /_(BPP|BPA)_(con|ind)_2026\.csv$/i.test(entry)),
       fingerprint,
+      securityMap: {
+        zipEntries: fcaEntries,
+        matches: securityMapMatches,
+      },
     };
 
     console.log(`CVM_BRAZIL_FUNDAMENTALS_FINGERPRINT ${JSON.stringify(result)}`);
@@ -150,5 +179,13 @@ liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
 
     const issuerRows = fingerprint.reduce((count, item) => count + item.issuerRowCount, 0);
     expect(issuerRows, "Expected current CVM statement rows for Meliuz CNPJ").toBeGreaterThan(0);
+    expect(
+      securityMapMatches.some(({ row }) => Object.values(row).some((value) => value.trim().toUpperCase() === MELIUZ_TICKER)),
+      "Expected FCA to map the listed CASH3 security without ticker-specific production code",
+    ).toBe(true);
+    expect(
+      securityMapMatches.some(({ row }) => Object.values(row).some((value) => digits(value) === MELIUZ_CNPJ)),
+      "Expected FCA security mapping evidence to include Meliuz CNPJ",
+    ).toBe(true);
   }, 240_000);
 });
