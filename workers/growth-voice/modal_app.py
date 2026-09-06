@@ -28,6 +28,7 @@ REQUIREMENTS_PATH = str(Path(__file__).with_name("requirements.txt"))
 CONTRACT_PATH = Path(__file__).with_name("voice_contract.py")
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
     .pip_install_from_requirements(REQUIREMENTS_PATH)
     .add_local_file(CONTRACT_PATH, remote_path="/root/voice_contract.py")
 )
