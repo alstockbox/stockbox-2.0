@@ -8,7 +8,7 @@ import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import { PAPER_TRADING_V3_STARTING_CASH } from "@/lib/paper-trading/accounts-v3";
 import { joinPaperCompetitionV3 } from "@/lib/paper-trading/competition-repository-v3";
 import { executePaperOrderServiceV3 } from "@/lib/paper-trading/order-service-v3";
-import { createPaperAccountV3 } from "@/lib/paper-trading/repository-v3";
+import { createPaperAccountV3, loadPaperAccountBoundaryV3 } from "@/lib/paper-trading/repository-v3";
 
 const accountSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -86,6 +86,14 @@ export async function executePaperOrderAction(formData: FormData) {
     quantity: formData.get("quantity"),
   });
   if (!parsed.success) redirect("/paper-trading?tradeStatus=invalid");
+
+  const boundary = await loadPaperAccountBoundaryV3(user.id, parsed.data.accountId);
+  if (!boundary.ok) {
+    redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=error`);
+  }
+  if (boundary.account.status !== "active" || boundary.account.accountType !== "personal") {
+    redirect(`/paper-trading?account=${encodeURIComponent(parsed.data.accountId)}&tradeStatus=invalid`);
+  }
 
   const result = await executePaperOrderServiceV3({
     userId: user.id,
