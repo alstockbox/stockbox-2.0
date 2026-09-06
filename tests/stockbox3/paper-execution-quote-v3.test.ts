@@ -85,7 +85,7 @@ describe("Paper execution quote V3", () => {
   });
 
   it("maps US share-class dots only at the Yahoo request boundary while preserving StockBox identity", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload({
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify(payload({
       regularMarketPrice: 500,
       regularMarketTime: 1788610200,
       currency: "USD",
@@ -105,7 +105,7 @@ describe("Paper execution quote V3", () => {
   });
 
   it("does not rewrite exchange-qualified symbols as share classes", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload({
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify(payload({
       regularMarketPrice: 250,
       regularMarketTime: 1788610200,
       currency: "SEK",
