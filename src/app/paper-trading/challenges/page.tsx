@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth/session";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import { getLocale } from "@/lib/i18n/server";
 import {
+  listJoinedPaperChallengesV3,
   listOpenPaperChallengesV3,
   listPaperCompetitionEntriesV3,
 } from "@/lib/paper-trading/competition-repository-v3";
@@ -52,11 +53,12 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
   if (!isFeatureEnabled("paperTrading") || !isFeatureEnabled("challenges")) notFound();
 
   const user = await requireUser();
-  const [params, locale, challengesResult, entriesResult] = await Promise.all([
+  const [params, locale, challengesResult, entriesResult, joinedChallengesResult] = await Promise.all([
     searchParams,
     getLocale(),
     listOpenPaperChallengesV3(),
     listPaperCompetitionEntriesV3(user.id),
+    listJoinedPaperChallengesV3(user.id),
   ]);
   const sv = locale === "sv";
   const killed = isKilled("paperTrading");
@@ -64,6 +66,9 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
   const joinedCompetitionIds = new Set(
     entriesResult.ok ? entriesResult.entries.map((entry) => entry.competitionId) : [],
   );
+  const openChallenges = challengesResult.ok
+    ? challengesResult.competitions.filter((competition) => !joinedCompetitionIds.has(competition.id))
+    : [];
   const feedback = feedbackLabel(first(params.challengeStatus), sv);
 
   return (
@@ -112,24 +117,73 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
 
         {feedback ? <p className="mt-5 text-sm text-[#e1cb95]" role="status">{feedback}</p> : null}
 
-        {!challengesResult.ok ? (
-          <Card className="mt-7 border-amber-300/20 bg-amber-950/20 text-sm text-amber-100">
-            {sv
-              ? "Öppna utmaningar kunde inte verifieras just nu. Ingen påhittad challenge-data visas."
-              : "Open challenges could not be verified right now. No invented challenge data is shown."}
-          </Card>
-        ) : challengesResult.competitions.length === 0 ? (
-          <Card className="mt-7">
-            <p className="font-semibold text-[#f4efe5]">{sv ? "Inga öppna utmaningar just nu" : "No open challenges right now"}</p>
-            <p className="mt-2 text-sm text-[#8391a4]">
-              {sv ? "När en verifierad challenge öppnas visas den här." : "When a verified challenge opens, it will appear here."}
-            </p>
-          </Card>
-        ) : (
-          <div className="mt-7 grid gap-4 lg:grid-cols-2">
-            {challengesResult.competitions.map((competition) => {
-              const joined = joinedCompetitionIds.has(competition.id);
-              return (
+        <div className="mt-8">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b99b5f]">{sv ? "Mina challenges" : "My challenges"}</p>
+              <h2 className="serif mt-2 text-2xl font-semibold text-[#f4efe5]">{sv ? "Dina registrerade utmaningar" : "Your registered challenges"}</h2>
+            </div>
+          </div>
+
+          {!joinedChallengesResult.ok ? (
+            <Card className="mt-4 border-amber-300/20 bg-amber-950/20 text-sm text-amber-100">
+              {sv
+                ? "Dina challenges kunde inte verifieras just nu. Ingen påhittad historik visas."
+                : "Your challenges could not be verified right now. No invented history is shown."}
+            </Card>
+          ) : joinedChallengesResult.competitions.length === 0 ? (
+            <Card className="mt-4">
+              <p className="text-sm text-[#8391a4]">{sv ? "Du har inte gått med i någon challenge ännu." : "You have not joined any challenge yet."}</p>
+            </Card>
+          ) : (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {joinedChallengesResult.competitions.map((competition) => (
+                <Card key={competition.id}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="serif text-xl font-semibold text-[#f4efe5]">{competition.name}</p>
+                      <p className="mt-1 text-xs uppercase tracking-wide text-[#b99b5f]">{competition.status}</p>
+                    </div>
+                    <ShieldCheck className="h-5 w-5 shrink-0 text-[#e1cb95]" aria-hidden="true" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-[#8391a4]">
+                    <p>{sv ? "Start" : "Starts"}: <span className="block mt-1 text-sm text-[#f4efe5]">{dateLabel(competition.startsAt, sv)}</span></p>
+                    <p>{sv ? "Slut" : "Ends"}: <span className="block mt-1 text-sm text-[#f4efe5]">{dateLabel(competition.endsAt, sv)}</span></p>
+                    <p>{sv ? "Startkapital" : "Starting capital"}: <span className="block mt-1 number text-sm text-[#f4efe5]">{numberLabel(competition.startingCash, sv)} {competition.baseCurrency}</span></p>
+                    <p>{sv ? "Max deltagare" : "Max participants"}: <span className="block mt-1 number text-sm text-[#f4efe5]">{numberLabel(competition.maxParticipants, sv)}</span></p>
+                  </div>
+                  <Link
+                    href={`/paper-trading/challenges/${encodeURIComponent(competition.id)}`}
+                    className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 px-4 text-sm font-semibold text-[#f4efe5] transition hover:bg-[#b99b5f]/15"
+                  >
+                    {sv ? "Öppna challenge" : "Open challenge"}
+                  </Link>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b99b5f]">{sv ? "Öppna challenges" : "Open challenges"}</p>
+          <h2 className="serif mt-2 text-2xl font-semibold text-[#f4efe5]">{sv ? "Nya utmaningar du kan gå med i" : "New challenges you can join"}</h2>
+
+          {!challengesResult.ok ? (
+            <Card className="mt-4 border-amber-300/20 bg-amber-950/20 text-sm text-amber-100">
+              {sv
+                ? "Öppna utmaningar kunde inte verifieras just nu. Ingen påhittad challenge-data visas."
+                : "Open challenges could not be verified right now. No invented challenge data is shown."}
+            </Card>
+          ) : openChallenges.length === 0 ? (
+            <Card className="mt-4">
+              <p className="font-semibold text-[#f4efe5]">{sv ? "Inga nya öppna utmaningar just nu" : "No new open challenges right now"}</p>
+              <p className="mt-2 text-sm text-[#8391a4]">
+                {sv ? "När en verifierad challenge öppnas visas den här." : "When a verified challenge opens, it will appear here."}
+              </p>
+            </Card>
+          ) : (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {openChallenges.map((competition) => (
                 <Card key={competition.id}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -162,19 +216,7 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
                     </div>
                   </dl>
 
-                  {joined ? (
-                    <div className="mt-5 space-y-3">
-                      <div className="rounded-lg border border-emerald-300/15 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-100">
-                        {sv ? "Du är redan registrerad i den här utmaningen." : "You are already registered for this challenge."}
-                      </div>
-                      <Link
-                        href={`/paper-trading/challenges/${encodeURIComponent(competition.id)}`}
-                        className="inline-flex h-10 w-full items-center justify-center rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 px-4 text-sm font-semibold text-[#f4efe5] transition hover:bg-[#b99b5f]/15"
-                      >
-                        {sv ? "Öppna challenge" : "Open challenge"}
-                      </Link>
-                    </div>
-                  ) : joinEnabled && !joinedCompetitionIds.has(competition.id) ? (
+                  {joinEnabled ? (
                     <form action={joinPaperChallengeAction} className="mt-5">
                       <input type="hidden" name="competitionId" value={competition.id} />
                       <Button type="submit" className="w-full">{sv ? "Gå med i utmaningen" : "Join challenge"}</Button>
@@ -185,10 +227,10 @@ export default async function PaperTradingChallengesPage({ searchParams }: PageP
                     </p>
                   )}
                 </Card>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
 
         <Card className="mt-6">
           <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Tävlingsintegritet" : "Competition integrity"}</p>
