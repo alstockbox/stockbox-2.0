@@ -190,6 +190,76 @@ export async function addHoldingAction(formData: FormData) {
   revalidatePath("/portfolio");
 }
 
+export async function recordPortfolioSaleAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = z.object({
+    portfolioId: z.string().uuid(),
+    ticker: tickerSchema,
+    quantity: z.coerce.number().positive().max(1_000_000_000),
+    price: z.coerce.number().nonnegative().max(1_000_000_000),
+    currency: currencySchema,
+    saleDate: transactionDateSchema,
+    fees: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
+  }).safeParse({
+    portfolioId: formData.get("portfolioId"),
+    ticker: formData.get("ticker"),
+    quantity: formData.get("quantity"),
+    price: formData.get("price"),
+    currency: formData.get("currency"),
+    saleDate: formData.get("saleDate"),
+    fees: formData.get("fees") || 0,
+  });
+
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
+  if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
+
+  const supabase = await createClient();
+  if (!supabase) {
+    redirect("/portfolio?error=configuration");
+    return;
+  }
+
+  const { data: holding } = await supabase
+    .from("holdings")
+    .select("id,quantity")
+    .eq("portfolio_id", parsed.data.portfolioId)
+    .eq("ticker", parsed.data.ticker)
+    .eq("currency", parsed.data.currency)
+    .maybeSingle();
+  const ownedQuantity = holding ? Number(holding.quantity) : Number.NaN;
+  if (!holding || !Number.isFinite(ownedQuantity) || parsed.data.quantity > ownedQuantity) {
+    redirect("/portfolio?error=sell_quantity");
+    return;
+  }
+
+  const { error } = await supabase.rpc("record_portfolio_transaction", {
+    p_portfolio_id: parsed.data.portfolioId,
+    p_ticker: parsed.data.ticker,
+    p_transaction_type: "sell",
+    p_quantity: parsed.data.quantity,
+    p_price: parsed.data.price,
+    p_currency: parsed.data.currency,
+    p_executed_at: parsed.data.saleDate,
+    p_fees: parsed.data.fees,
+    p_cash_amount: null,
+    p_security_id: null,
+    p_notes: null,
+  });
+  if (error) {
+    const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
+    if (message.includes("Sell quantity exceeds owned quantity")) {
+      redirect("/portfolio?error=sell_quantity");
+      return;
+    }
+    redirect("/portfolio?error=transaction_save");
+    return;
+  }
+  revalidatePath("/portfolio");
+}
+
 export async function updatePortfolioTransactionAction(formData: FormData) {
   await requireUser();
   const parsed = z.object({
