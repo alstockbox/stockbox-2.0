@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 
 const actions = readFileSync("src/app/paper-trading/actions.ts", "utf8");
 const accounts = readFileSync("src/lib/paper-trading/accounts-v3.ts", "utf8");
+const createAccountStart = actions.indexOf("export async function createPaperAccountAction");
+const createAccountEnd = actions.indexOf("export async function joinPaperChallengeAction");
+const createAccountAction = createAccountStart >= 0 && createAccountEnd > createAccountStart
+  ? actions.slice(createAccountStart, createAccountEnd)
+  : "";
 
 describe("Paper Trading V3 action boundary", () => {
   it("binds identity from the authenticated server session and never from FormData", () => {
@@ -38,11 +43,11 @@ describe("Paper Trading V3 action boundary", () => {
     expect(accounts).toContain(".limit(20)");
   });
 
-  it("keeps leaderboard fairness separate from account creation by fixing capital while allowing currency choice", () => {
+  it("keeps leaderboard fairness separate from personal account creation by fixing capital while allowing currency choice", () => {
     expect(accounts).toContain('"SEK"');
     expect(accounts).toContain('"USD"');
-    expect(actions).toContain("baseCurrency: parsed.data.baseCurrency");
-    expect(actions).not.toContain("leaderboard");
-    expect(actions).not.toContain("challenge");
+    expect(createAccountAction).toContain("baseCurrency: parsed.data.baseCurrency");
+    expect(createAccountAction).not.toContain("leaderboard");
+    expect(createAccountAction).not.toContain("challenge");
   });
 });
