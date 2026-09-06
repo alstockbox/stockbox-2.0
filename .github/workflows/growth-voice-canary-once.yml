@@ -1,0 +1,128 @@
+name: Growth Founder Voice Canary Once
+
+on:
+  push:
+    branches:
+      - canary/growth-voice-20260906-v1
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANARY_API_URL: https://joelaecxlksyvnmypihv.supabase.co/functions/v1/stockbox-growth-voice-canary
+      GROWTH_RENDER_WORKER_TOKEN: ${{ secrets.GROWTH_RENDER_WORKER_TOKEN }}
+      GROWTH_VOICE_WORKER_URL: ${{ secrets.GROWTH_VOICE_WORKER_URL }}
+      GROWTH_VOICE_WORKER_TOKEN: ${{ secrets.GROWTH_VOICE_WORKER_TOKEN }}
+
+    steps:
+      - name: Prepare one-shot canary and reserve budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GROWTH_RENDER_WORKER_TOKEN"
+          test -n "$GROWTH_VOICE_WORKER_URL"
+          test -n "$GROWTH_VOICE_WORKER_TOKEN"
+          curl --fail-with-body --silent --show-error \
+            -X POST "$CANARY_API_URL" \
+            -H "content-type: application/json" \
+            -H "x-stockbox-growth-worker-token: $GROWTH_RENDER_WORKER_TOKEN" \
+            --data '{"action":"prepare"}' \
+            > prepare.json
+          python - <<'PY'
+          import json, os
+          with open('prepare.json', encoding='utf-8') as fh:
+              data = json.load(fh)
+          assert data.get('model') == 'chatterbox-multilingual-v3', data.get('model')
+          assert data.get('status') == 'testing', data.get('status')
+          assert data.get('budget', {}).get('allowed') is True, data.get('budget')
+          assert float(data.get('estimated_sek')) == 1.0
+          values = {
+              'REFERENCE_AUDIO_URL': data['reference_audio_url'],
+              'CANARY_UPLOAD_URL': data['output']['signed_url'],
+              'CANARY_REQUEST_ID': data['request_id'],
+          }
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              for key, value in values.items():
+                  out.write(f'{key}={value}\n')
+          PY
+          rm -f prepare.json
+
+      - name: Generate exactly one Swedish founder-voice sample
+        id: provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PROVIDER_ATTEMPTED=true" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json, os
+          payload = {
+              'request_id': os.environ['CANARY_REQUEST_ID'],
+              'text': 'Det här är ett test av StockBox röst. Jag analyserar bolag med fokus på värdering, tillväxt, lönsamhet och risk.',
+              'language': 'sv',
+              'voice_mode': 'educational',
+              'reference_audio_url': os.environ['REFERENCE_AUDIO_URL'],
+          }
+          with open('request.json', 'w', encoding='utf-8') as fh:
+              json.dump(payload, fh, ensure_ascii=False)
+          PY
+          http_code=$(curl --silent --show-error \
+            -D response-headers.txt \
+            -o founder-voice-canary.wav \
+            -w '%{http_code}' \
+            -X POST "$GROWTH_VOICE_WORKER_URL" \
+            -H "authorization: Bearer $GROWTH_VOICE_WORKER_TOKEN" \
+            -H "content-type: application/json" \
+            --data-binary @request.json)
+          rm -f request.json
+          test "$http_code" = "200"
+          python - <<'PY'
+          import hashlib, os, wave
+          path = 'founder-voice-canary.wav'
+          size = os.path.getsize(path)
+          assert size > 1000, size
+          with wave.open(path, 'rb') as audio:
+              assert audio.getnchannels() >= 1
+              assert audio.getframerate() > 0
+              assert audio.getnframes() > 0
+              duration = audio.getnframes() / audio.getframerate()
+          digest = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+          print(f'canary_wav_ok size_bytes={size} duration_seconds={duration:.2f} sha256={digest}')
+          PY
+
+      - name: Store canary privately in Supabase staging
+        if: steps.provider.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -X PUT "$CANARY_UPLOAD_URL" \
+            -H 'content-type: audio/wav' \
+            -H 'cache-control: max-age=3600' \
+            -H 'x-upsert: true' \
+            --data-binary @founder-voice-canary.wav \
+            > /dev/null
+          echo 'private_canary_upload_ok'
+
+      - name: Finalize conservative canary usage accounting
+        if: always() && env.PROVIDER_ATTEMPTED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -X POST "$CANARY_API_URL" \
+            -H "content-type: application/json" \
+            -H "x-stockbox-growth-worker-token: $GROWTH_RENDER_WORKER_TOKEN" \
+            --data '{"action":"finalize"}' \
+            > finalize.json
+          python - <<'PY'
+          import json
+          with open('finalize.json', encoding='utf-8') as fh:
+              data = json.load(fh)
+          assert data.get('finalized') is True, data
+          print('canary_usage_finalized estimated_sek=1.00')
+          PY
+          rm -f finalize.json founder-voice-canary.wav response-headers.txt
