@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  loadPaperCompetitionFinalStandingsV3,
   loadPaperCompetitionStandingsV3,
   type PaperCompetitionStandingsLoadResultV3,
 } from "./standings-repository-v3";
@@ -63,7 +64,8 @@ export type PaperChallengeLeaderboardReadModelResultV3 =
 export type PaperChallengeLeaderboardReadModelDependenciesV3 = {
   loadCompetition: (competitionId: string) => Promise<ChallengeCompetitionLoadResultV3>;
   loadVerifiedCutoff: (competitionId: string) => Promise<VerifiedCutoffLoadResultV3>;
-  loadStandings: typeof loadPaperCompetitionStandingsV3;
+  loadActiveStandings: typeof loadPaperCompetitionStandingsV3;
+  loadFinalStandings: typeof loadPaperCompetitionFinalStandingsV3;
 };
 
 type JsonRow = Record<string, unknown>;
@@ -162,7 +164,8 @@ async function loadLatestVerifiedCompetitionCutoffV3(competitionId: string): Pro
 const defaultDependencies: PaperChallengeLeaderboardReadModelDependenciesV3 = {
   loadCompetition: loadChallengeCompetitionTermsV3,
   loadVerifiedCutoff: loadLatestVerifiedCompetitionCutoffV3,
-  loadStandings: loadPaperCompetitionStandingsV3,
+  loadActiveStandings: loadPaperCompetitionStandingsV3,
+  loadFinalStandings: loadPaperCompetitionFinalStandingsV3,
 };
 
 function standingsAreComplete(input: {
@@ -271,7 +274,10 @@ export async function loadPaperChallengeLeaderboardReadModelV3(
 
   let standingsResult: PaperCompetitionStandingsLoadResultV3;
   try {
-    standingsResult = await dependencies.loadStandings({
+    const loadStandings = competition.status === "completed"
+      ? dependencies.loadFinalStandings
+      : dependencies.loadActiveStandings;
+    standingsResult = await loadStandings({
       competitionId,
       evaluationCutoff,
       viewer: { scope: "public" },
