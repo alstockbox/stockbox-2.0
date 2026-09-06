@@ -36,6 +36,18 @@ describe("growth render contracts", () => {
     expect(RenderSpecSchema.parse(baseSpec).contentId).toBe("content-1");
   });
 
+  it("accepts dynamic Swedish founder voice modes and bounded style intensity", () => {
+    const parsed = RenderSpecSchema.parse({ ...baseSpec, voiceMode: "excited", voiceStyleIntensity: 85 });
+    expect(parsed.voiceMode).toBe("excited");
+    expect(parsed.voiceStyleIntensity).toBe(85);
+    expect(RenderSpecSchema.parse({ ...baseSpec, voiceStyleIntensity: 0 }).voiceStyleIntensity).toBe(0);
+    expect(RenderSpecSchema.parse({ ...baseSpec, voiceStyleIntensity: 100 }).voiceStyleIntensity).toBe(100);
+  });
+
+  it.each([-1, 101, 50.5])("rejects invalid voice style intensity %s", (voiceStyleIntensity) => {
+    expect(() => RenderSpecSchema.parse({ ...baseSpec, voiceStyleIntensity })).toThrow();
+  });
+
   it("rejects non-positive scene duration", () => {
     expect(() => RenderSpecSchema.parse({ ...baseSpec, scenes: [{ ...baseSpec.scenes[0], endMs: 0 }] })).toThrow();
   });
