@@ -1,6 +1,7 @@
 import { getServerEnv } from "@/lib/env/server";
 
 export const MAX_DURABLE_WORKER_DELAY_MS = 90_000;
+export const DURABLE_WORKER_TRIGGER_TIMEOUT_MS = 240_000;
 
 export function boundedDurableWorkerDelayMs(availableAt: string, nowMs = Date.now()): number {
   const availableAtMs = Date.parse(availableAt);
@@ -20,7 +21,7 @@ export async function triggerDurableBatchWorker(input: { baseUrl?: string; delay
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), DURABLE_WORKER_TRIGGER_TIMEOUT_MS);
   try {
     const response = await fetch(`${baseUrl}/api/jobs/batch/run`, {
       method: "POST",
