@@ -8,6 +8,7 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/session";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import { getLocale } from "@/lib/i18n/server";
+import { loadPaperChallengeLeaderboardReadModelV3 } from "@/lib/paper-trading/challenge-leaderboard-read-model-v3";
 import { loadPaperChallengeWorkspaceV3 } from "@/lib/paper-trading/competition-repository-v3";
 import { derivePaperTradingLedgerV3 } from "@/lib/paper-trading/engine-v3";
 import { loadPaperAccountStateV3 } from "@/lib/paper-trading/repository-v3";
@@ -65,6 +66,14 @@ export default async function PaperTradingChallengeWorkspacePage({ params, searc
   const workspaceResult = await loadPaperChallengeWorkspaceV3(user.id, competitionId);
   if (!workspaceResult.ok) notFound();
   const workspace = workspaceResult.workspace;
+
+  const leaderboardsEnabled = isFeatureEnabled("leaderboards");
+  const leaderboardResult = leaderboardsEnabled
+    ? await loadPaperChallengeLeaderboardReadModelV3({
+        competitionId: workspace.competition.id,
+        viewerUserId: user.id,
+      })
+    : null;
 
   const stateResult = await loadPaperAccountStateV3(user.id, workspace.accountId);
   const ledger = stateResult?.ok ? derivePaperTradingLedgerV3(stateResult.state.fills) : null;
@@ -268,13 +277,57 @@ export default async function PaperTradingChallengeWorkspacePage({ params, searc
           </>
         )}
 
-        <Card className="mt-6 border-white/10 bg-[#07111f]/60">
-          <p className="text-xs leading-5 text-[#8391a4]">
-            {sv
-              ? "Leaderboard visas inte från denna vy. En framtida ranking får bara byggas från samma verifierade värderingstidpunkt för alla deltagare; workspace-ledgern används inte som en genväg till jämförbara avkastningssiffror."
-              : "No leaderboard is shown from this view. Any future ranking must use the same verified evaluation cutoff for every participant; the workspace ledger is not used as a shortcut to comparable return figures."}
-          </p>
-        </Card>
+        {leaderboardsEnabled && leaderboardResult ? (
+          leaderboardResult.status === "VERIFIED" ? (
+            <Card className="mt-6 border-emerald-300/15 bg-emerald-950/10">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Trophy className="h-5 w-5 text-[#e1cb95]" aria-hidden="true" />
+                    <h2 className="serif text-xl font-semibold text-[#f4efe5]">{sv ? "Verifierad leaderboard" : "Verified leaderboard"}</h2>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-[#8391a4]">
+                    {sv ? "Alla deltagare rankas från sparad, verifierad evidens vid exakt samma värderingstidpunkt." : "Every participant is ranked from persisted, verified evidence at the exact same valuation cutoff."}
+                  </p>
+                </div>
+                <div className="text-right text-xs text-[#8391a4]">
+                  <p>{leaderboardResult.final ? (sv ? "Slutresultat" : "Final standings") : (sv ? "Verifierad snapshot" : "Verified snapshot")}</p>
+                  <p className="mt-1">{dateLabel(leaderboardResult.evaluationCutoff, locale)}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 divide-y divide-white/10">
+                {leaderboardResult.standings.map((standing, index) => (
+                  <div key={`${standing.rank}-${index}`} className={`grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0 sm:grid-cols-[72px_1fr_auto_auto] sm:items-center ${standing.isViewer ? "text-[#f4efe5]" : "text-[#c9d2df]"}`}>
+                    <p className="number text-lg font-semibold text-[#e1cb95]">#{standing.rank}</p>
+                    <p className="text-sm font-semibold">{standing.isViewer ? (sv ? "Du" : "You") : (sv ? "Deltagare" : "Participant")}</p>
+                    <p className="number text-sm sm:text-right">{numberLabel(standing.returnPercent, locale, 4)} %</p>
+                    <p className="number col-span-2 text-sm sm:col-span-1 sm:text-right">{numberLabel(standing.equity, locale, 2)} {leaderboardResult.baseCurrency}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : leaderboardResult.status === "UNAVAILABLE" ? (
+            <Card className="mt-6 border-amber-300/20 bg-amber-950/20">
+              <h2 className="serif text-xl font-semibold text-[#f4efe5]">
+                {sv ? "Verifierad leaderboard är inte tillgänglig" : "Verified leaderboard is unavailable"}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-amber-100/80">
+                {sv
+                  ? "StockBox visar inget delresultat när gemensam cutoff, verifierade snapshots eller full deltagartäckning saknas."
+                  : "StockBox does not show partial standings when a common cutoff, verified snapshots, or complete participant coverage is missing."}
+              </p>
+            </Card>
+          ) : null
+        ) : (
+          <Card className="mt-6 border-white/10 bg-[#07111f]/60">
+            <p className="text-xs leading-5 text-[#8391a4]">
+              {sv
+                ? "Leaderboard visas inte från denna vy. En framtida ranking får bara byggas från samma verifierade värderingstidpunkt för alla deltagare; workspace-ledgern används inte som en genväg till jämförbara avkastningssiffror."
+                : "No leaderboard is shown from this view. Any future ranking must use the same verified evaluation cutoff for every participant; the workspace ledger is not used as a shortcut to comparable return figures."}
+            </p>
+          </Card>
+        )}
       </Container>
     </Section>
   );
