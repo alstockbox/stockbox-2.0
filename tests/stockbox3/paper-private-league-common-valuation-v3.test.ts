@@ -6,6 +6,7 @@ import {
   orchestratePrivatePaperLeagueCommonValuationV3,
   type PaperCompetitionCommonValuationDependenciesV3,
 } from "../../src/lib/paper-trading/competition-valuation-v3";
+import { derivePaperPerformanceV3 } from "../../src/lib/paper-trading/performance-v3";
 
 const sourcePath = path.join(process.cwd(), "src/lib/paper-trading/competition-valuation-v3.ts");
 const source = fs.existsSync(sourcePath) ? fs.readFileSync(sourcePath, "utf8") : "";
@@ -120,6 +121,7 @@ function dependencies(input: {
         reason: null,
       };
     },
+    derivePerformance: derivePaperPerformanceV3,
     persistSnapshot: async ({ accountId, userId, performance }) => {
       calls.persistedAccounts.push(accountId);
       return {
