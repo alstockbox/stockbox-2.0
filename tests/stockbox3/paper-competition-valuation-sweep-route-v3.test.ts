@@ -4,15 +4,18 @@ import { describe, expect, it } from "vitest";
 const routePath = "src/app/api/jobs/paper-competition-valuation-sweep/run/route.ts";
 const vercelPath = "vercel.json";
 
-describe("Paper Trading V3 competition valuation sweep runtime route", () => {
-  it("exposes a CRON_SECRET-protected internal GET/POST route with no browser-controlled authority", () => {
+describe("Paper Trading V3 competition valuation runtime route", () => {
+  it("exposes one CRON_SECRET-protected internal GET/POST route with no browser-controlled authority", () => {
     expect(existsSync(routePath)).toBe(true);
     const route = readFileSync(routePath, "utf8");
 
     expect(route).toContain('export const runtime = "nodejs"');
     expect(route).toContain("CRON_SECRET");
     expect(route).toContain("isPayoutCronAuthorized");
-    expect(route).toContain("runPaperCompetitionValuationSweepV3");
+    expect(route).toContain("runPaperCompetitionValuationRuntimeV3");
+    expect(route).not.toContain("runPaperCompetitionValuationSweepV3");
+    expect(route).not.toContain("runPaperCompetitionFinalValuationSweepV3");
+    expect(route).not.toContain("completeDuePaperCompetitionsV3");
     expect(route).toContain("export const GET = run");
     expect(route).toContain("export const POST = run");
 
@@ -26,12 +29,15 @@ describe("Paper Trading V3 competition valuation sweep runtime route", () => {
     expect(route).not.toContain("p_now");
   });
 
-  it("fails closed on sweep lookup/runtime failure and returns only the aggregate sweep result", () => {
+  it("fails closed on runtime failure and returns only aggregate orchestration data", () => {
     expect(existsSync(routePath)).toBe(true);
     const route = readFileSync(routePath, "utf8");
 
     expect(route).toContain('result.status === "ERROR"');
+    expect(route).toContain('result.status === "COMPLETED"');
+    expect(route).toContain("result.errors > 0");
     expect(route).toContain("503");
+    expect(route).toContain("207");
     expect(route).toContain("Response.json(result");
     expect(route).not.toContain("competitionIds");
     expect(route).not.toContain("reason:");
