@@ -1,9 +1,7 @@
 name: Growth Founder Voice Canary Once
 
 on:
-  push:
-    branches:
-      - canary/growth-voice-20260906-v1
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -38,12 +36,17 @@ jobs:
               data = json.load(fh)
           assert data.get('model') == 'chatterbox-multilingual-v3', data.get('model')
           assert data.get('status') == 'testing', data.get('status')
+          assert int(data.get('profile_version')) == 2, data.get('profile_version')
+          assert data.get('voice_mode') == 'educational', data.get('voice_mode')
+          assert int(data.get('style_intensity')) == 50, data.get('style_intensity')
           assert data.get('budget', {}).get('allowed') is True, data.get('budget')
           assert float(data.get('estimated_sek')) == 1.0
           values = {
               'REFERENCE_AUDIO_URL': data['reference_audio_url'],
               'CANARY_UPLOAD_URL': data['output']['signed_url'],
               'CANARY_REQUEST_ID': data['request_id'],
+              'CANARY_VOICE_MODE': data['voice_mode'],
+              'CANARY_STYLE_INTENSITY': str(data['style_intensity']),
           }
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
               for key, value in values.items():
@@ -63,7 +66,8 @@ jobs:
               'request_id': os.environ['CANARY_REQUEST_ID'],
               'text': 'Det här är ett test av StockBox röst. Jag analyserar bolag med fokus på värdering, tillväxt, lönsamhet och risk.',
               'language': 'sv',
-              'voice_mode': 'educational',
+              'voice_mode': os.environ['CANARY_VOICE_MODE'],
+              'style_intensity': int(os.environ['CANARY_STYLE_INTENSITY']),
               'reference_audio_url': os.environ['REFERENCE_AUDIO_URL'],
           }
           with open('request.json', 'w', encoding='utf-8') as fh:
@@ -112,7 +116,7 @@ jobs:
         if: steps.provider.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: founder-voice-canary-v3
+          name: founder-voice-canary-v4
           path: founder-voice-canary.wav
           if-no-files-found: error
           retention-days: 1
