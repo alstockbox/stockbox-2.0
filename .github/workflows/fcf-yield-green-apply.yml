@@ -1,0 +1,125 @@
+name: Apply verified FX FCF yield consumer
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - .github/workflows/fcf-yield-green-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify expected parent
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = "61ce6117e5ab6ebb9d14fef2bc40b9a1c25cba01"
+      - name: Apply minimal consumer fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/lib/analysis/metrics.ts")
+          text = path.read_text()
+
+          old = '''  const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
+            ? safeDivide(reported.freeCashFlow, reported.marketCap)
+            : null;'''
+          new = '''  const reportedWithVerifiedFx = reported as typeof reported & {
+            freeCashFlowYield?: number | null;
+            freeCashFlowYieldProvenance?: MetricProvenance;
+          };
+          const fxProvenance = reportedWithVerifiedFx.freeCashFlowYieldProvenance;
+          const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);
+          const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);
+          const fxRateTime = fxProvenance?.periodEnd ? Date.parse(fxProvenance.periodEnd) : Number.NaN;
+          const valuationTime = reported.asOfDate ? Date.parse(reported.asOfDate) : Number.NaN;
+          const fxRateAtOrBeforeValuation = Number.isFinite(fxRateTime)
+            && Number.isFinite(valuationTime)
+            && fxRateTime <= valuationTime;
+          const fxRateCurrent = fxProvenance?.periodEnd && reported.asOfDate
+            ? dataDateStatus(fxProvenance.periodEnd, reported.asOfDate, 7).status === "current"
+            : false;
+          const verifiedFxYield = positive(reported.marketCap) !== null
+            && isFiniteNumber(reported.freeCashFlow)
+            && marketCapCurrency !== null
+            && freeCashFlowCurrency !== null
+            && marketCapCurrency !== freeCashFlowCurrency
+            && isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
+            && fxProvenance?.source === "ECB foreign exchange reference rates"
+            && fxProvenance.provider === "ecb"
+            && fxProvenance.valueKind === "derived"
+            && fxRateAtOrBeforeValuation
+            && fxRateCurrent
+              ? reportedWithVerifiedFx.freeCashFlowYield
+              : null;
+          const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
+            ? safeDivide(reported.freeCashFlow, reported.marketCap)
+            : fcfCurrent ? verifiedFxYield : null;'''
+          if old not in text:
+              raise SystemExit("provider FCF yield block not found exactly")
+          text = text.replace(old, new, 1)
+
+          old_prov = '''    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
+              return {
+                source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
+                periodEnd: input.reportedValuation.asOfDate ?? undefined,
+                valueKind: derivedNote ? "derived" : "reported",
+                inputs: derivedNote ? derivedInputs : undefined,
+                note: derivedNote,
+              };
+            }'''
+          new_prov = '''    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
+              if (metric === "freeCashFlowYield") {
+                const reportedWithVerifiedFx = input.reportedValuation as typeof input.reportedValuation & {
+                  freeCashFlowYield?: number | null;
+                  freeCashFlowYieldProvenance?: MetricProvenance;
+                };
+                if (
+                  isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
+                  && reportedValuationFallback.freeCashFlowYield === reportedWithVerifiedFx.freeCashFlowYield
+                  && reportedWithVerifiedFx.freeCashFlowYieldProvenance
+                ) {
+                  return reportedWithVerifiedFx.freeCashFlowYieldProvenance;
+                }
+              }
+              return {
+                source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
+                periodEnd: input.reportedValuation.asOfDate ?? undefined,
+                valueKind: derivedNote ? "derived" : "reported",
+                inputs: derivedNote ? derivedInputs : undefined,
+                note: derivedNote,
+              };
+            }'''
+          if old_prov not in text:
+              raise SystemExit("provider valuation provenance block not found exactly")
+          text = text.replace(old_prov, new_prov, 1)
+          path.write_text(text)
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify targeted GREEN
+        run: npx vitest run tests/analysis/provider-valuation-fallback.test.ts
+      - name: Verify types
+        run: npm run typecheck
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/fcf-yield-green-apply.yml
+          git config user.name "stockbox-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/analysis/metrics.ts .github/workflows/fcf-yield-green-apply.yml
+          git commit -m "fix: consume verified FX-normalized FCF yield"
+          git fetch origin fix/coverage-engine-root-cause
+          test "$(git rev-parse origin/fix/coverage-engine-root-cause)" = "$GITHUB_SHA"
+          git push origin HEAD:fix/coverage-engine-root-cause
