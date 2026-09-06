@@ -11,6 +11,7 @@ import { getLocale } from "@/lib/i18n/server";
 import { loadPaperChallengeWorkspaceV3 } from "@/lib/paper-trading/competition-repository-v3";
 import { derivePaperTradingLedgerV3 } from "@/lib/paper-trading/engine-v3";
 import { loadPaperAccountStateV3 } from "@/lib/paper-trading/repository-v3";
+import { paperTradingServerNowMsV3 } from "@/lib/paper-trading/server-clock-v3";
 import { executePaperChallengeOrderAction } from "../../actions";
 
 export const metadata: Metadata = { title: "Paper Trading Challenge" };
@@ -78,7 +79,7 @@ export default async function PaperTradingChallengeWorkspacePage({ params, searc
 
   const sv = locale === "sv";
   const killed = isKilled("paperTrading");
-  const nowMs = Date.now();
+  const nowMs = paperTradingServerNowMsV3();
   const startsAtMs = Date.parse(workspace.competition.startsAt);
   const endsAtMs = Date.parse(workspace.competition.endsAt);
   const tradingWindowOpen = nowMs >= startsAtMs && nowMs <= endsAtMs;
@@ -97,7 +98,7 @@ export default async function PaperTradingChallengeWorkspacePage({ params, searc
         : workspace.competition.status === "completed" || nowMs > endsAtMs
           ? (sv ? "Utmaningen är avslutad. Resultat och ledger visas endast som historik." : "The challenge has ended. Results and ledger are shown as history only.")
           : nowMs < startsAtMs
-            ? (sv ? "Du är registrerad. Simulerad handel öppnar först när det officiella starttiden nås." : "You are registered. Simulated trading opens only when the official start time is reached.")
+            ? (sv ? "Du är registrerad. Simulerad handel öppnar först när den officiella starttiden nås." : "You are registered. Simulated trading opens only when the official start time is reached.")
             : verifiedState === null
               ? (sv ? "Kontots ledger kunde inte verifieras. Ingen handel tillåts och inga påhittade saldon visas." : "The account ledger could not be verified. Trading is disabled and no invented balances are shown.")
               : (sv ? "Challenge-fönstret är öppet för verifierade simulerade order." : "The challenge window is open for verified simulated orders.");
