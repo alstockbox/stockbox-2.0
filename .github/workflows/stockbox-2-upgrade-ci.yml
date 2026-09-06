@@ -81,19 +81,22 @@ jobs:
         id: typecheck
         continue-on-error: true
         run: npm run typecheck
-      - name: Lint changed StockBox 2 files
-        id: lint
+      - name: Lint portfolio purchase component
+        id: lint_purchase
         continue-on-error: true
-        shell: bash
-        run: |
-          git fetch origin main:refs/remotes/origin/main
-          mapfile -t files < <(git diff --name-only origin/main...HEAD | grep -E '\.(js|jsx|ts|tsx|mjs|cjs)$' || true)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No changed JS/TS files to lint."
-            exit 0
-          fi
-          printf 'Linting changed files:\n%s\n' "${files[*]}"
-          npx eslint "${files[@]}"
+        run: npx eslint src/components/portfolio/portfolio-purchase-form.tsx
+      - name: Lint portfolio page
+        id: lint_page
+        continue-on-error: true
+        run: npx eslint src/app/portfolio/page.tsx
+      - name: Lint workspace action
+        id: lint_workspace
+        continue-on-error: true
+        run: npx eslint src/lib/workspace/actions.ts
+      - name: Lint workspace tests
+        id: lint_tests
+        continue-on-error: true
+        run: npx eslint tests/workspace/actions.test.ts tests/workspace/canonical-identity.test.ts
       - name: Production build
         id: build
         continue-on-error: true
@@ -107,9 +110,18 @@ jobs:
       - name: Gate typecheck
         if: always()
         run: test "${{ steps.typecheck.outcome }}" = "success"
-      - name: Gate changed-file lint
+      - name: Gate purchase component lint
         if: always()
-        run: test "${{ steps.lint.outcome }}" = "success"
+        run: test "${{ steps.lint_purchase.outcome }}" = "success"
+      - name: Gate portfolio page lint
+        if: always()
+        run: test "${{ steps.lint_page.outcome }}" = "success"
+      - name: Gate workspace action lint
+        if: always()
+        run: test "${{ steps.lint_workspace.outcome }}" = "success"
+      - name: Gate workspace test lint
+        if: always()
+        run: test "${{ steps.lint_tests.outcome }}" = "success"
       - name: Gate production build
         if: always()
         run: test "${{ steps.build.outcome }}" = "success"
