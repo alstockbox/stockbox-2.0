@@ -7,10 +7,37 @@ from pathlib import PurePosixPath
 import wave
 from urllib.parse import urlparse
 
-ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis"}
+ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis", "excited"}
 ALLOWED_REFERENCE_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac"}
 CHATTERBOX_T3_MODEL = "v3"
 MAX_TEXT_CHARS = 1500
+
+VOICE_STYLE_PRESETS = {
+    "serious_analysis": {
+        "default_intensity": 35,
+        "exaggeration": (0.32, 0.50),
+        "cfg_weight": (0.52, 0.44),
+        "temperature": (0.72, 0.78),
+    },
+    "educational": {
+        "default_intensity": 50,
+        "exaggeration": (0.42, 0.64),
+        "cfg_weight": (0.50, 0.40),
+        "temperature": (0.76, 0.82),
+    },
+    "hook": {
+        "default_intensity": 70,
+        "exaggeration": (0.54, 0.82),
+        "cfg_weight": (0.46, 0.32),
+        "temperature": (0.78, 0.86),
+    },
+    "excited": {
+        "default_intensity": 85,
+        "exaggeration": (0.68, 0.95),
+        "cfg_weight": (0.40, 0.28),
+        "temperature": (0.82, 0.90),
+    },
+}
 
 
 def authorized(authorization: str | None, expected: str) -> bool:
@@ -40,6 +67,31 @@ def chatterbox_model_kwargs() -> dict[str, str]:
 
 def torchaudio_save_kwargs() -> dict[str, str | int]:
     return {"format": "wav", "encoding": "PCM_S", "bits_per_sample": 16}
+
+
+def _interpolate(bounds: tuple[float, float], ratio: float) -> float:
+    low, high = bounds
+    return round(low + (high - low) * ratio, 3)
+
+
+def voice_generation_kwargs(voice_mode: str, style_intensity: int | float | None) -> dict[str, float]:
+    preset = VOICE_STYLE_PRESETS.get(voice_mode)
+    if preset is None:
+        raise ValueError("unsupported_voice_mode")
+    if style_intensity is None:
+        intensity = float(preset["default_intensity"])
+    else:
+        if isinstance(style_intensity, bool) or not isinstance(style_intensity, (int, float)):
+            raise ValueError("invalid_style_intensity")
+        intensity = float(style_intensity)
+        if not math.isfinite(intensity) or intensity < 0 or intensity > 100:
+            raise ValueError("invalid_style_intensity")
+    ratio = intensity / 100.0
+    return {
+        "exaggeration": _interpolate(preset["exaggeration"], ratio),
+        "cfg_weight": _interpolate(preset["cfg_weight"], ratio),
+        "temperature": _interpolate(preset["temperature"], ratio),
+    }
 
 
 def validate_voice_request(language: str, voice_mode: str, text: str) -> None:
