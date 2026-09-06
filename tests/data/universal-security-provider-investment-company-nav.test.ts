@@ -170,4 +170,74 @@ describe("investment-company official NAV production wiring", () => {
     expect(report.dataCoverage).toBeLessThan(0.99);
     expect(report.recommendation).toBe("No Rating");
   });
+
+  it("fails closed when official NAV is unavailable without inventing a source or NAV value", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce({
+      ok: false,
+      message: "No verified official NAV adapter is configured for this investment company yet.",
+      diagnostic: {
+        provider: "Official investment-company NAV",
+        capability: "specialized",
+        status: "unavailable",
+        reason: "official_nav_adapter_not_configured",
+        observedAt,
+      },
+    });
+
+    const result = await analyzeCompany({
+      company: {
+        ticker: "HOLD.ST",
+        name: "Diversified Investment Holding AB",
+        securityType: "Common Stock",
+      },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const analysis = report.securityAnalysis?.investmentCompany;
+    const navFactor = analysis?.score.factors.find((factor) => factor.key === "nav_valuation");
+
+    expect(analysis?.nav.source).toBe("unavailable");
+    expect(analysis?.nav.perShare).toBeNull();
+    expect(navFactor?.status).toBe("missing");
+    expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(false);
+    expect(report.providerDiagnostics?.some((item) => (
+      item.provider === "Official investment-company NAV"
+      && item.status === "unavailable"
+      && item.reason === "official_nav_adapter_not_configured"
+    ))).toBe(true);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("does not call the official NAV adapter for an operating company", async () => {
+    const report = coreHoldingCompanyReport();
+    report.ticker = "OPER";
+    report.companyName = "Operating Company";
+    report.analysisArchetype = "standard";
+    mocks.analyzeOperatingCompany.mockResolvedValueOnce({
+      ok: true,
+      data: report,
+      sources: report.sources,
+      warnings: [],
+    });
+
+    const result = await analyzeCompany({
+      company: {
+        ticker: "OPER",
+        name: "Operating Company",
+        securityType: "Common Stock",
+      },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.fetchOfficialInvestmentCompanyNav).not.toHaveBeenCalled();
+    if (!result.ok) return;
+    expect((result.data as UniversalSecurityReport).securityAnalysis?.investmentCompany).toBeUndefined();
+  });
 });
