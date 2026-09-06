@@ -52,6 +52,7 @@ describe("workspace canonical identity", () => {
     await addHoldingAction(form({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "true b",
+      companyName: "Truecaller AB (publ)",
       quantity: "2",
       averageCost: "45",
       currency: "sek",
@@ -61,5 +62,18 @@ describe("workspace canonical identity", () => {
       p_ticker: "TRUE-B.ST",
       p_portfolio_id: "00000000-0000-4000-8000-000000000222",
     }));
+  });
+
+  it("requires a selected company identity before recording a portfolio purchase", async () => {
+    await addHoldingAction(form({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "AAPL",
+      quantity: "1",
+      averageCost: "200",
+      currency: "USD",
+      purchaseDate: "2026-09-06",
+    }));
+
+    expect(mocks.rpc).not.toHaveBeenCalledWith("record_portfolio_transaction", expect.anything());
   });
 });
