@@ -1,8 +1,10 @@
+import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import {
   loadDuePaperCompetitionValuationCandidatesV3,
   type PaperCompetitionValuationCandidatesResultV3,
 } from "./competition-valuation-candidate-repository-v3";
 import { runPaperCompetitionValuationJobV3 } from "./competition-valuation-job-v3";
+import { reconcilePaperCompetitionLifecycleV3 } from "./competition-lifecycle-repository-v3";
 
 export type PaperCompetitionValuationSweepResultV3 =
   | { status: "ERROR" }
@@ -21,13 +23,28 @@ type CompetitionRunnerV3 = (
   input: { competitionId: string },
 ) => ReturnType<typeof runPaperCompetitionValuationJobV3>;
 
+type LifecycleReconcilerV3 = typeof reconcilePaperCompetitionLifecycleV3;
+
 export type PaperCompetitionValuationSweepDependenciesV3 = {
   loadCandidates: () => Promise<PaperCompetitionValuationCandidatesResultV3>;
   runCompetition: CompetitionRunnerV3;
+  reconcileLifecycle?: LifecycleReconcilerV3;
+  lifecycleEnabled?: () => boolean;
 };
 
+function lifecycleReconciliationEnabledV3(): boolean {
+  return isFeatureEnabled("paperTrading")
+    && isFeatureEnabled("leaderboards")
+    && (isFeatureEnabled("challenges") || isFeatureEnabled("privateLeagues"))
+    && !isKilled("paperTrading")
+    && !isKilled("backgroundJobs");
+}
+
 /**
- * Executes one bounded internal sweep. Candidate selection is DB-owned and the
+ * Executes one bounded internal sweep. Before candidate enumeration, production
+ * runs may reconcile open competitions into active state using the DB-owned
+ * lifecycle authority. That mutation is feature/kill-switch gated and fails
+ * closed before provider work. Candidate selection remains DB-owned and the
  * per-competition job re-loads trusted kind before the existing claim RPC
  * establishes the authoritative cutoff. Runs are deliberately sequential to
  * cap provider/database pressure and one failed competition cannot suppress
@@ -35,10 +52,23 @@ export type PaperCompetitionValuationSweepDependenciesV3 = {
  */
 export async function runPaperCompetitionValuationSweepV3(
   dependencies: PaperCompetitionValuationSweepDependenciesV3 = {
+    lifecycleEnabled: lifecycleReconciliationEnabledV3,
+    reconcileLifecycle: reconcilePaperCompetitionLifecycleV3,
     loadCandidates: loadDuePaperCompetitionValuationCandidatesV3,
     runCompetition: runPaperCompetitionValuationJobV3,
   },
 ): Promise<PaperCompetitionValuationSweepResultV3> {
+  if (dependencies.lifecycleEnabled?.()) {
+    if (!dependencies.reconcileLifecycle) return { status: "ERROR" };
+
+    try {
+      const lifecycle = await dependencies.reconcileLifecycle();
+      if (!lifecycle.ok) return { status: "ERROR" };
+    } catch {
+      return { status: "ERROR" };
+    }
+  }
+
   let candidates: PaperCompetitionValuationCandidatesResultV3;
   try {
     candidates = await dependencies.loadCandidates();
