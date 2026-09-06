@@ -669,8 +669,8 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     },
     {
       key: "structure_tax", label: "Structure / tax efficiency", weight: 0.03, value: input.structureTaxEfficiencyScore ?? null,
-      score: taxStructure, status: isFiniteNumber(taxStructure) ? "available" : "missing",
-      rationale: "Structure and tax efficiency are scored only from explicit jurisdiction/product evidence.",
+      score: taxStructure, status: isFiniteNumber(taxStructure) ? "available" : "not_applicable",
+      rationale: "Structure and tax efficiency are scored only when explicit investor-jurisdiction and product evidence is available; otherwise this context-dependent factor is excluded from specialist coverage.",
     },
   ];
 
