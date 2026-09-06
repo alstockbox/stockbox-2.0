@@ -7,6 +7,7 @@ import {
 import { PAPER_TRADING_V3_FIXED_STARTING_CASH } from "./performance-v3";
 
 export const PAPER_COMPETITION_VALUATION_ENTRY_PAGE_SIZE = 500;
+export const PAPER_PRIVATE_LEAGUE_VALUATION_MEMBER_PAGE_SIZE = 500;
 export const PAPER_COMPETITION_VALUATION_ACCOUNT_CHUNK_SIZE = 100;
 export const PAPER_COMPETITION_VALUATION_LEDGER_CHUNK_SIZE = 100;
 const PAPER_COMPETITION_VALUATION_LEDGER_PAGE_SIZE = 1000;
@@ -14,9 +15,11 @@ const PAPER_COMPETITION_VALUATION_LEDGER_PAGE_SIZE = 1000;
 type JsonRow = Record<string, unknown>;
 type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
 
+export type PaperCompetitionValuationKindV3 = "challenge" | "private_league";
+
 type PaperCompetitionValuationTermsV3 = {
   id: string;
-  kind: "challenge";
+  kind: "challenge" | "private_league";
   status: "active" | "completed";
   baseCurrency: string;
   startingCash: 100_000;
@@ -31,6 +34,12 @@ type PaperCompetitionValuationEntryV3 = {
   userId: string;
   accountId: string;
   joinedAt: string;
+};
+
+type PaperPrivateLeagueValuationMembershipV3 = {
+  competitionId: string;
+  userId: string;
+  role: "owner" | "admin" | "member";
 };
 
 type PaperCompetitionValuationAccountV3 = {
@@ -115,7 +124,7 @@ function mapCompetition(row: JsonRow): PaperCompetitionValuationTermsV3 | null {
 
   if (
     !id
-    || kind !== "challenge"
+    || (kind !== "challenge" && kind !== "private_league")
     || (status !== "active" && status !== "completed")
     || !baseCurrency
     || !/^[A-Z]{3}$/.test(baseCurrency)
@@ -131,7 +140,7 @@ function mapCompetition(row: JsonRow): PaperCompetitionValuationTermsV3 | null {
 
   return {
     id,
-    kind: "challenge",
+    kind,
     status,
     baseCurrency,
     startingCash: PAPER_TRADING_V3_FIXED_STARTING_CASH,
@@ -328,6 +337,59 @@ async function loadEntries(
   return entries;
 }
 
+async function loadPrivateLeagueMemberships(
+  supabase: AdminClient,
+  competitionId: string,
+  entries: readonly PaperCompetitionValuationEntryV3[],
+): Promise<Map<string, PaperPrivateLeagueValuationMembershipV3> | null> {
+  const memberships = new Map<string, PaperPrivateLeagueValuationMembershipV3>();
+  const seenUsers = new Set<string>();
+  const entryUsers = new Set(entries.map((entry) => entry.userId));
+  let ownerCount = 0;
+
+  for (let from = 0; from <= entries.length; from += PAPER_PRIVATE_LEAGUE_VALUATION_MEMBER_PAGE_SIZE) {
+    const to = Math.min(from + PAPER_PRIVATE_LEAGUE_VALUATION_MEMBER_PAGE_SIZE - 1, entries.length);
+    const expectedCapacity = to - from + 1;
+    const { data, error } = await supabase
+      .from("paper_private_league_members_v3")
+      .select("competition_id,user_id,role")
+      .eq("competition_id", competitionId)
+      .order("user_id", { ascending: true })
+      .range(from, to);
+    if (error) return null;
+
+    const rows = data ?? [];
+    for (const rawRow of rows) {
+      const row = rawRow as JsonRow;
+      const rowCompetitionId = text(row.competition_id);
+      const userId = text(row.user_id);
+      const role = text(row.role);
+      if (
+        rowCompetitionId !== competitionId
+        || !userId
+        || (role !== "owner" && role !== "admin" && role !== "member")
+        || seenUsers.has(userId)
+        || !entryUsers.has(userId)
+      ) return null;
+
+      seenUsers.add(userId);
+      if (role === "owner") ownerCount += 1;
+      memberships.set(userId, { competitionId, userId, role });
+      if (seenUsers.size > entries.length) return null;
+    }
+
+    if (rows.length < expectedCapacity) break;
+  }
+
+  if (
+    seenUsers.size !== entries.length
+    || entries.some((entry) => !seenUsers.has(entry.userId))
+    || ownerCount !== 1
+  ) return null;
+
+  return memberships;
+}
+
 async function loadAccounts(
   supabase: AdminClient,
   competitionId: string,
@@ -476,16 +538,13 @@ async function loadLedgerEvidence(
   return fillsByAccount;
 }
 
-/**
- * Loads only the immutable evidence needed to reconstruct every challenge
- * participant at one common cutoff. Current cash balances are intentionally not
- * queried: cash is reconstructed later from the fixed starting capital and the
- * verified fills returned here.
- */
-export async function loadPaperCompetitionValuationEvidenceV3(input: {
-  competitionId: string;
-  evaluationCutoff: string;
-}): Promise<PaperCompetitionValuationEvidenceResultV3> {
+async function loadPaperCompetitionValuationEvidenceForKindV3(
+  input: {
+    competitionId: string;
+    evaluationCutoff: string;
+  },
+  expectedKind: PaperCompetitionValuationKindV3,
+): Promise<PaperCompetitionValuationEvidenceResultV3> {
   const competitionId = identity(input.competitionId);
   const cutoffMs = Date.parse(input.evaluationCutoff);
   if (!competitionId || !Number.isFinite(cutoffMs)) {
@@ -505,10 +564,13 @@ export async function loadPaperCompetitionValuationEvidenceV3(input: {
     if (!data) return { ok: false, error: "PAPER_COMPETITION_VALUATION_NOT_FOUND" };
 
     const competition = mapCompetition(data as JsonRow);
+    if (expectedKind === "challenge" && competition && competition.kind !== "challenge") {
+      return { ok: false, error: "PAPER_COMPETITION_VALUATION_EVIDENCE_INVALID" };
+    }
     if (
       !competition
       || competition.id !== competitionId
-      || competition.kind !== "challenge"
+      || competition.kind !== expectedKind
       || (competition.status !== "active" && competition.status !== "completed")
       || competition.startingCash !== PAPER_TRADING_V3_FIXED_STARTING_CASH
       || cutoffMs < Date.parse(competition.startsAt)
@@ -519,6 +581,13 @@ export async function loadPaperCompetitionValuationEvidenceV3(input: {
 
     const entries = await loadEntries(supabase, competitionId, competition);
     if (!entries) return { ok: false, error: "PAPER_COMPETITION_VALUATION_EVIDENCE_INVALID" };
+
+    if (expectedKind === "private_league") {
+      const memberships = await loadPrivateLeagueMemberships(supabase, competitionId, entries);
+      if (!memberships || memberships.size !== entries.length) {
+        return { ok: false, error: "PAPER_COMPETITION_VALUATION_EVIDENCE_INVALID" };
+      }
+    }
 
     const accounts = await loadAccounts(supabase, competitionId, competition, entries);
     if (!accounts) return { ok: false, error: "PAPER_COMPETITION_VALUATION_EVIDENCE_INVALID" };
@@ -546,4 +615,26 @@ export async function loadPaperCompetitionValuationEvidenceV3(input: {
   } catch {
     return { ok: false, error: "PAPER_COMPETITION_VALUATION_LOAD_FAILED" };
   }
+}
+
+/**
+ * Loads challenge valuation evidence from immutable verified fills at one
+ * common cutoff. Challenge semantics and the existing export remain unchanged.
+ */
+export async function loadPaperCompetitionValuationEvidenceV3(input: {
+  competitionId: string;
+  evaluationCutoff: string;
+}): Promise<PaperCompetitionValuationEvidenceResultV3> {
+  return loadPaperCompetitionValuationEvidenceForKindV3(input, "challenge");
+}
+
+/**
+ * Loads private-league valuation evidence with an additional exact membership
+ * consistency boundary before account and ledger evidence can be trusted.
+ */
+export async function loadPrivatePaperLeagueValuationEvidenceV3(input: {
+  competitionId: string;
+  evaluationCutoff: string;
+}): Promise<PaperCompetitionValuationEvidenceResultV3> {
+  return loadPaperCompetitionValuationEvidenceForKindV3(input, "private_league");
 }
