@@ -44,4 +44,16 @@ describe("ETF look-through completeness integrity", () => {
       score: null,
     });
   });
+
+  it("does not treat nominal holdings count as standalone diversification evidence", () => {
+    const result = analyzeEtf({
+      subtype: "index_etf",
+      numberOfHoldings: 500,
+    });
+
+    expect(result.score.factors.find((factor) => factor.key === "diversification")).toMatchObject({
+      status: "missing",
+      score: null,
+    });
+  });
 });
