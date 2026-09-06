@@ -98,14 +98,21 @@ jobs:
         id: build
         continue-on-error: true
         run: npm run build
-      - name: Verification gate
+      - name: Gate full test suite
         if: always()
-        run: |
-          test "${{ steps.full_tests.outcome }}" = "success"
-          test "${{ steps.baseline_fingerprint.outcome }}" = "success"
-          test "${{ steps.typecheck.outcome }}" = "success"
-          test "${{ steps.lint.outcome }}" = "success"
-          test "${{ steps.build.outcome }}" = "success"
+        run: test "${{ steps.full_tests.outcome }}" = "success"
+      - name: Gate archetype baseline
+        if: always()
+        run: test "${{ steps.baseline_fingerprint.outcome }}" = "success"
+      - name: Gate typecheck
+        if: always()
+        run: test "${{ steps.typecheck.outcome }}" = "success"
+      - name: Gate changed-file lint
+        if: always()
+        run: test "${{ steps.lint.outcome }}" = "success"
+      - name: Gate production build
+        if: always()
+        run: test "${{ steps.build.outcome }}" = "success"
 
   portfolio-migration-smoke:
     runs-on: ubuntu-latest
