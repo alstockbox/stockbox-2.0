@@ -85,7 +85,7 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
       volume: null,
       marketCap: 450_000_000_000,
       sharesOutstanding: 3_000_000_000,
-      performance: { "1D": undefined, "1W": undefined, "1M": undefined, "3M": undefined, "6M": undefined, "YTD": undefined, "1Y": undefined, "3Y": undefined, "5Y": undefined },
+      performance: { "1D": undefined, "1W": undefined, "1M": undefined, "3M": undefined, "6M": undefined, "YTD": undefined, "1Y": undefined },
     },
     engine: {
       metrics: {
