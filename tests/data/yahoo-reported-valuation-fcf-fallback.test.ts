@@ -64,6 +64,25 @@ function annualPayload(includeTtmPeriod: boolean) {
   return { timeseries: { result } };
 }
 
+function sameDateAnnualAndTtmPayload() {
+  const date = "2025-12-31";
+  const payload = annualPayload(false);
+  payload.timeseries.result.push(
+    series("trailingTotalRevenue", [row(date, "TTM", "CNY", 1000)]),
+    series("trailingOperatingIncome", [row(date, "TTM", "CNY", 100)]),
+    series("trailingNetIncome", [row(date, "TTM", "CNY", 80)]),
+    series("trailingOperatingCashFlow", [row(date, "TTM", "CNY", 120)]),
+    series("trailingCapitalExpenditure", [row(date, "TTM", "CNY", -20)]),
+    series("trailingFreeCashFlow", [row(date, "TTM", "CNY", 100)]),
+    series("quarterlyTotalAssets", [row(date, "3M", "CNY", 2000)]),
+    series("quarterlyTotalLiabilitiesNetMinorityInterest", [row(date, "3M", "CNY", 800)]),
+    series("quarterlyStockholdersEquity", [row(date, "3M", "CNY", 1200)]),
+    series("quarterlyCashAndCashEquivalents", [row(date, "3M", "CNY", 300)]),
+    series("quarterlyTotalDebt", [row(date, "3M", "CNY", 400)]),
+  );
+  return payload;
+}
+
 function installFetch(payload: object) {
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
@@ -141,6 +160,29 @@ describe("Yahoo provider-reported valuation FCF period alignment", () => {
       freeCashFlowCurrency: "CNY",
       freeCashFlowDate: "2026-06-30",
       freeCashFlowPeriodBasis: "TTM_REPORTED",
+    }));
+  });
+
+  it("uses FY basis when Yahoo reports an identical same-date direct annual FCF alongside the TTM fact", async () => {
+    installFetch(sameDateAnnualAndTtmPayload());
+
+    const result = await fetchYahooFundamentalsResult(company);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.trailingTwelveMonths?.periodBasis).toBe("TTM_REPORTED");
+    expect(result.data.annualPeriods.at(-1)?.provenance?.freeCashFlow).toMatchObject({
+      provider: "yahoo-fundamentals",
+      valueKind: "reported",
+      periodBasis: "FY",
+      periodEnd: "2025-12-31",
+      unit: "CNY",
+    });
+    expect(result.data.reportedValuation).toEqual(expect.objectContaining({
+      freeCashFlow: 100,
+      freeCashFlowCurrency: "CNY",
+      freeCashFlowDate: "2025-12-31",
+      freeCashFlowPeriodBasis: "FY",
     }));
   });
 });
