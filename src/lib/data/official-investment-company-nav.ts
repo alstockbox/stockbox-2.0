@@ -1,4 +1,5 @@
 import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
+import type { NavPerShareObservation } from "./investment-company-nav-history";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROVIDER_ID = "official-investment-company-nav";
@@ -95,6 +96,11 @@ function tableRow(html: string, labelPattern: RegExp): string | null {
   return rows.find((row) => labelPattern.test(htmlToText(row))) ?? null;
 }
 
+function tableContainingRow(html: string, labelPattern: RegExp): string | null {
+  const tables = html.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) ?? [];
+  return tables.find((table) => tableRow(table, labelPattern) !== null) ?? null;
+}
+
 function rowNumbers(row: string | null): number[] {
   if (!row) return [];
   const cells = row.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) ?? [];
@@ -144,6 +150,35 @@ export function parseLatourOfficialNav(html: string): ParsedNav | null {
     reportedNavPerShare: perShare,
     navAsOf: Number.isFinite(year) && Number.isFinite(quarter) ? quarterEnd(quarter, year) : null,
   };
+}
+
+export function parseLatourOfficialNavHistory(html: string): NavPerShareObservation[] {
+  const labelPattern = /^Substansvärde per aktie,?\s*kr/i;
+  const table = tableContainingRow(html, labelPattern);
+  if (!table) return [];
+
+  const perShareValues = rowNumbers(tableRow(table, labelPattern));
+  const cells = table.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) ?? [];
+  const quarters = cells.flatMap((cell) => {
+    const match = /^Q([1-4])\/(\d{2}|\d{4})$/i.exec(htmlToText(cell));
+    if (!match) return [];
+    const quarter = Number.parseInt(match[1], 10);
+    const rawYear = Number.parseInt(match[2], 10);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    const date = quarterEnd(quarter, year);
+    return date ? [{ date }] : [];
+  });
+
+  if (quarters.length === 0 || quarters.length !== perShareValues.length) return [];
+  if (perShareValues.some((value) => !Number.isFinite(value) || value <= 0)) return [];
+
+  const dates = quarters.map((quarter) => quarter.date);
+  if (new Set(dates).size !== dates.length) return [];
+
+  return quarters.map((quarter, index) => ({
+    date: quarter.date,
+    navPerShare: perShareValues[index],
+  }));
 }
 
 export function parseIndustrivardenOfficialNav(html: string): ParsedNav | null {
