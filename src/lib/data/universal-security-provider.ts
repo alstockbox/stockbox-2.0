@@ -44,6 +44,7 @@ import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
 import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
@@ -234,7 +235,7 @@ function holdingFundamentalDataContributes(
   });
 }
 
-const INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS = 120;
+const INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS = 120;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseIsoDay(value: string | null | undefined): number | null {
@@ -255,12 +256,12 @@ function parseIsoDay(value: string | null | undefined): number | null {
   return timestamp;
 }
 
-function isOfficialNavComparable(navAsOf: string | null, marketAsOf: string | null | undefined): boolean {
-  const navDay = parseIsoDay(navAsOf);
+function isOfficialDisclosureComparable(asOf: string | null | undefined, marketAsOf: string | null | undefined): boolean {
+  const disclosureDay = parseIsoDay(asOf);
   const marketDay = parseIsoDay(marketAsOf);
-  if (navDay === null || marketDay === null) return false;
-  const ageDays = (marketDay - navDay) / DAY_MS;
-  return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS;
+  if (disclosureDay === null || marketDay === null) return false;
+  const ageDays = (marketDay - disclosureDay) / DAY_MS;
+  return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS;
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
@@ -412,16 +413,24 @@ async function enrichInvestmentCompanyReport(
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.market?.date ?? null;
-  const [officialNav, longHistory] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
+    fetchOfficialInvestmentCompanyHoldings(company),
   ]);
-  const navComparable = officialNav.ok && isOfficialNavComparable(
+  const navComparable = officialNav.ok && isOfficialDisclosureComparable(
     officialNav.data.navAsOf,
     marketDate,
   );
+  const holdingsComparable = officialHoldings.ok && isOfficialDisclosureComparable(
+    officialHoldings.data.asOf,
+    marketDate,
+  );
   const navFreshnessMessage = officialNav.ok && !navComparable
-    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${marketDate ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${marketDate ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    : null;
+  const holdingsFreshnessMessage = officialHoldings.ok && !holdingsComparable
+    ? `Official holdings dated ${officialHoldings.data.asOf} are stale or not comparable with market price date ${marketDate ?? "unknown"}. Diversification requires verified official holdings no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
     : null;
   const navGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
@@ -431,6 +440,12 @@ async function enrichInvestmentCompanyReport(
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
   const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
     || shareholderReturns.shareholderReturn5yCagr !== null;
+  const investmentHoldings: EtfHolding[] | undefined = holdingsComparable
+    ? officialHoldings.data.holdings.map((holding) => ({
+      name: holding.name,
+      weight: holding.weight,
+    }))
+    : undefined;
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
@@ -440,6 +455,7 @@ async function enrichInvestmentCompanyReport(
     ...shareholderReturns,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
+    holdings: investmentHoldings,
   });
 
   report.securityClassification = classifyUniversalSecurity({
@@ -458,6 +474,17 @@ async function enrichInvestmentCompanyReport(
       && source.version === navSource.version
     ))) {
       report.sources = [...report.sources, navSource];
+    }
+  }
+
+  if (officialHoldings.ok) {
+    const holdingsSource = officialHoldings.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === holdingsSource.provider
+      && source.url === holdingsSource.url
+      && source.version === holdingsSource.version
+    ))) {
+      report.sources = [...report.sources, holdingsSource];
     }
   }
 
@@ -489,6 +516,23 @@ async function enrichInvestmentCompanyReport(
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), navDiagnostic];
   }
 
+  const holdingsDiagnostic: ProviderDiagnostic = officialHoldings.ok
+    ? holdingsComparable
+      ? officialHoldings.data.diagnostic
+      : {
+        ...officialHoldings.data.diagnostic,
+        status: "partial",
+        reason: "official_holdings_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialHoldings.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === holdingsDiagnostic.provider
+    && diagnostic.status === holdingsDiagnostic.status
+    && diagnostic.reason === holdingsDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), holdingsDiagnostic];
+  }
+
   if (longHistory) {
     const historyDiagnostic: ProviderDiagnostic = longHistory.ok && !shareholderReturnContributes
       ? {
@@ -513,10 +557,11 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage || navFreshnessMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       ...(navFreshnessMessage ? [navFreshnessMessage] : []),
+      ...(holdingsFreshnessMessage ? [holdingsFreshnessMessage] : []),
       ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
       ...(gateMessage ? [gateMessage] : []),
     ])];
