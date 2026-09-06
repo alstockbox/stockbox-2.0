@@ -259,7 +259,6 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const trackingError = firstNumber(fundPerformance?.trackingError3y, risk?.trackingError, risk?.threeYearTrackingError, riskOverviewStatistics?.trackingError3y);
   const weightedForwardPe = firstNumber(equityHoldings?.priceToEarnings, equityHoldings?.forwardPE);
   const weightedPriceBook = firstNumber(equityHoldings?.priceToBook);
-  const weightedEpsGrowth = firstNumber(equityHoldings?.threeYearEarningsGrowth, equityHoldings?.earningsGrowth);
   const distributionYield = firstNumber(summaryDetail?.yield, quote?.yield, summaryDetail?.trailingAnnualDividendYield);
   const turnover = firstNumber(fees?.annualHoldingsTurnover, fundProfile?.annualHoldingsTurnover, keyStatistics?.annualHoldingsTurnover);
   const numberOfHoldings = firstNumber(topHoldings?.holdingCount, topHoldings?.numberOfHoldings) ?? (holdings.length || null);
@@ -290,7 +289,6 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
     maxDrawdown3y,
     weightedForwardPe,
     weightedPriceBook,
-    weightedEpsGrowth,
     distributionYield,
     turnover,
     yieldToMaturity,
