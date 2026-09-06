@@ -55,9 +55,14 @@ async function enrichWithOfficialInvestmentCompanyNav(
   report: UniversalSecurityReport,
   args: AnalyzeArgs,
 ): Promise<UniversalSecurityReport> {
-  if (report.analysisArchetype !== "holding_company") return report;
-
+  const alreadyClassifiedAsHoldingCompany = report.analysisArchetype === "holding_company";
   const navResult = await fetchOfficialInvestmentCompanyNav(args.company);
+
+  // A verified official NAV adapter is itself strong evidence that the issuer belongs in the
+  // investment-company regime. This prevents a vague upstream industry/SIC label from routing
+  // a known investment company through the ordinary operating-company methodology.
+  if (!navResult.ok && !alreadyClassifiedAsHoldingCompany) return report;
+
   report.providerDiagnostics = appendUnique(
     report.providerDiagnostics,
     navResult.ok ? navResult.data.diagnostic : navResult.diagnostic,
@@ -72,6 +77,7 @@ async function enrichWithOfficialInvestmentCompanyNav(
     return applyInvestmentCompanyCoverageGate(report);
   }
 
+  report.analysisArchetype = "holding_company";
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -117,10 +123,12 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
   if (!result.ok) return result;
 
   const report = result.data as UniversalSecurityReport;
-  if (report.analysisArchetype !== "holding_company") return result;
 
   try {
     const enriched = await enrichWithOfficialInvestmentCompanyNav(report, args);
+    if (enriched === report && report.analysisArchetype !== "holding_company" && !report.securityAnalysis?.investmentCompany) {
+      return result;
+    }
     return {
       ...result,
       data: enriched,
@@ -128,6 +136,7 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
       warnings: result.warnings,
     };
   } catch {
+    if (report.analysisArchetype !== "holding_company" && !report.securityAnalysis?.investmentCompany) return result;
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
