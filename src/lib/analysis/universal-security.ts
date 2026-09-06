@@ -65,6 +65,7 @@ export type LookThroughHolding = {
 
 export type LookThroughMetrics = {
   coveredWeight: number;
+  qualityCoveredWeight: number;
   stockBoxQuality: number | null;
   revenueGrowth: number | null;
   epsGrowth: number | null;
@@ -198,6 +199,8 @@ const COMMODITY_PATTERN = /\b(?:commodity|gold|silver|copper|oil|crude|natural g
 const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|low volatility|multifactor|smart beta)\b/i;
 const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energy|utilities|industrials|materials|real estate|consumer|communication)\b/i;
 const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
+const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
+const LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT = 0.95;
 
 export function classifyUniversalSecurity(input: {
   company?: Pick<CompanySearchResult, "securityType" | "name" | "ticker"> | null;
@@ -308,16 +311,43 @@ function harmonicMetric(holdings: LookThroughHolding[], getter: (holding: LookTh
   return denominator > 0 ? weight / denominator : null;
 }
 
+function perHoldingQualityScore(holding: LookThroughHolding): number | null {
+  if (isFiniteNumber(holding.stockBoxScore)) return clamp(holding.stockBoxScore, 0, 100);
+  const growth = isFiniteNumber(holding.epsGrowth) ? holding.epsGrowth : holding.revenueGrowth;
+  const components = [
+    scoreHigherIsBetter(holding.roic, 0.02, 0.2),
+    scoreHigherIsBetter(growth, -0.05, 0.15),
+    scoreHigherIsBetter(holding.operatingMargin, 0.04, 0.25),
+  ].filter(isFiniteNumber);
+  if (components.length < 2) return null;
+  return components.reduce((sum, score) => sum + score, 0) / components.length;
+}
+
+function portfolioQuality(holdings: LookThroughHolding[]): { score: number | null; coveredWeight: number } {
+  const scored = holdings.flatMap((holding) => {
+    const score = perHoldingQualityScore(holding);
+    return isFiniteNumber(score) ? [{ holding, score }] : [];
+  });
+  const rawCoveredWeight = scored.reduce((sum, item) => sum + item.holding.weight, 0);
+  const coveredWeight = Math.min(1, rawCoveredWeight);
+  if (coveredWeight < LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT || rawCoveredWeight <= 0) {
+    return { score: null, coveredWeight };
+  }
+  const score = scored.reduce((sum, item) => sum + item.score * item.holding.weight, 0) / rawCoveredWeight;
+  return { score, coveredWeight };
+}
+
 function hhiFromBuckets(values: Array<string | null | undefined>, weights: number[]): number | null {
   const buckets = new Map<string, number>();
+  let representedWeight = 0;
   values.forEach((value, index) => {
     const weight = weights[index];
     if (!value || !isFiniteNumber(weight) || weight <= 0) return;
+    representedWeight += weight;
     buckets.set(value, (buckets.get(value) ?? 0) + weight);
   });
-  const total = [...buckets.values()].reduce((sum, value) => sum + value, 0);
-  if (total <= 0) return null;
-  return [...buckets.values()].reduce((sum, value) => sum + (value / total) ** 2, 0);
+  if (representedWeight < LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT) return null;
+  return [...buckets.values()].reduce((sum, value) => sum + value ** 2, 0);
 }
 
 export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): LookThroughMetrics {
@@ -326,11 +356,13 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
   const normalized = totalWeight > 1.5
     ? validWeights.map((holding) => ({ ...holding, weight: holding.weight / 100 }))
     : validWeights;
-  const coveredWeight = normalized.reduce((sum, holding) => sum + holding.weight, 0);
+  const coveredWeight = Math.min(1, normalized.reduce((sum, holding) => sum + holding.weight, 0));
   const sortedWeights = normalized.map((holding) => holding.weight).sort((a, b) => b - a);
+  const quality = portfolioQuality(normalized);
   return {
     coveredWeight,
-    stockBoxQuality: weightedMetric(normalized, (holding) => holding.stockBoxScore),
+    qualityCoveredWeight: quality.coveredWeight,
+    stockBoxQuality: quality.score,
     revenueGrowth: weightedMetric(normalized, (holding) => holding.revenueGrowth),
     epsGrowth: weightedMetric(normalized, (holding) => holding.epsGrowth),
     roic: weightedMetric(normalized, (holding) => holding.roic),
@@ -342,7 +374,9 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
     dividendYield: weightedMetric(normalized, (holding) => holding.dividendYield),
     top10Weight: sortedWeights.length ? sortedWeights.slice(0, 10).reduce((sum, weight) => sum + weight, 0) : null,
     largestHoldingWeight: sortedWeights[0] ?? null,
-    holdingsHhi: sortedWeights.length ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0) : null,
+    holdingsHhi: coveredWeight >= LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT
+      ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0)
+      : null,
     sectorHhi: hhiFromBuckets(normalized.map((holding) => holding.sector), normalized.map((holding) => holding.weight)),
     countryHhi: hhiFromBuckets(normalized.map((holding) => holding.country), normalized.map((holding) => holding.weight)),
   };
@@ -426,7 +460,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "holdings_quality", label: "Underlying holdings quality", weight: 0.18, value: lookThrough.stockBoxQuality,
       score: holdingsQuality, status: isFiniteNumber(holdingsQuality) ? "available" : "missing",
-      rationale: "Look-through quality is the portfolio-weighted quality of underlying holdings.",
+      rationale: "Look-through quality requires verified quality evidence across at least 80% of portfolio weight.",
     },
     {
       key: "nav_growth", label: "NAV/share growth", weight: 0.15, value: navGrowth,
@@ -457,7 +491,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
       key: "diversification", label: "Diversification", weight: 0.05, value: input.diversificationScore ?? null,
       score: percentageScore(input.diversificationScore) ?? scoreByAnchors(lookThrough.holdingsHhi, [[0.03, 95], [0.07, 80], [0.15, 55], [0.3, 25]]),
       status: isFiniteNumber(input.diversificationScore) || isFiniteNumber(lookThrough.holdingsHhi) ? "available" : "missing",
-      rationale: "Diversification reflects actual portfolio concentration rather than raw holding count.",
+      rationale: "Diversification requires actual concentration evidence across at least 95% of portfolio weight.",
     },
     {
       key: "dividend_quality", label: "Dividend quality", weight: 0.04, value: input.dividendQualityScore ?? null,
@@ -485,14 +519,8 @@ function resolvedEtfConcentration(input: EtfAnalysisInput, lookThrough: LookThro
 }
 
 function etfHoldingsQuality(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
-  if (isFiniteNumber(lookThrough.stockBoxQuality)) return clamp(lookThrough.stockBoxQuality, 0, 100);
-  const roic = lookThrough.roic;
-  const growth = lookThrough.epsGrowth ?? lookThrough.revenueGrowth;
-  const margin = lookThrough.operatingMargin;
-  const scores = [scoreHigherIsBetter(roic, 0.02, 0.2), scoreHigherIsBetter(growth, -0.05, 0.15), scoreHigherIsBetter(margin, 0.04, 0.25)].filter(isFiniteNumber);
-  if (!scores.length) return null;
   void input;
-  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return isFiniteNumber(lookThrough.stockBoxQuality) ? clamp(lookThrough.stockBoxQuality, 0, 100) : null;
 }
 
 function etfValuationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
@@ -625,7 +653,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "holdings_quality", label: "Underlying holdings quality", weight: 0.20, value: lookThrough.stockBoxQuality,
       score: holdingsQuality, status: equityApplicable ? (isFiniteNumber(holdingsQuality) ? "available" : "missing") : "not_applicable",
-      rationale: "Equity ETF quality is computed look-through from actual holdings; it is not an ETF-level profitability ratio.",
+      rationale: "Equity ETF quality is computed only when verified look-through quality evidence represents at least 80% of portfolio weight.",
     },
     {
       key: "valuation", label: "Look-through valuation", weight: 0.15, value: input.weightedForwardPe ?? lookThrough.forwardPe,
@@ -640,7 +668,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "diversification", label: "Diversification", weight: 0.12, value: input.holdingsHhi ?? lookThrough.holdingsHhi,
       score: diversification, status: isFiniteNumber(diversification) ? "available" : "missing",
-      rationale: "Diversification uses concentration mathematics and exposure breadth, not holding count alone.",
+      rationale: "Diversification uses concentration mathematics only when the underlying allocation is sufficiently representative; holding count alone is not treated as full concentration evidence.",
     },
     {
       key: "liquidity", label: "Liquidity / tradability", weight: 0.10, value: normalizeFraction(input.bidAskSpread),
@@ -660,7 +688,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "concentration", label: "Concentration risk", weight: 0.06, value: normalizeFraction(input.top10Weight) ?? lookThrough.top10Weight,
       score: concentration, status: isFiniteNumber(concentration) ? "available" : "missing",
-      rationale: "Top-holding concentration is scored separately from nominal diversification.",
+      rationale: "Top-holding concentration is scored separately from full-portfolio HHI and may remain observable from a partial holdings list.",
     },
     {
       key: "fund_stability", label: "Fund size / stability", weight: 0.04, value: input.assetsUnderManagement ?? null,
