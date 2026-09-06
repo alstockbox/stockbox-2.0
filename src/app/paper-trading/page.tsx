@@ -87,6 +87,7 @@ export default async function PaperTradingPage({ searchParams }: PageProps) {
   const [params, user, locale] = await Promise.all([searchParams, requireUser(), getLocale()]);
   const sv = locale === "sv";
   const killed = isKilled("paperTrading");
+  const privateLeaguesEnabled = isFeatureEnabled("privateLeagues");
   const feedback = feedbackCopy(params, sv);
   const accountsResult = await listPaperAccountsV3(user.id);
   const requestedAccountId = first(params.account);
@@ -140,6 +141,27 @@ export default async function PaperTradingPage({ searchParams }: PageProps) {
         ) : null}
 
         {feedback ? <p className="mt-5 text-sm text-[#e1cb95]" role="status">{feedback}</p> : null}
+
+        {privateLeaguesEnabled ? (
+          <Card className="mt-6 border-[#b99b5f]/25 bg-[#b99b5f]/5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-[#f4efe5]">{sv ? "Privata ligor" : "Private leagues"}</p>
+                <p className="mt-1 max-w-2xl text-xs leading-5 text-[#8391a4]">
+                  {sv
+                    ? "Öppna endast ligor där ditt verifierade medlemskap finns. Privata ligor använder simulerade pengar och är inte publikt sökbara."
+                    : "Open only leagues where your verified membership exists. Private leagues use simulated money and are not publicly discoverable."}
+                </p>
+              </div>
+              <Link
+                href="/paper-trading/private-leagues"
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 px-4 text-sm font-semibold text-[#f4efe5] transition hover:bg-[#b99b5f]/15"
+              >
+                {sv ? "Mina privata ligor" : "My private leagues"}
+              </Link>
+            </div>
+          </Card>
+        ) : null}
 
         {!accountsResult.ok ? (
           <Card className="mt-7 border-amber-300/20 bg-amber-950/20 text-sm text-amber-100">
