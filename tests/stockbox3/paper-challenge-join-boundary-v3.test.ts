@@ -24,6 +24,34 @@ describe("Paper Trading V3 challenge-only join boundary", () => {
     expect(entryLookup).toBeGreaterThan(kindGuard);
   });
 
+  it("serializes joins on the competition row before duplicate lookup and participant counting", () => {
+    const competitionLookup = migration.indexOf("from public.paper_competitions_v3");
+    const competitionLock = migration.indexOf("for update", competitionLookup);
+    const entryLookup = migration.indexOf("from public.paper_competition_entries_v3", competitionLock);
+    const participantCount = migration.indexOf("select count(*)::integer into v_participant_count", entryLookup);
+    const participantCap = migration.indexOf("v_participant_count >= v_competition.max_participants", participantCount);
+    const accountInsert = migration.indexOf("insert into public.paper_accounts_v3", participantCap);
+
+    expect(competitionLookup).toBeGreaterThanOrEqual(0);
+    expect(competitionLock).toBeGreaterThan(competitionLookup);
+    expect(entryLookup).toBeGreaterThan(competitionLock);
+    expect(participantCount).toBeGreaterThan(entryLookup);
+    expect(participantCap).toBeGreaterThan(participantCount);
+    expect(accountInsert).toBeGreaterThan(participantCap);
+  });
+
+  it("returns an existing entry before window or cap rejection so retries are idempotent", () => {
+    const entryLookup = migration.indexOf("from public.paper_competition_entries_v3");
+    const existingReturn = migration.indexOf("if found then\n    return v_entry", entryLookup);
+    const windowGuard = migration.indexOf("if v_competition.status <> 'open'", entryLookup);
+    const participantCount = migration.indexOf("select count(*)::integer into v_participant_count", entryLookup);
+
+    expect(entryLookup).toBeGreaterThanOrEqual(0);
+    expect(existingReturn).toBeGreaterThan(entryLookup);
+    expect(windowGuard).toBeGreaterThan(existingReturn);
+    expect(participantCount).toBeGreaterThan(windowGuard);
+  });
+
   it("preserves open-window and participant-cap enforcement", () => {
     expect(migration).toContain("v_competition.status <> 'open'");
     expect(migration).toContain("v_competition.join_deadline");
