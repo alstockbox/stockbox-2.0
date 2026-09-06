@@ -1,7 +1,9 @@
 import { derivePaperTradingLedgerV3, type PaperMarketObservationV3 } from "./engine-v3";
 import {
   loadPaperCompetitionValuationEvidenceV3,
+  loadPrivatePaperLeagueValuationEvidenceV3,
   type PaperCompetitionValuationEvidenceV3,
+  type PaperCompetitionValuationKindV3,
 } from "./competition-valuation-repository-v3";
 import { fetchYahooExecutionQuoteV3 } from "./execution-quote-v3";
 import {
@@ -71,9 +73,10 @@ function evidenceMatchesRequest(
   evidence: PaperCompetitionValuationEvidenceV3,
   competitionId: string,
   evaluationCutoff: string,
+  expectedKind: PaperCompetitionValuationKindV3,
 ): boolean {
   return evidence.competition.id === competitionId
-    && evidence.competition.kind === "challenge"
+    && evidence.competition.kind === expectedKind
     && /^[A-Z]{3}$/.test(evidence.competition.baseCurrency)
     && evidence.competition.startingCash === 100_000
     && evidence.evaluationCutoff === evaluationCutoff
@@ -91,12 +94,13 @@ function evidenceMatchesRequest(
  * - if any participant cannot be verified, no snapshot is written;
  * - standings are returned only after exact-cutoff persistence has full coverage.
  */
-export async function orchestratePaperCompetitionCommonValuationV3(
+async function orchestratePaperCompetitionCommonValuationForKindV3(
   input: {
     competitionId: string;
     serverNow: Date;
   },
   dependencies: PaperCompetitionCommonValuationDependenciesV3,
+  expectedKind: PaperCompetitionValuationKindV3,
 ): Promise<PaperCompetitionCommonValuationResultV3> {
   const competitionId = normalizedIdentity(input.competitionId);
   const serverNowMs = input.serverNow instanceof Date ? input.serverNow.getTime() : Number.NaN;
@@ -113,7 +117,7 @@ export async function orchestratePaperCompetitionCommonValuationV3(
   if (!evidenceResult.ok) return unavailable("EVIDENCE_UNAVAILABLE");
 
   const evidence = evidenceResult.evidence;
-  if (!evidenceMatchesRequest(evidence, competitionId, evaluationCutoff)) {
+  if (!evidenceMatchesRequest(evidence, competitionId, evaluationCutoff, expectedKind)) {
     return unavailable("EVIDENCE_MISMATCH");
   }
 
@@ -203,12 +207,16 @@ export async function orchestratePaperCompetitionCommonValuationV3(
     }
   }
 
+  const standingsViewer = expectedKind === "challenge"
+    ? { scope: "public" as const }
+    : { scope: "member" as const, userId: prepared[0].userId };
+
   let standings: Awaited<ReturnType<PaperCompetitionCommonValuationDependenciesV3["loadStandings"]>>;
   try {
     standings = await dependencies.loadStandings({
       competitionId,
       evaluationCutoff,
-      viewer: { scope: "public" },
+      viewer: standingsViewer,
     });
   } catch {
     return unavailable("STANDINGS_UNAVAILABLE");
@@ -218,7 +226,7 @@ export async function orchestratePaperCompetitionCommonValuationV3(
   const participantCount = evidence.participants.length;
   if (
     standings.competitionId !== competitionId
-    || standings.competitionKind !== "challenge"
+    || standings.competitionKind !== expectedKind
     || standings.baseCurrency !== evidence.competition.baseCurrency
     || standings.evaluationCutoff !== evaluationCutoff
     || standings.unavailableCount !== 0
@@ -238,8 +246,35 @@ export async function orchestratePaperCompetitionCommonValuationV3(
   };
 }
 
+export async function orchestratePaperCompetitionCommonValuationV3(
+  input: {
+    competitionId: string;
+    serverNow: Date;
+  },
+  dependencies: PaperCompetitionCommonValuationDependenciesV3,
+): Promise<PaperCompetitionCommonValuationResultV3> {
+  return orchestratePaperCompetitionCommonValuationForKindV3(input, dependencies, "challenge");
+}
+
+export async function orchestratePrivatePaperLeagueCommonValuationV3(
+  input: {
+    competitionId: string;
+    serverNow: Date;
+  },
+  dependencies: PaperCompetitionCommonValuationDependenciesV3,
+): Promise<PaperCompetitionCommonValuationResultV3> {
+  return orchestratePaperCompetitionCommonValuationForKindV3(input, dependencies, "private_league");
+}
+
 const liveDependencies: PaperCompetitionCommonValuationDependenciesV3 = {
   loadEvidence: loadPaperCompetitionValuationEvidenceV3,
+  fetchQuote: fetchYahooExecutionQuoteV3,
+  persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
+  loadStandings: loadPaperCompetitionStandingsV3,
+};
+
+const privateLeagueLiveDependencies: PaperCompetitionCommonValuationDependenciesV3 = {
+  loadEvidence: loadPrivatePaperLeagueValuationEvidenceV3,
   fetchQuote: fetchYahooExecutionQuoteV3,
   persistSnapshot: persistVerifiedPaperPerformanceSnapshotV3,
   loadStandings: loadPaperCompetitionStandingsV3,
@@ -264,6 +299,30 @@ export async function runPaperCompetitionCommonValuationV3(input: {
   competitionId: string;
 }): Promise<PaperCompetitionCommonValuationResultV3> {
   return runPaperCompetitionCommonValuationAtV3({
+    competitionId: input.competitionId,
+    serverNow: new Date(),
+  });
+}
+
+/**
+ * Trusted private-league entry point for a cutoff already established by the
+ * private-league database valuation lease.
+ */
+export async function runPrivatePaperLeagueCommonValuationAtV3(input: {
+  competitionId: string;
+  serverNow: Date;
+}): Promise<PaperCompetitionCommonValuationResultV3> {
+  return orchestratePrivatePaperLeagueCommonValuationV3({
+    competitionId: input.competitionId,
+    serverNow: input.serverNow,
+  }, privateLeagueLiveDependencies);
+}
+
+/** Server-only private-league live entry point without a caller-controlled cutoff. */
+export async function runPrivatePaperLeagueCommonValuationV3(input: {
+  competitionId: string;
+}): Promise<PaperCompetitionCommonValuationResultV3> {
+  return runPrivatePaperLeagueCommonValuationAtV3({
     competitionId: input.competitionId,
     serverNow: new Date(),
   });
