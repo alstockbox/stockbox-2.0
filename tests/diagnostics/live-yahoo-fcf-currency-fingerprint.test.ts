@@ -63,8 +63,6 @@ liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
         ticker,
         resolvedTicker: company.canonicalTicker ?? company.ticker,
         companyCurrency: company.currency ?? null,
-        companyTradingCurrency: company.tradingCurrency ?? null,
-        companyReportingCurrency: company.reportingCurrency ?? null,
         market: {
           currency: market.data.currency ?? null,
           price: market.data.price ?? null,
