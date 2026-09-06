@@ -15,6 +15,7 @@ import {
   generatePrivateLeagueInviteTokenV3,
   hashPrivateLeagueInviteTokenV3,
 } from "@/lib/paper-trading/private-league-invite-v3";
+import { loadPrivatePaperLeagueTradingContextV3 } from "@/lib/paper-trading/private-league-read-repository-v3";
 import {
   createPrivatePaperLeagueInviteV3,
   createPrivatePaperLeagueV3,
@@ -42,6 +43,14 @@ const orderSchema = z.object({
 });
 
 const challengeOrderSchema = z.object({
+  competitionId: z.string().uuid(),
+  idempotencyKey: z.string().trim().min(1).max(128),
+  ticker: z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()),
+  side: z.enum(["buy", "sell"]),
+  quantity: z.coerce.number().finite().positive().max(1_000_000_000),
+});
+
+const privateLeagueOrderSchema = z.object({
   competitionId: z.string().uuid(),
   idempotencyKey: z.string().trim().min(1).max(128),
   ticker: z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()),
@@ -347,4 +356,41 @@ export async function setPrivatePaperLeagueMemberRoleAction(formData: FormData) 
   if (!result.ok) return { status: "error" } as const;
   revalidatePath("/paper-trading");
   return { status: "updated", role: result.role } as const;
+}
+
+export async function executePrivatePaperLeagueOrderAction(formData: FormData) {
+  const user = await requireUser();
+  if (!privateLeagueAvailable()) redirect("/dashboard");
+
+  const parsed = privateLeagueOrderSchema.safeParse({
+    competitionId: formData.get("competitionId"),
+    idempotencyKey: formData.get("idempotencyKey"),
+    ticker: formData.get("ticker"),
+    side: formData.get("side"),
+    quantity: formData.get("quantity"),
+  });
+  if (!parsed.success) return { status: "invalid" } as const;
+
+  const contextResult = await loadPrivatePaperLeagueTradingContextV3(user.id, parsed.data.competitionId);
+  if (!contextResult.ok) return { status: "unavailable" } as const;
+  const context = contextResult.context;
+
+  const result = await executePaperOrderServiceV3({
+    userId: user.id,
+    accountId: context.accountId,
+    intent: {
+      idempotencyKey: parsed.data.idempotencyKey,
+      ticker: parsed.data.ticker,
+      side: parsed.data.side,
+      quantity: parsed.data.quantity,
+    },
+  });
+
+  revalidatePath("/paper-trading");
+  if (result.status === "FILLED") return { status: "filled" } as const;
+  if (result.status === "ALREADY_RECORDED") return { status: "existing" } as const;
+  if (result.status === "REJECTED") return { status: "rejected" } as const;
+  if (result.status === "KILLED") return { status: "paused" } as const;
+  if (result.status === "DISABLED") redirect("/dashboard");
+  return { status: "error" } as const;
 }
