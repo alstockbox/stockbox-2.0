@@ -167,6 +167,48 @@ jobs:
           end
           $$;
           SQL
+      - name: Reject sell chains without owned quantity
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          set session_replication_role = replica;
+          insert into public.profiles (id, email)
+          values ('00000000-0000-4000-8000-000000000901', 'portfolio-sell-guard@test.invalid');
+          insert into public.portfolios (id, user_id, name, base_currency)
+          values ('00000000-0000-4000-8000-000000000902', '00000000-0000-4000-8000-000000000901', 'Sell guard', 'USD');
+          insert into public.portfolio_transactions (
+            id, portfolio_id, ticker, transaction_type, quantity, price, fees, currency, executed_at
+          ) values (
+            '00000000-0000-4000-8000-000000000903',
+            '00000000-0000-4000-8000-000000000902',
+            'AAPL', 'sell', 1, 100, 0, 'USD', '2026-09-01'
+          );
+          set session_replication_role = origin;
+
+          do $$
+          declare
+            v_guarded boolean := false;
+          begin
+            begin
+              perform private.rebuild_portfolio_holding(
+                '00000000-0000-4000-8000-000000000902', 'AAPL', 'USD'
+              );
+            exception when others then
+              if sqlerrm = 'Sell quantity exceeds owned quantity' then
+                v_guarded := true;
+              else
+                raise;
+              end if;
+            end;
+            if not v_guarded then
+              raise exception 'Sell-without-position guard did not fire';
+            end if;
+          end
+          $$;
+
+          delete from public.portfolio_transactions where portfolio_id = '00000000-0000-4000-8000-000000000902';
+          delete from public.portfolios where id = '00000000-0000-4000-8000-000000000902';
+          delete from public.profiles where id = '00000000-0000-4000-8000-000000000901';
+          SQL
       - name: Stop disposable Supabase
         if: always()
         run: supabase stop --no-backup
