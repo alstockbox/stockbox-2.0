@@ -137,15 +137,18 @@ async function verifyPrivateLeagueMembership(
 
   try {
     const { data, error } = await supabase
-      .from("paper_competition_entries_v3")
-      .select("id,user_id,competition_id")
+      .from("paper_private_league_members_v3")
+      .select("competition_id,user_id,role")
       .eq("competition_id", competitionId)
       .eq("user_id", viewerUserId)
       .maybeSingle();
     if (error) return "FAILED";
     if (!data || typeof data !== "object") return "FORBIDDEN";
     const row = data as JsonRow;
-    return text(row.user_id) === viewerUserId && text(row.competition_id) === competitionId
+    const role = text(row.role);
+    return text(row.user_id) === viewerUserId
+      && text(row.competition_id) === competitionId
+      && (role === "owner" || role === "admin" || role === "member")
       ? "ALLOWED"
       : "FORBIDDEN";
   } catch {
@@ -244,9 +247,9 @@ async function loadExactCutoffSnapshots(
 /**
  * Loads the exact persisted evidence required by the pure leaderboard engine.
  * Public access is intentionally limited to challenges. Private leagues require
- * a current competition entry for the requesting user before any standings data
- * is loaded. No quote fetching, FX conversion or performance recomputation is
- * allowed in this repository.
+ * an authoritative private-league membership row for the requesting user before
+ * any standings data is loaded. No quote fetching, FX conversion or performance
+ * recomputation is allowed in this repository.
  */
 export async function loadPaperCompetitionStandingsV3(input: {
   competitionId: string;
