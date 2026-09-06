@@ -245,12 +245,26 @@ const liveDependencies: PaperCompetitionCommonValuationDependenciesV3 = {
   loadStandings: loadPaperCompetitionStandingsV3,
 };
 
-/** Server-only live entry point. The cutoff is generated here, never accepted from a client. */
-export async function runPaperCompetitionCommonValuationV3(input: {
+/**
+ * Trusted internal entry point for a cutoff already established by StockBox
+ * server infrastructure, such as the database valuation-lease claim.
+ */
+export async function runPaperCompetitionCommonValuationAtV3(input: {
   competitionId: string;
+  serverNow: Date;
 }): Promise<PaperCompetitionCommonValuationResultV3> {
   return orchestratePaperCompetitionCommonValuationV3({
     competitionId: input.competitionId,
-    serverNow: new Date(),
+    serverNow: input.serverNow,
   }, liveDependencies);
+}
+
+/** Server-only live entry point for callers that do not already own a trusted cutoff. */
+export async function runPaperCompetitionCommonValuationV3(input: {
+  competitionId: string;
+}): Promise<PaperCompetitionCommonValuationResultV3> {
+  return runPaperCompetitionCommonValuationAtV3({
+    competitionId: input.competitionId,
+    serverNow: new Date(),
+  });
 }
