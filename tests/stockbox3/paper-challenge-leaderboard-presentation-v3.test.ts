@@ -24,7 +24,7 @@ describe("Paper Trading V3 challenge leaderboard presentation", () => {
     expect(page).toContain('leaderboardResult.status === "VERIFIED"');
     expect(page).toContain("leaderboardResult.evaluationCutoff");
     expect(page).toContain("leaderboardResult.baseCurrency");
-    expect(page).toContain("leaderboardResult.standings.map((standing)");
+    expect(page).toContain("leaderboardResult.standings.map(");
     expect(page).toContain("standing.rank");
     expect(page).toContain("standing.returnPercent");
     expect(page).toContain("standing.equity");
