@@ -145,6 +145,37 @@ describe("ETF model", () => {
     expect(result.score.missing).toContain("Tracking quality");
   });
 
+  it("does not count investor-jurisdiction structure/tax context as missing specialist data", () => {
+    const result = analyzeEtf({
+      subtype: "index_etf",
+      expenseRatio: 0.0007,
+      trackingDifference: -0.001,
+      trackingError: 0.002,
+      bidAskSpread: 0.0004,
+      averageDailyDollarVolume: 500_000_000,
+      assetsUnderManagement: 50_000_000_000,
+      fundAgeYears: 15,
+      numberOfHoldings: 500,
+      top10Weight: 0.25,
+      largestHoldingWeight: 0.06,
+      holdingsHhi: 0.02,
+      sectorHhi: 0.12,
+      sharpeRatio3y: 0.9,
+      maxDrawdown3y: -0.22,
+      weightedForwardPe: 22,
+      weightedPriceBook: 3.2,
+      weightedFreeCashFlowYield: 0.045,
+      holdings: [
+        { name: "A", weight: 0.5, stockBoxScore: 85 },
+        { name: "B", weight: 0.5, stockBoxScore: 80 },
+      ],
+    });
+
+    expect(result.score.factors.find((factor) => factor.key === "structure_tax")?.status).toBe("not_applicable");
+    expect(result.score.missing).not.toContain("Structure / tax efficiency");
+    expect(result.score.coverage).toBeCloseTo(1, 8);
+  });
+
   it("marks equity profitability/valuation concepts not applicable for bond ETFs", () => {
     const result = analyzeEtf({
       subtype: "bond_etf",
