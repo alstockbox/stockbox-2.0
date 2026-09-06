@@ -1,8 +1,16 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { parseYahooExecutionQuoteV3 } from "@/lib/paper-trading/execution-quote-v3";
+import {
+  fetchYahooExecutionQuoteV3,
+  parseYahooExecutionQuoteV3,
+} from "@/lib/paper-trading/execution-quote-v3";
 
 const source = readFileSync("src/lib/paper-trading/execution-quote-v3.ts", "utf8");
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function payload(meta: Record<string, unknown>) {
   return {
@@ -74,6 +82,45 @@ describe("Paper execution quote V3", () => {
     });
     expect(result.observation.ticker).toBe("BRK.B");
     expect(result.observation.verification).toBe("VERIFIED");
+  });
+
+  it("maps US share-class dots only at the Yahoo request boundary while preserving StockBox identity", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload({
+      regularMarketPrice: 500,
+      regularMarketTime: 1788610200,
+      currency: "USD",
+    })), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchYahooExecutionQuoteV3("BRK.B");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(requestedUrl).toContain("/BRK-B?");
+    expect(result.observation.ticker).toBe("BRK.B");
+    expect(result.observation.verification).toBe("VERIFIED");
+  });
+
+  it("does not rewrite exchange-qualified symbols as share classes", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload({
+      regularMarketPrice: 250,
+      regularMarketTime: 1788610200,
+      currency: "SEK",
+    })), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchYahooExecutionQuoteV3("VOLV-B.ST");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(requestedUrl).toContain("/VOLV-B.ST?");
+    expect(result.observation.ticker).toBe("VOLV-B.ST");
   });
 
   it("marks provider errors unavailable rather than fabricating a quote", () => {
