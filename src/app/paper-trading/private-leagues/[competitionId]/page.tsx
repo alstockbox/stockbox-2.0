@@ -120,6 +120,14 @@ export default async function PrivatePaperLeagueWorkspacePage({ params }: PagePr
               ? "Det här är en privat, simulerad och medlemsbegränsad miljö. StockBox skickar aldrig riktiga värdepappersorder och ligan är inte publikt sökbar."
               : "This is a private, simulated, member-only environment. StockBox never sends real securities orders and the league is not publicly discoverable."}
           </p>
+          {workspace.role === "owner" || workspace.role === "admin" ? (
+            <Link
+              href={`/paper-trading/private-leagues/${encodeURIComponent(workspace.competition.id)}/manage`}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-md border border-[#b99b5f]/40 bg-[#b99b5f]/10 px-4 text-sm font-semibold text-[#f4efe5] transition hover:bg-[#b99b5f]/15"
+            >
+              {sv ? "Hantera liga" : "Manage league"}
+            </Link>
+          ) : null}
         </div>
 
         <Card className={`mt-6 ${tradingEnabled ? "border-emerald-300/15 bg-emerald-950/10" : "border-amber-300/15 bg-amber-950/10"}`}>
