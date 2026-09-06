@@ -344,6 +344,7 @@ export function resolveFinancialClassificationDiagnostics(input: FinancialAnalys
 export function resolveFinancialArchetype(input: FinancialAnalysisInput): AnalysisArchetype {
   const base = resolveArchetype(input.company);
   if (base === "pre_revenue_biotech") return base;
+  if (base === "asset_manager" && hasOperatingAssetManagerFinancialSignature(input)) return base;
   if ((base === "unknown" || base === "asset_manager") && hasInvestmentHoldingFinancialSignature(input)) return "holding_company";
   if (base === "unknown" && hasConfidentUnresolvedSpecialistStop(input)) return base;
   if (base === "unknown" && hasOperatingAssetManagerFinancialSignature(input)) return "asset_manager";
