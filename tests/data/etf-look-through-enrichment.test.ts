@@ -60,6 +60,26 @@ describe("ETF look-through enrichment", () => {
     expect(result.targetReached).toBe(true);
   });
 
+  it("does not spend requests when ticker-bearing holdings cannot mathematically reach 80% quality coverage", async () => {
+    const input: EtfHolding[] = [
+      { name: "Unmapped basket", weight: 0.4 },
+      { ticker: "A", name: "A", weight: 0.35 },
+      { ticker: "B", name: "B", weight: 0.25 },
+    ];
+    const fetchHolding = vi.fn(async () => ({
+      ok: true as const,
+      data: { revenueGrowth: 0.09, operatingMargin: 0.2 },
+    }));
+
+    const result = await enrichEtfLookThroughHoldings(input, fetchHolding, { maxRequests: 10 });
+
+    expect(fetchHolding).not.toHaveBeenCalled();
+    expect(result.attemptedTickers).toEqual([]);
+    expect(result.verifiedQualityWeight).toBe(0);
+    expect(result.targetReached).toBe(false);
+    expect(result.budgetExhausted).toBe(false);
+  });
+
   it("stops at the request budget and reports that the target was not reached", async () => {
     const fetchHolding = vi.fn(async () => ({
       ok: true as const,
