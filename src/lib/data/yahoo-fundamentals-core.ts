@@ -61,7 +61,7 @@ type YahooMetadata = {
 const FLOW_FIELDS = [
   "TotalRevenue", "CostOfRevenue", "GrossProfit", "TotalOperatingIncomeAsReported", "OperatingIncome", "EBITDA", "NetIncome",
   "NetIncomeCommonStockholders", "DilutedNIAvailtoComStockholders", "DilutedEPS",
-  "OperatingCashFlow", "FreeCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "PretaxIncome",
+  "OperatingCashFlow", "FreeCashFlow", "PurchaseOfPPE", "CapitalExpenditure", "InterestExpense", "InterestExpenseNonOperating", "PretaxIncome",
   "TaxProvision", "CashDividendsPaid", "StockBasedCompensation", "ResearchAndDevelopment",
   "DilutedAverageShares",
 ] as const;
@@ -384,7 +384,7 @@ function buildPeriod(
     operatingCashFlow,
     capitalExpenditures: normalizedCapex(capexFact),
     freeCashFlow: freeCashFlowFact?.value ?? null,
-    interestExpense: flow("InterestExpense", "interestExpense"),
+    interestExpense: flow("InterestExpense", "interestExpense") ?? flow("InterestExpenseNonOperating", "interestExpense"),
     pretaxIncome: flow("PretaxIncome", "pretaxIncome"),
     incomeTaxExpense: flow("TaxProvision", "incomeTaxExpense"),
     dividendsPaid: dividendFact ? Math.abs(dividendFact.value) : null,
