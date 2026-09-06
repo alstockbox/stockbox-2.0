@@ -67,6 +67,24 @@ describe("coverage audit", () => {
     expect(audit.rootCauseCounts.PROVIDER_MISSING).toBeGreaterThan(0);
   });
 
+  it("classifies interest expense that is missing or not separately reported as provider missing", () => {
+    const annualPeriods = durableCompounderInput.annualPeriods.map((period, index) => index === durableCompounderInput.annualPeriods.length - 1 ? {
+      ...period,
+      interestExpense: null,
+    } : period);
+    const result = analyze({ annualPeriods });
+    const audit = buildCoverageAudit({ ticker: "TEST", result });
+    const interestCoverage = audit.metrics.find((metric) => metric.category === "financialHealth" && metric.label === "Interest coverage");
+
+    expect(interestCoverage?.reason).toContain("missing or not separately reported");
+    expect(interestCoverage).toMatchObject({
+      status: "PROVIDER_MISSING",
+      relevant: true,
+      available: false,
+      providerDiagnostics: [],
+    });
+  });
+
   it("attributes five-year growth gaps to a known provider history cap instead of the issuer", () => {
     const result = analyze({
       company: {
