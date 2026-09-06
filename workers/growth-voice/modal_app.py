@@ -16,6 +16,7 @@ from voice_contract import (
     chatterbox_model_kwargs,
     fake_wav,
     reference_audio_suffix,
+    torchaudio_save_kwargs,
     validate_reference_url,
     validate_voice_request,
 )
@@ -92,7 +93,7 @@ def _synthesize_founder_voice(text: str, reference_path: Path, voice_mode: str) 
     if audio.ndim == 1:
         audio = audio.unsqueeze(0)
     result = io.BytesIO()
-    torchaudio.save(result, audio, model.sr, format="wav")
+    torchaudio.save(result, audio, model.sr, **torchaudio_save_kwargs())
     return result.getvalue()
 
 
