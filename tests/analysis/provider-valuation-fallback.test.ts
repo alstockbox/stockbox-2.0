@@ -23,6 +23,29 @@ function inputWithMarket(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function annualFallbackFxValuation() {
+  return {
+    asOfDate: "2026-09-03",
+    marketCap: 1_000,
+    marketCapCurrency: "EUR",
+    freeCashFlow: 100,
+    freeCashFlowCurrency: "USD",
+    freeCashFlowDate: "2025-12-31",
+    freeCashFlowYield: 0.086,
+    freeCashFlowYieldProvenance: {
+      source: "ECB foreign exchange reference rates",
+      provider: "ecb",
+      valueKind: "derived" as const,
+      periodEnd: "2026-09-03",
+      inputs: [
+        "providerReportedFreeCashFlow:100 USD",
+        "providerReportedMarketCap:1000 EUR",
+        "ecbRateDate:2026-09-03",
+      ],
+    },
+  };
+}
+
 describe("provider-reported valuation fallback", () => {
   it("uses fresh provider ratios when cross-currency blocks StockBox-derived valuation", () => {
     const result = analyzeFinancials(inputWithMarket());
@@ -96,6 +119,31 @@ describe("provider-reported valuation fallback", () => {
       valueKind: "derived",
       periodEnd: "2026-08-27",
     });
+  });
+
+  it("uses the annual financial-flow freshness window for verified FX FCF yield when TTM is unavailable", () => {
+    const result = analyzeFinancials({
+      ...inputWithMarket(annualFallbackFxValuation()),
+      analysisDate: "2026-09-06T00:00:00.000Z",
+      trailingTwelveMonths: undefined,
+    });
+
+    expect(result.metrics.valuation.freeCashFlowYield).toBeCloseTo(0.086, 8);
+  });
+
+  it("keeps the shorter financial-flow freshness window when a TTM period exists", () => {
+    const result = analyzeFinancials({
+      ...inputWithMarket(annualFallbackFxValuation()),
+      analysisDate: "2026-09-06T00:00:00.000Z",
+      trailingTwelveMonths: {
+        ...durableCompounderInput.annualPeriods.at(-1)!,
+        form: "TTM",
+        periodBasis: "TTM_REPORTED",
+        periodEndDate: "2026-06-30",
+      },
+    });
+
+    expect(result.metrics.valuation.freeCashFlowYield).toBeNull();
   });
 
   it("does not trust a cross-currency precomputed FCF yield without explicit FX provenance", () => {
