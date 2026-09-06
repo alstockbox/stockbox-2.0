@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { searchCompanies } from "../../src/lib/data/provider";
 import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundamentals";
@@ -100,6 +101,12 @@ liveDescribe("live Yahoo FCF-yield currency fingerprint", () => {
     }
 
     console.log(`YAHOO_FCF_CURRENCY_FINGERPRINT ${JSON.stringify(rows)}`);
+    await mkdir("artifacts/coverage-live", { recursive: true });
+    await writeFile(
+      "artifacts/coverage-live/yahoo-fcf-currency-fingerprint.json",
+      `${JSON.stringify(rows, null, 2)}\n`,
+      "utf8",
+    );
     expect(rows).toHaveLength(FCF_CURRENCY_GAP_TICKERS.length);
   }, 240_000);
 });
