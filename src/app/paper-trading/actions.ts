@@ -6,12 +6,17 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth/session";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import { PAPER_TRADING_V3_STARTING_CASH } from "@/lib/paper-trading/accounts-v3";
+import { joinPaperCompetitionV3 } from "@/lib/paper-trading/competition-repository-v3";
 import { executePaperOrderServiceV3 } from "@/lib/paper-trading/order-service-v3";
 import { createPaperAccountV3 } from "@/lib/paper-trading/repository-v3";
 
 const accountSchema = z.object({
   name: z.string().trim().min(1).max(80),
   baseCurrency: z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
+});
+
+const challengeJoinSchema = z.object({
+  competitionId: z.string().uuid(),
 });
 
 const orderSchema = z.object({
@@ -24,6 +29,12 @@ const orderSchema = z.object({
 
 function featureAvailable(): boolean {
   return isFeatureEnabled("paperTrading") && !isKilled("paperTrading");
+}
+
+function challengeAvailable(): boolean {
+  return isFeatureEnabled("paperTrading")
+    && isFeatureEnabled("challenges")
+    && !isKilled("paperTrading");
 }
 
 export async function createPaperAccountAction(formData: FormData) {
@@ -46,6 +57,21 @@ export async function createPaperAccountAction(formData: FormData) {
 
   revalidatePath("/paper-trading");
   redirect(`/paper-trading?account=${encodeURIComponent(result.data.id)}&accountStatus=created`);
+}
+
+export async function joinPaperChallengeAction(formData: FormData) {
+  const user = await requireUser();
+  if (!challengeAvailable()) redirect("/dashboard");
+
+  const parsed = challengeJoinSchema.safeParse({
+    competitionId: formData.get("competitionId"),
+  });
+  if (!parsed.success) redirect("/paper-trading?challengeStatus=invalid");
+
+  const result = await joinPaperCompetitionV3(user.id, parsed.data.competitionId);
+  revalidatePath("/paper-trading");
+  if (!result.ok) redirect("/paper-trading?challengeStatus=error");
+  redirect(`/paper-trading?challengeStatus=joined&competition=${encodeURIComponent(parsed.data.competitionId)}`);
 }
 
 export async function executePaperOrderAction(formData: FormData) {
