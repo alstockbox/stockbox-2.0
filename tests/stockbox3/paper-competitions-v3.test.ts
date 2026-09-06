@@ -45,6 +45,20 @@ describe("Paper Trading V3 competition account foundation", () => {
     expect(migration).toContain("foreign key (account_id, competition_id)");
   });
 
+  it("keeps personal account quota independent from competition accounts", () => {
+    expect(migration).toContain("and account_type = 'personal'");
+    expect(migration).toContain("values (p_user_id, v_name, v_currency, 100000, 'personal', null)");
+  });
+
+  it("rejects competition fills outside the official trading window", () => {
+    expect(migration).toContain("create or replace function private.enforce_paper_competition_fill_window_v3");
+    expect(migration).toContain("new.executed_at < v_starts_at");
+    expect(migration).toContain("new.executed_at > v_ends_at");
+    expect(migration).toContain("new.market_observed_at < v_starts_at");
+    expect(migration).toContain("paper competition fill outside official window");
+    expect(migration).toContain("before insert or update on public.paper_fills_v3");
+  });
+
   it("keeps competition mutation RPCs service-role only", () => {
     expect(migration).toContain(
       "revoke all on function public.join_paper_competition_v3(uuid,uuid) from public, anon, authenticated",
