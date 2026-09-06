@@ -16,6 +16,7 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
+import { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
@@ -850,8 +851,9 @@ export async function analyzeCompany({
   const providerOrchestrationMs = Date.now() - startedAt;
   const fundamentalsResult = fundamentalsResolution.result;
   const marketResult = marketResolution.result;
-  const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
+  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const rawMarket = marketResult.ok ? marketResult.data : null;
+  const fundamentals = rawFundamentals ? await enrichFundamentalsWithEcbFcfYield(rawFundamentals) : null;
   const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
   const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
   const annualHistoryLimitDiagnostic = annualHistoryProviderLimitDiagnostic({
