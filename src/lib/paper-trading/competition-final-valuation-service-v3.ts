@@ -41,16 +41,16 @@ export type PaperCompetitionFinalValuationServiceResultV3 =
   | { status: "THROTTLED" }
   | { status: "ERROR" };
 
-async function runChallengeFinalValuationAtV3(input: {
+async function runChallengeFinalValuationAtV3(trustedFinal: {
   competitionId: string;
   evaluationCutoff: string;
 }): Promise<PaperCompetitionCommonValuationResultV3> {
-  const cutoffMs = Date.parse(input.evaluationCutoff);
+  const cutoffMs = Date.parse(trustedFinal.evaluationCutoff);
   if (!Number.isFinite(cutoffMs)) return { status: "UNAVAILABLE", reason: "INVALID_INPUT" };
   const evaluationCutoff = new Date(cutoffMs).toISOString();
 
   return orchestratePaperCompetitionCommonValuationV3({
-    competitionId: input.competitionId,
+    competitionId: trustedFinal.competitionId,
     serverNow: new Date(cutoffMs),
   }, {
     loadEvidence: loadPaperCompetitionValuationEvidenceV3,
@@ -60,16 +60,16 @@ async function runChallengeFinalValuationAtV3(input: {
   });
 }
 
-async function runPrivateLeagueFinalValuationAtV3(input: {
+async function runPrivateLeagueFinalValuationAtV3(trustedFinal: {
   competitionId: string;
   evaluationCutoff: string;
 }): Promise<PaperCompetitionCommonValuationResultV3> {
-  const cutoffMs = Date.parse(input.evaluationCutoff);
+  const cutoffMs = Date.parse(trustedFinal.evaluationCutoff);
   if (!Number.isFinite(cutoffMs)) return { status: "UNAVAILABLE", reason: "INVALID_INPUT" };
   const evaluationCutoff = new Date(cutoffMs).toISOString();
 
   return orchestratePrivatePaperLeagueCommonValuationV3({
-    competitionId: input.competitionId,
+    competitionId: trustedFinal.competitionId,
     serverNow: new Date(cutoffMs),
   }, {
     loadEvidence: loadPrivatePaperLeagueValuationEvidenceV3,
