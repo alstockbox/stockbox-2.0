@@ -7,8 +7,17 @@ import {
   type GrowthDbAdapter,
 } from "../supabase/functions/stockbox-growth-engine/v3/orchestration";
 
-function fakeDb(): GrowthDbAdapter & { rows: Record<string, any[]> } {
-  const rows: Record<string, any[]> = {
+type TestRow = {
+  [key: string]: unknown;
+  idempotency_key?: unknown;
+  content_id?: string;
+  render_spec?: unknown;
+  metadata?: Record<string, unknown>;
+  automatic_render?: boolean;
+};
+
+function fakeDb(): GrowthDbAdapter & { rows: Record<string, TestRow[]> } {
+  const rows: Record<string, TestRow[]> = {
     acq_content: [
       { id: "c1", title: "Tre risker att kontrollera", topic: "hur hittar man risker i ett börsbolag", body: "Börja med skulden. Kontrollera kassaflödet. Jämför riskerna över tid.", language: "sv", hook_type: "problem-lösning", pillar: "Aktieanalys", format: "master", cta: "Analysera i StockBox", utm_url: "https://www.getstockbox.app/?utm_content=c1", status: "repurposed", updated_at: "2026-09-04T10:00:00Z" },
       { id: "c2", title: "Så analyserar du lönsamhet", topic: "hur analyserar man lönsamhet i ett bolag", body: "Titta på marginaler. Jämför avkastning på kapital. Bedöm stabiliteten över tid.", language: "sv", hook_type: "decision_clarity", pillar: "education", format: "master", cta: "Analysera i StockBox", utm_url: "https://www.getstockbox.app/?utm_content=c2", status: "repurposed", updated_at: "2026-09-04T09:00:00Z" },
@@ -28,9 +37,9 @@ function fakeDb(): GrowthDbAdapter & { rows: Record<string, any[]> } {
     rows,
     async select(table) { return structuredClone(rows[table] || []); },
     async insertIgnore(table, payload, onConflict) {
-      const incoming = Array.isArray(payload) ? payload : [payload];
+      const incoming = (Array.isArray(payload) ? payload : [payload]) as TestRow[];
       rows[table] ||= [];
-      const inserted: any[] = [];
+      const inserted: TestRow[] = [];
       for (const item of incoming) {
         const key = onConflict === "idempotency_key" ? item.idempotency_key : item[onConflict];
         if (rows[table].some((existing) => (onConflict === "idempotency_key" ? existing.idempotency_key : existing[onConflict]) === key)) continue;
@@ -72,10 +81,10 @@ describe("growth v3 orchestration", () => {
     expect(first.shadowMode).toBe(true);
     expect(second.created).toBe(0);
     expect(db.rows.acq_render_jobs).toHaveLength(first.created);
-    expect(db.rows.acq_render_jobs.every((row) => row.metadata.expose_to_ready === false)).toBe(true);
+    expect(db.rows.acq_render_jobs.every((row) => row.metadata?.expose_to_ready === false)).toBe(true);
     const riskJob = db.rows.acq_render_jobs.find((row) => row.content_id === "c1");
     expect(riskJob?.render_spec).toMatchObject({ voiceMode: "hook", voiceStyleIntensity: 70 });
-    expect(riskJob?.metadata.voice_delivery).toEqual({ voice_mode: "hook", style_intensity: 70 });
+    expect(riskJob?.metadata?.voice_delivery).toEqual({ voice_mode: "hook", style_intensity: 70 });
   });
 
   it("selects zero paid video jobs at the 75 SEK hard cap", async () => {
