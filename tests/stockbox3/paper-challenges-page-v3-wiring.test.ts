@@ -29,7 +29,9 @@ describe("Paper Trading V3 challenge discovery page", () => {
   it("keeps the kill switch read-only and never exposes a join form while evidence is incomplete", () => {
     expect(source).toContain('const killed = isKilled("paperTrading")');
     expect(source).toContain("const joinEnabled = !killed && entriesResult.ok");
-    expect(source).toContain("joinEnabled && !joinedCompetitionIds.has(competition.id)");
+    expect(source).toContain("challengesResult.competitions.filter((competition) => !joinedCompetitionIds.has(competition.id))");
+    expect(source).toContain("{openChallenges.map((competition) => (");
+    expect(source).toContain("{joinEnabled ? (");
   });
 
   it("joins only through the gated server action with competition id as the sole hidden authority input", () => {
