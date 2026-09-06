@@ -52,6 +52,7 @@ export async function listPaperAccountsV3(userId: string): Promise<PaperAccountL
       .from("paper_accounts_v3")
       .select("id,user_id,name,base_currency,status,created_at,updated_at")
       .eq("user_id", normalizedUserId)
+      .eq("account_type", "personal")
       .order("created_at", { ascending: true })
       .limit(20);
     if (error) return { ok: false, error: error.message, accounts: [] };
