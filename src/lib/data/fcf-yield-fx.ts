@@ -1,4 +1,4 @@
-import type { MetricProvenance, ProviderReportedValuation } from "@/lib/analysis/types";
+import type { CompanyFundamentals, MetricProvenance, ProviderReportedValuation } from "@/lib/analysis/types";
 import {
   convertWithComparisonFxContext,
   resolveComparisonFxContexts,
@@ -11,6 +11,10 @@ const PROVIDER_FCF_YIELD_FX_ID = "provider-fcf-yield";
 export type FxNormalizedProviderReportedValuation = ProviderReportedValuation & {
   freeCashFlowYield?: number | null;
   freeCashFlowYieldProvenance?: MetricProvenance;
+};
+
+export type FxNormalizedCompanyFundamentals = Omit<CompanyFundamentals, "reportedValuation"> & {
+  reportedValuation?: FxNormalizedProviderReportedValuation;
 };
 
 type FcfYieldFxContextResolver = typeof resolveComparisonFxContexts;
@@ -124,4 +128,12 @@ export async function enrichProviderReportedValuationWithEcbFcfYield(
     reported,
     contexts.get(PROVIDER_FCF_YIELD_FX_ID),
   );
+}
+
+export async function enrichFundamentalsWithEcbFcfYield(
+  fundamentals: CompanyFundamentals,
+  resolveContexts: FcfYieldFxContextResolver = resolveComparisonFxContexts,
+): Promise<FxNormalizedCompanyFundamentals> {
+  void resolveContexts;
+  return fundamentals;
 }

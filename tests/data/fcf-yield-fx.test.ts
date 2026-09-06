@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderReportedValuation } from "@/lib/analysis/types";
+import type { CompanyFundamentals, ProviderReportedValuation } from "@/lib/analysis/types";
 import type { ComparisonFxContext } from "@/lib/data/ecb-fx";
 import {
   deriveFxNormalizedProviderFcfYield,
+  enrichFundamentalsWithEcbFcfYield,
   enrichProviderReportedValuationWithEcbFcfYield,
 } from "@/lib/data/fcf-yield-fx";
 
@@ -26,6 +27,18 @@ function context(overrides: Partial<ComparisonFxContext> = {}): ComparisonFxCont
     targetRatePerEuro: 1,
     provider: "ecb-euro-reference-rates",
     methodologyVersion: "ecb-fx-v1",
+    ...overrides,
+  };
+}
+
+function fundamentals(overrides: Partial<CompanyFundamentals> = {}): CompanyFundamentals {
+  return {
+    ticker: "TEST",
+    name: "Test Company",
+    sector: null,
+    industry: null,
+    annual: [],
+    reportedValuation: { ...baseValuation },
     ...overrides,
   };
 }
@@ -141,5 +154,29 @@ describe("provider FCF yield ECB normalization", () => {
 
     expect(resolver).not.toHaveBeenCalled();
     expect(result).toEqual(incomplete);
+  });
+
+  it("immutably enriches fundamentals when provider valuation gains an ECB-derived FCF yield", async () => {
+    const original = fundamentals();
+    const originalValuation = original.reportedValuation;
+    const resolver = vi.fn(async () => new Map([["provider-fcf-yield", context()]]));
+
+    const result = await enrichFundamentalsWithEcbFcfYield(original, resolver);
+
+    expect(result).not.toBe(original);
+    expect(result.reportedValuation).not.toBe(originalValuation);
+    expect(result.reportedValuation?.freeCashFlowYield).toBeCloseTo(0.1, 10);
+    expect(original.reportedValuation).toEqual(baseValuation);
+    expect(Object.prototype.hasOwnProperty.call(original.reportedValuation ?? {}, "freeCashFlowYield")).toBe(false);
+  });
+
+  it("returns the original fundamentals object without resolver work when reported valuation is absent", async () => {
+    const original = fundamentals({ reportedValuation: undefined });
+    const resolver = vi.fn(async () => new Map<string, ComparisonFxContext>());
+
+    const result = await enrichFundamentalsWithEcbFcfYield(original, resolver);
+
+    expect(result).toBe(original);
+    expect(resolver).not.toHaveBeenCalled();
   });
 });
