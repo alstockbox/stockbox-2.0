@@ -31,6 +31,7 @@ function annualFallbackFxValuation() {
     freeCashFlow: 100,
     freeCashFlowCurrency: "USD",
     freeCashFlowDate: "2025-12-31",
+    freeCashFlowPeriodBasis: "FY" as const,
     freeCashFlowYield: 0.086,
     freeCashFlowYieldProvenance: {
       source: "ECB foreign exchange reference rates",
@@ -43,6 +44,14 @@ function annualFallbackFxValuation() {
         "ecbRateDate:2026-09-03",
       ],
     },
+  };
+}
+
+function staleTtmFxValuation() {
+  return {
+    ...annualFallbackFxValuation(),
+    freeCashFlowDate: "2025-09-30",
+    freeCashFlowPeriodBasis: "TTM_REPORTED" as const,
   };
 }
 
@@ -139,7 +148,7 @@ describe("provider-reported valuation fallback", () => {
     });
   });
 
-  it("uses the annual financial-flow freshness window for verified FX FCF yield when TTM is unavailable", () => {
+  it("uses the annual financial-flow freshness window only for explicitly FY provider FCF", () => {
     const result = analyzeFinancials({
       ...inputWithMarket(annualFallbackFxValuation()),
       analysisDate: "2026-09-06T00:00:00.000Z",
@@ -149,9 +158,30 @@ describe("provider-reported valuation fallback", () => {
     expect(result.metrics.valuation.freeCashFlowYield).toBeCloseTo(0.086, 8);
   });
 
+  it("keeps the shorter freshness window for TTM provider FCF even after the TTM period object is removed", () => {
+    const result = analyzeFinancials({
+      ...inputWithMarket(staleTtmFxValuation()),
+      analysisDate: "2026-09-06T00:00:00.000Z",
+      trailingTwelveMonths: undefined,
+    });
+
+    expect(result.metrics.valuation.freeCashFlowYield).toBeNull();
+  });
+
+  it("does not infer FY freshness merely because the TTM period object is unavailable", () => {
+    const { freeCashFlowPeriodBasis: _basis, ...valuationWithoutBasis } = annualFallbackFxValuation();
+    const result = analyzeFinancials({
+      ...inputWithMarket(valuationWithoutBasis),
+      analysisDate: "2026-09-06T00:00:00.000Z",
+      trailingTwelveMonths: undefined,
+    });
+
+    expect(result.metrics.valuation.freeCashFlowYield).toBeNull();
+  });
+
   it("keeps the shorter financial-flow freshness window when a valid TTM period exists", () => {
     const result = analyzeFinancials({
-      ...inputWithMarket(annualFallbackFxValuation()),
+      ...inputWithMarket(staleTtmFxValuation()),
       analysisDate: "2026-09-06T00:00:00.000Z",
       trailingTwelveMonths: {
         ...durableCompounderInput.annualPeriods.at(-1)!,
