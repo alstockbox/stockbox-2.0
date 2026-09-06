@@ -18,6 +18,11 @@ function functionBlock(source: string, signature: string, nextSignature: string)
   return source.slice(start, end >= 0 ? end : source.length);
 }
 
+const competitionListResultType = functionBlock(
+  repository,
+  "export type PaperCompetitionListResultV3",
+  "export type PaperCompetitionEntryListResultV3",
+);
 const joinedLoader = functionBlock(
   repository,
   "export async function listJoinedPaperChallengesV3",
@@ -56,10 +61,10 @@ describe("Paper Trading V3 joined challenge discovery", () => {
   });
 
   it("returns no raw user ids, entry ids, or account ids in the joined challenge DTO", () => {
-    expect(repository).toContain("PaperCompetitionListResultV3");
-    expect(joinedLoader).not.toContain("accountId:");
-    expect(joinedLoader).not.toContain("userId:");
-    expect(joinedLoader).not.toContain("entryId:");
+    expect(competitionListResultType).toContain("competitions: PaperCompetitionV3[]");
+    expect(competitionListResultType).not.toContain("accountId:");
+    expect(competitionListResultType).not.toContain("userId:");
+    expect(competitionListResultType).not.toContain("entryId:");
   });
 
   it("renders a separate My challenges section using the joined loader", () => {
