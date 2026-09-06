@@ -29,6 +29,16 @@ function hasVerifiedQualityEvidence(holding: EtfHolding): boolean {
   return computeLookThroughMetrics([{ ...holding, weight: 1 }]).qualityCoveredWeight >= 1;
 }
 
+function isEnrichmentCandidate(holding: EtfHolding): boolean {
+  return (
+    typeof holding.ticker === "string"
+    && holding.ticker.trim().length > 0
+    && Number.isFinite(holding.weight)
+    && holding.weight > 0
+    && !hasVerifiedQualityEvidence(holding)
+  );
+}
+
 function mergeVerifiedFields(
   holding: EtfHolding,
   data: EtfHoldingFundamentalData,
@@ -54,6 +64,18 @@ function qualityWeight(holdings: EtfHolding[]): number {
   return computeLookThroughMetrics(holdings).qualityCoveredWeight;
 }
 
+function maximumReachableQualityWeight(holdings: EtfHolding[]): number {
+  const optimistic = holdings.map((holding) => {
+    if (!isEnrichmentCandidate(holding)) return holding;
+    return {
+      ...holding,
+      revenueGrowth: holding.revenueGrowth ?? 0,
+      operatingMargin: holding.operatingMargin ?? 0,
+    };
+  });
+  return qualityWeight(optimistic);
+}
+
 export async function enrichEtfLookThroughHoldings(
   holdings: EtfHolding[],
   fetchHolding: EtfHoldingFundamentalsFetcher,
@@ -76,15 +98,20 @@ export async function enrichEtfLookThroughHoldings(
     };
   }
 
+  if (maximumReachableQualityWeight(enriched) < LOOK_THROUGH_QUALITY_TARGET_WEIGHT) {
+    return {
+      holdings: enriched,
+      verifiedQualityWeight,
+      attemptedTickers,
+      failedTickers,
+      targetReached: false,
+      budgetExhausted: false,
+    };
+  }
+
   const candidates = enriched
     .map((holding, index) => ({ holding, index }))
-    .filter(({ holding }) => (
-      typeof holding.ticker === "string"
-      && holding.ticker.trim().length > 0
-      && Number.isFinite(holding.weight)
-      && holding.weight > 0
-      && !hasVerifiedQualityEvidence(holding)
-    ))
+    .filter(({ holding }) => isEnrichmentCandidate(holding))
     .sort((left, right) => right.holding.weight - left.holding.weight);
 
   let candidateIndex = 0;
