@@ -42,6 +42,7 @@ import {
 } from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
@@ -416,11 +417,15 @@ async function enrichInvestmentCompanyReport(
   const navFreshnessMessage = officialNav.ok && !navComparable
     ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${report.market?.date ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_NAV_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
     : null;
+  const navGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
+    ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
+    : { navGrowth1y: null, navGrowth3yCagr: null, navGrowth5yCagr: null };
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
+    ...navGrowth,
     cash: latest?.cashAndEquivalents ?? null,
     debt: latest?.totalDebt ?? null,
   });
