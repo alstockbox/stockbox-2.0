@@ -30,6 +30,17 @@ export type PrivatePaperLeagueWorkspaceResultV3 =
   | { ok: true; workspace: PrivatePaperLeagueWorkspaceV3 }
   | { ok: false; error: string };
 
+export type PrivatePaperLeagueTradingContextV3 = {
+  competitionId: string;
+  accountId: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+export type PrivatePaperLeagueTradingContextResultV3 =
+  | { ok: true; context: PrivatePaperLeagueTradingContextV3 }
+  | { ok: false; error: string };
+
 export type PrivatePaperLeagueInviteMetadataV3 = {
   id: string;
   competitionId: string;
@@ -252,6 +263,47 @@ export async function loadPrivatePaperLeagueWorkspaceV3(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "PRIVATE_LEAGUE_WORKSPACE_FAILED" };
   }
+}
+
+export async function loadPrivatePaperLeagueTradingContextV3(
+  userId: string,
+  competitionId: string,
+  now: Date = new Date(),
+): Promise<PrivatePaperLeagueTradingContextResultV3> {
+  const normalizedUserId = normalizeIdentity(userId);
+  const normalizedCompetitionId = normalizeIdentity(competitionId);
+  const nowMs = now.getTime();
+  if (!normalizedUserId || !normalizedCompetitionId || !Number.isFinite(nowMs)) {
+    return { ok: false, error: "PRIVATE_LEAGUE_TRADING_INVALID" };
+  }
+
+  const workspaceResult = await loadPrivatePaperLeagueWorkspaceV3(normalizedUserId, normalizedCompetitionId);
+  if (!workspaceResult.ok) return { ok: false, error: "PRIVATE_LEAGUE_TRADING_UNAVAILABLE" };
+  const workspace = workspaceResult.workspace;
+  const startsAtMs = Date.parse(workspace.competition.startsAt);
+  const endsAtMs = Date.parse(workspace.competition.endsAt);
+
+  if (
+    workspace.competition.kind !== "private_league"
+    || workspace.competition.status === "cancelled"
+    || workspace.competition.status === "completed"
+    || workspace.accountStatus !== "active"
+    || !Number.isFinite(startsAtMs)
+    || !Number.isFinite(endsAtMs)
+    || nowMs < startsAtMs || nowMs > endsAtMs
+  ) {
+    return { ok: false, error: "PRIVATE_LEAGUE_TRADING_UNAVAILABLE" };
+  }
+
+  return {
+    ok: true,
+    context: {
+      competitionId: normalizedCompetitionId,
+      accountId: workspace.accountId,
+      startsAt: workspace.competition.startsAt,
+      endsAt: workspace.competition.endsAt,
+    },
+  };
 }
 
 export async function listPrivatePaperLeagueInvitesV3(
