@@ -37,42 +37,44 @@ jobs:
 
           metrics_path = Path("src/lib/analysis/metrics.ts")
           metrics = metrics_path.read_text()
-          old_metrics = '''  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
-            && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
-          const fcfFreshnessThreshold = input.trailingTwelveMonths
-            ? DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow
-            : DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow;
-          const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
-          const reportedWithVerifiedFx = reported as typeof reported & {
-            freeCashFlowYield?: number | null;
-            freeCashFlowYieldProvenance?: MetricProvenance;
-          };
-          '''
-          new_metrics = '''  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null
-            && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);
-          const reportedWithVerifiedFx = reported as typeof reported & {
-            freeCashFlowPeriodBasis?: MetricProvenance["periodBasis"];
-            freeCashFlowYield?: number | null;
-            freeCashFlowYieldProvenance?: MetricProvenance;
-          };
-          const fcfFreshnessThreshold = reportedWithVerifiedFx.freeCashFlowPeriodBasis === "FY"
-            ? DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow
-            : DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow;
-          const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);
-          '''
+          old_metrics = "\n".join([
+              "  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null",
+              "    && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);",
+              "  const fcfFreshnessThreshold = input.trailingTwelveMonths",
+              "    ? DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow",
+              "    : DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow;",
+              "  const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);",
+              "  const reportedWithVerifiedFx = reported as typeof reported & {",
+              "    freeCashFlowYield?: number | null;",
+              "    freeCashFlowYieldProvenance?: MetricProvenance;",
+              "  };",
+          ]) + "\n"
+          new_metrics = "\n".join([
+              "  const sameFcfCurrency = normalizedCurrency(reported.marketCapCurrency) !== null",
+              "    && normalizedCurrency(reported.marketCapCurrency) === normalizedCurrency(reported.freeCashFlowCurrency);",
+              "  const reportedWithVerifiedFx = reported as typeof reported & {",
+              "    freeCashFlowPeriodBasis?: MetricProvenance[\"periodBasis\"];",
+              "    freeCashFlowYield?: number | null;",
+              "    freeCashFlowYieldProvenance?: MetricProvenance;",
+              "  };",
+              "  const fcfFreshnessThreshold = reportedWithVerifiedFx.freeCashFlowPeriodBasis === \"FY\"",
+              "    ? DATA_FRESHNESS_THRESHOLDS_DAYS.annualFinancialFlow",
+              "    : DATA_FRESHNESS_THRESHOLDS_DAYS.financialFlow;",
+              "  const fcfCurrent = freshnessAllows(input, reported.freeCashFlowDate, fcfFreshnessThreshold);",
+          ]) + "\n"
           if metrics.count(old_metrics) != 1:
               raise SystemExit(f"Expected exactly one metrics block, found {metrics.count(old_metrics)}")
           metrics_path.write_text(metrics.replace(old_metrics, new_metrics, 1))
 
           test_path = Path("tests/analysis/provider-valuation-fallback.test.ts")
           test = test_path.read_text()
-          old_test = '''    const { freeCashFlowPeriodBasis: _basis, ...valuationWithoutBasis } = annualFallbackFxValuation();
-          '''
-          new_test = '''    const valuationWithoutBasis = {
-              ...annualFallbackFxValuation(),
-              freeCashFlowPeriodBasis: undefined,
-            };
-          '''
+          old_test = "    const { freeCashFlowPeriodBasis: _basis, ...valuationWithoutBasis } = annualFallbackFxValuation();\n"
+          new_test = "\n".join([
+              "    const valuationWithoutBasis = {",
+              "      ...annualFallbackFxValuation(),",
+              "      freeCashFlowPeriodBasis: undefined,",
+              "    };",
+          ]) + "\n"
           if test.count(old_test) != 1:
               raise SystemExit(f"Expected exactly one lint-cleanup block, found {test.count(old_test)}")
           test_path.write_text(test.replace(old_test, new_test, 1))
