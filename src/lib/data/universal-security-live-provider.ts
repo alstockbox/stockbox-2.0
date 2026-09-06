@@ -1,3 +1,8 @@
+import {
+  SPECIALIST_COVERAGE_TARGET,
+  specialistCoverageGateMessage,
+  specialistCoverageMeetsTarget,
+} from "@/lib/analysis/specialist-coverage";
 import { analyzeInvestmentCompany, classifyUniversalSecurity } from "@/lib/analysis/universal-security";
 import type { Recommendation } from "@/lib/analysis/types";
 import {
@@ -14,7 +19,7 @@ type AnalyzeArgs = Parameters<typeof analyzeUniversalCompany>[0];
 type AnalyzeResult = Awaited<ReturnType<typeof analyzeUniversalCompany>>;
 
 function recommendationForScore(score: number | null, coverage: number): Recommendation {
-  if (score === null || coverage < 0.5) return "No Rating";
+  if (score === null || !specialistCoverageMeetsTarget(coverage)) return "No Rating";
   if (score >= 85) return "Strong Buy";
   if (score >= 70) return "Buy";
   if (score >= 45) return "Hold";
@@ -26,6 +31,24 @@ function appendUnique<T>(values: T[] | undefined, value: T, key: (item: T) => st
   const existing = values ?? [];
   const valueKey = key(value);
   return existing.some((item) => key(item) === valueKey) ? existing : [...existing, value];
+}
+
+function applyInvestmentCompanyCoverageGate(report: UniversalSecurityReport): UniversalSecurityReport {
+  const specialist = report.securityAnalysis?.investmentCompany;
+  if (!specialist) return report;
+
+  const coverage = specialist.score.coverage;
+  // Investment-company coverage must come from the investment-company model.
+  // Never let strong generic corporate coverage mask missing NAV/look-through inputs.
+  report.dataCoverage = coverage;
+  report.recommendation = recommendationForScore(specialist.score.score, coverage);
+  report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, coverage * 100)));
+
+  const gateMessage = specialistCoverageGateMessage("Investment-company", coverage);
+  if (gateMessage) {
+    report.score.missingData = [...new Set([...report.score.missingData, gateMessage])];
+  }
+  return report;
 }
 
 async function enrichWithOfficialInvestmentCompanyNav(
@@ -46,7 +69,7 @@ async function enrichWithOfficialInvestmentCompanyNav(
       ...report.score.missingData,
       `Official investment-company NAV unavailable: ${navResult.message} StockBox keeps NAV-dependent factors as N/A and does not substitute consolidated book equity.`,
     ])];
-    return report;
+    return applyInvestmentCompanyCoverageGate(report);
   }
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
@@ -77,9 +100,6 @@ async function enrichWithOfficialInvestmentCompanyNav(
   if (typeof securityScore === "number" && Number.isFinite(securityScore)) {
     report.score.score = securityScore;
     report.score.personalizedScore = securityScore;
-    report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
-    report.dataCoverage = Math.max(report.dataCoverage ?? 0, analysis.score.coverage);
-    report.recommendation = recommendationForScore(securityScore, analysis.score.coverage);
   }
 
   report.score.missingData = [...new Set([
@@ -87,9 +107,9 @@ async function enrichWithOfficialInvestmentCompanyNav(
     ...analysis.score.missing,
   ])];
 
-  report.summary = `${report.summary} Verified official NAV${navResult.data.reportedNavPerShare !== null ? ` of ${navResult.data.reportedNavPerShare.toFixed(2)} per share` : ""}${navResult.data.navAsOf ? ` as of ${navResult.data.navAsOf}` : ""} is incorporated into the investment-company valuation model.`;
+  report.summary = `${report.summary} Verified official NAV${navResult.data.reportedNavPerShare !== null ? ` of ${navResult.data.reportedNavPerShare.toFixed(2)} per share` : ""}${navResult.data.navAsOf ? ` as of ${navResult.data.navAsOf}` : ""} is incorporated into the investment-company valuation model. A full StockBox rating requires at least ${(SPECIALIST_COVERAGE_TARGET * 100).toFixed(0)}% verified investment-company factor coverage.`;
 
-  return report;
+  return applyInvestmentCompanyCoverageGate(report);
 }
 
 export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> {
@@ -112,6 +132,6 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
       ...report.score.missingData,
       "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
     ])];
-    return { ...result, data: report };
+    return { ...result, data: applyInvestmentCompanyCoverageGate(report) };
   }
 }
