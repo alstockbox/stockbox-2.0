@@ -47,10 +47,10 @@ describe("Paper Trading V3 challenge-only join boundary", () => {
     );
   });
 
-  it("keeps the server repository join payload limited to user and competition identity", () => {
-    expect(repository).toContain('supabase.rpc("join_paper_competition_v3"');
-    expect(repository).toContain("p_user_id: userId");
-    expect(repository).toContain("p_competition_id: competitionId");
+  it("keeps the server repository join payload limited to normalized user and competition identity", () => {
+    expect(repository).toContain('.rpc("join_paper_competition_v3"');
+    expect(repository).toContain("p_user_id: normalizedUserId");
+    expect(repository).toContain("p_competition_id: normalizedCompetitionId");
     expect(repository).not.toContain("p_invite_token");
     expect(repository).not.toContain("p_starting_cash");
     expect(repository).not.toContain("p_base_currency");
