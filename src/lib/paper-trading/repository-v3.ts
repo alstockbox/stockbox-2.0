@@ -18,6 +18,18 @@ export type PaperAccountRowV3 = {
   updatedAt: string;
 };
 
+export type PaperAccountBoundaryV3 = {
+  id: string;
+  userId: string;
+  status: "active" | "archived";
+  accountType: "personal" | "competition";
+  competitionId: string | null;
+};
+
+export type PaperAccountBoundaryLoadResultV3 =
+  | { ok: true; account: PaperAccountBoundaryV3 }
+  | { ok: false; error: string };
+
 export type PaperOrderRowV3 = {
   id: string;
   accountId: string;
@@ -53,6 +65,23 @@ function text(value: unknown): string | null {
 function numeric(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mapAccountBoundary(row: JsonRow): PaperAccountBoundaryV3 | null {
+  const id = text(row.id);
+  const userId = text(row.user_id);
+  const status = row.status === "active" || row.status === "archived" ? row.status : null;
+  const accountType = row.account_type === "personal" || row.account_type === "competition" ? row.account_type : null;
+  const competitionId = row.competition_id === null ? null : text(row.competition_id);
+  if (
+    !id
+    || !userId
+    || !status
+    || !accountType
+    || (accountType === "personal" && competitionId !== null)
+    || (accountType === "competition" && competitionId === null)
+  ) return null;
+  return { id, userId, status, accountType, competitionId };
 }
 
 function mapAccount(row: JsonRow): PaperAccountRowV3 | null {
@@ -143,6 +172,28 @@ function mapFill(row: JsonRow, order: PaperOrderRowV3 | undefined): PaperFillV3 
     pricingBasis: "VERIFIED_OBSERVATION_EXACT",
     policyVersion,
   };
+}
+
+export async function loadPaperAccountBoundaryV3(userId: string, accountId: string): Promise<PaperAccountBoundaryLoadResultV3> {
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
+
+  try {
+    const { data, error } = await supabase
+      .from("paper_accounts_v3")
+      .select("id,user_id,status,account_type,competition_id")
+      .eq("id", accountId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (!data) return { ok: false, error: "PAPER_ACCOUNT_NOT_FOUND" };
+    const account = mapAccountBoundary(data as JsonRow);
+    return account
+      ? { ok: true, account }
+      : { ok: false, error: "PAPER_ACCOUNT_BOUNDARY_INVALID" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "PAPER_ACCOUNT_BOUNDARY_LOAD_FAILED" };
+  }
 }
 
 export async function loadPaperAccountStateV3(userId: string, accountId: string): Promise<PaperAccountLoadResultV3> {
