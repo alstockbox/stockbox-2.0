@@ -15,8 +15,8 @@ describe("Paper Trading V3 latest verified competition cutoff", () => {
     expect(sql).toContain("paper_competition_valuation_control_v3_verified_pointer_check");
   });
 
-  it("updates the verified pointer only for a verified completion", () => {
-    expect(sql).toContain("p_outcome = 'verified'");
+  it("updates the verified pointer only for a normalized verified completion", () => {
+    expect(sql).toContain("v_outcome = 'verified'");
     expect(sql).toContain("last_verified_at = case");
     expect(sql).toContain("last_verified_evaluation_cutoff = case");
     expect(sql).toContain("then v_now");
