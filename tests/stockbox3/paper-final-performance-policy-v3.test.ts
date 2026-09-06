@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { PaperFillV3, PaperMarketObservationV3, PaperTradingAccountStateV3 } from "@/lib/paper-trading/engine-v3";
 import {
   derivePaperFinalPerformanceV3,
-  derivePaperPerformanceV3,
   PAPER_FINAL_PERFORMANCE_V3_MAX_QUOTE_AGE_MS,
   PAPER_FINAL_PERFORMANCE_V3_POLICY_VERSION,
+} from "@/lib/paper-trading/final-performance-v3";
+import {
+  derivePaperPerformanceV3,
   PAPER_TRADING_V3_FIXED_STARTING_CASH,
 } from "@/lib/paper-trading/performance-v3";
 import { parseYahooFinalCutoffQuoteV3 } from "@/lib/paper-trading/final-cutoff-quote-v3";
