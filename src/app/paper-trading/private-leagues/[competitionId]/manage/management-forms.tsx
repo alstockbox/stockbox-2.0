@@ -20,6 +20,7 @@ type Props = {
   invites: PrivatePaperLeagueInviteMetadataV3[];
   members: PrivatePaperLeagueMemberV3[];
   canEditRoles: boolean;
+  nowMs: number;
   sv: boolean;
 };
 
@@ -38,7 +39,7 @@ function roleLabel(role: PrivatePaperLeagueMemberV3["role"], sv: boolean): strin
   return sv ? "Medlem" : "Member";
 }
 
-export function PrivateLeagueManagementForms({ competitionId, invites, members, canEditRoles, sv }: Props) {
+export function PrivateLeagueManagementForms({ competitionId, invites, members, canEditRoles, nowMs, sv }: Props) {
   const [createState, createAction, createPending] = useActionState(
     createPrivateLeagueManagementInviteAction,
     INITIAL_CREATE_PRIVATE_LEAGUE_MANAGEMENT_INVITE_STATE,
@@ -96,7 +97,7 @@ export function PrivateLeagueManagementForms({ competitionId, invites, members, 
           <div className="mt-4 divide-y divide-white/10">
             {invites.map((invite, index) => {
               const revoked = invite.revokedAt !== null;
-              const expired = Date.parse(invite.expiresAt) <= Date.now();
+              const expired = Date.parse(invite.expiresAt) <= nowMs;
               return (
                 <div key={invite.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
                   <div>
