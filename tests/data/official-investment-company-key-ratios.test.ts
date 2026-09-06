@@ -17,6 +17,7 @@ const html = `
     <tr><td>Number of shares outstanding total, thousands</td><td>431,899</td><td>431,899</td><td>431,899</td><td>431,899</td><td>431,899</td><td>435,210</td></tr>
     <tr><td>Dividends paid value, SEK mn</td><td>3,779</td><td>3,563</td><td>3,347</td><td>3,131</td><td>2,915</td><td>3,590</td></tr>
     <tr><td>Dividends paid value per share, SEK</td><td>8.75</td><td>8.25</td><td>7.75</td><td>7.25</td><td>6.75</td><td>8.25</td></tr>
+    <tr><td>Total return index (SIXRX), %</td><td>13</td><td>9</td><td>19</td><td>-23</td><td>39</td><td>15</td></tr>
     <tr><td>Dividends received, SEK mn</td><td>9,532</td><td>8,585</td><td>6,418</td><td>5,479</td><td>8,081</td><td>657</td></tr>
   </tbody>
 </table>`;
@@ -34,6 +35,7 @@ describe("official investment-company key-ratio history", () => {
     expect(parsed?.years[0]).toEqual({
       year: 2025,
       portfolioReturn: 0.22,
+      benchmarkReturnSixrx: 0.13,
       netPurchasesSales: 4_650_000_000,
       netDebt: -5_920_000_000,
       debtEquitiesRatio: 0.03,
@@ -46,6 +48,7 @@ describe("official investment-company key-ratio history", () => {
     expect(parsed?.years[5]).toEqual(expect.objectContaining({
       year: 2020,
       portfolioReturn: 0.07,
+      benchmarkReturnSixrx: 0.15,
       netPurchasesSales: 4_106_000_000,
       netDebt: -7_654_000_000,
       dividendPerShare: 8.25,

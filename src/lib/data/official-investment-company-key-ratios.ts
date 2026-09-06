@@ -2,12 +2,13 @@ import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROVIDER_ID = "official-investment-company-key-ratios";
-const PROVIDER_VERSION = "v1";
+const PROVIDER_VERSION = "v2";
 const MIN_COMPLETE_YEARS = 5;
 
 export type InvestmentCompanyKeyRatioYear = {
   year: number;
   portfolioReturn: number;
+  benchmarkReturnSixrx?: number | null;
   netPurchasesSales: number;
   netDebt: number;
   debtEquitiesRatio: number;
@@ -135,6 +136,7 @@ const SECTION_LABELS = [
   "net asset value",
   "number of shares outstanding",
   "dividends paid",
+  "total return industrivärden shares",
   "other key ratios",
 ] as const;
 
@@ -155,6 +157,11 @@ const METRICS: MetricSpec[] = [
   {
     key: "portfolioReturn",
     matches: (label) => label.includes("equities portfolio") && label.includes("total return"),
+    scale: "ratio_percent",
+  },
+  {
+    key: "benchmarkReturnSixrx",
+    matches: (label) => label.includes("total return index") && label.includes("sixrx"),
     scale: "ratio_percent",
   },
   {
@@ -257,6 +264,7 @@ function parseMetricRows(rows: ParsedRow[], years: number[]): Map<MetricKey, num
 function yearIsValid(point: InvestmentCompanyKeyRatioYear): boolean {
   return Number.isInteger(point.year)
     && Number.isFinite(point.portfolioReturn)
+    && Number.isFinite(point.benchmarkReturnSixrx)
     && Number.isFinite(point.netPurchasesSales)
     && Number.isFinite(point.netDebt)
     && Number.isFinite(point.debtEquitiesRatio)
@@ -286,6 +294,7 @@ export function parseIndustrivardenOfficialKeyRatios(
   const points = years.map((year, index): InvestmentCompanyKeyRatioYear => ({
     year,
     portfolioReturn: values.get("portfolioReturn")?.[index] ?? Number.NaN,
+    benchmarkReturnSixrx: values.get("benchmarkReturnSixrx")?.[index] ?? Number.NaN,
     netPurchasesSales: values.get("netPurchasesSales")?.[index] ?? Number.NaN,
     netDebt: values.get("netDebt")?.[index] ?? Number.NaN,
     debtEquitiesRatio: values.get("debtEquitiesRatio")?.[index] ?? Number.NaN,
@@ -364,7 +373,7 @@ export async function fetchOfficialInvestmentCompanyKeyRatios(
       name: "Industrivärden official key ratios",
       url: entry.url,
       accessedAt,
-      freshness: "Official annual key-ratio history; values retain the company's published annual alignment and are converted only for explicit units (percent, SEK million and thousands of shares).",
+      freshness: "Official annual key-ratio and SIXRX benchmark history; values retain the company's published annual alignment and are converted only for explicit units (percent, SEK million and thousands of shares).",
       provider: PROVIDER_ID,
       version: PROVIDER_VERSION,
       capability: "specialized",
