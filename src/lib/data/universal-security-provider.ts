@@ -9,12 +9,14 @@ import {
   analyzeInvestmentCompany,
   classifyUniversalSecurity,
   type EtfAnalysisResult,
+  type EtfHolding,
   type InvestmentCompanyAnalysisResult,
   type UniversalSecurityClassification,
   type WeightedSecurityFactor,
 } from "@/lib/analysis/universal-security";
 import type {
   AnalysisReport,
+  AnalysisSource,
   AnalysisType,
   CompanySearchResult,
   DcfRange,
@@ -34,8 +36,13 @@ import {
   fetchConfiguredMarketData,
   searchCompanies,
 } from "./enhanced-provider";
+import {
+  enrichEtfLookThroughHoldings,
+  type EtfHoldingFundamentalData,
+} from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
 import { inferSecurityType } from "./security-classification";
+import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
 
 export { searchCompanies };
 
@@ -205,6 +212,23 @@ function describeEtf(result: EtfAnalysisResult, company: CompanySearchResult): {
   };
 }
 
+function supportsEquityEtfLookThrough(subtype: string | null | undefined): boolean {
+  return subtype === "equity_etf"
+    || subtype === "index_etf"
+    || subtype === "sector_etf"
+    || subtype === "factor_etf";
+}
+
+function holdingFundamentalDataContributes(
+  holding: EtfHolding,
+  data: EtfHoldingFundamentalData,
+): boolean {
+  return (Object.keys(data) as Array<keyof EtfHoldingFundamentalData>).some((key) => {
+    const value = data[key];
+    return value !== null && value !== undefined && (holding[key] === null || holding[key] === undefined);
+  });
+}
+
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
   const env = getServerEnv();
@@ -223,8 +247,41 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     };
   }
 
+  const holdingSources: AnalysisSource[] = [];
+  const holdingDiagnostics: ProviderDiagnostic[] = [];
+  let holdings = etfResult.data.input.holdings;
+  let lookThroughBudgetWarning: string | null = null;
+
+  if (
+    supportsEquityEtfLookThrough(etfResult.data.input.subtype)
+    && Array.isArray(holdings)
+    && holdings.length > 0
+  ) {
+    const enrichment = await enrichEtfLookThroughHoldings(
+      holdings,
+      async (holding) => {
+        const result = await fetchYahooEtfHoldingFundamentals(holding);
+        if (result.ok && holdingFundamentalDataContributes(holding, result.data)) {
+          if (!holdingSources.some((source) => source.provider === result.source.provider && source.version === result.source.version)) {
+            holdingSources.push(result.source);
+          }
+          if (!holdingDiagnostics.some((diagnostic) => diagnostic.provider === result.diagnostic.provider)) {
+            holdingDiagnostics.push(result.diagnostic);
+          }
+        }
+        return result;
+      },
+      { maxRequests: 12 },
+    );
+    holdings = enrichment.holdings;
+    if (enrichment.budgetExhausted && !enrichment.targetReached) {
+      lookThroughBudgetWarning = "ETF look-through quality enrichment reached its request budget before 80% of portfolio weight had verified holding-quality evidence; holdings quality remains N/A until the threshold is met.";
+    }
+  }
+
   const input = {
     ...etfResult.data.input,
+    holdings,
     averageDailyDollarVolume: etfResult.data.input.averageDailyDollarVolume
       ?? (market?.price && market?.volume ? market.price * market.volume : null),
   };
@@ -238,9 +295,17 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     quoteType: etfResult.data.quoteType,
     category: etfResult.data.category,
   });
-  const sources = etfResult.data.sources;
-  const providerDiagnostics: ProviderDiagnostic[] = [marketResult.diagnostic, ...etfResult.data.diagnostics];
-  const reportWarnings = [...new Set([...etfResult.data.warnings, ...analysis.warnings])];
+  const sources = [...etfResult.data.sources, ...holdingSources];
+  const providerDiagnostics: ProviderDiagnostic[] = [
+    marketResult.diagnostic,
+    ...etfResult.data.diagnostics,
+    ...holdingDiagnostics,
+  ];
+  const reportWarnings = [...new Set([
+    ...etfResult.data.warnings,
+    ...(lookThroughBudgetWarning ? [lookThroughBudgetWarning] : []),
+    ...analysis.warnings,
+  ])];
   const report: UniversalSecurityReport = {
     id: randomUUID(),
     ticker: args.company.ticker,
