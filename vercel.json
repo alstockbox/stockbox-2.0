@@ -1,4 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "stockbox-3.0": false
+    }
+  },
   "crons": [
     {
       "path": "/api/monitoring/run",
