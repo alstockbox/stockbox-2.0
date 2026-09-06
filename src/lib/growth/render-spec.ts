@@ -40,6 +40,7 @@ export const VoiceModeSchema = z.enum([
   "hook",
   "educational",
   "serious_analysis",
+  "excited",
   "generic_english",
 ]);
 
@@ -119,6 +120,7 @@ export const RenderSpecSchema = z
     hook: z.string().min(1).max(500),
     script: z.string().min(1).max(6000),
     voiceMode: VoiceModeSchema,
+    voiceStyleIntensity: z.number().int().min(0).max(100).optional(),
     scenes: z.array(SceneSchema).min(1).max(40),
     subtitles: z.array(SubtitleSchema).max(300).default([]),
     cta: CtaSchema,
@@ -179,8 +181,8 @@ export const RenderSpecSchema = z
 
     if (
       spec.language === "sv" &&
-      !(["hook", "educational", "serious_analysis"] as const).includes(
-        spec.voiceMode as "hook" | "educational" | "serious_analysis",
+      !(["hook", "educational", "serious_analysis", "excited"] as const).includes(
+        spec.voiceMode as "hook" | "educational" | "serious_analysis" | "excited",
       )
     ) {
       ctx.addIssue({
