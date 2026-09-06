@@ -1,6 +1,5 @@
 import {
   computeLookThroughMetrics,
-  LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT,
   type EtfHolding,
 } from "@/lib/analysis/universal-security";
 
@@ -24,6 +23,7 @@ export type EtfLookThroughEnrichmentResult = {
 };
 
 const DEFAULT_MAX_REQUESTS = 12;
+const LOOK_THROUGH_QUALITY_TARGET_WEIGHT = 0.80;
 
 function hasVerifiedQualityEvidence(holding: EtfHolding): boolean {
   return computeLookThroughMetrics([{ ...holding, weight: 1 }]).qualityCoveredWeight >= 1;
@@ -65,7 +65,7 @@ export async function enrichEtfLookThroughHoldings(
   const failedTickers: string[] = [];
   let verifiedQualityWeight = qualityWeight(enriched);
 
-  if (verifiedQualityWeight >= LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT) {
+  if (verifiedQualityWeight >= LOOK_THROUGH_QUALITY_TARGET_WEIGHT) {
     return {
       holdings: enriched,
       verifiedQualityWeight,
@@ -91,7 +91,7 @@ export async function enrichEtfLookThroughHoldings(
   while (
     candidateIndex < candidates.length
     && attemptedTickers.length < maxRequests
-    && verifiedQualityWeight < LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT
+    && verifiedQualityWeight < LOOK_THROUGH_QUALITY_TARGET_WEIGHT
   ) {
     const candidate = candidates[candidateIndex];
     candidateIndex += 1;
@@ -108,7 +108,7 @@ export async function enrichEtfLookThroughHoldings(
     verifiedQualityWeight = qualityWeight(enriched);
   }
 
-  const targetReached = verifiedQualityWeight >= LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT;
+  const targetReached = verifiedQualityWeight >= LOOK_THROUGH_QUALITY_TARGET_WEIGHT;
   return {
     holdings: enriched,
     verifiedQualityWeight,
