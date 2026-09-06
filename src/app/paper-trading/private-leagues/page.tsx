@@ -81,6 +81,29 @@ export default async function PrivatePaperLeaguesPage() {
           </Card>
         ) : null}
 
+        {!killed ? (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <Link
+              href="/paper-trading/private-leagues/new"
+              className="rounded-lg border border-[#b99b5f]/30 bg-[#b99b5f]/10 p-4 transition hover:bg-[#b99b5f]/15"
+            >
+              <p className="font-semibold text-[#f4efe5]">{sv ? "Skapa privat liga" : "Create private league"}</p>
+              <p className="mt-1 text-xs leading-5 text-[#8391a4]">
+                {sv ? "Sätt verifierade villkor och få en hemlig engångsinbjudan." : "Set verified terms and receive a secret one-time invite token."}
+              </p>
+            </Link>
+            <Link
+              href="/paper-trading/private-leagues/join"
+              className="rounded-lg border border-white/10 bg-[#07111f]/60 p-4 transition hover:border-white/20"
+            >
+              <p className="font-semibold text-[#f4efe5]">{sv ? "Gå med via inbjudan" : "Join with invite"}</p>
+              <p className="mt-1 text-xs leading-5 text-[#8391a4]">
+                {sv ? "Verifiera en hemlig kod utan att söka i någon publik ligakatalog." : "Verify a secret token without searching any public league directory."}
+              </p>
+            </Link>
+          </div>
+        ) : null}
+
         {!leaguesResult.ok ? (
           <Card className="mt-7 border-amber-300/20 bg-amber-950/20 text-sm text-amber-100">
             {sv
