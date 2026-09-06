@@ -7,6 +7,7 @@ import {
   YAHOO_FUNDAMENTALS_CAPABILITIES,
   fetchYahooFundamentalsResult as fetchCoreYahooFundamentalsResult,
 } from "./yahoo-fundamentals-core";
+import { enrichYahooInterestExpense } from "./yahoo-interest-expense-enrichment";
 import { enrichSpecializedFundamentals } from "./specialized-enrichment";
 import type { AdapterResult, FundamentalsProvider } from "./providers";
 
@@ -52,10 +53,14 @@ export async function fetchYahooFundamentalsResult(
   const core = await fetchCoreYahooFundamentalsResult(company);
   if (!core.ok) return core;
 
-  const enrichment = await enrichSpecializedFundamentals(company, core.data);
+  const interestEnrichment = await enrichYahooInterestExpense(company, core.data);
+  const enrichment = await enrichSpecializedFundamentals(company, interestEnrichment.fundamentals);
   return {
     ...core,
-    data: appendUniqueDiagnostics(enrichment.fundamentals, enrichment.diagnostics),
+    data: appendUniqueDiagnostics(
+      enrichment.fundamentals,
+      [...interestEnrichment.diagnostics, ...enrichment.diagnostics],
+    ),
   };
 }
 
