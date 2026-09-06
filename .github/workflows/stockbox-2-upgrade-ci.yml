@@ -11,6 +11,7 @@ on:
       - "src/lib/**"
       - "tests/**"
       - "supabase/migrations/**"
+      - "vercel.json"
       - ".github/workflows/stockbox-2-upgrade-ci.yml"
 
 jobs:
@@ -47,6 +48,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Vercel deployment policy test
+        run: npm test -- tests/config/vercel-deployment-policy.test.ts
       - name: Portfolio 2 math tests
         run: npm test -- tests/portfolio/portfolio-math-v2.test.ts
       - name: Workspace Portfolio 2 regression tests
