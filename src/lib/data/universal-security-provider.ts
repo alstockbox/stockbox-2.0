@@ -41,6 +41,7 @@ import {
   type EtfHoldingFundamentalData,
 } from "./etf-look-through-enrichment";
 import { fetchEtfProviderChain } from "./etf-provider-chain";
+import { classifyFundStructure } from "./fund-structure-classification";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
 
@@ -244,6 +245,27 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
       sources: [],
       warnings: etfResult.warnings.length ? etfResult.warnings : [etfResult.message],
       providerDiagnostics: [marketResult.diagnostic, ...etfResult.diagnostics],
+    };
+  }
+
+  const fundStructure = classifyFundStructure({
+    company: args.company,
+    quoteType: etfResult.data.quoteType,
+    category: etfResult.data.category,
+  });
+  if (fundStructure.structure !== "exchange_traded_fund") {
+    const closedEnd = fundStructure.structure === "closed_end_fund";
+    const structureWarning = closedEnd
+      ? "Closed-end funds require a dedicated specialist model using verified NAV/share, discount or premium to NAV, leverage, distribution quality and coverage, portfolio exposure and liquidity. StockBox will not substitute ETF scoring for those economics."
+      : `StockBox could not verify whether this listed fund is an ETF, closed-end fund, or another fund structure. ${fundStructure.reason}`;
+    return {
+      ok: false,
+      error: closedEnd
+        ? "Closed-end fund specialist analysis is not yet available for this security."
+        : "Fund structure could not be verified well enough to select a specialist model.",
+      sources: etfResult.data.sources,
+      warnings: [...new Set([...etfResult.data.warnings, structureWarning])],
+      providerDiagnostics: [marketResult.diagnostic, ...etfResult.data.diagnostics],
     };
   }
 
