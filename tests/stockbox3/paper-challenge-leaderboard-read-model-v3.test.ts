@@ -112,7 +112,8 @@ function setup(input?: {
   const deps: PaperChallengeLeaderboardReadModelDependenciesV3 = {
     loadCompetition: loadCompetition as never,
     loadVerifiedCutoff: loadVerifiedCutoff as never,
-    loadStandings: loadStandings as never,
+    loadActiveStandings: loadStandings as never,
+    loadFinalStandings: loadStandings as never,
   };
   return { deps, loadCompetition, loadVerifiedCutoff, loadStandings };
 }
