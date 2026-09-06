@@ -86,8 +86,6 @@ jobs:
         continue-on-error: true
         run: npx eslint src/components/portfolio/portfolio-purchase-form.tsx
       - name: Diagnose set-state-in-effect rule
-        id: lint_purchase_without_set_state_effect
-        continue-on-error: true
         run: |
           npx eslint src/components/portfolio/portfolio-purchase-form.tsx --rule 'react-hooks/set-state-in-effect: off'
       - name: Lint portfolio page
