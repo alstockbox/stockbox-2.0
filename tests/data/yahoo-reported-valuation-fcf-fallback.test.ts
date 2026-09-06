@@ -104,6 +104,7 @@ describe("Yahoo provider-reported valuation FCF period alignment", () => {
       freeCashFlow: 100,
       freeCashFlowCurrency: "CNY",
       freeCashFlowDate: "2025-12-31",
+      freeCashFlowPeriodBasis: "FY",
     }));
   });
 
@@ -121,6 +122,25 @@ describe("Yahoo provider-reported valuation FCF period alignment", () => {
       freeCashFlow: null,
       freeCashFlowCurrency: null,
       freeCashFlowDate: null,
+    }));
+  });
+
+  it("carries the reported TTM basis with provider valuation FCF when Yahoo reports trailing FCF", async () => {
+    const payload = annualPayload(true);
+    payload.timeseries.result.push(
+      series("trailingFreeCashFlow", [row("2026-06-30", "TTM", "CNY", 105)]),
+    );
+    installFetch(payload);
+
+    const result = await fetchYahooFundamentalsResult(company);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.reportedValuation).toEqual(expect.objectContaining({
+      freeCashFlow: 105,
+      freeCashFlowCurrency: "CNY",
+      freeCashFlowDate: "2026-06-30",
+      freeCashFlowPeriodBasis: "TTM_REPORTED",
     }));
   });
 });
