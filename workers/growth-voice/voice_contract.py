@@ -3,10 +3,13 @@ from __future__ import annotations
 import hmac
 import io
 import math
+from pathlib import PurePosixPath
 import wave
 from urllib.parse import urlparse
 
 ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis"}
+ALLOWED_REFERENCE_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac"}
+CHATTERBOX_T3_MODEL = "v3"
 MAX_TEXT_CHARS = 1500
 
 
@@ -24,6 +27,15 @@ def validate_reference_url(raw_url: str) -> None:
         raise ValueError("invalid_reference_url")
     if not hostname.endswith(".supabase.co"):
         raise ValueError("invalid_reference_host")
+
+
+def reference_audio_suffix(raw_url: str) -> str:
+    suffix = PurePosixPath(urlparse(raw_url).path).suffix.lower()
+    return suffix if suffix in ALLOWED_REFERENCE_AUDIO_SUFFIXES else ".audio"
+
+
+def chatterbox_model_kwargs() -> dict[str, str]:
+    return {"t3_model": CHATTERBOX_T3_MODEL}
 
 
 def validate_voice_request(language: str, voice_mode: str, text: str) -> None:
