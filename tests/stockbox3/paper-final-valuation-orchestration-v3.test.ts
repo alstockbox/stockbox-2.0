@@ -82,7 +82,7 @@ describe("Paper Trading V3 final valuation orchestration", () => {
       fetchQuote: vi.fn(async () => ({ observation: null, reason: "unexpected" })) as never,
       derivePerformance,
       persistSnapshot,
-      loadStandings: async ({ evaluationCutoff }) => ({
+      loadStandings: async ({ evaluationCutoff }: { evaluationCutoff: string }) => ({
         ok: true as const,
         competitionId: "competition-1",
         competitionKind: "challenge" as const,
