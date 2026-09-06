@@ -171,7 +171,7 @@ describe("Yahoo provider-reported valuation FCF period alignment", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.trailingTwelveMonths?.periodBasis).toBe("TTM_REPORTED");
-    expect(result.data.annualPeriods.at(-1)?.provenance?.freeCashFlow).toMatchObject({
+    expect(result.data.annualPeriods?.at(-1)?.provenance?.freeCashFlow).toMatchObject({
       provider: "yahoo-fundamentals",
       valueKind: "reported",
       periodBasis: "FY",
