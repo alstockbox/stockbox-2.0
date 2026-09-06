@@ -344,7 +344,7 @@ describe("investment-company 99% production rating gate", () => {
     expect(analysis?.score.score).not.toBeNull();
     expect(report.score.score).toBe(analysis?.score.score);
     expect(report.recommendation).not.toBe("No Rating");
-    expect(report.score.missingData.some((message) => /below the 99% verified-data rating gate/i.test(message))).toBe(false);
+    expect(report.score.missingData.some((message) => /below StockBox's 99% verified-data target/i.test(message))).toBe(false);
   });
 
   it("keeps No Rating at the former 94% ceiling when governance evidence is unavailable", async () => {
@@ -371,6 +371,6 @@ describe("investment-company 99% production rating gate", () => {
     expect(analysis?.score.factors.find((factor) => factor.key === "governance")?.status).toBe("missing");
     expect(report.dataCoverage).toBeCloseTo(0.94, 12);
     expect(report.recommendation).toBe("No Rating");
-    expect(report.score.missingData.some((message) => /below the 99% verified-data rating gate/i.test(message))).toBe(true);
+    expect(report.score.missingData.some((message) => /below StockBox's 99% verified-data target/i.test(message))).toBe(true);
   });
 });
