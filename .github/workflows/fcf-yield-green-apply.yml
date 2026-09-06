@@ -24,87 +24,83 @@ jobs:
       - name: Verify expected parent
         shell: bash
         run: |
-          test "$(git rev-parse HEAD^)" = "61ce6117e5ab6ebb9d14fef2bc40b9a1c25cba01"
+          test "$(git rev-parse HEAD^)" = "b38589a3681b3c2b51b0493f0c286ae0a5b6bcc8"
       - name: Apply minimal consumer fix
         shell: python
         run: |
+          import re
           from pathlib import Path
 
           path = Path("src/lib/analysis/metrics.ts")
           text = path.read_text()
 
-          old = '''  const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
-            ? safeDivide(reported.freeCashFlow, reported.marketCap)
-            : null;'''
-          new = '''  const reportedWithVerifiedFx = reported as typeof reported & {
-            freeCashFlowYield?: number | null;
-            freeCashFlowYieldProvenance?: MetricProvenance;
-          };
-          const fxProvenance = reportedWithVerifiedFx.freeCashFlowYieldProvenance;
-          const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);
-          const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);
-          const fxRateTime = fxProvenance?.periodEnd ? Date.parse(fxProvenance.periodEnd) : Number.NaN;
-          const valuationTime = reported.asOfDate ? Date.parse(reported.asOfDate) : Number.NaN;
-          const fxRateAtOrBeforeValuation = Number.isFinite(fxRateTime)
-            && Number.isFinite(valuationTime)
-            && fxRateTime <= valuationTime;
-          const fxRateCurrent = fxProvenance?.periodEnd && reported.asOfDate
-            ? dataDateStatus(fxProvenance.periodEnd, reported.asOfDate, 7).status === "current"
-            : false;
-          const verifiedFxYield = positive(reported.marketCap) !== null
-            && isFiniteNumber(reported.freeCashFlow)
-            && marketCapCurrency !== null
-            && freeCashFlowCurrency !== null
-            && marketCapCurrency !== freeCashFlowCurrency
-            && isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
-            && fxProvenance?.source === "ECB foreign exchange reference rates"
-            && fxProvenance.provider === "ecb"
-            && fxProvenance.valueKind === "derived"
-            && fxRateAtOrBeforeValuation
-            && fxRateCurrent
-              ? reportedWithVerifiedFx.freeCashFlowYield
-              : null;
-          const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)
-            ? safeDivide(reported.freeCashFlow, reported.marketCap)
-            : fcfCurrent ? verifiedFxYield : null;'''
-          if old not in text:
-              raise SystemExit("provider FCF yield block not found exactly")
-          text = text.replace(old, new, 1)
+          fcf_pattern = re.compile(
+              r"  const fcfYield = sameFcfCurrency && fcfCurrent && positive\(reported\.marketCap\) !== null && isFiniteNumber\(reported\.freeCashFlow\)\n"
+              r"\s+\? safeDivide\(reported\.freeCashFlow, reported\.marketCap\)\n"
+              r"\s+: null;"
+          )
+          fcf_new = "\n".join([
+              "  const reportedWithVerifiedFx = reported as typeof reported & {",
+              "    freeCashFlowYield?: number | null;",
+              "    freeCashFlowYieldProvenance?: MetricProvenance;",
+              "  };",
+              "  const fxProvenance = reportedWithVerifiedFx.freeCashFlowYieldProvenance;",
+              "  const marketCapCurrency = normalizedCurrency(reported.marketCapCurrency);",
+              "  const freeCashFlowCurrency = normalizedCurrency(reported.freeCashFlowCurrency);",
+              "  const fxRateTime = fxProvenance?.periodEnd ? Date.parse(fxProvenance.periodEnd) : Number.NaN;",
+              "  const valuationTime = reported.asOfDate ? Date.parse(reported.asOfDate) : Number.NaN;",
+              "  const fxRateAtOrBeforeValuation = Number.isFinite(fxRateTime)",
+              "    && Number.isFinite(valuationTime)",
+              "    && fxRateTime <= valuationTime;",
+              "  const fxRateCurrent = fxProvenance?.periodEnd && reported.asOfDate",
+              "    ? dataDateStatus(fxProvenance.periodEnd, reported.asOfDate, 7).status === \"current\"",
+              "    : false;",
+              "  const verifiedFxYield = positive(reported.marketCap) !== null",
+              "    && isFiniteNumber(reported.freeCashFlow)",
+              "    && marketCapCurrency !== null",
+              "    && freeCashFlowCurrency !== null",
+              "    && marketCapCurrency !== freeCashFlowCurrency",
+              "    && isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)",
+              "    && fxProvenance?.source === \"ECB foreign exchange reference rates\"",
+              "    && fxProvenance.provider === \"ecb\"",
+              "    && fxProvenance.valueKind === \"derived\"",
+              "    && fxRateAtOrBeforeValuation",
+              "    && fxRateCurrent",
+              "      ? reportedWithVerifiedFx.freeCashFlowYield",
+              "      : null;",
+              "  const fcfYield = sameFcfCurrency && fcfCurrent && positive(reported.marketCap) !== null && isFiniteNumber(reported.freeCashFlow)",
+              "    ? safeDivide(reported.freeCashFlow, reported.marketCap)",
+              "    : fcfCurrent ? verifiedFxYield : null;",
+          ])
+          text, count = fcf_pattern.subn(fcf_new, text, count=1)
+          if count != 1:
+              raise SystemExit(f"provider FCF yield block matches={count}")
 
-          old_prov = '''    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
-              return {
-                source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
-                periodEnd: input.reportedValuation.asOfDate ?? undefined,
-                valueKind: derivedNote ? "derived" : "reported",
-                inputs: derivedNote ? derivedInputs : undefined,
-                note: derivedNote,
-              };
-            }'''
-          new_prov = '''    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {
-              if (metric === "freeCashFlowYield") {
-                const reportedWithVerifiedFx = input.reportedValuation as typeof input.reportedValuation & {
-                  freeCashFlowYield?: number | null;
-                  freeCashFlowYieldProvenance?: MetricProvenance;
-                };
-                if (
-                  isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)
-                  && reportedValuationFallback.freeCashFlowYield === reportedWithVerifiedFx.freeCashFlowYield
-                  && reportedWithVerifiedFx.freeCashFlowYieldProvenance
-                ) {
-                  return reportedWithVerifiedFx.freeCashFlowYieldProvenance;
-                }
-              }
-              return {
-                source: derivedNote ? "StockBox deterministic formula" : input.reportedValuation.provider,
-                periodEnd: input.reportedValuation.asOfDate ?? undefined,
-                valueKind: derivedNote ? "derived" : "reported",
-                inputs: derivedNote ? derivedInputs : undefined,
-                note: derivedNote,
-              };
-            }'''
-          if old_prov not in text:
-              raise SystemExit("provider valuation provenance block not found exactly")
-          text = text.replace(old_prov, new_prov, 1)
+          provenance_pattern = re.compile(
+              r"(    if \(isFiniteNumber\(reportedValuationFallback\[metric\]\) && input\.reportedValuation\) \{\n)"
+              r"(      return \{)"
+          )
+          provenance_insert = "\n".join([
+              "    if (isFiniteNumber(reportedValuationFallback[metric]) && input.reportedValuation) {",
+              "      if (metric === \"freeCashFlowYield\") {",
+              "        const reportedWithVerifiedFx = input.reportedValuation as typeof input.reportedValuation & {",
+              "          freeCashFlowYield?: number | null;",
+              "          freeCashFlowYieldProvenance?: MetricProvenance;",
+              "        };",
+              "        if (",
+              "          isFiniteNumber(reportedWithVerifiedFx.freeCashFlowYield)",
+              "          && reportedValuationFallback.freeCashFlowYield === reportedWithVerifiedFx.freeCashFlowYield",
+              "          && reportedWithVerifiedFx.freeCashFlowYieldProvenance",
+              "        ) {",
+              "          return reportedWithVerifiedFx.freeCashFlowYieldProvenance;",
+              "        }",
+              "      }",
+              "      return {",
+          ])
+          text, count = provenance_pattern.subn(provenance_insert, text, count=1)
+          if count != 1:
+              raise SystemExit(f"provider valuation provenance block matches={count}")
+
           path.write_text(text)
       - name: Install dependencies
         run: npm ci
