@@ -569,9 +569,9 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       ? interestCoverageOperatingIncome > 0 ? DEBT_FREE_INTEREST_COVERAGE_RATIO : null
       : interestCoverageOperatingIncome / Math.abs(interestCoverageExpense)
     : null;
-  const useTtmCashToDebt = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.cashAndCashEquivalents) && isFiniteNumber(latest?.totalDebt) && latest.totalDebt !== 0);
+  const useTtmCashToDebt = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.cashAndEquivalents) && isFiniteNumber(latest?.totalDebt) && latest.totalDebt !== 0);
   const cashToDebtPeriod = useTtmCashToDebt ? latest : latestAnnual;
-  const cashToDebt = safeDivide(cashToDebtPeriod?.cashAndCashEquivalents, cashToDebtPeriod?.totalDebt);
+  const cashToDebt = safeDivide(cashToDebtPeriod?.cashAndEquivalents, cashToDebtPeriod?.totalDebt);
   const useTtmCurrentRatio = Boolean(input.trailingTwelveMonths && currentTtmBalanceAligned && isFiniteNumber(latest?.currentAssets) && isFiniteNumber(latest?.currentLiabilities) && latest.currentLiabilities !== 0);
   const currentRatioPeriod = useTtmCurrentRatio ? latest : latestAnnual;
   const currentRatio = safeDivide(currentRatioPeriod?.currentAssets, currentRatioPeriod?.currentLiabilities);
@@ -764,7 +764,7 @@ export function computeFinancialMetrics(input: FinancialAnalysisInput): Financia
       cashToDebt: derivedProvenance(
         "StockBox deterministic formula",
         cashToDebtPeriod?.periodEndDate,
-        ["cashAndCashEquivalents", "totalDebt"],
+        ["cashAndEquivalents", "totalDebt"],
         useTtmCashToDebt ? "Current TTM balance-sheet ratio." : "Annual fallback because complete current TTM balance inputs were unavailable.",
       ),
       currentRatio: derivedProvenance(
