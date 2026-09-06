@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
 import hmac
 import io
 import math
@@ -70,8 +71,10 @@ def torchaudio_save_kwargs() -> dict[str, str | int]:
 
 
 def _interpolate(bounds: tuple[float, float], ratio: float) -> float:
-    low, high = bounds
-    return round(low + (high - low) * ratio, 3)
+    low, high = (Decimal(str(value)) for value in bounds)
+    decimal_ratio = Decimal(str(ratio))
+    value = low + (high - low) * decimal_ratio
+    return float(value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
 
 
 def voice_generation_kwargs(voice_mode: str, style_intensity: int | float | None) -> dict[str, float]:
