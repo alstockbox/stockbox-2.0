@@ -8,8 +8,9 @@ import { providerDiagnostic } from "./providers";
 
 const PROVIDER_NAME = "Yahoo Finance ETF holding fundamentals";
 const SOURCE_PROVIDER = "Yahoo Finance";
-const PROVIDER_VERSION = "yahoo-etf-holding-fundamentals-v1";
+const PROVIDER_VERSION = "yahoo-etf-holding-fundamentals-v2";
 const REQUEST_TIMEOUT_MS = 10_000;
+const SUCCESS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MODULES = "financialData,defaultKeyStatistics,summaryDetail,assetProfile";
 const HOSTS = [
   "https://query1.finance.yahoo.com",
@@ -30,6 +31,18 @@ export type YahooEtfHoldingFundamentalsResult =
       message: string;
       diagnostic: ProviderDiagnostic;
     };
+
+type YahooEtfHoldingFundamentalsSuccess = Extract<
+  YahooEtfHoldingFundamentalsResult,
+  { ok: true }
+>;
+
+type SuccessCacheEntry = {
+  expiresAt: number;
+  result: YahooEtfHoldingFundamentalsSuccess;
+};
+
+const successCache = new Map<string, SuccessCacheEntry>();
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -93,6 +106,16 @@ function requestUrl(host: string, ticker: string): string {
   return `${host}/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${MODULES}`;
 }
 
+function readCachedSuccess(cacheKey: string): YahooEtfHoldingFundamentalsSuccess | null {
+  const cached = successCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    successCache.delete(cacheKey);
+    return null;
+  }
+  return cached.result;
+}
+
 export async function fetchYahooEtfHoldingFundamentals(
   holding: EtfHolding,
 ): Promise<YahooEtfHoldingFundamentalsResult> {
@@ -100,6 +123,10 @@ export async function fetchYahooEtfHoldingFundamentals(
   if (!ticker) {
     return unavailable("missing_ticker", "ETF holding has no explicit ticker for Yahoo look-through enrichment.");
   }
+
+  const cacheKey = ticker.toUpperCase();
+  const cached = readCachedSuccess(cacheKey);
+  if (cached) return cached;
 
   let sawValidYahooPayload = false;
 
@@ -123,7 +150,7 @@ export async function fetchYahooEtfHoldingFundamentals(
       if (!hasVerifiedField(data)) continue;
 
       const accessedAt = new Date().toISOString();
-      return {
+      const success: YahooEtfHoldingFundamentalsSuccess = {
         ok: true,
         data,
         diagnostic: providerDiagnostic(PROVIDER_NAME, "specialized", "available"),
@@ -137,6 +164,11 @@ export async function fetchYahooEtfHoldingFundamentals(
           version: PROVIDER_VERSION,
         },
       };
+      successCache.set(cacheKey, {
+        expiresAt: Date.now() + SUCCESS_CACHE_TTL_MS,
+        result: success,
+      });
+      return success;
     } catch {
       // Try the alternate Yahoo host. If both fail, the adapter fails closed below.
     }
