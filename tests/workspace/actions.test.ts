@@ -35,6 +35,7 @@ import {
   addWatchlistItemAction,
   createPortfolioAction,
   deletePortfolioAction,
+  recordPortfolioSaleAction,
   removeHoldingAction,
   updateHoldingAction,
 } from "../../src/lib/workspace/actions";
@@ -74,7 +75,15 @@ describe("workspace server actions", () => {
     mocks.portfolioMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
     mocks.holdingSelect.mockReturnValue(holdingQuery);
     mocks.holdingEq.mockReturnValue(holdingQuery);
-    mocks.holdingMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000333", portfolio_id: "00000000-0000-4000-8000-000000000222" } });
+    mocks.holdingMaybeSingle.mockResolvedValue({
+      data: {
+        id: "00000000-0000-4000-8000-000000000333",
+        portfolio_id: "00000000-0000-4000-8000-000000000222",
+        ticker: "AAPL",
+        quantity: "5",
+        currency: "USD",
+      },
+    });
     mocks.holdingInsert.mockResolvedValue({ error: null });
     mocks.holdingUpdate.mockReturnValue(holdingQuery);
     mocks.holdingDelete.mockReturnValue(holdingQuery);
@@ -125,6 +134,47 @@ describe("workspace server actions", () => {
       p_security_id: null,
       p_notes: null,
     });
+  });
+
+  it("records a sale against an existing owned position through the transaction rpc", async () => {
+    await recordPortfolioSaleAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      quantity: "1.5",
+      price: "230",
+      currency: "usd",
+      saleDate: "2026-09-06",
+      fees: "2",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "sell",
+      p_quantity: 1.5,
+      p_price: 230,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 2,
+      p_cash_amount: null,
+      p_security_id: null,
+      p_notes: null,
+    });
+  });
+
+  it("rejects a sale larger than the current owned quantity before calling the rpc", async () => {
+    await recordPortfolioSaleAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      quantity: "6",
+      price: "230",
+      currency: "usd",
+      saleDate: "2026-09-06",
+      fees: "0",
+    }));
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/portfolio?error=sell_quantity");
+    expect(mocks.rpc).not.toHaveBeenCalledWith("record_portfolio_transaction", expect.anything());
   });
 
   it("updates an owned holding through the RLS-protected holdings table", async () => {

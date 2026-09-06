@@ -3,6 +3,7 @@ import { AlertTriangle, BriefcaseBusiness, CalendarDays, Plus, Save, Trash2, Tre
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { PortfolioAnalyzer } from "@/components/portfolio/portfolio-analyzer";
 import { PortfolioPurchaseForm } from "@/components/portfolio/portfolio-purchase-form";
+import { PortfolioSaleForm } from "@/components/portfolio/portfolio-sale-form";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -153,16 +154,18 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
   const feedback = params.limit
     ? copy.limit
     : params.error === "transaction_input"
-      ? (sv ? "Välj ett bolag från sökresultaten och kontrollera antal, pris, datum, avgift och valuta." : "Select a company from the search results and check quantity, price, date, fee and currency.")
+      ? (sv ? "Kontrollera bolag, antal, pris, datum, avgift och valuta." : "Check company, quantity, price, date, fee and currency.")
       : params.error === "holding_identity"
         ? (sv ? "Bolaget kunde inte verifieras. Sök igen och välj rätt bolag från listan." : "The company could not be verified. Search again and select the correct company from the list.")
-        : params.error === "transaction_save"
-          ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
-          : params.error === "transaction_delete"
-            ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
-            : params.error
-              ? copy.error
-              : null;
+        : params.error === "sell_quantity"
+          ? (sv ? "Försäljningen kan inte registreras eftersom antalet överskrider den tillgängliga positionen på valt datum." : "The sale cannot be recorded because the quantity exceeds the available position on the selected date.")
+          : params.error === "transaction_save"
+            ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
+            : params.error === "transaction_delete"
+              ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
+              : params.error
+                ? copy.error
+                : null;
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -170,7 +173,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
       <Container>
         <p className="text-sm font-semibold text-[#e1cb95]">{copy.kicker}</p>
         <h1 className="serif mt-2 text-3xl font-semibold sm:text-4xl">{sv ? "Din riktiga portfölj, inte bara en tickerlista" : "Your actual portfolio, not just a ticker list"}</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera varje köp med antal, pris och datum. StockBox räknar cost basis, kopplar dina senaste analyser till positionerna och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record each purchase with quantity, price and date. StockBox calculates cost basis, connects your latest research to each position and saves snapshots so you can follow the portfolio over time."}</p>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera köp och försäljningar med antal, pris och datum. StockBox räknar cost basis från hela transaktionskedjan, kopplar dina senaste analyser till positionerna och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record purchases and sales with quantity, price and date. StockBox calculates cost basis from the complete transaction chain, connects your latest research to each position and saves snapshots so you can follow the portfolio over time."}</p>
 
         {!user ? (
           <Card className="mt-8">
@@ -305,6 +308,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                   <div className="mt-4 flex flex-wrap items-center gap-2"><div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 px-3 py-2"><span className="text-xs text-[#bba975]">Score</span><span className="ml-2 font-semibold">{currentScore === null ? "—" : Math.round(currentScore)}</span>{scoreDelta !== null ? <span className={`ml-2 text-xs ${scoreDelta >= 0 ? "text-emerald-200" : "text-red-200"}`}>{scoreDelta >= 0 ? "+" : ""}{scoreDelta.toFixed(1)}</span> : null}</div><span className="text-xs text-[#7f8b9b]">{sv ? "Analys" : "Analysis"}: {dateTime(latestAnalysis?.created_at, locale)}</span></div>
                                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{dims.map(([label, value]) => <div key={label} className="rounded-md bg-white/[0.035] p-2"><p className="truncate text-[10px] text-[#7f8b9b]">{label}</p><p className="mt-1 text-xs font-semibold">{value === null ? "—" : Math.round(value)}</p></div>)}</div>
                                   <p className="mt-3 text-[11px] leading-5 text-[#6f7b8c]">{sv ? `Första registrerade köp: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell visas som StockBox analysindikator, aldrig som garanti.` : `First recorded purchase: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell is shown as a StockBox research indicator, never a guarantee.`}</p>
+                                  <PortfolioSaleForm portfolioId={portfolio.id} ticker={position.ticker} quantity={position.quantity} currency={position.currency} today={today} locale={locale} />
                                 </div>
                               );
                             })}
@@ -313,7 +317,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <h3 className="font-semibold text-[#f4efe5]">{sv ? "Köp- och transaktionshistorik" : "Purchase and transaction history"}</h3>
-                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp är en egen rad. Ändringar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase is its own row. Changes rebuild position cost basis from the complete transaction chain."}</p>
+                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp och försäljning är en egen rad. Ändringar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase and sale is its own row. Changes rebuild position cost basis from the complete transaction chain."}</p>
                           {transactionsAvailable && portfolioTransactions.length ? (
                             <div className="mt-3 grid gap-2">
                               {portfolioTransactions.slice(0, 30).map((transaction) => (
