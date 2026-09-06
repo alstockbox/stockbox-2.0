@@ -4,6 +4,7 @@ import {
   parseIndustrivardenOfficialNav,
   parseInvestorOfficialNav,
   parseLatourOfficialNav,
+  parseLatourOfficialNavHistory,
   parseLundbergsOfficialNav,
   parseSvolderOfficialNav,
 } from "../../src/lib/data/official-investment-company-nav";
@@ -31,6 +32,34 @@ describe("official investment-company NAV parsing", () => {
       reportedNavPerShare: 203,
       navAsOf: "2026-06-30",
     });
+  });
+
+  it("parses Latour quarter columns into dated NAV/share history", () => {
+    const html = `
+      <table>
+        <tr><th>Mått</th><th>Q2/23</th><th>Q3/2023</th><th>Q4/2023</th><th>Q1/2024</th></tr>
+        <tr><td>Substansvärde, Mkr</td><td>123,527</td><td>110,061</td><td>126,675</td><td>130,240</td></tr>
+        <tr><td>Substansvärde per aktie, kr</td><td>193</td><td>172</td><td>198</td><td>204</td></tr>
+      </table>
+    `;
+
+    expect(parseLatourOfficialNavHistory(html)).toEqual([
+      { date: "2023-06-30", navPerShare: 193 },
+      { date: "2023-09-30", navPerShare: 172 },
+      { date: "2023-12-31", navPerShare: 198 },
+      { date: "2024-03-31", navPerShare: 204 },
+    ]);
+  });
+
+  it("fails Latour history closed when quarter columns and NAV/share cells do not align", () => {
+    const html = `
+      <table>
+        <tr><th>Mått</th><th>Q2/23</th><th>Q3/23</th><th>Q4/23</th></tr>
+        <tr><td>Substansvärde per aktie, kr</td><td>193</td><td>172</td></tr>
+      </table>
+    `;
+
+    expect(parseLatourOfficialNavHistory(html)).toEqual([]);
   });
 
   it("parses Industrivärden NAV per share from an official press-release phrase", () => {
