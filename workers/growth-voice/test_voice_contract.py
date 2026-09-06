@@ -4,7 +4,14 @@ import io
 import unittest
 import wave
 
-from voice_contract import authorized, fake_wav, validate_reference_url, validate_voice_request
+from voice_contract import (
+    authorized,
+    chatterbox_model_kwargs,
+    fake_wav,
+    reference_audio_suffix,
+    validate_reference_url,
+    validate_voice_request,
+)
 
 
 class VoiceContractTests(unittest.TestCase):
@@ -28,6 +35,23 @@ class VoiceContractTests(unittest.TestCase):
             validate_voice_request("sv", "unknown", "Hej")
         with self.assertRaisesRegex(ValueError, "invalid_text"):
             validate_voice_request("sv", "hook", "x" * 1501)
+
+    def test_founder_model_is_explicitly_multilingual_v3(self):
+        self.assertEqual(chatterbox_model_kwargs(), {"t3_model": "v3"})
+
+    def test_reference_audio_suffix_preserves_supported_audio_type(self):
+        self.assertEqual(
+            reference_audio_suffix(
+                "https://abc.supabase.co/storage/v1/object/sign/growth-voice-private/founder-voice-sv-v1.mp3?token=secret"
+            ),
+            ".mp3",
+        )
+        self.assertEqual(
+            reference_audio_suffix(
+                "https://abc.supabase.co/storage/v1/object/sign/growth-voice-private/reference.bin?token=secret"
+            ),
+            ".audio",
+        )
 
     def test_fake_mode_wav_is_deterministic_and_valid(self):
         first = fake_wav("Test")
