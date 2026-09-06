@@ -12,6 +12,7 @@ from voice_contract import (
     torchaudio_save_kwargs,
     validate_reference_url,
     validate_voice_request,
+    voice_generation_kwargs,
 )
 
 
@@ -30,6 +31,7 @@ class VoiceContractTests(unittest.TestCase):
 
     def test_founder_clone_contract_is_swedish_and_bounded(self):
         validate_voice_request("sv", "educational", "Hej")
+        validate_voice_request("sv", "excited", "Hej")
         with self.assertRaisesRegex(ValueError, "unsupported_language"):
             validate_voice_request("en", "educational", "Hello")
         with self.assertRaisesRegex(ValueError, "unsupported_voice_mode"):
@@ -59,6 +61,30 @@ class VoiceContractTests(unittest.TestCase):
             torchaudio_save_kwargs(),
             {"format": "wav", "encoding": "PCM_S", "bits_per_sample": 16},
         )
+
+    def test_voice_style_defaults_are_deterministic(self):
+        self.assertEqual(
+            voice_generation_kwargs("educational", None),
+            {"exaggeration": 0.53, "cfg_weight": 0.45, "temperature": 0.79},
+        )
+        self.assertEqual(
+            voice_generation_kwargs("excited", None),
+            {"exaggeration": 0.91, "cfg_weight": 0.298, "temperature": 0.888},
+        )
+
+    def test_voice_style_intensity_changes_delivery_within_safe_bounds(self):
+        low = voice_generation_kwargs("hook", 0)
+        high = voice_generation_kwargs("hook", 100)
+        self.assertLess(low["exaggeration"], high["exaggeration"])
+        self.assertGreater(low["cfg_weight"], high["cfg_weight"])
+        self.assertLess(low["temperature"], high["temperature"])
+        self.assertEqual(low, {"exaggeration": 0.54, "cfg_weight": 0.46, "temperature": 0.78})
+        self.assertEqual(high, {"exaggeration": 0.82, "cfg_weight": 0.32, "temperature": 0.86})
+
+    def test_voice_style_intensity_rejects_out_of_range_values(self):
+        for value in (-1, 101, True):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "invalid_style_intensity"):
+                voice_generation_kwargs("educational", value)
 
     def test_fake_mode_wav_is_deterministic_and_valid(self):
         first = fake_wav("Test")
