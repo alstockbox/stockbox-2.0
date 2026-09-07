@@ -320,17 +320,29 @@ export function parseSvolderOfficialHoldings(
   };
 }
 
-function parseLundbergsListItems(html: string): Array<{ name: string; reportedWeight: number }> {
+const LUNDBERGS_ALLOCATION_START = "Lundbergs investerar i fastigheter och börsnoterade företag.";
+const LUNDBERGS_ALLOCATION_END = "De börsnoterade innehaven är värderade till marknadsvärde.";
+
+function parseLundbergsAllocationRows(html: string): Array<{ name: string; reportedWeight: number }> {
+  const text = htmlToText(html);
+  const lowerText = text.toLocaleLowerCase("sv-SE");
+  const startMarker = LUNDBERGS_ALLOCATION_START.toLocaleLowerCase("sv-SE");
+  const endMarker = LUNDBERGS_ALLOCATION_END.toLocaleLowerCase("sv-SE");
+  const markerIndex = lowerText.indexOf(startMarker);
+  if (markerIndex < 0) return [];
+
+  const allocationStart = markerIndex + LUNDBERGS_ALLOCATION_START.length;
+  const allocationEnd = lowerText.indexOf(endMarker, allocationStart);
+  if (allocationEnd <= allocationStart) return [];
+
+  const allocationText = text.slice(allocationStart, allocationEnd).trim();
   const rows: Array<{ name: string; reportedWeight: number }> = [];
-  const itemPattern = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+  const itemPattern = /(.+?)\s+(-?\d+(?:[.,]\d+)?)\s*%(?=\s|$)/g;
   let itemMatch: RegExpExecArray | null;
 
-  while ((itemMatch = itemPattern.exec(html)) !== null) {
-    const text = htmlToText(itemMatch[1]);
-    const match = /^(.+?)\s+(-?\d+(?:[.,]\d+)?)\s*%$/.exec(text);
-    if (!match) continue;
-    const name = match[1].trim().replace(/\s+/g, " ");
-    const percentage = Number.parseFloat(match[2].replace(",", "."));
+  while ((itemMatch = itemPattern.exec(allocationText)) !== null) {
+    const name = itemMatch[1].trim().replace(/\s+/g, " ");
+    const percentage = Number.parseFloat(itemMatch[2].replace(",", "."));
     if (!name || !/[A-Za-zÅÄÖåäö]/.test(name) || !Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
       return [];
     }
@@ -352,7 +364,7 @@ export function parseLundbergsOfficialHoldings(
     : null;
   if (!asOf) return null;
 
-  const rows = parseLundbergsListItems(html);
+  const rows = parseLundbergsAllocationRows(html);
   if (rows.length < 5) return null;
   const uniqueNames = new Set(rows.map((holding) => holding.name.toLocaleLowerCase("sv-SE")));
   if (uniqueNames.size !== rows.length) return null;
