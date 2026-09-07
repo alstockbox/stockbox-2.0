@@ -19,11 +19,11 @@ describe("StockBox 3 investment-company official NAV authority", () => {
     const provider = readFileSync(universalProviderPath, "utf8");
 
     expect(navProvider).toContain("export async function fetchOfficialInvestmentCompanyNav");
-    expect(navProvider).toContain('provider: "official-investment-company-nav"');
+    expect(navProvider).toContain('const PROVIDER_ID = "official-investment-company-nav"');
     expect(navProvider).toContain("reportedNav: number | null");
     expect(navProvider).toContain("reportedNavPerShare: number | null");
     expect(navProvider).toContain("navAsOf: string | null");
-    expect(navProvider).toContain("cache: \"no-store\"");
+    expect(navProvider).toContain('cache: "no-store"');
     expect(navProvider).toContain("AbortController");
     expect(navProvider).toContain("official_nav_adapter_not_configured");
     expect(navProvider).toContain("official_nav_parse_failed");
