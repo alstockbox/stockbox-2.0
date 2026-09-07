@@ -245,7 +245,7 @@ describe("investment-company capital-allocation production wiring", () => {
     expect(capitalAllocation?.status).toBe("available");
     expect(capitalAllocation?.value).toBeCloseTo(70, 12);
     expect(capitalAllocation?.score).toBeCloseTo(70, 12);
-    expect(report.dataCoverage).toBeCloseTo(0.31, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.39, 12);
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(result.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(report.providerDiagnostics?.some((item) => (
@@ -282,7 +282,7 @@ describe("investment-company capital-allocation production wiring", () => {
     expect(mocks.fetchOfficialInvestmentCompanyKeyRatios).toHaveBeenCalledTimes(1);
     expect(capitalAllocation?.status).toBe("missing");
     expect(capitalAllocation?.value).toBeNull();
-    expect(report.dataCoverage).toBeCloseTo(0.19, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.27, 12);
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(result.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(report.providerDiagnostics?.some((item) => (
