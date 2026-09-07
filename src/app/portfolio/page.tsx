@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AlertTriangle, BriefcaseBusiness, CalendarDays, Plus, Save, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { PortfolioAnalyzer } from "@/components/portfolio/portfolio-analyzer";
+import { PortfolioCashFlowForm } from "@/components/portfolio/portfolio-cash-flow-form";
 import { PortfolioPurchaseForm } from "@/components/portfolio/portfolio-purchase-form";
 import { PortfolioSaleForm } from "@/components/portfolio/portfolio-sale-form";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -47,6 +48,12 @@ type SnapshotRow = {
   invested_capital: Numeric;
   unrealized_pl: Numeric;
   unrealized_pl_percent: Numeric;
+  realized_pl: Numeric;
+  dividend_income: Numeric;
+  standalone_fees: Numeric;
+  trading_fees: Numeric;
+  total_fees: Numeric;
+  total_pl: Numeric;
   portfolio_score: Numeric;
   risk_score: Numeric;
   valuation_score: Numeric;
@@ -143,7 +150,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
   const snapshotResult = supabase && ids.length
     ? await supabase.from("portfolio_snapshots")
-      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
+      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,realized_pl,dividend_income,standalone_fees,trading_fees,total_fees,total_pl,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
       .in("portfolio_id", ids).order("created_at", { ascending: false }).limit(60)
     : { data: [], error: null };
   const snapshotsAvailable = !snapshotResult.error;
@@ -173,7 +180,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
       <Container>
         <p className="text-sm font-semibold text-[#e1cb95]">{copy.kicker}</p>
         <h1 className="serif mt-2 text-3xl font-semibold sm:text-4xl">{sv ? "Din riktiga portfölj, inte bara en tickerlista" : "Your actual portfolio, not just a ticker list"}</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera köp och försäljningar med antal, pris och datum. StockBox räknar cost basis från hela transaktionskedjan, kopplar dina senaste analyser till positionerna och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record purchases and sales with quantity, price and date. StockBox calculates cost basis from the complete transaction chain, connects your latest research to each position and saves snapshots so you can follow the portfolio over time."}</p>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera köp, försäljningar, utdelningar och avgifter. StockBox räknar cost basis och realiserat resultat från hela transaktionskedjan, normaliserar historiska kassaflöden till basvalutan och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record purchases, sales, dividends and fees. StockBox calculates cost basis and realized performance from the complete transaction chain, normalizes historical cash flows into the base currency and saves snapshots so you can follow the portfolio over time."}</p>
 
         {!user ? (
           <Card className="mt-8">
@@ -250,9 +257,19 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                         <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.portfolio_value, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.invested_capital, portfolio.base_currency, locale)}</p></div>
-                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest?.unrealized_pl_percent)})</span></p></div>
+                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.total_pl, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest?.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
                         </div>
+
+                        {latest ? (
+                          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Realiserat P/L" : "Realized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.realized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.realized_pl, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest.unrealized_pl_percent)})</span></p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Utdelningar" : "Dividends"}</p><p className="mt-1 font-semibold text-emerald-200">{money(latest.dividend_income, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Avgifter" : "Fees"}</p><p className="mt-1 font-semibold text-red-200">{money(latest.total_fees, portfolio.base_currency, locale)}</p><p className="mt-1 text-[10px] text-[#6f7b8c]">{sv ? "Courtage" : "Trading"}: {money(latest.trading_fees, portfolio.base_currency, locale)} · {sv ? "Övrigt" : "Other"}: {money(latest.standalone_fees, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
+                          </div>
+                        ) : null}
 
                         <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
 
@@ -267,7 +284,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                         ) : null}
 
                         <div className="mt-6">
-                          <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Positioner" : "Positions"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Mobilanpassade kort med inköpsdata, marknadsläge och senaste StockBox-signaler." : "Mobile-friendly cards with purchase data, market state and latest StockBox signals."}</p></div>{latest ? <p className="text-xs text-[#7f8b9b]">{sv ? "Priser uppdaterade" : "Prices updated"}: {dateTime(latest.prices_updated_at, locale)}</p> : null}</div>
+                          <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Positioner" : "Positions"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Mobilanpassade kort med inköpsdata, marknadsläge, kassaflöden och senaste StockBox-signaler." : "Mobile-friendly cards with purchase data, market state, cash flows and latest StockBox signals."}</p></div>{latest ? <p className="text-xs text-[#7f8b9b]">{sv ? "Priser uppdaterade" : "Prices updated"}: {dateTime(latest.prices_updated_at, locale)}</p> : null}</div>
                           <div className="mt-3 grid gap-3 xl:grid-cols-2">
                             {positions.map((position) => {
                               const analysisRows = analysisHistory.get(position.ticker) ?? [];
@@ -309,6 +326,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{dims.map(([label, value]) => <div key={label} className="rounded-md bg-white/[0.035] p-2"><p className="truncate text-[10px] text-[#7f8b9b]">{label}</p><p className="mt-1 text-xs font-semibold">{value === null ? "—" : Math.round(value)}</p></div>)}</div>
                                   <p className="mt-3 text-[11px] leading-5 text-[#6f7b8c]">{sv ? `Första registrerade köp: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell visas som StockBox analysindikator, aldrig som garanti.` : `First recorded purchase: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell is shown as a StockBox research indicator, never a guarantee.`}</p>
                                   <PortfolioSaleForm portfolioId={portfolio.id} ticker={position.ticker} quantity={position.quantity} currency={position.currency} today={today} locale={locale} />
+                                  <PortfolioCashFlowForm portfolioId={portfolio.id} ticker={position.ticker} currency={position.currency} today={today} locale={locale} />
                                 </div>
                               );
                             })}
@@ -317,7 +335,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <h3 className="font-semibold text-[#f4efe5]">{sv ? "Köp- och transaktionshistorik" : "Purchase and transaction history"}</h3>
-                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp och försäljning är en egen rad. Ändringar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase and sale is its own row. Changes rebuild position cost basis from the complete transaction chain."}</p>
+                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp, försäljning, utdelning och avgift är en egen rad. Köp och försäljningar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase, sale, dividend and fee is its own row. Purchases and sales rebuild position cost basis from the complete transaction chain."}</p>
                           {transactionsAvailable && portfolioTransactions.length ? (
                             <div className="mt-3 grid gap-2">
                               {portfolioTransactions.slice(0, 30).map((transaction) => (
@@ -347,7 +365,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Portfolio history" : "Portfolio history"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Varje helportföljanalys sparar en snapshot för senare trendgrafer och jämförelser." : "Every whole-portfolio analysis saves a snapshot for future trend charts and comparisons."}</p></div>{summary?.strongestHolding || summary?.weakestHolding ? <p className="text-xs text-[#8f9bac]">{sv ? "Starkast" : "Strongest"}: <strong className="text-[#c9d2df]">{summary.strongestHolding ?? "—"}</strong> · {sv ? "Svagast" : "Weakest"}: <strong className="text-[#c9d2df]">{summary.weakestHolding ?? "—"}</strong></p> : null}</div>
-                          {history.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{history.map((snapshot) => <div key={snapshot.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><div className="flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-xs text-[#8f9bac]"><CalendarDays className="h-3.5 w-3.5" />{dateTime(snapshot.created_at, locale)}</span>{(numeric(snapshot.unrealized_pl) ?? 0) >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-200" /> : <TrendingDown className="h-4 w-4 text-red-200" />}</div><div className="mt-3 grid grid-cols-3 gap-2"><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Värde" : "Value"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.portfolio_value, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">Score</p><p className="mt-1 text-xs font-semibold">{score(snapshot.portfolio_score)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Risk" : "Risk"}</p><p className="mt-1 text-xs font-semibold">{score(snapshot.risk_score)}</p></div></div>{snapshot.failures?.length ? <p className="mt-2 text-[10px] text-amber-200">{snapshot.failures.length} {sv ? "datavarningar" : "data warnings"}</p> : null}</div>)}</div> : <p className="mt-3 text-sm text-[#7f8b9b]">{snapshotsAvailable ? (sv ? "Kör din första portföljanalys för att skapa historik." : "Run your first portfolio analysis to create history.") : (sv ? "Historik aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
+                          {history.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{history.map((snapshot) => <div key={snapshot.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><div className="flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-xs text-[#8f9bac]"><CalendarDays className="h-3.5 w-3.5" />{dateTime(snapshot.created_at, locale)}</span>{(numeric(snapshot.total_pl) ?? numeric(snapshot.unrealized_pl) ?? 0) >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-200" /> : <TrendingDown className="h-4 w-4 text-red-200" />}</div><div className="mt-3 grid grid-cols-3 gap-2"><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Värde" : "Value"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.portfolio_value, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.total_pl, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">Score</p><p className="mt-1 text-xs font-semibold">{score(snapshot.portfolio_score)}</p></div></div>{snapshot.failures?.length ? <p className="mt-2 text-[10px] text-amber-200">{snapshot.failures.length} {sv ? "datavarningar" : "data warnings"}</p> : null}</div>)}</div> : <p className="mt-3 text-sm text-[#7f8b9b]">{snapshotsAvailable ? (sv ? "Kör din första portföljanalys för att skapa historik." : "Run your first portfolio analysis to create history.") : (sv ? "Historik aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
                         </div>
                       </>
                     ) : (
