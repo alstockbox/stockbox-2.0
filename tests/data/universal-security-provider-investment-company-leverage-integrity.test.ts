@@ -47,7 +47,7 @@ const company = {
   securityType: "Common Stock" as const,
 };
 
-function coreHoldingCompanyReport(): UniversalSecurityReport {
+function coreHoldingCompanyReport(marketDate = "2026-09-05"): UniversalSecurityReport {
   return {
     id: "holding-leverage-integrity-fixture",
     ticker: company.ticker,
@@ -102,7 +102,7 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
       ticker: company.ticker,
       price: 150,
       currency: "SEK",
-      date: "2026-09-05",
+      date: marketDate,
       volume: null,
       marketCap: 450_000_000_000,
       sharesOutstanding: 3_000_000_000,
@@ -113,8 +113,8 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
     engine: {
       metrics: {
         latestPeriod: {
-          fiscalYear: 2025,
-          periodEndDate: "2025-12-31",
+          fiscalYear: Number(marketDate.slice(0, 4)) - 1,
+          periodEndDate: `${Number(marketDate.slice(0, 4)) - 1}-12-31`,
           cashAndEquivalents: 10_000_000_000,
           totalDebt: 20_000_000_000,
         },
@@ -152,13 +152,13 @@ function unavailableLongHistory() {
   };
 }
 
-function officialNavSuccess() {
+function officialNavSuccess(navAsOf = "2026-09-05") {
   return {
     ok: true as const,
     data: {
       reportedNav: 600_000_000_000,
       reportedNavPerShare: 200,
-      navAsOf: "2026-09-05",
+      navAsOf,
       navPerShareHistory: [],
       annualNavPerShareHistory: [],
       historySource: null,
@@ -169,11 +169,48 @@ function officialNavSuccess() {
         freshness: "official fixture",
         provider: "official-investment-company-nav",
         capability: "specialized" as const,
-        dataAsOf: "2026-09-05",
+        dataAsOf: navAsOf,
         version: "official-investment-company-nav-v2",
       },
       diagnostic: {
         provider: "Official investment-company NAV",
+        capability: "specialized" as const,
+        status: "available" as const,
+        observedAt,
+      },
+    },
+  };
+}
+
+function officialKeyRatiosSuccess(year = 2025, debtEquitiesRatio = 0.04) {
+  return {
+    ok: true as const,
+    data: {
+      years: [{
+        year,
+        portfolioReturn: 0.1,
+        benchmarkReturnSixrx: 0.08,
+        netPurchasesSales: 0,
+        netDebt: 24_000_000_000,
+        debtEquitiesRatio,
+        navPerShare: 200,
+        sharesOutstanding: 3_000_000_000,
+        dividendsPaid: 0,
+        dividendPerShare: 0,
+        dividendsReceived: 0,
+      }],
+      source: {
+        name: "Verified NAV Holding AB official key ratios",
+        url: "https://example.com/holding-key-ratios",
+        accessedAt: observedAt,
+        freshness: "official annual fixture",
+        provider: "official-investment-company-key-ratios",
+        capability: "specialized" as const,
+        dataAsOf: `${year}-12-31`,
+        version: "v2",
+      },
+      diagnostic: {
+        provider: "Official investment-company key ratios",
         capability: "specialized" as const,
         status: "available" as const,
         observedAt,
@@ -211,5 +248,43 @@ describe("investment-company leverage source integrity", () => {
     expect(leverage?.value).toBeNull();
     expect(report.dataCoverage).toBeCloseTo(0.22, 12);
     expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("uses fresh verified issuer debt-equities ratio for holding-company leverage", async () => {
+    mocks.fetchOfficialInvestmentCompanyKeyRatios.mockResolvedValueOnce(officialKeyRatiosSuccess(2025, 0.04));
+
+    const result = await analyzeCompany({ company, analysisType: "summary", investmentProfile: "balanced" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const leverage = report.securityAnalysis?.investmentCompany?.score.factors.find((factor) => factor.key === "leverage");
+
+    expect(leverage?.status).toBe("available");
+    expect(leverage?.value).toBeCloseTo(0.04, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.30, 12);
+    expect(report.recommendation).toBe("No Rating");
+    expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
+  });
+
+  it("fails verified annual leverage closed when the latest ratio is more than one year behind the market year", async () => {
+    const report = coreHoldingCompanyReport("2028-09-05");
+    mocks.analyzeOperatingCompany.mockResolvedValueOnce({ ok: true, data: report, sources: report.sources, warnings: [] });
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2028-09-05"));
+    mocks.fetchOfficialInvestmentCompanyKeyRatios.mockResolvedValueOnce(officialKeyRatiosSuccess(2025, 0.04));
+
+    const result = await analyzeCompany({ company, analysisType: "summary", investmentProfile: "balanced" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const analyzed = result.data as UniversalSecurityReport;
+    const leverage = analyzed.securityAnalysis?.investmentCompany?.score.factors.find((factor) => factor.key === "leverage");
+
+    expect(leverage?.status).toBe("missing");
+    expect(leverage?.value).toBeNull();
+    expect(analyzed.dataCoverage).toBeCloseTo(0.22, 12);
+    expect(analyzed.recommendation).toBe("No Rating");
   });
 });
