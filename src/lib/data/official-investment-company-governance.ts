@@ -178,7 +178,7 @@ export function parseInvestorOfficialBoardRoster(html: string): string[] | null 
 }
 
 function parseSwedishBoardCount(text: string): number | null {
-  const match = text.match(/består\s+av\s+(\d+|en|ett|två|tre|fyra|fem|sex|sju|åtta|nio|tio)\s+ledamöter/i);
+  const match = text.match(/bestå(?:r)?\s+av\s+(\d+|en|ett|två|tre|fyra|fem|sex|sju|åtta|nio|tio)\s+ledamöter/i);
   if (!match) return null;
   const token = match[1].toLocaleLowerCase("sv-SE");
   if (/^\d+$/.test(token)) return Number(token);
@@ -197,7 +197,6 @@ function parseSwedishBoardCount(text: string): number | null {
   };
   return counts[token] ?? null;
 }
-
 export function parseCreadesOfficialBoardRoster(html: string): string[] | null {
   const text = htmlToText(html);
   const expectedCount = parseSwedishBoardCount(text);
