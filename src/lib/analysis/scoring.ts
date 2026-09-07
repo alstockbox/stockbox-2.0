@@ -430,9 +430,15 @@ function marginStabilityMissingReason(
   numeratorLabel: string,
   numerator: keyof FinancialPeriod,
 ): string | undefined {
-  const available = contiguousAnnualHistory(input.annualPeriods)
+  const history = contiguousAnnualHistory(input.annualPeriods);
+  const available = history
     .filter((period) => isFiniteNumber(period[numerator]) && isFiniteNumber(period.revenue) && period.revenue !== 0);
-  return available.length >= 3 ? undefined : stabilityMissingReason(label, [`reported ${numeratorLabel}`, "reported revenue"]);
+  if (available.length >= 3) return undefined;
+  const zeroRevenueCount = history.filter((period) => period.revenue === 0).length;
+  if (zeroRevenueCount > 0 && history.length - zeroRevenueCount < 3) {
+    return `${label} is not finite when reported revenue is zero in enough contiguous annual periods to leave fewer than three usable margin observations.`;
+  }
+  return stabilityMissingReason(label, [`reported ${numeratorLabel}`, "reported revenue"]);
 }
 
 function fcfStabilityMissingReason(input: FinancialAnalysisInput): string | undefined {
@@ -647,7 +653,6 @@ function standardDimensions(input: FinancialAnalysisInput, metrics: FinancialMet
     ], "Market sensitivity and balance-sheet resilience provide a bounded risk context."),
   };
 }
-
 function unknownArchetypeDimensions(input: FinancialAnalysisInput, metrics: FinancialMetrics): Record<ScoreDimensionKey, ScoreDimension> {
   const dimensions = standardDimensions(input, metrics);
   const b = benchmarksForSector(input.company.sector);
