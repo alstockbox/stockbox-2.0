@@ -6,6 +6,7 @@ import {
   parseLatourOfficialNav,
   parseLatourOfficialNavHistory,
   parseLundbergsOfficialNav,
+  parseSvolderOfficialAnnualNavHistory,
   parseSvolderOfficialNav,
 } from "../../src/lib/data/official-investment-company-nav";
 
@@ -78,6 +79,34 @@ describe("official investment-company NAV parsing", () => {
       reportedNavPerShare: 60,
       navAsOf: "2026-08-28",
     });
+  });
+
+  it("parses Svolder fiscal-year NAV/share values as explicit annual anchors without inventing dates", () => {
+    const html = `
+      <table>
+        <tr><th></th><th>24/25</th><th>23/24</th><th>22/23</th><th>21/22</th><th>20/21</th></tr>
+        <tr><td>Substansvärde, SEK</td><td>57,20</td><td>58,80</td><td>51,20</td><td>57,30</td><td>69,50</td></tr>
+      </table>
+    `;
+
+    expect(parseSvolderOfficialAnnualNavHistory(html)).toEqual([
+      { year: 2025, navPerShare: 57.2 },
+      { year: 2024, navPerShare: 58.8 },
+      { year: 2023, navPerShare: 51.2 },
+      { year: 2022, navPerShare: 57.3 },
+      { year: 2021, navPerShare: 69.5 },
+    ]);
+  });
+
+  it("fails Svolder annual NAV history closed when fiscal-year headers and NAV/share cells do not align", () => {
+    const html = `
+      <table>
+        <tr><th></th><th>24/25</th><th>23/24</th><th>22/23</th></tr>
+        <tr><td>Substansvärde, SEK</td><td>57,20</td><td>58,80</td></tr>
+      </table>
+    `;
+
+    expect(parseSvolderOfficialAnnualNavHistory(html)).toEqual([]);
   });
 
   it("parses Creades monthly NAV and total NAV when both are present", () => {
