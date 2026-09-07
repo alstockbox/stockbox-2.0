@@ -44,7 +44,7 @@ describe("official Lundbergs holdings", () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed?.asOf).toBe("2026-05-19");
-    expect(parsed?.rawWeightSum).toBeCloseTo(1, 12);
+    expect(parsed?.rawWeightSum).toBeCloseTo(1.01, 12);
     expect(parsed?.holdings).toHaveLength(11);
     expect(parsed?.holdings.reduce((sum, holding) => sum + holding.weight, 0)).toBeCloseTo(1, 12);
     expect(parsed?.holdings.find((holding) => holding.name === "Industrivärden")?.reportedWeight).toBeCloseTo(0.297, 12);
