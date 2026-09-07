@@ -17,21 +17,15 @@ const FIELDS = [
 ] as const satisfies ReadonlyArray<keyof FinancialPeriod>;
 
 type JsonObject = Record<string, unknown>;
-
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
 }
-
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-
 function fingerprint(period: FinancialPeriod | null | undefined) {
   if (!period) return null;
-  const availableFields = FIELDS.filter((field) => {
-    const value = period[field];
-    return typeof value === "number" && Number.isFinite(value);
-  });
+  const availableFields = FIELDS.filter((field) => typeof period[field] === "number" && Number.isFinite(period[field]));
   return {
     periodEndDate: period.periodEndDate ?? null,
     balanceSheetDate: period.balanceSheetDate ?? null,
@@ -43,11 +37,9 @@ function fingerprint(period: FinancialPeriod | null | undefined) {
     availableFields,
   };
 }
-
 function providerFingerprint(fundamentals: CompanyFundamentals) {
   return { annual: (fundamentals.annualPeriods ?? []).map(fingerprint), ttm: fingerprint(fundamentals.trailingTwelveMonths) };
 }
-
 async function rawYahooAnnualRevenue(symbol: string, period2Unix?: number) {
   const url = new URL(`https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`);
   url.searchParams.set("symbol", symbol);
@@ -66,12 +58,7 @@ async function rawYahooAnnualRevenue(symbol: string, period2Unix?: number) {
       const reported = object(row?.reportedValue);
       const date = typeof row?.asOfDate === "string" ? row.asOfDate : null;
       if (!date) return [];
-      return [{
-        date,
-        value: finiteNumber(reported?.raw),
-        currency: typeof row?.currencyCode === "string" ? row.currencyCode : null,
-        periodType: typeof row?.periodType === "string" ? row.periodType : null,
-      }];
+      return [{ date, value: finiteNumber(reported?.raw), currency: typeof row?.currencyCode === "string" ? row.currencyCode : null, periodType: typeof row?.periodType === "string" ? row.periodType : null }];
     });
   }).sort((a, b) => a.date.localeCompare(b.date));
   return { status: response.status, rows, resultCount: results.length, error: object(timeseries?.error) };
@@ -86,12 +73,7 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
       expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
       if (!company) continue;
       const [sec, yahoo] = await Promise.all([fetchCompanyFundamentalsResult(company), fetchYahooFundamentalsResult(company)]);
-      rows.push({
-        ticker,
-        cik: company.cik ?? null,
-        sec: sec.ok ? providerFingerprint(sec.data) : { failure: sec.reason, diagnostic: sec.diagnostic },
-        yahoo: yahoo.ok ? providerFingerprint(yahoo.data) : { failure: yahoo.reason, diagnostic: yahoo.diagnostic },
-      });
+      rows.push({ ticker, cik: company.cik ?? null, sec: sec.ok ? providerFingerprint(sec.data) : { failure: sec.reason, diagnostic: sec.diagnostic }, yahoo: yahoo.ok ? providerFingerprint(yahoo.data) : { failure: yahoo.reason, diagnostic: yahoo.diagnostic } });
     }
     console.log(`SEC_YAHOO_PERIOD_FINGERPRINT ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(PROBE_TICKERS.length);
@@ -99,47 +81,30 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
 
   it("traces raw Yahoo annual revenue rows against the adapter for five-year CAGR gaps", async () => {
     const rows: Array<Record<string, unknown>> = [];
-    const historicalWindowEnd = Math.floor(Date.UTC(2022, 0, 1) / 1000);
+    const window2022 = Math.floor(Date.UTC(2022, 0, 1) / 1000);
+    const window2021 = Math.floor(Date.UTC(2021, 0, 1) / 1000);
     for (const ticker of FIVE_YEAR_PROBE_TICKERS) {
       const candidates = await searchCompanies(ticker);
       const company = candidates.find((candidate) => (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker);
       expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
       if (!company) continue;
       const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
-      const [raw, historicalRaw, yahoo] = await Promise.all([
-        rawYahooAnnualRevenue(symbol),
-        rawYahooAnnualRevenue(symbol, historicalWindowEnd),
-        fetchYahooFundamentalsResult(company),
+      const [raw, historical2022, historical2021, yahoo] = await Promise.all([
+        rawYahooAnnualRevenue(symbol), rawYahooAnnualRevenue(symbol, window2022), rawYahooAnnualRevenue(symbol, window2021), fetchYahooFundamentalsResult(company),
       ]);
       rows.push({
-        ticker,
-        symbol,
-        rawStatus: raw.status,
-        rawRevenueRows: raw.rows,
-        rawRevenueCount: raw.rows.length,
-        rawResultCount: raw.resultCount,
-        rawError: raw.error,
-        historicalWindowEnd: "2022-01-01",
-        historicalRawStatus: historicalRaw.status,
-        historicalRawRevenueRows: historicalRaw.rows,
-        historicalRawRevenueCount: historicalRaw.rows.length,
-        historicalRawResultCount: historicalRaw.resultCount,
-        historicalRawError: historicalRaw.error,
-        adapterAnnualRows: yahoo.ok ? (yahoo.data.annualPeriods ?? []).map((period) => ({
-          periodEndDate: period.periodEndDate ?? null,
-          fiscalYear: period.fiscalYear ?? null,
-          periodBasis: period.periodBasis ?? null,
-          currency: period.currency ?? null,
-          revenue: typeof period.revenue === "number" && Number.isFinite(period.revenue) ? period.revenue : null,
-        })) : [],
+        ticker, symbol,
+        rawStatus: raw.status, rawRevenueRows: raw.rows, rawRevenueCount: raw.rows.length,
+        historical2022: { status: historical2022.status, rows: historical2022.rows, count: historical2022.rows.length, error: historical2022.error },
+        historical2021: { status: historical2021.status, rows: historical2021.rows, count: historical2021.rows.length, error: historical2021.error },
+        adapterAnnualRows: yahoo.ok ? (yahoo.data.annualPeriods ?? []).map((period) => ({ periodEndDate: period.periodEndDate ?? null, fiscalYear: period.fiscalYear ?? null, periodBasis: period.periodBasis ?? null, currency: period.currency ?? null, revenue: typeof period.revenue === "number" && Number.isFinite(period.revenue) ? period.revenue : null })) : [],
         adapterAnnualCount: yahoo.ok ? (yahoo.data.annualPeriods ?? []).length : 0,
         adapterFailure: yahoo.ok ? null : yahoo.reason,
         adapterDiagnostic: yahoo.diagnostic,
       });
     }
-    const outputPath = "artifacts/coverage-live/yahoo-five-year-history-fingerprint.json";
     await mkdir("artifacts/coverage-live", { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+    await writeFile("artifacts/coverage-live/yahoo-five-year-history-fingerprint.json", `${JSON.stringify(rows, null, 2)}\n`, "utf8");
     console.log(`YAHOO_FIVE_YEAR_HISTORY_DIAGNOSTIC ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(FIVE_YEAR_PROBE_TICKERS.length);
   }, 300_000);
