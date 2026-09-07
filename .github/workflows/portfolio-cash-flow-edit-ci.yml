@@ -1,0 +1,124 @@
+name: Portfolio cash-flow edit CI
+
+on:
+  pull_request:
+    paths:
+      - "src/app/portfolio/**"
+      - "src/components/portfolio/**"
+      - "src/lib/workspace/**"
+      - "tests/portfolio/**"
+      - "tests/workspace/**"
+      - "supabase/migrations/20260907120500_portfolio_cash_flow_updates.sql"
+      - ".github/workflows/portfolio-cash-flow-edit-ci.yml"
+
+jobs:
+  cash-flow-update-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Isolate Portfolio 2 migrations
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          cp supabase/migrations/20260820220000_initial_stockbox.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260905140500_portfolio_2_private_schema.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260905141000_portfolio_2_transactions_snapshots.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260906141500_portfolio_sell_chain_guard.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260907110000_portfolio_cash_flow_accounting.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260907120500_portfolio_cash_flow_updates.sql /tmp/stockbox-migrations/
+          rm -f supabase/migrations/*.sql
+          supabase init --force
+      - name: Start disposable Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Apply Portfolio 2 schema and cash-flow update migration
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260820220000_initial_stockbox.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905140500_portfolio_2_private_schema.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260905141000_portfolio_2_transactions_snapshots.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260906141500_portfolio_sell_chain_guard.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260907110000_portfolio_cash_flow_accounting.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260907120500_portfolio_cash_flow_updates.sql
+      - name: Verify cash-flow update security and type guards
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if to_regprocedure('public.update_portfolio_cash_flow_transaction(uuid,numeric,text,date)') is null then
+              raise exception 'update_portfolio_cash_flow_transaction RPC missing';
+            end if;
+            if not has_function_privilege('authenticated', 'public.update_portfolio_cash_flow_transaction(uuid,numeric,text,date)', 'EXECUTE') then
+              raise exception 'authenticated role must be able to execute cash-flow update RPC';
+            end if;
+            if has_function_privilege('anon', 'public.update_portfolio_cash_flow_transaction(uuid,numeric,text,date)', 'EXECUTE') then
+              raise exception 'anon must not be able to execute cash-flow update RPC';
+            end if;
+          end
+          $$;
+
+          begin;
+          set local session_replication_role = replica;
+          insert into public.profiles (id, email) values
+            ('00000000-0000-4000-8000-000000000921', 'cash-edit-owner@test.invalid'),
+            ('00000000-0000-4000-8000-000000000922', 'cash-edit-other@test.invalid');
+          insert into public.portfolios (id, user_id, name, base_currency) values
+            ('00000000-0000-4000-8000-000000000923', '00000000-0000-4000-8000-000000000921', 'Owner', 'USD'),
+            ('00000000-0000-4000-8000-000000000924', '00000000-0000-4000-8000-000000000922', 'Other', 'USD');
+          insert into public.portfolio_transactions (
+            id, portfolio_id, ticker, transaction_type, quantity, price, cash_amount, fees, currency, executed_at
+          ) values
+            ('00000000-0000-4000-8000-000000000925', '00000000-0000-4000-8000-000000000923', 'AAPL', 'dividend', null, null, 10, 0, 'USD', '2026-09-01'),
+            ('00000000-0000-4000-8000-000000000926', '00000000-0000-4000-8000-000000000923', 'AAPL', 'buy', 1, 100, null, 0, 'USD', '2026-09-01'),
+            ('00000000-0000-4000-8000-000000000927', '00000000-0000-4000-8000-000000000924', 'MSFT', 'fee', null, null, 5, 0, 'USD', '2026-09-01');
+          set local session_replication_role = origin;
+          set local role authenticated;
+          select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000921', true);
+
+          do $$
+          declare
+            v_ok boolean;
+            v_amount numeric;
+            v_currency text;
+            v_date date;
+          begin
+            select public.update_portfolio_cash_flow_transaction(
+              '00000000-0000-4000-8000-000000000925', 42.5, 'sek', '2026-09-06'
+            ) into v_ok;
+            if v_ok is not true then raise exception 'Owned dividend update was rejected'; end if;
+
+            select cash_amount, currency, executed_at into v_amount, v_currency, v_date
+            from public.portfolio_transactions where id = '00000000-0000-4000-8000-000000000925';
+            if v_amount <> 42.5 or v_currency <> 'SEK' or v_date <> date '2026-09-06' then
+              raise exception 'Owned dividend update did not persist expected fields';
+            end if;
+
+            select public.update_portfolio_cash_flow_transaction(
+              '00000000-0000-4000-8000-000000000926', 99, 'SEK', '2026-09-06'
+            ) into v_ok;
+            if v_ok is not false then raise exception 'Buy transaction must be rejected by cash-flow update RPC'; end if;
+
+            select public.update_portfolio_cash_flow_transaction(
+              '00000000-0000-4000-8000-000000000927', 99, 'SEK', '2026-09-06'
+            ) into v_ok;
+            if v_ok is not false then raise exception 'Cross-user cash-flow update must be rejected'; end if;
+
+            select public.update_portfolio_cash_flow_transaction(
+              '00000000-0000-4000-8000-000000000925', -1, 'SEK', '2026-09-06'
+            ) into v_ok;
+            if v_ok is not false then raise exception 'Negative cash-flow update must be rejected'; end if;
+          end
+          $$;
+          rollback;
+          SQL
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup
