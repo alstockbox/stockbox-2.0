@@ -299,8 +299,16 @@ export function parseSvolderOfficialHoldings(
   }
 
   const rows = [
-    ...equities.map(({ name, reportedWeight }) => ({ name, reportedWeight })),
-    { name: "Net receivable / cash", reportedWeight: netReceivableWeight },
+    ...equities.map(({ name, reportedWeight }) => ({
+      name,
+      reportedWeight,
+      issuerFundamentalsEligible: true,
+    })),
+    {
+      name: "Net receivable / cash",
+      reportedWeight: netReceivableWeight,
+      issuerFundamentalsEligible: false,
+    },
   ];
   const rawWeightSum = rows.reduce((sum, holding) => sum + holding.reportedWeight, 0);
   if (
