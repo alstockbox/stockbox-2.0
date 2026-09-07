@@ -4,6 +4,7 @@ import type { AnalysisArchetype, CompanySearchResult } from "./types";
 export type UniversalSecurityKind =
   | "operating_company"
   | "investment_company"
+  | "business_development_company"
   | "bank"
   | "insurance"
   | "reit"
@@ -110,6 +111,7 @@ export type InvestmentCompanyAnalysisInput = {
   cash?: number | null;
   debt?: number | null;
   otherLiabilities?: number | null;
+  holdingCompanyLeverageRatio?: number | null;
   navGrowth1y?: number | null;
   navGrowth3yCagr?: number | null;
   navGrowth5yCagr?: number | null;
@@ -143,7 +145,7 @@ export type InvestmentCompanyAnalysisResult = {
 export type EtfHolding = LookThroughHolding;
 
 export type EtfAnalysisInput = {
-  subtype?: Exclude<UniversalSecurityKind, "operating_company" | "investment_company" | "bank" | "insurance" | "reit" | "real_estate" | "utility" | "commodity_mining" | "pre_profit_growth">;
+  subtype?: Exclude<UniversalSecurityKind, "operating_company" | "investment_company" | "business_development_company" | "bank" | "insurance" | "reit" | "real_estate" | "utility" | "commodity_mining" | "pre_profit_growth">;
   expenseRatio?: number | null;
   trackingDifference?: number | null;
   trackingError?: number | null;
@@ -200,7 +202,8 @@ const BOND_PATTERN = /\b(?:bond|treasury|fixed income|corporate debt|government 
 const COMMODITY_PATTERN = /\b(?:commodity|gold|silver|copper|oil|crude|natural gas|uranium|wheat|agriculture)\b/i;
 const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|low volatility|multifactor|smart beta)\b/i;
 const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energy|utilities|industrials|materials|real estate|consumer|communication)\b/i;
-const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
+const BDC_PATTERN = /\b(?:business development company|specialty lending|specialty finance|\bbdc\b)\b/i;
+const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments)\b/i;
 const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
 const LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT = 0.95;
 
@@ -229,6 +232,15 @@ export function classifyUniversalSecurity(input: {
     if (SECTOR_PATTERN.test(text)) return { kind: "sector_etf", confidence: 0.82, reason: "Fund metadata or name identifies concentrated sector exposure." };
     if (/\b(?:s&p|nasdaq|msci|ftse|stoxx|index|benchmark)\b/i.test(text)) return { kind: "index_etf", confidence: 0.86, reason: "Fund metadata or name identifies benchmark/index tracking." };
     return { kind: "equity_etf", confidence: 0.72, reason: "Security is an ETF/fund and no more specific fund regime is reliably established." };
+  }
+
+  if (BDC_PATTERN.test(text)) {
+    return {
+      kind: "business_development_company",
+      confidence: 0.98,
+      reason: "Business development companies require a dedicated private-credit/NAV specialist model; holding-company NAV/SOTP and generic operating-company scoring are not applicable.",
+      analysisArchetype: "unknown",
+    };
   }
 
   if (input.analysisArchetype === "holding_company" || HOLDING_PATTERN.test(text)) {
@@ -394,13 +406,14 @@ export function computeSotP(
   options: { cash?: number | null; debt?: number | null; otherLiabilities?: number | null; dilutedShares?: number | null },
 ): SotPResult | null {
   if (!segments?.length) return null;
+  if (![options.cash, options.debt, options.otherLiabilities].every(isFiniteNumber)) return null;
+  const cash = options.cash as number;
+  const debt = options.debt as number;
+  const liabilities = options.otherLiabilities as number;
   const scenario = (field: "bearValue" | "baseValue" | "bullValue") => {
     const values = segments.map((segment) => segment[field]);
     if (!values.every(isFiniteNumber)) return null;
     const assets = values.reduce((sum, value) => sum + (value as number), 0);
-    const cash = isFiniteNumber(options.cash) ? options.cash : 0;
-    const debt = isFiniteNumber(options.debt) ? options.debt : 0;
-    const liabilities = isFiniteNumber(options.otherLiabilities) ? options.otherLiabilities : 0;
     return assets + cash - debt - liabilities;
   };
   const bear = scenario("bearValue");
@@ -428,18 +441,17 @@ function investmentNav(input: InvestmentCompanyAnalysisInput, sotp: SotPResult |
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? input.reportedNav / input.dilutedShares : null;
     return { total: input.reportedNav, perShare, source: "reported_nav" as const };
   }
-  const components = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
-  if ([input.listedHoldingsValue, input.unlistedHoldingsValue].some(isFiniteNumber)) {
-    const total = (isFiniteNumber(input.listedHoldingsValue) ? input.listedHoldingsValue : 0)
-      + (isFiniteNumber(input.unlistedHoldingsValue) ? input.unlistedHoldingsValue : 0)
-      + (isFiniteNumber(input.cash) ? input.cash : 0)
-      - (isFiniteNumber(input.debt) ? input.debt : 0)
-      - (isFiniteNumber(input.otherLiabilities) ? input.otherLiabilities : 0);
+  const componentInputs = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
+  if (componentInputs.every(isFiniteNumber)) {
+    const total = (input.listedHoldingsValue as number)
+      + (input.unlistedHoldingsValue as number)
+      + (input.cash as number)
+      - (input.debt as number)
+      - (input.otherLiabilities as number);
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? total / input.dilutedShares : null;
     if (isFiniteNumber(total) && total > 0) return { total, perShare, source: "component_nav" as const };
   }
   if (isFiniteNumber(sotp?.baseEquityValue) && sotp!.baseEquityValue! > 0) return { total: sotp!.baseEquityValue, perShare: sotp!.baseNavPerShare, source: "sotp_base" as const };
-  void components;
   return { total: null, perShare: null, source: "unavailable" as const };
 }
 
@@ -455,7 +467,9 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
   const navGrowth = [input.navGrowth5yCagr, input.navGrowth3yCagr, input.navGrowth1y].find(isFiniteNumber) ?? null;
   const shareholderReturn = [input.shareholderReturn5yCagr, input.shareholderReturn3yCagr].find(isFiniteNumber) ?? null;
   const grossAssets = isFiniteNumber(nav.total) && isFiniteNumber(input.debt) ? nav.total + input.debt : null;
-  const grossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
+  const derivedGrossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
+  const explicitLeverage = normalizeFraction(input.holdingCompanyLeverageRatio);
+  const grossLeverageToNav = isFiniteNumber(explicitLeverage) && explicitLeverage >= 0 ? explicitLeverage : derivedGrossLeverageToNav;
   const holdingsQuality = percentageScore(input.holdings?.length ? lookThrough.stockBoxQuality : null);
   const factors: WeightedSecurityFactor[] = [
     {
@@ -487,7 +501,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "leverage", label: "Holding-company leverage", weight: 0.08, value: grossLeverageToNav,
       score: scoreLowerIsBetter(grossLeverageToNav, 0.45, 0.05), status: isFiniteNumber(grossLeverageToNav) ? "available" : "missing",
-      rationale: "Holding-company leverage is measured relative to look-through asset value rather than operating EBITDA.",
+      rationale: "Holding-company leverage uses an explicit verified leverage ratio when available, otherwise a debt-to-gross-assets derivation from verified NAV and debt.",
     },
     {
       key: "governance", label: "Management / governance", weight: 0.06, value: input.managementGovernanceScore ?? null,
