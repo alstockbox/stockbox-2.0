@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analyzeInvestmentCompany } from "../../src/lib/analysis/universal-security";
+import type { UniversalSecurityReport } from "../../src/lib/data/universal-security-provider";
 
 const mocks = vi.hoisted(() => ({
   analyzeUniversalCompany: vi.fn(),
@@ -18,10 +19,7 @@ vi.mock("../../src/lib/data/official-investment-company-nav", () => ({
   fetchOfficialInvestmentCompanyNav: mocks.fetchOfficialInvestmentCompanyNav,
 }));
 
-import {
-  analyzeCompany,
-  type UniversalSecurityReport,
-} from "../../src/lib/data/universal-security-live-provider";
+import { analyzeCompany } from "../../src/lib/data/universal-security-live-provider";
 
 const company = {
   ticker: "TEST.ST",
@@ -172,10 +170,11 @@ describe("universal-security live provider investment-company integrity", () => 
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    const data = result.data as UniversalSecurityReport;
     expect(mocks.fetchOfficialInvestmentCompanyNav).not.toHaveBeenCalled();
-    expect(result.data.securityAnalysis?.investmentCompany).toBe(specialist);
-    expect(result.data.dataCoverage).toBeCloseTo(1, 12);
-    expect(result.data.recommendation).not.toBe("No Rating");
+    expect(data.securityAnalysis?.investmentCompany).toBe(specialist);
+    expect(data.dataCoverage).toBeCloseTo(1, 12);
+    expect(data.recommendation).not.toBe("No Rating");
   });
 
   it("clears a stale generic score when official NAV reroutes a company into an insufficient-coverage specialist model", async () => {
@@ -195,11 +194,12 @@ describe("universal-security live provider investment-company integrity", () => 
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.analysisArchetype).toBe("holding_company");
-    expect(result.data.securityAnalysis?.investmentCompany?.score.score).toBeNull();
-    expect(result.data.dataCoverage).toBeLessThan(0.99);
-    expect(result.data.recommendation).toBe("No Rating");
-    expect(result.data.score.score).toBeNull();
-    expect(result.data.score.personalizedScore).toBeNull();
+    const data = result.data as UniversalSecurityReport;
+    expect(data.analysisArchetype).toBe("holding_company");
+    expect(data.securityAnalysis?.investmentCompany?.score.score).toBeNull();
+    expect(data.dataCoverage).toBeLessThan(0.99);
+    expect(data.recommendation).toBe("No Rating");
+    expect(data.score.score).toBeNull();
+    expect(data.score.personalizedScore).toBeNull();
   });
 });
