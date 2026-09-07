@@ -38,9 +38,11 @@ import {
   deriveInvestmentCompanyNavGrowth,
   type InvestmentCompanyNavGrowth,
 } from "./investment-company-nav-history";
+import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
+import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
 
@@ -329,13 +331,17 @@ async function enrichInvestmentCompanyReport(
 ): Promise<UniversalSecurityReport> {
   if (report.analysisArchetype !== "holding_company") return report;
   const latest = report.engine?.metrics.latestPeriod ?? null;
-  const officialNav = await fetchOfficialInvestmentCompanyNav(company);
+  const marketDate = report.dataAsOf ?? report.market?.date ?? null;
+  const [officialNav, longHistory] = await Promise.all([
+    fetchOfficialInvestmentCompanyNav(company),
+    marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
+  ]);
   const navComparable = officialNav.ok
-    && isOfficialDisclosureComparable(officialNav.data.navAsOf, report.dataAsOf ?? null);
+    && isOfficialDisclosureComparable(officialNav.data.navAsOf, marketDate);
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
-  const marketYear = marketYearFromDate(report.dataAsOf ?? null);
+  const marketYear = marketYearFromDate(marketDate);
   const annualNavGrowth = officialNav.ok && marketYear !== undefined
     ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
     : emptyInvestmentCompanyNavGrowth();
@@ -344,6 +350,11 @@ async function enrichInvestmentCompanyReport(
     navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? annualNavGrowth.navGrowth3yCagr,
     navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? annualNavGrowth.navGrowth5yCagr,
   };
+  const shareholderReturns = longHistory?.ok && marketDate
+    ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
+    : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
+  const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
+    || shareholderReturns.shareholderReturn5yCagr !== null;
 
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -353,6 +364,7 @@ async function enrichInvestmentCompanyReport(
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
+    ...shareholderReturns,
   });
 
   if (officialNav.ok) {
@@ -376,7 +388,7 @@ async function enrichInvestmentCompanyReport(
     if (!navComparable) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
-        `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is not comparable with market data dated ${report.dataAsOf ?? "unknown"} and was excluded from specialist coverage.`,
+        `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is not comparable with market data dated ${marketDate ?? "unknown"} and was excluded from specialist coverage.`,
       ])];
     }
   } else {
@@ -388,6 +400,39 @@ async function enrichInvestmentCompanyReport(
       ...report.score.missingData,
       `Official investment-company NAV unavailable: ${officialNav.message}`,
     ])];
+  }
+
+  if (longHistory) {
+    const historyDiagnostic = longHistory.diagnostic;
+    if (!(report.providerDiagnostics ?? []).some((existing) => (
+      existing.provider === historyDiagnostic.provider
+      && existing.capability === historyDiagnostic.capability
+      && existing.status === historyDiagnostic.status
+      && existing.reason === historyDiagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), historyDiagnostic];
+    }
+
+    if (longHistory.ok && shareholderReturnContributes) {
+      const historySource = longHistory.source;
+      if (!report.sources.some((existing) => (
+        existing.provider === historySource.provider
+        && existing.url === historySource.url
+        && existing.version === historySource.version
+      ))) {
+        report.sources = [...report.sources, historySource];
+      }
+    } else if (!longHistory.ok) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Adjusted shareholder-return history unavailable: ${longHistory.reason}.`,
+      ])];
+    } else if (!shareholderReturnContributes) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        "Adjusted shareholder-return history did not contain a fresh current observation and a verified 3Y or 5Y anniversary anchor; shareholder return remains N/A.",
+      ])];
+    }
   }
 
   report.securityClassification = classifyUniversalSecurity({
