@@ -124,18 +124,22 @@ export async function POST(request: Request) {
     currency: row.currency,
     executedAt: row.executed_at,
   }));
-  const positions = buildPortfolioPositions(transactions);
-  if (!positions.length) return Response.json({ error: "Add at least one position before analyzing the portfolio." }, { status: 422 });
+  if (!transactions.length) return Response.json({ error: "Add at least one transaction before analyzing the portfolio." }, { status: 422 });
 
+  const positions = buildPortfolioPositions(transactions);
   const tickers = [...new Set(positions.map((position) => position.ticker))];
-  const { data: analysisRows } = await supabase
-    .from("analyses")
-    .select("id,ticker,created_at,score,recommendation,report")
-    .eq("user_id", user.id)
-    .in("ticker", tickers)
-    .order("created_at", { ascending: false });
+  let analysisRows: StoredAnalysis[] = [];
+  if (tickers.length) {
+    const { data } = await supabase
+      .from("analyses")
+      .select("id,ticker,created_at,score,recommendation,report")
+      .eq("user_id", user.id)
+      .in("ticker", tickers)
+      .order("created_at", { ascending: false });
+    analysisRows = (data ?? []) as StoredAnalysis[];
+  }
   const latest = new Map<string, StoredAnalysis>();
-  for (const row of (analysisRows ?? []) as StoredAnalysis[]) {
+  for (const row of analysisRows) {
     const ticker = row.ticker.trim().toUpperCase();
     if (!latest.has(ticker)) latest.set(ticker, row);
   }
@@ -166,7 +170,9 @@ export async function POST(request: Request) {
       date: report?.market?.date ?? analysis?.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
     };
   });
-  const marketFx = await resolveComparisonFxContexts(marketRequests, baseCurrency);
+  const marketFx = marketRequests.length
+    ? await resolveComparisonFxContexts(marketRequests, baseCurrency)
+    : new Map();
 
   const failures: Array<{ ticker: string; reason: string }> = [];
   const rawValued: ValuedPortfolioPosition[] = positions.map((position, index) => {
@@ -198,7 +204,15 @@ export async function POST(request: Request) {
 
   const allValued = rawValued.every((position) => position.valuationStatus === "available");
   const valued = allValued ? applyPortfolioWeights(rawValued) : rawValued;
-  const totals = calculatePortfolioTotals(valued);
+  const totals = positions.length
+    ? calculatePortfolioTotals(valued)
+    : {
+        investedCapital: 0,
+        marketValue: 0,
+        unrealizedProfitLoss: 0,
+        unrealizedProfitLossPercent: null,
+        complete: true,
+      };
   const totalProfitLoss = calculatePortfolioTotalProfitLoss({
     realizedProfitLossBase: ledger.realizedProfitLossBase,
     unrealizedProfitLossBase: totals.unrealizedProfitLoss,
@@ -245,7 +259,7 @@ export async function POST(request: Request) {
     holdings,
     failures,
     analysis_summary: {
-      methodology: "market-value-weighted-v1",
+      methodology: positions.length ? "market-value-weighted-v1" : "closed-ledger-v1",
       completeValuation: allValued,
       strongestHolding: ranked[0]?.signal.ticker ?? null,
       weakestHolding: ranked.at(-1)?.signal.ticker ?? null,
@@ -254,7 +268,7 @@ export async function POST(request: Request) {
       analyzedHoldings: signals.filter(({ signal }) => signal.analysisId).length,
       totalHoldings: positions.length,
     },
-    prices_updated_at: now,
+    prices_updated_at: positions.length ? now : null,
     analyses_updated_at: signals.map(({ signal }) => signal.analysisDate).filter(Boolean).sort().at(-1) ?? null,
   }).select("id,created_at").single();
   if (snapshotError || !snapshot) {
