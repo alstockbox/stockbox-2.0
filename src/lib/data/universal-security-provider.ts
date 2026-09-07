@@ -246,6 +246,7 @@ function holdingFundamentalDataContributes(
 }
 
 const INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS = 120;
+const INVESTMENT_COMPANY_ANNUAL_LEVERAGE_MAX_YEAR_LAG = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseIsoDay(value: string | null | undefined): number | null {
@@ -280,6 +281,36 @@ function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
     navGrowth3yCagr: null,
     navGrowth5yCagr: null,
   };
+}
+
+function verifiedInvestmentCompanyLeverageDebtEquivalent(
+  years: Array<{ year: number; debtEquitiesRatio: number }> | null | undefined,
+  marketYear: number | undefined,
+  navTotal: number | null | undefined,
+): number | null {
+  if (
+    marketYear === undefined
+    || typeof navTotal !== "number"
+    || !Number.isFinite(navTotal)
+    || navTotal <= 0
+  ) {
+    return null;
+  }
+
+  const latest = [...(years ?? [])]
+    .filter((point) => Number.isInteger(point.year))
+    .sort((left, right) => right.year - left.year)[0];
+  if (!latest) return null;
+
+  const yearLag = marketYear - latest.year;
+  if (yearLag < 0 || yearLag > INVESTMENT_COMPANY_ANNUAL_LEVERAGE_MAX_YEAR_LAG) return null;
+
+  const ratio = latest.debtEquitiesRatio;
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio >= 1) return null;
+  if (ratio === 0) return 0;
+
+  const debtEquivalent = ratio * navTotal / (1 - ratio);
+  return Number.isFinite(debtEquivalent) && debtEquivalent >= 0 ? debtEquivalent : null;
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
@@ -529,11 +560,37 @@ async function enrichInvestmentCompanyReport(
     }
   }
 
+  const dilutedShares = report.market?.sharesOutstanding
+    ?? latest?.currentSharesOutstanding
+    ?? latest?.sharesDiluted
+    ?? null;
+  const comparableNavTotal = navComparable
+    ? officialNav.data.reportedNav
+      ?? (
+        typeof officialNav.data.reportedNavPerShare === "number"
+        && Number.isFinite(officialNav.data.reportedNavPerShare)
+        && officialNav.data.reportedNavPerShare > 0
+        && typeof dilutedShares === "number"
+        && Number.isFinite(dilutedShares)
+        && dilutedShares > 0
+          ? officialNav.data.reportedNavPerShare * dilutedShares
+          : null
+      )
+    : null;
+  const verifiedLeverageDebtEquivalent = officialKeyRatios.ok
+    ? verifiedInvestmentCompanyLeverageDebtEquivalent(
+      officialKeyRatios.data.years,
+      marketYear,
+      comparableNavTotal,
+    )
+    : null;
+
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
-    dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
+    dilutedShares,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
+    debt: verifiedLeverageDebtEquivalent,
     ...navGrowth,
     ...shareholderReturns,
     capitalAllocationScore: capitalAllocation?.score ?? null,
