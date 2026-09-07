@@ -173,6 +173,70 @@ jobs:
           end
           $$;
           SQL
+      - name: Assert cash-flow performance persistence contract
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_columns integer;
+          begin
+            select count(*) into v_columns
+            from information_schema.columns
+            where table_schema = 'public'
+              and table_name = 'portfolio_snapshots'
+              and column_name in (
+                'realized_pl',
+                'dividend_income',
+                'standalone_fees',
+                'trading_fees',
+                'total_fees',
+                'total_pl'
+              );
+            if v_columns <> 6 then
+              raise exception 'Expected six portfolio performance snapshot columns, found %', v_columns;
+            end if;
+          end
+          $$;
+          SQL
+      - name: Reject negative cash-flow amounts
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          set session_replication_role = replica;
+          insert into public.profiles (id, email)
+          values ('00000000-0000-4000-8000-000000000911', 'portfolio-cash-guard@test.invalid');
+          insert into public.portfolios (id, user_id, name, base_currency)
+          values ('00000000-0000-4000-8000-000000000912', '00000000-0000-4000-8000-000000000911', 'Cash guard', 'USD');
+          set session_replication_role = origin;
+
+          begin;
+          set local role authenticated;
+          select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000911', true);
+          do $$
+          declare
+            v_guarded boolean := false;
+          begin
+            begin
+              perform public.record_portfolio_transaction(
+                '00000000-0000-4000-8000-000000000912',
+                'AAPL', 'dividend', null, null, 'USD', '2026-09-06', 0, -1, null, null
+              );
+            exception when others then
+              if sqlerrm = 'Cash amount must be nonnegative' then
+                v_guarded := true;
+              else
+                raise;
+              end if;
+            end;
+            if not v_guarded then
+              raise exception 'Negative cash-flow amount guard did not fire';
+            end if;
+          end
+          $$;
+          rollback;
+
+          delete from public.portfolios where id = '00000000-0000-4000-8000-000000000912';
+          delete from public.profiles where id = '00000000-0000-4000-8000-000000000911';
+          SQL
       - name: Reject sell chains without owned quantity
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
