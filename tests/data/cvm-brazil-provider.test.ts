@@ -75,6 +75,23 @@ function itrCsv({ period = "2026-06-30", currentDebt = "0.0000000000", nonCurren
   ].join("\n");
 }
 
+function itrCsvWithComparative({
+  period = "2026-06-30",
+  comparativePeriod = "2025-12-31",
+  currentDebt = "0.0000000000",
+  nonCurrentDebt = "0.0000000000",
+  comparativeCurrentDebt = "0.0000000000",
+  comparativeNonCurrentDebt = "0.0000000000",
+} = {}): string {
+  return [
+    "CNPJ_CIA;CD_CVM;DT_REFER;VERSAO;DENOM_CIA;GRUPO_DFP;MOEDA;ESCALA_MOEDA;ORDEM_EXERC;DT_FIM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA;ST_CONTA_FIXA",
+    `14.110.585/0001-07;025232;${period};1;MÉLIUZ S.A.;DF Consolidado - Balanço Patrimonial Passivo;REAL;MIL;ÚLTIMO;${period};2.01.04;Empréstimos e Financiamentos;${currentDebt};S`,
+    `14.110.585/0001-07;025232;${period};1;MÉLIUZ S.A.;DF Consolidado - Balanço Patrimonial Passivo;REAL;MIL;ÚLTIMO;${period};2.02.01;Empréstimos e Financiamentos;${nonCurrentDebt};S`,
+    `14.110.585/0001-07;025232;${period};1;MÉLIUZ S.A.;DF Consolidado - Balanço Patrimonial Passivo;REAL;MIL;PENÚLTIMO;${comparativePeriod};2.01.04;Empréstimos e Financiamentos;${comparativeCurrentDebt};S`,
+    `14.110.585/0001-07;025232;${period};1;MÉLIUZ S.A.;DF Consolidado - Balanço Patrimonial Passivo;REAL;MIL;PENÚLTIMO;${comparativePeriod};2.02.01;Empréstimos e Financiamentos;${comparativeNonCurrentDebt};S`,
+  ].join("\n");
+}
+
 function providerFetch({ fca = fcaCsv(), itr = itrCsv(), failFca = false, failItr = false } = {}) {
   return vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
@@ -143,6 +160,33 @@ describe("CVM Brazil debt provider", () => {
       provider: "cvm-brazil-itr",
       capability: "fundamentals",
       dataAsOf: "2026-06-30",
+    }));
+  });
+
+  it("also supplements an exact missing annual comparative debt period from the latest ITR", async () => {
+    const fetchImpl = providerFetch({ itr: itrCsvWithComparative() });
+    const input: CompanyFundamentals = {
+      ...fundamentals(null),
+      annualPeriods: [
+        {
+          periodEndDate: "2025-12-31",
+          periodBasis: "FY",
+          currency: "BRL",
+          totalDebt: null,
+          cashAndEquivalents: 72_857_000,
+          provenance: {},
+        },
+      ],
+    } as CompanyFundamentals;
+
+    const result = await enrichBrazilFundamentalsWithCvmDebt(company, input, { fetchImpl, useCache: false });
+
+    expect(result.supplemented).toBe(true);
+    expect(result.fundamentals.trailingTwelveMonths?.totalDebt).toBe(0);
+    expect(result.fundamentals.annualPeriods?.[0]?.totalDebt).toBe(0);
+    expect(result.fundamentals.annualPeriods?.[0]?.provenance?.totalDebt).toEqual(expect.objectContaining({
+      provider: "cvm-brazil-itr",
+      periodEnd: "2025-12-31",
     }));
   });
 
