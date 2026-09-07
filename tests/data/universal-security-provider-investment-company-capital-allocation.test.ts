@@ -239,12 +239,17 @@ describe("investment-company capital-allocation production wiring", () => {
     const capitalAllocation = report.securityAnalysis?.investmentCompany?.score.factors.find(
       (factor) => factor.key === "capital_allocation",
     );
+    const leverage = report.securityAnalysis?.investmentCompany?.score.factors.find(
+      (factor) => factor.key === "leverage",
+    );
 
     expect(mocks.fetchOfficialInvestmentCompanyKeyRatios).toHaveBeenCalledTimes(1);
     expect(mocks.fetchOfficialInvestmentCompanyKeyRatios).toHaveBeenCalledWith(company);
     expect(capitalAllocation?.status).toBe("available");
     expect(capitalAllocation?.value).toBeCloseTo(70, 12);
     expect(capitalAllocation?.score).toBeCloseTo(70, 12);
+    expect(leverage?.status).toBe("available");
+    expect(leverage?.value).toBeCloseTo(0.04, 12);
     expect(report.dataCoverage).toBeCloseTo(0.39, 12);
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(result.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
@@ -278,10 +283,15 @@ describe("investment-company capital-allocation production wiring", () => {
     const capitalAllocation = report.securityAnalysis?.investmentCompany?.score.factors.find(
       (factor) => factor.key === "capital_allocation",
     );
+    const leverage = report.securityAnalysis?.investmentCompany?.score.factors.find(
+      (factor) => factor.key === "leverage",
+    );
 
     expect(mocks.fetchOfficialInvestmentCompanyKeyRatios).toHaveBeenCalledTimes(1);
     expect(capitalAllocation?.status).toBe("missing");
     expect(capitalAllocation?.value).toBeNull();
+    expect(leverage?.status).toBe("available");
+    expect(leverage?.value).toBeCloseTo(0.04, 12);
     expect(report.dataCoverage).toBeCloseTo(0.27, 12);
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(result.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
