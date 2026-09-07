@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { CompanyFundamentals, FinancialPeriod } from "../../src/lib/analysis/types";
 import { searchCompanies } from "../../src/lib/data/provider";
@@ -6,7 +7,21 @@ import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundament
 
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 const PROBE_TICKERS = ["AAPL", "NVDA", "SBUX", "MSFT", "KO", "SHOP"] as const;
-const FIVE_YEAR_PROBE_TICKERS = ["AAPL", "FMT.BK", "SIG.CO", "0205.KL", "GTT.PA", "PXT.TO"] as const;
+const FIVE_YEAR_PROBE_TICKERS = [
+  "AAPL",
+  "FMT.BK",
+  "SIG.CO",
+  "0205.KL",
+  "054540.KQ",
+  "002900.KS",
+  "012160.KS",
+  "GTT.PA",
+  "600403.SS",
+  "PXT.TO",
+  "B.V",
+  "RELIANCE.NS",
+  "BHP.AX",
+] as const;
 const FIELDS = [
   "revenue",
   "grossProfit",
@@ -25,6 +40,10 @@ type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function fingerprint(period: FinancialPeriod | null | undefined) {
@@ -64,18 +83,25 @@ async function rawYahooAnnualRevenue(symbol: string) {
   const payload = response.ok ? object(await response.json()) : null;
   const timeseries = object(payload?.timeseries);
   const results = Array.isArray(timeseries?.result) ? timeseries.result : [];
-  const dates = results.flatMap((resultValue) => {
+  const rows = results.flatMap((resultValue) => {
     const result = object(resultValue);
-    const rows = Array.isArray(result?.annualTotalRevenue) ? result.annualTotalRevenue : [];
-    return rows.flatMap((rowValue) => {
+    const revenueRows = Array.isArray(result?.annualTotalRevenue) ? result.annualTotalRevenue : [];
+    return revenueRows.flatMap((rowValue) => {
       const row = object(rowValue);
+      const reported = object(row?.reportedValue);
       const date = typeof row?.asOfDate === "string" ? row.asOfDate : null;
-      return date ? [date] : [];
+      if (!date) return [];
+      return [{
+        date,
+        value: finiteNumber(reported?.raw),
+        currency: typeof row?.currencyCode === "string" ? row.currencyCode : null,
+        periodType: typeof row?.periodType === "string" ? row.periodType : null,
+      }];
     });
-  }).sort();
+  }).sort((a, b) => a.date.localeCompare(b.date));
   return {
     status: response.status,
-    dates,
+    rows,
     resultCount: results.length,
     error: object(timeseries?.error),
   };
@@ -128,16 +154,26 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
         ticker,
         symbol,
         rawStatus: raw.status,
-        rawRevenueDates: raw.dates,
-        rawRevenueCount: raw.dates.length,
+        rawRevenueRows: raw.rows,
+        rawRevenueCount: raw.rows.length,
         rawResultCount: raw.resultCount,
         rawError: raw.error,
-        adapterAnnualDates: yahoo.ok ? (yahoo.data.annualPeriods ?? []).map((period) => period.periodEndDate ?? null) : [],
+        adapterAnnualRows: yahoo.ok ? (yahoo.data.annualPeriods ?? []).map((period) => ({
+          periodEndDate: period.periodEndDate ?? null,
+          fiscalYear: period.fiscalYear ?? null,
+          periodBasis: period.periodBasis ?? null,
+          currency: period.currency ?? null,
+          revenue: typeof period.revenue === "number" && Number.isFinite(period.revenue) ? period.revenue : null,
+        })) : [],
         adapterAnnualCount: yahoo.ok ? (yahoo.data.annualPeriods ?? []).length : 0,
         adapterFailure: yahoo.ok ? null : yahoo.reason,
+        adapterDiagnostic: yahoo.ok ? yahoo.diagnostic ?? null : yahoo.diagnostic,
       });
     }
+    const outputPath = "artifacts/coverage-live/yahoo-five-year-history-fingerprint.json";
+    await mkdir("artifacts/coverage-live", { recursive: true });
+    await writeFile(outputPath, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
     console.log(`YAHOO_FIVE_YEAR_HISTORY_DIAGNOSTIC ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(FIVE_YEAR_PROBE_TICKERS.length);
-  }, 180_000);
+  }, 300_000);
 });
