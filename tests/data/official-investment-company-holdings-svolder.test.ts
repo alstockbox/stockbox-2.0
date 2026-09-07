@@ -52,6 +52,13 @@ describe("official Svolder holdings", () => {
     expect(parsed?.holdings.find((holding) => holding.name === "Ependion")?.reportedWeight).toBeCloseTo(0.146, 12);
     expect(parsed?.holdings.find((holding) => holding.name === "New Wave Group")?.reportedWeight).toBeCloseTo(0.12, 12);
     expect(parsed?.holdings.find((holding) => holding.name === "Net receivable / cash")?.reportedWeight).toBeCloseTo(0.056, 12);
+
+    const classifiedHoldings = parsed?.holdings as Array<{
+      name: string;
+      issuerFundamentalsEligible?: boolean;
+    }> | undefined;
+    expect(classifiedHoldings?.find((holding) => holding.name === "Ependion")?.issuerFundamentalsEligible).toBe(true);
+    expect(classifiedHoldings?.find((holding) => holding.name === "Net receivable / cash")?.issuerFundamentalsEligible).toBe(false);
   });
 
   it("fails closed when the published equity weights do not reconcile to the official equity-portfolio summary", () => {
