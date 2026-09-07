@@ -35,6 +35,8 @@ import {
   addWatchlistItemAction,
   createPortfolioAction,
   deletePortfolioAction,
+  recordPortfolioDividendAction,
+  recordPortfolioFeeAction,
   recordPortfolioSaleAction,
   removeHoldingAction,
   updateHoldingAction,
@@ -175,6 +177,54 @@ describe("workspace server actions", () => {
 
     expect(mocks.redirect).toHaveBeenCalledWith("/portfolio?error=sell_quantity");
     expect(mocks.rpc).not.toHaveBeenCalledWith("record_portfolio_transaction", expect.anything());
+  });
+
+  it("records dividend cash flow against an existing owned position", async () => {
+    await recordPortfolioDividendAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "30.5",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "dividend",
+      p_quantity: null,
+      p_price: null,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 0,
+      p_cash_amount: 30.5,
+      p_security_id: null,
+      p_notes: null,
+    });
+  });
+
+  it("records a security-specific standalone fee against an existing owned position", async () => {
+    await recordPortfolioFeeAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "5.25",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "fee",
+      p_quantity: null,
+      p_price: null,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 0,
+      p_cash_amount: 5.25,
+      p_security_id: null,
+      p_notes: null,
+    });
   });
 
   it("updates an owned holding through the RLS-protected holdings table", async () => {

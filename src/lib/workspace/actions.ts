@@ -260,6 +260,72 @@ export async function recordPortfolioSaleAction(formData: FormData) {
   revalidatePath("/portfolio");
 }
 
+async function recordPortfolioCashFlowAction(formData: FormData, transactionType: "dividend" | "fee") {
+  const user = await requireUser();
+  const parsed = z.object({
+    portfolioId: z.string().uuid(),
+    ticker: tickerSchema,
+    amount: z.coerce.number().positive().max(1_000_000_000),
+    currency: currencySchema,
+    transactionDate: transactionDateSchema,
+  }).safeParse({
+    portfolioId: formData.get("portfolioId"),
+    ticker: formData.get("ticker"),
+    amount: formData.get("amount"),
+    currency: formData.get("currency"),
+    transactionDate: formData.get("transactionDate"),
+  });
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
+  if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
+
+  const supabase = await createClient();
+  if (!supabase) {
+    redirect("/portfolio?error=configuration");
+    return;
+  }
+  const { data: holding } = await supabase
+    .from("holdings")
+    .select("id")
+    .eq("portfolio_id", parsed.data.portfolioId)
+    .eq("ticker", parsed.data.ticker)
+    .eq("currency", parsed.data.currency)
+    .maybeSingle();
+  if (!holding) {
+    redirect("/portfolio?error=holding_identity");
+    return;
+  }
+
+  const { error } = await supabase.rpc("record_portfolio_transaction", {
+    p_portfolio_id: parsed.data.portfolioId,
+    p_ticker: parsed.data.ticker,
+    p_transaction_type: transactionType,
+    p_quantity: null,
+    p_price: null,
+    p_currency: parsed.data.currency,
+    p_executed_at: parsed.data.transactionDate,
+    p_fees: 0,
+    p_cash_amount: parsed.data.amount,
+    p_security_id: null,
+    p_notes: null,
+  });
+  if (error) {
+    redirect("/portfolio?error=transaction_save");
+    return;
+  }
+  revalidatePath("/portfolio");
+}
+
+export async function recordPortfolioDividendAction(formData: FormData) {
+  return recordPortfolioCashFlowAction(formData, "dividend");
+}
+
+export async function recordPortfolioFeeAction(formData: FormData) {
+  return recordPortfolioCashFlowAction(formData, "fee");
+}
+
 export async function updatePortfolioTransactionAction(formData: FormData) {
   await requireUser();
   const parsed = z.object({
