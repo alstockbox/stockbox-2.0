@@ -26,8 +26,8 @@ describe("Portfolio V3 sale and realized P/L UI", () => {
 
   it("derives realized P/L from the transaction ledger", () => {
     expect(page).toContain("calculateRealizedPortfolioPerformance(transactionInputs)");
-    expect(page).toContain("realizedPerformance.complete");
-    expect(page).toContain("realizedPerformance.byCurrency.map");
+    expect(page).toContain("selectedState.realizedPerformance.complete");
+    expect(page).toContain("selectedState.realizedPerformance.byCurrency.map");
   });
 
   it("never presents a synthetic cross-currency realized total", () => {
@@ -37,20 +37,20 @@ describe("Portfolio V3 sale and realized P/L UI", () => {
     expect(page).toContain("StockBox does not mix currencies without verified FX");
     expect(page).not.toContain("totalRealizedProfitLoss");
 
-    const realizedStart = page.indexOf("realizedPerformance.complete");
-    const analyzerStart = page.indexOf("<PortfolioAnalyzer", realizedStart);
+    const realizedStart = page.indexOf("selectedState.realizedPerformance.complete");
+    const positionsStart = page.indexOf("selectedState.positions.map", realizedStart);
     expect(realizedStart).toBeGreaterThan(-1);
-    expect(analyzerStart).toBeGreaterThan(realizedStart);
-    const realizedSection = page.slice(realizedStart, analyzerStart);
-    expect(realizedSection).toContain("realizedPerformance.byCurrency.map");
+    expect(positionsStart).toBeGreaterThan(realizedStart);
+    const realizedSection = page.slice(realizedStart, positionsStart);
+    expect(realizedSection).toContain("selectedState.realizedPerformance.byCurrency.map");
     expect(realizedSection).not.toContain("realizedProfitLossBase");
     expect(realizedSection).not.toContain(".reduce(");
   });
 
   it("fails closed in the UI when ledger integrity is not complete", () => {
-    expect(page).toContain("!realizedPerformance.complete");
-    expect(page).toContain("StockBox fyller inte i ett delresultat");
-    expect(page).toContain("StockBox does not fill in a partial result");
+    expect(page).toContain("!selectedState.realizedPerformance.complete");
+    expect(page).toContain("Realiserat P/L döljs eftersom transaktionshistoriken innehåller en ogiltig köp-/säljsekvens");
+    expect(page).toContain("Realized P/L is hidden because transaction history contains an invalid buy/sell sequence");
   });
 
   it("does not reintroduce direct derived-holding mutations", () => {

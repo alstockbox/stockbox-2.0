@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const actions = readFileSync("src/lib/workspace/actions.ts", "utf8");
 const page = readFileSync("src/app/portfolio/page.tsx", "utf8");
+const purchaseForm = readFileSync("src/components/portfolio/portfolio-purchase-form.tsx", "utf8");
 
 describe("Portfolio V3 server-action surface", () => {
   it("does not expose legacy direct derived-holding mutation actions", () => {
@@ -17,7 +18,9 @@ describe("Portfolio V3 server-action surface", () => {
     expect(actions).toContain('rpc("record_portfolio_transaction"');
     expect(actions).toContain('rpc("update_portfolio_transaction"');
     expect(actions).toContain('rpc("delete_portfolio_transaction"');
-    expect(page).toContain("addHoldingAction");
+    expect(page).toContain("<PortfolioPurchaseForm");
+    expect(purchaseForm).toContain('import { addHoldingAction } from "@/lib/workspace/actions";');
+    expect(purchaseForm).toContain("await addHoldingAction(formData)");
     expect(page).toContain("updatePortfolioTransactionAction");
     expect(page).toContain("removePortfolioTransactionAction");
   });

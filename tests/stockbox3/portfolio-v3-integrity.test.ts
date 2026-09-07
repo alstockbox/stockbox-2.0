@@ -17,6 +17,10 @@ const portfolioPage = readFileSync(
   new URL("../../src/app/portfolio/page.tsx", import.meta.url),
   "utf8",
 );
+const purchaseForm = readFileSync(
+  new URL("../../src/components/portfolio/portfolio-purchase-form.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("Portfolio V3 integrity invariants", () => {
   it("makes the transaction ledger read-only to direct authenticated table DML", () => {
@@ -73,11 +77,15 @@ describe("Portfolio V3 integrity invariants", () => {
   });
 
   it("routes the active portfolio transaction UI through transaction RPC server actions", () => {
-    expect(portfolioPage).toContain("addHoldingAction");
+    expect(portfolioPage).toContain("<PortfolioPurchaseForm");
+    expect(purchaseForm).toContain('import { addHoldingAction } from "@/lib/workspace/actions";');
+    expect(purchaseForm).toContain("await addHoldingAction(formData)");
     expect(portfolioPage).toContain("updatePortfolioTransactionAction");
     expect(portfolioPage).toContain("removePortfolioTransactionAction");
     expect(portfolioPage).not.toContain("updateHoldingAction");
     expect(portfolioPage).not.toContain("removeHoldingAction");
+    expect(purchaseForm).not.toContain("updateHoldingAction");
+    expect(purchaseForm).not.toContain("removeHoldingAction");
 
     expect(workspaceActions).toContain('rpc("record_portfolio_transaction"');
     expect(workspaceActions).toContain('rpc("update_portfolio_transaction"');
