@@ -129,7 +129,7 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
     expect(rows).toHaveLength(FIVE_YEAR_PROBE_TICKERS.length);
   }, 300_000);
 
-  it("traces raw Yahoo diluted EPS and diluted-share facts for three-year CAGR gaps", async () => {
+  it("traces raw Yahoo diluted EPS inputs for three-year CAGR gaps", async () => {
     const rows: Array<Record<string, unknown>> = [];
     for (const ticker of EPS_CAGR_PROBE_TICKERS) {
       const candidates = await searchCompanies(ticker);
@@ -137,8 +137,9 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
       expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
       if (!company) continue;
       const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
-      const [rawEps, rawDilutedShares, yahoo] = await Promise.all([
+      const [rawEps, rawDilutedIncome, rawDilutedShares, yahoo] = await Promise.all([
         rawYahooAnnualMetric(symbol, "annualDilutedEPS"),
+        rawYahooAnnualMetric(symbol, "annualDilutedNIAvailtoComStockholders"),
         rawYahooAnnualMetric(symbol, "annualDilutedAverageShares"),
         fetchYahooFundamentalsResult(company),
       ]);
@@ -148,6 +149,9 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
         rawEpsStatus: rawEps.status,
         rawEpsRows: rawEps.rows,
         rawEpsCount: rawEps.rows.length,
+        rawDilutedIncomeStatus: rawDilutedIncome.status,
+        rawDilutedIncomeRows: rawDilutedIncome.rows,
+        rawDilutedIncomeCount: rawDilutedIncome.rows.length,
         rawDilutedSharesStatus: rawDilutedShares.status,
         rawDilutedShareRows: rawDilutedShares.rows,
         rawDilutedShareCount: rawDilutedShares.rows.length,
@@ -157,8 +161,10 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
           periodBasis: period.periodBasis ?? null,
           currency: period.currency ?? null,
           epsDiluted: typeof period.epsDiluted === "number" && Number.isFinite(period.epsDiluted) ? period.epsDiluted : null,
+          dilutedNetIncomeAvailableToCommon: typeof period.dilutedNetIncomeAvailableToCommon === "number" && Number.isFinite(period.dilutedNetIncomeAvailableToCommon) ? period.dilutedNetIncomeAvailableToCommon : null,
           sharesDiluted: typeof period.sharesDiluted === "number" && Number.isFinite(period.sharesDiluted) ? period.sharesDiluted : null,
           epsProvenance: period.provenance?.epsDiluted ?? null,
+          dilutedIncomeProvenance: period.provenance?.dilutedNetIncomeAvailableToCommon ?? null,
           sharesProvenance: period.provenance?.sharesDiluted ?? null,
         })) : [],
         adapterFailure: yahoo.ok ? null : yahoo.reason,
