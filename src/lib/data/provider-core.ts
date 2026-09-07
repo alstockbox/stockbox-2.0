@@ -16,6 +16,7 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
+import { enrichBrazilFundamentalsWithCvmDebt } from "./cvm-brazil-provider";
 import { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
@@ -853,9 +854,18 @@ export async function analyzeCompany({
   const marketResult = marketResolution.result;
   const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const rawMarket = marketResult.ok ? marketResult.data : null;
-  const fundamentals = rawFundamentals ? await enrichFundamentalsWithEcbFcfYield(rawFundamentals) : null;
+  const cvmEnrichment = rawFundamentals
+    ? await enrichBrazilFundamentalsWithCvmDebt(company, rawFundamentals)
+    : null;
+  const regionalFundamentals = cvmEnrichment?.fundamentals ?? rawFundamentals;
+  const fundamentals = regionalFundamentals ? await enrichFundamentalsWithEcbFcfYield(regionalFundamentals) : null;
   const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
-  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
+  const providerDiagnostics = [
+    ...fundamentalsResolution.diagnostics,
+    ...(cvmEnrichment?.diagnostic ? [cvmEnrichment.diagnostic] : []),
+    ...marketResolution.diagnostics,
+    ...(filingsResult ? [filingsResult.diagnostic] : []),
+  ];
   const annualHistoryLimitDiagnostic = annualHistoryProviderLimitDiagnostic({
     fundamentals,
     market: rawMarket,
@@ -882,6 +892,12 @@ export async function analyzeCompany({
       accessedAt,
       dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,
     })));
+    if (cvmEnrichment?.source) {
+      sources.push({
+        ...cvmEnrichment.source,
+        accessedAt,
+      });
+    }
   } else {
     warnings.push(`Fundamental data is unavailable: ${fundamentalsResult.ok ? "unknown provider error" : fundamentalsResult.message}`);
   }
