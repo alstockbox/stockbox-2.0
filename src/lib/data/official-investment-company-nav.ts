@@ -300,6 +300,19 @@ export function parseCreadesOfficialNav(html: string): ParsedNav | null {
   };
 }
 
+export function parseCreadesOfficialAnnualNavObservation(html: string): AnnualNavPerShareObservation | null {
+  const text = htmlToText(html);
+  const matches = [...text.matchAll(
+    /\b31\s+december\s+((?:19|20)\d{2})\s+uppgick\s+substansvärdet\s+till\s+([\d\s.,]+)\s+kronor\s+per\s+aktie\b/gi,
+  )];
+  if (matches.length !== 1) return null;
+
+  const year = Number.parseInt(matches[0][1], 10);
+  const navPerShare = parseSwedishTableNumber(matches[0][2]);
+  if (!Number.isFinite(year) || year < 2000 || year > 2200 || navPerShare === null || navPerShare <= 0) return null;
+  return { year, navPerShare };
+}
+
 export function parseLundbergsOfficialNav(html: string): ParsedNav | null {
   const text = htmlToText(html);
   const match = text.match(/Substansvärde\s+([\d\s.,]+)\s*Mdkr\s+(\d{4}-\d{2}-\d{2})/i)
@@ -404,12 +417,19 @@ async function svolderFetcher(): Promise<OfficialNavFetchResult> {
 
 async function creadesFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://www.creades.se/innehav/substansvarde/";
-  const html = await fetchText(url);
+  const historyUrl = "https://www.creades.se/pressmeddelanden/pressmeddelanden/2025/creades-substansvarde-1-januari-30-november-2025/";
+  const [html, historyHtml] = await Promise.all([fetchText(url), fetchText(historyUrl)]);
+  const currentAnnual = html ? parseCreadesOfficialAnnualNavObservation(html) : null;
+  const priorAnnual = historyHtml ? parseCreadesOfficialAnnualNavObservation(historyHtml) : null;
+  const annualNavPerShareHistory = currentAnnual && priorAnnual && currentAnnual.year === priorAnnual.year + 1
+    ? [currentAnnual, priorAnnual]
+    : [];
   return {
     parsed: html ? parseCreadesOfficialNav(html) : null,
     url,
     navPerShareHistory: [],
-    ...emptyHistoryFields(),
+    annualNavPerShareHistory,
+    historyUrl: annualNavPerShareHistory.length > 0 ? historyUrl : null,
   };
 }
 
@@ -482,7 +502,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
       name: `${company.name} official annual NAV history`,
       url: historyUrl,
       accessedAt,
-      freshness: "Fiscal-year NAV/share history is fetched directly from the investment company's official investor-relations key-figures table at analysis time.",
+      freshness: "Annual NAV/share history is fetched directly from the investment company's official investor-relations disclosure at analysis time.",
       provider: PROVIDER_ID,
       capability: "specialized",
       dataAsOf: null,
