@@ -539,8 +539,6 @@ async function enrichInvestmentCompanyReport(
     capitalAllocationScore: capitalAllocation?.score ?? null,
     managementGovernanceScore: governance?.score ?? null,
     dividendQualityScore: dividendQuality?.score ?? null,
-    cash: latest?.cashAndEquivalents ?? null,
-    debt: latest?.totalDebt ?? null,
     holdings: investmentHoldings,
   });
 
