@@ -62,6 +62,7 @@ type SnapshotRow = {
   growth_score: Numeric;
   momentum_score: Numeric;
   diversification_score: Numeric;
+  ledger_revision: Numeric;
   holdings: SnapshotHolding[] | null;
   failures: Array<{ ticker?: string; reason?: string }> | null;
   analysis_summary: { strongestHolding?: string | null; weakestHolding?: string | null; largestPosition?: string | null; largestPositionWeight?: number | null; completeValuation?: boolean } | null;
@@ -138,6 +139,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
   const transactionsAvailable = !transactionResult.error;
   const transactions = (transactionResult.data ?? []) as TransactionRow[];
 
+  const revisionResult = supabase && ids.length
+    ? await supabase.from("portfolio_ledger_revisions").select("portfolio_id,revision").in("portfolio_id", ids)
+    : { data: [], error: null };
+  const revisionsAvailable = !revisionResult.error;
+  const currentLedgerRevision = new Map<string, number>();
+  for (const row of (revisionResult.data ?? []) as Array<{ portfolio_id: string; revision: Numeric }>) {
+    const revision = numeric(row.revision);
+    if (revision !== null && Number.isSafeInteger(revision) && revision >= 0) currentLedgerRevision.set(row.portfolio_id, revision);
+  }
+
   const tickers = [...new Set(holdings.map((holding) => holding.ticker.trim().toUpperCase()))];
   const analysisResult = supabase && tickers.length
     ? await supabase.from("analyses").select("id,ticker,created_at,score,recommendation,report").eq("user_id", user?.id ?? "").in("ticker", tickers).order("created_at", { ascending: false })
@@ -151,13 +162,17 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
   const snapshotResult = supabase && ids.length
     ? await supabase.from("portfolio_snapshots")
-      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,realized_pl,dividend_income,standalone_fees,trading_fees,total_fees,total_pl,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
+      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,realized_pl,dividend_income,standalone_fees,trading_fees,total_fees,total_pl,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,ledger_revision,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
       .in("portfolio_id", ids).order("created_at", { ascending: false }).limit(60)
     : { data: [], error: null };
-  const snapshotsAvailable = !snapshotResult.error;
+  const snapshotsAvailable = !snapshotResult.error && revisionsAvailable;
   const snapshots = (snapshotResult.data ?? []) as SnapshotRow[];
   const latestSnapshot = new Map<string, SnapshotRow>();
-  for (const snapshot of snapshots) if (!latestSnapshot.has(snapshot.portfolio_id)) latestSnapshot.set(snapshot.portfolio_id, snapshot);
+  for (const snapshot of snapshots) {
+    const currentRevision = currentLedgerRevision.get(snapshot.portfolio_id);
+    const snapshotRevision = numeric(snapshot.ledger_revision);
+    if (snapshotRevision === currentRevision && !latestSnapshot.has(snapshot.portfolio_id)) latestSnapshot.set(snapshot.portfolio_id, snapshot);
+  }
 
   const feedback = params.limit
     ? copy.limit
