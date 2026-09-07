@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { BATCH_ITEM_EXECUTION_TIMEOUT_MS } from "@/lib/batch/durable";
 import {
   boundedDurableWorkerDelayMs,
   DURABLE_WORKER_TRIGGER_TIMEOUT_MS,
@@ -13,6 +14,8 @@ describe("durable batch worker chaining", () => {
     expect(boundedDurableWorkerDelayMs("2026-09-01T20:00:30.000Z", now)).toBe(30_000);
     expect(boundedDurableWorkerDelayMs("2026-09-01T20:10:00.000Z", now)).toBe(MAX_DURABLE_WORKER_DELAY_MS);
     expect(boundedDurableWorkerDelayMs("2026-09-01T19:59:00.000Z", now)).toBe(0);
+    expect(MAX_DURABLE_WORKER_DELAY_MS).toBeLessThanOrEqual(30_000);
+    expect(BATCH_ITEM_EXECUTION_TIMEOUT_MS + MAX_DURABLE_WORKER_DELAY_MS).toBeLessThan(DURABLE_WORKER_TRIGGER_TIMEOUT_MS + 30_000);
   });
 
   it("allows a chained worker request to outlive normal analysis latency", () => {
@@ -32,16 +35,19 @@ describe("durable batch worker chaining", () => {
     expect(statusRoute).toContain("export const maxDuration = 300");
   });
 
-  it("drains several queued jobs per worker invocation", () => {
+  it("drains several queued jobs per worker invocation with bounded concurrency", () => {
     const workerRoute = readFileSync(resolve(process.cwd(), "src/app/api/jobs/batch/run/route.ts"), "utf8");
-    expect(workerRoute).toContain("runDurableBatchJobs(5)");
+    const jobs = readFileSync(resolve(process.cwd(), "src/lib/jobs/background-jobs.ts"), "utf8");
+    expect(workerRoute).toContain("runDurableBatchJobs(3)");
+    expect(jobs).toContain("await Promise.all(jobs.map");
   });
 
-  it("self-heals a stranded batch when queued items exist without active processing", () => {
+  it("self-heals stranded queues without triggering another worker on every active status poll", () => {
     const statusRoute = readFileSync(resolve(process.cwd(), "src/app/api/batch/runs/[id]/route.ts"), "utf8");
+    expect(statusRoute).toContain("recoverStaleBatchItems");
     expect(statusRoute).toContain('item.status === "queued"');
     expect(statusRoute).toContain('item.status === "processing"');
-    expect(statusRoute).toContain("hasQueuedItems && !hasProcessingItems");
+    expect(statusRoute).toContain("if (hasQueuedItems && !hasProcessingItems)");
     expect(statusRoute).toContain("triggerDurableBatchWorker");
     expect(statusRoute).toContain("after(async ()");
     expect(statusRoute).toContain("new URL(request.url).origin");

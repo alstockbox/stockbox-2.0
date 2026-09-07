@@ -5,7 +5,7 @@ import {
   MAX_BATCH_ROWS,
   normalizeBatchSymbol,
 } from "@/lib/batch/input";
-import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
+import { resolveMostRelevantCompanySelection } from "@/lib/data/company-resolution";
 import { searchCompanies } from "@/lib/data/provider";
 import { supportsLiveFundamentalsSecurity } from "@/lib/data/security-classification";
 import { getBatchEntitlement } from "@/lib/db/repositories";
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
   const rateLimit = await checkDistributedRateLimit(
     clientRateLimitKey(request, "batch-resolve", user.id),
-    RATE_LIMITS.batchResolve
+    user.role === "admin" ? RATE_LIMITS.adminBatchResolve : RATE_LIMITS.batchResolve,
   );
   if (!rateLimit.allowed) {
     return rateLimitExceededResponse(rateLimit);
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   }
   const items = await mapWithConcurrency(symbols, 4, async (symbol) => {
     try {
-      const resolution = resolveCanonicalCompanySelection(
+      const resolution = resolveMostRelevantCompanySelection(
         { ticker: symbol, canonicalTicker: symbol, name: symbol },
         await searchCompanies(symbol),
       );
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
           input: symbol,
           status: resolution.reason === "ambiguous" ? "ambiguous" as const : "not_found" as const,
           error: resolution.reason === "ambiguous"
-            ? "Multiple exact listings matched. Select a stable security identifier."
+            ? "No sufficiently relevant exact listing could be selected."
             : "No exact ticker match was found.",
         };
       }

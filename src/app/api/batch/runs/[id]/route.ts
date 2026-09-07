@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getDurableBatchRun } from "@/lib/batch/durable";
+import { recoverStaleBatchItems } from "@/lib/batch/stale-recovery";
 import { triggerDurableBatchWorker } from "@/lib/batch/worker-trigger";
 
 export const runtime = "nodejs";
@@ -12,6 +13,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Sign in to view this batch." }, { status: 401, headers: noStoreHeaders });
   const { id } = await context.params;
+
+  await recoverStaleBatchItems({ userId: user.id, batchId: id });
   const lookup = await getDurableBatchRun({ userId: user.id, batchId: id });
   if (lookup.status === "unavailable") {
     return Response.json(

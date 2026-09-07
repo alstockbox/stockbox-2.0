@@ -158,7 +158,7 @@ describe("batch resolve API", () => {
     });
   });
 
-  it("uses the same ambiguity gate as single-company analysis", async () => {
+  it("selects the most relevant exact ticker listing deterministically", async () => {
     mocks.searchCompanies.mockResolvedValue([
       {
         ticker: "ABC",
@@ -186,7 +186,11 @@ describe("batch resolve API", () => {
     expect(response.status).toBe(200);
     expect(payload.items).toEqual([expect.objectContaining({
       input: "ABC",
-      status: "ambiguous",
+      status: "ready",
+      company: expect.objectContaining({
+        name: "ABC Holdings US",
+        country: "US",
+      }),
     })]);
   });
 
