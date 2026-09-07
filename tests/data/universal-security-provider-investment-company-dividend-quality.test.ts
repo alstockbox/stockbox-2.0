@@ -244,7 +244,7 @@ describe("investment-company dividend-quality production wiring", () => {
     expect(dividendQuality?.status).toBe("available");
     expect(dividendQuality?.value).toBe(100);
     expect(dividendQuality?.score).toBe(100);
-    expect(report.dataCoverage).toBeCloseTo(0.04, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.19, 12);
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
     expect(report.providerDiagnostics?.some((item) => (
       item.provider === "Official investment-company key ratios"
