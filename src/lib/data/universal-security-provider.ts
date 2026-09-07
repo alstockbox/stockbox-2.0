@@ -33,6 +33,11 @@ import {
   searchCompanies,
 } from "./enhanced-provider";
 import { classifyFundStructure } from "./fund-structure-classification";
+import {
+  deriveInvestmentCompanyAnnualNavGrowth,
+  deriveInvestmentCompanyNavGrowth,
+  type InvestmentCompanyNavGrowth,
+} from "./investment-company-nav-history";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
@@ -213,6 +218,16 @@ function isOfficialDisclosureComparable(disclosureAsOf: string | null, marketAsO
   return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS;
 }
 
+function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
+  return { navGrowth1y: null, navGrowth3yCagr: null, navGrowth5yCagr: null };
+}
+
+function marketYearFromDate(marketAsOf: string | null): number | undefined {
+  if (!marketAsOf) return undefined;
+  const timestamp = Date.parse(marketAsOf);
+  return Number.isFinite(timestamp) ? new Date(timestamp).getUTCFullYear() : undefined;
+}
+
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
   const [marketResult, etfResult] = await Promise.all([
@@ -317,6 +332,18 @@ async function enrichInvestmentCompanyReport(
   const officialNav = await fetchOfficialInvestmentCompanyNav(company);
   const navComparable = officialNav.ok
     && isOfficialDisclosureComparable(officialNav.data.navAsOf, report.dataAsOf ?? null);
+  const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
+    ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
+    : emptyInvestmentCompanyNavGrowth();
+  const marketYear = marketYearFromDate(report.dataAsOf ?? null);
+  const annualNavGrowth = officialNav.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
+    : emptyInvestmentCompanyNavGrowth();
+  const navGrowth: InvestmentCompanyNavGrowth = {
+    navGrowth1y: datedNavGrowth.navGrowth1y ?? annualNavGrowth.navGrowth1y,
+    navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? annualNavGrowth.navGrowth3yCagr,
+    navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? annualNavGrowth.navGrowth5yCagr,
+  };
 
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -325,10 +352,23 @@ async function enrichInvestmentCompanyReport(
     debt: latest?.totalDebt ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
+    ...navGrowth,
   });
 
   if (officialNav.ok) {
-    report.sources = [...report.sources, officialNav.data.source];
+    const navSources = [
+      officialNav.data.source,
+      ...(officialNav.data.historySource ? [officialNav.data.historySource] : []),
+    ];
+    for (const source of navSources) {
+      if (!report.sources.some((existing) => (
+        existing.provider === source.provider
+        && existing.url === source.url
+        && existing.version === source.version
+      ))) {
+        report.sources = [...report.sources, source];
+      }
+    }
     report.providerDiagnostics = [
       ...(report.providerDiagnostics ?? []),
       officialNav.data.diagnostic,
