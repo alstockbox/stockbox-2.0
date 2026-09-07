@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  specialistCoverageGateMessage,
+  specialistCoverageMeetsTarget,
+} from "@/lib/analysis/specialist-coverage";
+import {
   analyzeEtf,
   analyzeInvestmentCompany,
   classifyUniversalSecurity,
@@ -72,7 +76,7 @@ function emptyMetrics(market: MarketSnapshot | null): Metrics {
 }
 
 function recommendationForScore(score: number | null, coverage: number): Recommendation {
-  if (score === null || coverage < 0.5) return "No Rating";
+  if (score === null || !specialistCoverageMeetsTarget(coverage)) return "No Rating";
   if (score >= 85) return "Strong Buy";
   if (score >= 70) return "Buy";
   if (score >= 45) return "Hold";
@@ -146,12 +150,13 @@ function etfScore(result: EtfAnalysisResult): StockBoxScore {
     dimension("growth", "Portfolio / credit quality", factors, ["bond_credit"], 0.04),
     dimension("risk", "Concentration & structural risk", factors, ["concentration", "bond_duration", "path_dependency"], 0.07),
   ];
+  const gateMessage = specialistCoverageGateMessage("ETF", result.score.coverage);
   return {
     score: result.score.score,
     personalizedScore: result.score.score,
     confidence: Math.round(Math.min(98, Math.max(5, result.score.coverage * 100))),
     dimensions,
-    missingData: result.score.missing,
+    missingData: [...new Set([...result.score.missing, ...(gateMessage ? [gateMessage] : [])])],
   };
 }
 
@@ -286,16 +291,25 @@ function enrichInvestmentCompanyReport(report: UniversalSecurityReport): Univers
     analysisArchetype: "holding_company",
   });
   report.securityAnalysis = { ...(report.securityAnalysis ?? {}), investmentCompany: analysis };
+  report.dataCoverage = analysis.score.coverage;
+  report.recommendation = recommendationForScore(analysis.score.score, analysis.score.coverage);
   if (analysis.score.score !== null) {
     report.score.score = analysis.score.score;
     report.score.personalizedScore = analysis.score.score;
     report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
   }
   const missing = analysis.score.missing;
-  if (missing.length) {
+  const gateMessage = specialistCoverageGateMessage("Investment company", analysis.score.coverage);
+  const specialistMessages = [
+    ...(missing.length
+      ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`]
+      : []),
+    ...(gateMessage ? [gateMessage] : []),
+  ];
+  if (specialistMessages.length) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
-      `Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`,
+      ...specialistMessages,
     ])];
   }
   return report;
