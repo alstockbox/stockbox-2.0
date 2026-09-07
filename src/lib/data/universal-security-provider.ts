@@ -459,13 +459,16 @@ async function enrichInvestmentCompanyReport(
   const marketYear = marketTimestamp === null
     ? undefined
     : new Date(marketTimestamp).getUTCFullYear();
-  const annualNavGrowth = officialKeyRatios.ok && marketYear !== undefined
+  const officialAnnualNavGrowth = officialNav.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
+    : emptyInvestmentCompanyNavGrowth();
+  const keyRatioAnnualNavGrowth = officialKeyRatios.ok && marketYear !== undefined
     ? deriveInvestmentCompanyAnnualNavGrowth(officialKeyRatios.data.years, marketYear)
     : emptyInvestmentCompanyNavGrowth();
   const navGrowth: InvestmentCompanyNavGrowth = {
-    navGrowth1y: datedNavGrowth.navGrowth1y ?? annualNavGrowth.navGrowth1y,
-    navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? annualNavGrowth.navGrowth3yCagr,
-    navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? annualNavGrowth.navGrowth5yCagr,
+    navGrowth1y: datedNavGrowth.navGrowth1y ?? officialAnnualNavGrowth.navGrowth1y ?? keyRatioAnnualNavGrowth.navGrowth1y,
+    navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? officialAnnualNavGrowth.navGrowth3yCagr ?? keyRatioAnnualNavGrowth.navGrowth3yCagr,
+    navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? officialAnnualNavGrowth.navGrowth5yCagr ?? keyRatioAnnualNavGrowth.navGrowth5yCagr,
   };
   const shareholderReturns = longHistory?.ok && marketDate
     ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
@@ -557,6 +560,14 @@ async function enrichInvestmentCompanyReport(
       && source.version === navSource.version
     ))) {
       report.sources = [...report.sources, navSource];
+    }
+    const navHistorySource = officialNav.data.historySource;
+    if (navHistorySource && !report.sources.some((source) => (
+      source.provider === navHistorySource.provider
+      && source.url === navHistorySource.url
+      && source.version === navHistorySource.version
+    ))) {
+      report.sources = [...report.sources, navHistorySource];
     }
   }
 
