@@ -2,7 +2,7 @@
 
 import { Plus, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CompanySearchResult } from "@/lib/analysis/types";
 import { addHoldingAction } from "@/lib/workspace/actions";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,32 @@ type PortfolioOption = { id: string; name: string; baseCurrency: string };
 type Props = { portfolios: PortfolioOption[]; locale: "sv" | "en"; today: string };
 
 const STORAGE_KEY = "stockbox:last-portfolio-id";
+const STORAGE_EVENT = "stockbox:portfolio-selection-change";
+
+function subscribePortfolioSelection(onStoreChange: () => void) {
+  window.addEventListener(STORAGE_EVENT, onStoreChange);
+  return () => window.removeEventListener(STORAGE_EVENT, onStoreChange);
+}
+
+function storedPortfolioId(portfolios: PortfolioOption[], fallback: string) {
+  const stored = window.sessionStorage.getItem(STORAGE_KEY);
+  return stored && portfolios.some((portfolio) => portfolio.id === stored) ? stored : fallback;
+}
+
+function storePortfolioId(portfolioId: string) {
+  window.sessionStorage.setItem(STORAGE_KEY, portfolioId);
+  window.dispatchEvent(new Event(STORAGE_EVENT));
+}
 
 export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
   const sv = locale === "sv";
   const router = useRouter();
   const firstId = portfolios[0]?.id ?? "";
-  const [portfolioId, setPortfolioId] = useState(firstId);
+  const portfolioId = useSyncExternalStore(
+    subscribePortfolioSelection,
+    () => storedPortfolioId(portfolios, firstId),
+    () => firstId,
+  );
   const [query, setQuery] = useState("");
   const [ticker, setTicker] = useState("");
   const [results, setResults] = useState<CompanySearchResult[]>([]);
@@ -26,17 +46,8 @@ export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
   const searchSequence = useRef(0);
 
   useEffect(() => {
-    const stored = window.sessionStorage.getItem(STORAGE_KEY);
-    if (stored && portfolios.some((portfolio) => portfolio.id === stored)) setPortfolioId(stored);
-  }, [portfolios]);
-
-  useEffect(() => {
     const term = query.trim();
-    if (term.length < 1 || ticker) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
+    if (term.length < 1 || ticker) return;
     const sequence = ++searchSequence.current;
     const timer = window.setTimeout(async () => {
       setSearching(true);
@@ -60,9 +71,11 @@ export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
 
   function chooseCompany(company: CompanySearchResult) {
     const canonical = (company.canonicalTicker ?? company.ticker).trim().toUpperCase();
+    searchSequence.current += 1;
     setTicker(canonical);
     setQuery(`${company.name} · ${canonical}`);
     setResults([]);
+    setSearching(false);
     setMessage(null);
   }
 
@@ -94,7 +107,7 @@ export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
       if (averageCost) averageCost.value = "";
       if (fees) fees.value = "0";
       clearSearch();
-      window.sessionStorage.setItem(STORAGE_KEY, portfolioId);
+      storePortfolioId(portfolioId);
       setMessage(sv ? "Köpet är tillagt. Portföljvalet är kvar och bolagssökningen är rensad." : "Purchase added. Portfolio selection was kept and company search was cleared.");
       router.refresh();
     } finally {
@@ -116,10 +129,7 @@ export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
         name="portfolioId"
         required
         value={portfolioId}
-        onChange={(event) => {
-          setPortfolioId(event.target.value);
-          window.sessionStorage.setItem(STORAGE_KEY, event.target.value);
-        }}
+        onChange={(event) => storePortfolioId(event.target.value)}
         aria-label={sv ? "Portfölj" : "Portfolio"}
         className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3"
       >
@@ -132,8 +142,11 @@ export function PortfolioPurchaseForm({ portfolios, locale, today }: Props) {
           <input
             value={query}
             onChange={(event) => {
+              searchSequence.current += 1;
               setQuery(event.target.value);
               setTicker("");
+              setResults([]);
+              setSearching(false);
               setMessage(null);
             }}
             autoComplete="off"
