@@ -193,7 +193,9 @@ export type EtfAnalysisResult = {
 };
 
 const ETF_PATTERN = /\betf\b|exchange[-\s]traded|\bucits\b|\bindex fund\b|\btracker\b/i;
-const LEVERAGED_PATTERN = /\b(?:2x|3x|ultra|leveraged|inverse|short|bear)\b/i;
+const EXPLICIT_LEVERAGED_PATTERN = /\b(?:2x|3x|leveraged|inverse|bear|ultrashort)\b/i;
+const AMBIGUOUS_SHORT_LEVERAGE_PATTERN = /\b(?:short|ultra)\b/i;
+const SHORT_DURATION_PATTERN = /\b(?:short[-\s]+(?:term|duration|maturity)|ultra\s+short(?:\s+(?:term|duration|maturity|bond|income|credit))?)\b/i;
 const BOND_PATTERN = /\b(?:bond|treasury|fixed income|corporate debt|government debt|aggregate bond|high yield)\b/i;
 const COMMODITY_PATTERN = /\b(?:commodity|gold|silver|copper|oil|crude|natural gas|uranium|wheat|agriculture)\b/i;
 const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|low volatility|multifactor|smart beta)\b/i;
@@ -201,6 +203,11 @@ const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energ
 const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
 const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
 const LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT = 0.95;
+
+function isLeveragedOrInverseFund(text: string): boolean {
+  if (EXPLICIT_LEVERAGED_PATTERN.test(text)) return true;
+  return AMBIGUOUS_SHORT_LEVERAGE_PATTERN.test(text) && !SHORT_DURATION_PATTERN.test(text);
+}
 
 export function classifyUniversalSecurity(input: {
   company?: Pick<CompanySearchResult, "securityType" | "name" | "ticker"> | null;
@@ -215,7 +222,7 @@ export function classifyUniversalSecurity(input: {
     .join(" ");
   const explicitFund = input.company?.securityType === "ETF/Fund" || /\bETF\b/i.test(input.quoteType ?? "") || ETF_PATTERN.test(text);
   if (explicitFund) {
-    if (LEVERAGED_PATTERN.test(text)) return { kind: "leveraged_inverse_etf", confidence: 0.96, reason: "Fund metadata or name identifies a leveraged/inverse exchange-traded product." };
+    if (isLeveragedOrInverseFund(text)) return { kind: "leveraged_inverse_etf", confidence: 0.96, reason: "Fund metadata or name identifies a leveraged/inverse exchange-traded product." };
     if (BOND_PATTERN.test(text)) return { kind: "bond_etf", confidence: 0.94, reason: "Fund metadata or name identifies fixed-income exposure." };
     if (COMMODITY_PATTERN.test(text)) return { kind: "commodity_etf", confidence: 0.9, reason: "Fund metadata or name identifies commodity exposure." };
     if (FACTOR_PATTERN.test(text)) return { kind: "factor_etf", confidence: 0.88, reason: "Fund metadata or name identifies systematic factor exposure." };
