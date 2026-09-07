@@ -13,6 +13,10 @@ import { resolveInvestmentCompanyHoldingCandidate } from "./investment-company-h
 const QUALITY_TARGET_WEIGHT = 0.80;
 const DEFAULT_MAX_SEARCHES = 12;
 
+type HoldingWithIssuerEligibility = EtfHolding & {
+  issuerFundamentalsEligible?: boolean;
+};
+
 export type InvestmentCompanyHoldingFundamentalsResult =
   | {
       ok: true;
@@ -77,6 +81,10 @@ function maximumReachableWeight(holdings: EtfHolding[]): number {
   ), 0));
 }
 
+function issuerFundamentalsEligible(holding: EtfHolding): boolean {
+  return (holding as HoldingWithIssuerEligibility).issuerFundamentalsEligible !== false;
+}
+
 function pushUniqueSource(sources: AnalysisSource[], source: AnalysisSource): void {
   if (sources.some((item) => item.provider === source.provider && item.version === source.version)) return;
   sources.push(source);
@@ -119,7 +127,11 @@ export async function enrichInvestmentCompanyHoldingsQuality(
 
   const candidates = enriched
     .map((holding, index) => ({ holding, index }))
-    .filter(({ holding }) => Number.isFinite(holding.weight) && holding.weight > 0)
+    .filter(({ holding }) => (
+      Number.isFinite(holding.weight)
+      && holding.weight > 0
+      && issuerFundamentalsEligible(holding)
+    ))
     .sort((left, right) => right.holding.weight - left.holding.weight);
 
   let candidateIndex = 0;
