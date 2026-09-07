@@ -15,7 +15,7 @@ import {
   Square,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { captureClientEvent } from "@/lib/analytics/client";
 import type {
   AnalysisReport,
@@ -151,6 +151,8 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
+  const pollInFlightRef = useRef(false);
+  const pollFailureCountRef = useRef(0);
   const parsed = useMemo(() => parseBatchInput(input), [input]);
   const completedRows = rows.filter((row) => row.status === "completed");
   const failedRows = rows.filter((row) => row.status === "failed");
@@ -264,16 +266,30 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
     }
   }
 
-  const refreshDurableBatch = useCallback(async (batchId: string) => {
-    const response = await fetch(`/api/batch/runs/${encodeURIComponent(batchId)}`, { cache: "no-store" });
-    const payload = (await response.json()) as DurableBatchPayload;
+  const refreshDurableBatch = useCallback(async (batchId: string, signal?: AbortSignal) => {
+  if (pollInFlightRef.current) return "busy" as const;
+  pollInFlightRef.current = true;
+  try {
+    const response = await fetch(`/api/batch/runs/${encodeURIComponent(batchId)}`, {
+      cache: "no-store",
+      signal,
+    });
+    const payload = await response.json().catch(() => ({})) as DurableBatchPayload;
     if (!response.ok || !payload.run || !payload.items) {
       if (response.status === 404) {
+        pollFailureCountRef.current = 0;
         window.localStorage.removeItem(LAST_BATCH_STORAGE_KEY);
         setCurrentBatchId(null);
+        return "not_found" as const;
       }
+      if (response.status === 503) {
+        pollFailureCountRef.current += 1;
+        setError(payload.error ?? copy.connectionInterrupted);
+        return "transient_error" as const;
+      }
+      pollFailureCountRef.current += 1;
       if (!response.ok) setError(payload.error ?? copy.connectionInterrupted);
-      return;
+      return "transient_error" as const;
     }
 
     const itemByInput = new Map(payload.items.map((item) => [item.input_ticker.toUpperCase(), item]));
@@ -303,12 +319,24 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
 
     const terminal = ["completed", "partial", "failed", "cancelled"].includes(payload.run.status);
     setIsRunning(!terminal);
+    pollFailureCountRef.current = 0;
     if (terminal) {
       const completedCount = payload.items.filter((item) => item.status === "completed").length;
       const failedCount = payload.items.filter((item) => item.status === "failed").length;
       captureClientEvent("batch_completed", { count: payload.items.length, completedCount, failedCount });
+      return "terminal" as const;
     }
-  }, [copy.connectionInterrupted, copy.monthlyLimit, copy.rateLimited, copy.stopAfterCurrent]);
+    return "success" as const;
+  } catch (reason) {
+    pollFailureCountRef.current += 1;
+    if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+      setError(copy.connectionInterrupted);
+    }
+    return "transient_error" as const;
+  } finally {
+    pollInFlightRef.current = false;
+  }
+}, [copy.connectionInterrupted, copy.monthlyLimit, copy.rateLimited, copy.stopAfterCurrent]);
 
   useEffect(() => {
     if (currentBatchId) return undefined;
@@ -322,14 +350,38 @@ export function BatchWorkbench({ financialConfigured, locale }: { financialConfi
   }, [currentBatchId, refreshDurableBatch]);
 
   useEffect(() => {
-    if (!currentBatchId || !isRunning) return undefined;
-    const initialPoll = window.setTimeout(() => void refreshDurableBatch(currentBatchId), 0);
-    const interval = window.setInterval(() => void refreshDurableBatch(currentBatchId), 2_000);
-    return () => {
-      window.clearTimeout(initialPoll);
-      window.clearInterval(interval);
-    };
-  }, [currentBatchId, isRunning, refreshDurableBatch]);
+  if (!currentBatchId || !isRunning) return undefined;
+
+  let cancelled = false;
+  let pollTimeout: number | undefined;
+  let activeController: AbortController | null = null;
+
+  const schedulePoll = (delayMs: number) => {
+    if (cancelled) return;
+    pollTimeout = window.setTimeout(() => { void poll(); }, delayMs);
+  };
+
+  const poll = async () => {
+    if (cancelled) return;
+    activeController = new AbortController();
+    const requestTimeout = window.setTimeout(() => activeController?.abort(), 12_000);
+    const outcome = await refreshDurableBatch(currentBatchId, activeController.signal);
+    window.clearTimeout(requestTimeout);
+    activeController = null;
+
+    if (cancelled || outcome === "terminal" || outcome === "not_found") return;
+    const failures = Math.min(pollFailureCountRef.current, 3);
+    const delayMs = failures > 0 ? Math.min(2_000 * (2 ** failures), 16_000) : 2_000;
+    schedulePoll(delayMs);
+  };
+
+  schedulePoll(0);
+  return () => {
+    cancelled = true;
+    if (pollTimeout !== undefined) window.clearTimeout(pollTimeout);
+    activeController?.abort();
+  };
+}, [currentBatchId, isRunning, refreshDurableBatch]);
 
   async function executeBatch(candidates: BatchRow[]) {
     if (!candidates.length || isRunning) return;
