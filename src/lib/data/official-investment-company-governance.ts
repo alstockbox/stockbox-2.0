@@ -10,6 +10,7 @@ const INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL = "https://www.industrivarden.se
 const INVESTOR_BOARD_URL = "https://www.investorab.com/about-investor/board-management/board-of-directors";
 const INVESTOR_INDEPENDENCE_STATEMENT_URL = "https://www.investorab.com/media/e3hbxzb5/information-about-proposed-board-of-directors-2026.pdf";
 const SVOLDER_BOARD_URL = "https://svolder.se/bolagsstyrning/styrelse/";
+const LATOUR_BOARD_URL = "https://www.latour.se/en/corporate-governance/the-board-of-directors";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -62,10 +63,12 @@ type VersionedRosterGovernanceRegistryEntry = {
 
 type LivePageGovernanceRegistryEntry = {
   evidenceMode: "live-page";
-  id: "svolder";
+  id: "svolder" | "latour";
   label: string;
   boardUrl: string;
   boardSourceName: string;
+  evidenceUnavailableReason: string;
+  evidenceUnavailableMessage: string;
   matches: (company: CompanySearchResult) => boolean;
   parseEvidence: (html: string) => InvestmentCompanyDirectorGovernanceEvidence[] | null;
 };
@@ -234,6 +237,66 @@ export function parseSvolderOfficialGovernanceEvidence(
   }));
 }
 
+export function parseLatourOfficialGovernanceEvidence(
+  html: string,
+): InvestmentCompanyDirectorGovernanceEvidence[] | null {
+  const decodedHtml = decodeHtml(html);
+  const text = htmlToText(decodedHtml);
+  const boardCountMatch = text.match(
+    /Board of Latour consists of\s+(eight|8)\s+regular members,\s+includ(?:ing|ig)\s+the CEO/i,
+  );
+  if (!boardCountMatch) return null;
+  const expectedCount = 8;
+
+  if (!/With\s+(?:the\s+)?exception of the CEO,\s+no member holds any assignments in the Group/i.test(text)) {
+    return null;
+  }
+
+  const dependentMatch = text.match(
+    /Two of the members are not independent of the company's largest owner,\s*([^.]+)\./i,
+  );
+  if (!dependentMatch) return null;
+  const dependentNames = dependentMatch[1]
+    .split(/\s+and\s+/i)
+    .map((name) => name.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  if (dependentNames.length !== 2) return null;
+  const dependentNormalized = new Set(dependentNames.map(normalizeDirectorName));
+  if (dependentNormalized.size !== 2) return null;
+
+  const directors = new Map<string, { name: string; isCeo: boolean }>();
+  const headingPattern = /<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>([\s\S]*?)(?=<h[1-4]\b|$)/gi;
+  let headingMatch: RegExpExecArray | null;
+  while ((headingMatch = headingPattern.exec(decodedHtml)) !== null) {
+    const name = htmlToText(headingMatch[1]);
+    const followingText = htmlToText(headingMatch[2]);
+    if (!name || !/\bBorn:\s*(?:19|20)\d{2}\b/i.test(followingText)) continue;
+    const roleMatch = followingText.match(/\b(Board member and CEO|Chairman of the Board|Board member)\b/i);
+    if (!roleMatch || !/\bIndependent:\s*(?:Yes|No)\b/i.test(followingText)) continue;
+
+    const normalized = normalizeDirectorName(name);
+    const isCeo = /Board member and CEO/i.test(roleMatch[1]);
+    const existing = directors.get(normalized);
+    if (existing) {
+      if (existing.isCeo !== isCeo) return null;
+      continue;
+    }
+    directors.set(normalized, { name, isCeo });
+  }
+
+  if (directors.size !== expectedCount) return null;
+  const ceos = [...directors.entries()].filter(([, director]) => director.isCeo);
+  if (ceos.length !== 1) return null;
+  const ceoNormalized = ceos[0][0];
+  if (![...dependentNormalized].every((name) => directors.has(name))) return null;
+
+  return [...directors.entries()].map(([normalized, director]) => ({
+    name: director.name,
+    independentFromCompanyManagement: normalized !== ceoNormalized,
+    independentFromMajorShareholders: !dependentNormalized.has(normalized),
+  }));
+}
+
 const REGISTRY: OfficialGovernanceRegistryEntry[] = [
   {
     evidenceMode: "versioned-roster",
@@ -274,12 +337,30 @@ const REGISTRY: OfficialGovernanceRegistryEntry[] = [
     label: "Svolder",
     boardUrl: SVOLDER_BOARD_URL,
     boardSourceName: "Svolder current Board of Directors and independence relationships",
+    evidenceUnavailableReason: "svolder_governance_independence_evidence_unavailable",
+    evidenceUnavailableMessage: "The current official Svolder page does not contain a complete board roster plus explicit independence evidence that can be verified safely.",
     matches: (company) => {
       const identity = normalizeIdentity(company);
       return /\bsvol(?:-[ab])?\.st\b/.test(identity)
         || identity.includes("svolder");
     },
     parseEvidence: parseSvolderOfficialGovernanceEvidence,
+  },
+  {
+    evidenceMode: "live-page",
+    id: "latour",
+    label: "Latour",
+    boardUrl: LATOUR_BOARD_URL,
+    boardSourceName: "Latour current Board of Directors and independence relationships",
+    evidenceUnavailableReason: "latour_governance_independence_evidence_unavailable",
+    evidenceUnavailableMessage: "The current official Latour page does not contain a complete board roster plus explicit management and major-owner independence evidence that can be verified safely.",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\blato(?:-[ab])?\.st\b/.test(identity)
+        || identity.includes("investment ab latour")
+        || identity.includes("latour");
+    },
+    parseEvidence: parseLatourOfficialGovernanceEvidence,
   },
 ];
 
@@ -341,8 +422,8 @@ export async function fetchOfficialInvestmentCompanyGovernance(
       const directors = entry.parseEvidence(html);
       if (!directors) {
         return failure(
-          "svolder_governance_independence_evidence_unavailable",
-          "The current official Svolder page does not contain a complete board roster plus explicit independence evidence that can be verified safely.",
+          entry.evidenceUnavailableReason,
+          entry.evidenceUnavailableMessage,
         );
       }
 
