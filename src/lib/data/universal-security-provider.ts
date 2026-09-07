@@ -47,6 +47,7 @@ import { deriveInvestmentCompanyDividendQuality } from "./investment-company-div
 import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import {
+  deriveInvestmentCompanyAnnualNavGrowth,
   deriveInvestmentCompanyNavGrowth,
   type InvestmentCompanyNavGrowth,
 } from "./investment-company-nav-history";
@@ -273,63 +274,12 @@ function isOfficialDisclosureComparable(asOf: string | null | undefined, marketA
   return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS;
 }
 
-type AnnualNavPerShareObservation = {
-  year: number;
-  navPerShare: number;
-};
-
 function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
   return {
     navGrowth1y: null,
     navGrowth3yCagr: null,
     navGrowth5yCagr: null,
   };
-}
-
-function deriveAnnualInvestmentCompanyNavGrowth(
-  years: AnnualNavPerShareObservation[] | null | undefined,
-): InvestmentCompanyNavGrowth {
-  const empty = emptyInvestmentCompanyNavGrowth();
-  const byYear = new Map<number, number>();
-
-  for (const observation of years ?? []) {
-    if (
-      !Number.isInteger(observation.year)
-      || !Number.isFinite(observation.navPerShare)
-      || observation.navPerShare <= 0
-      || byYear.has(observation.year)
-    ) {
-      return empty;
-    }
-    byYear.set(observation.year, observation.navPerShare);
-  }
-
-  if (byYear.size === 0) return empty;
-  const latestYear = Math.max(...byYear.keys());
-  const current = byYear.get(latestYear);
-  if (current === undefined) return empty;
-
-  const periodGrowth = (yearsBack: 1 | 3 | 5): number | null => {
-    const anchor = byYear.get(latestYear - yearsBack);
-    if (anchor === undefined) return null;
-    const ratio = current / anchor;
-    if (!Number.isFinite(ratio) || ratio <= 0) return null;
-    if (yearsBack === 1) return ratio - 1;
-    const cagr = ratio ** (1 / yearsBack) - 1;
-    return Number.isFinite(cagr) ? cagr : null;
-  };
-
-  return {
-    navGrowth1y: periodGrowth(1),
-    navGrowth3yCagr: periodGrowth(3),
-    navGrowth5yCagr: periodGrowth(5),
-  };
-}
-
-function hasInvestmentCompanyNavGrowth(growth: InvestmentCompanyNavGrowth): boolean {
-  return growth.navGrowth1y !== null
-    || growth.navGrowth3yCagr !== null
-    || growth.navGrowth5yCagr !== null;
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
@@ -505,12 +455,18 @@ async function enrichInvestmentCompanyReport(
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
-  const annualNavGrowth = officialKeyRatios.ok
-    ? deriveAnnualInvestmentCompanyNavGrowth(officialKeyRatios.data.years)
+  const marketTimestamp = parseIsoDay(marketDate);
+  const marketYear = marketTimestamp === null
+    ? undefined
+    : new Date(marketTimestamp).getUTCFullYear();
+  const annualNavGrowth = officialKeyRatios.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(officialKeyRatios.data.years, marketYear)
     : emptyInvestmentCompanyNavGrowth();
-  const navGrowth = hasInvestmentCompanyNavGrowth(datedNavGrowth)
-    ? datedNavGrowth
-    : annualNavGrowth;
+  const navGrowth: InvestmentCompanyNavGrowth = {
+    navGrowth1y: datedNavGrowth.navGrowth1y ?? annualNavGrowth.navGrowth1y,
+    navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? annualNavGrowth.navGrowth3yCagr,
+    navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? annualNavGrowth.navGrowth5yCagr,
+  };
   const shareholderReturns = longHistory?.ok && marketDate
     ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
