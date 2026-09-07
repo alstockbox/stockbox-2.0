@@ -23,17 +23,20 @@ describe("investment-company holdings quality issuer eligibility", () => {
       name: query,
       securityType: "Common Stock",
     }]);
-    const fetchHoldingFundamentals = vi.fn(async (_holding: EtfHolding) => ({
-      ok: false as const,
-      message: "fixture unavailable",
-      diagnostic: {
-        provider: "Fixture holding fundamentals",
-        capability: "specialized" as const,
-        status: "unavailable" as const,
-        reason: "fixture_unavailable",
-        observedAt: "2026-09-07T11:50:00.000Z",
-      },
-    }));
+    const fetchHoldingFundamentals = vi.fn(async (holding: EtfHolding) => {
+      void holding;
+      return {
+        ok: false as const,
+        message: "fixture unavailable",
+        diagnostic: {
+          provider: "Fixture holding fundamentals",
+          capability: "specialized" as const,
+          status: "unavailable" as const,
+          reason: "fixture_unavailable",
+          observedAt: "2026-09-07T11:50:00.000Z",
+        },
+      };
+    });
 
     const result = await enrichInvestmentCompanyHoldingsQuality(
       holdings,
