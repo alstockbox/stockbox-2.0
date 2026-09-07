@@ -106,6 +106,19 @@ export async function POST(request: Request) {
   const { data: portfolio } = await supabase.from("portfolios").select("id,name,base_currency").eq("id", body.data.portfolioId).eq("user_id", user.id).maybeSingle();
   if (!portfolio) return Response.json({ error: "Portfolio not found." }, { status: 404 });
 
+  const { data: revisionRow, error: revisionError } = await supabase
+    .from("portfolio_ledger_revisions")
+    .select("revision")
+    .eq("portfolio_id", portfolio.id)
+    .maybeSingle();
+  if (revisionError) {
+    return Response.json({ error: "Portfolio ledger revision migration is required before analysis." }, { status: 503 });
+  }
+  const expectedRevision = Number(revisionRow?.revision ?? 0);
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+    return Response.json({ error: "Portfolio ledger revision is invalid." }, { status: 503 });
+  }
+
   const { data: transactionRows, error: transactionError } = await supabase
     .from("portfolio_transactions")
     .select("id,ticker,transaction_type,quantity,price,cash_amount,fees,currency,executed_at")
@@ -234,10 +247,7 @@ export async function POST(request: Request) {
   const largest = allValued ? [...valued].sort((left, right) => (right.weight ?? 0) - (left.weight ?? 0))[0] ?? null : null;
   const holdings = signals.map(({ position, signal }) => ({ ...position, signal }));
   const now = new Date().toISOString();
-
-  const { data: snapshot, error: snapshotError } = await supabase.from("portfolio_snapshots").insert({
-    portfolio_id: portfolio.id,
-    user_id: user.id,
+  const snapshotPayload = {
     base_currency: baseCurrency,
     portfolio_value: totals.marketValue,
     invested_capital: totals.investedCapital,
@@ -270,10 +280,21 @@ export async function POST(request: Request) {
     },
     prices_updated_at: positions.length ? now : null,
     analyses_updated_at: signals.map(({ signal }) => signal.analysisDate).filter(Boolean).sort().at(-1) ?? null,
-  }).select("id,created_at").single();
-  if (snapshotError || !snapshot) {
+  };
+
+  const { data: snapshotRows, error: snapshotError } = await supabase.rpc("insert_portfolio_snapshot_if_current", {
+    p_portfolio_id: portfolio.id,
+    p_expected_revision: expectedRevision,
+    p_snapshot: snapshotPayload,
+  });
+  const snapshot = Array.isArray(snapshotRows) ? snapshotRows[0] : null;
+  if (snapshotError) {
     captureServerEvent("portfolio_analysis_failed", { userId: user.id, errorCode: "snapshot_persistence" });
     return Response.json({ error: "Portfolio analysis completed but the snapshot could not be saved." }, { status: 503 });
+  }
+  if (!snapshot) {
+    captureServerEvent("portfolio_analysis_failed", { userId: user.id, errorCode: "ledger_changed_during_snapshot" });
+    return Response.json({ error: "Portfolio changed while it was being analyzed. Run the analysis again." }, { status: 409 });
   }
 
   captureServerEvent("portfolio_snapshot_created", { userId: user.id, holdingCount: positions.length, failedCount: failures.length });
@@ -283,6 +304,7 @@ export async function POST(request: Request) {
     snapshot: {
       id: snapshot.id,
       createdAt: snapshot.created_at,
+      ledgerRevision: snapshot.ledger_revision,
       baseCurrency,
       totals,
       performance: {
