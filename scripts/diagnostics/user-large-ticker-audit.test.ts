@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AnalysisReport, CompanySearchResult, ProviderDiagnostic, ScoreDimensionKey } from "../../src/lib/analysis/types";
 import { findExactBatchCompany, mapWithConcurrency, parseBatchInput } from "../../src/lib/batch/input";
-import { analyzeCompany, searchCompanies } from "../../src/lib/data/provider";
+import { analyzeCompany, searchCompanies } from "../../src/lib/data/universal-security-live-provider";
 import { yahooMarketDataProvider } from "../../src/lib/data/yahoo-market";
 import {
   type BatchRootCause,
