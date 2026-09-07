@@ -272,4 +272,39 @@ describe("Svolder annual NAV growth production wiring", () => {
     ]));
     expect(result.sources.filter((source) => source.provider === "official-investment-company-nav")).toHaveLength(2);
   });
+
+  it("keeps annual NAV growth missing when the latest official annual observation lags the market year by more than one year while retaining history provenance", async () => {
+    const futureReport = coreHoldingCompanyReport();
+    if (futureReport.market) futureReport.market.date = "2027-09-05";
+    mocks.analyzeOperatingCompany.mockResolvedValueOnce({
+      ok: true,
+      data: futureReport,
+      sources: futureReport.sources,
+      warnings: [],
+    });
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2027-08-28"));
+
+    const result = await analyzeCompany({ company, analysisType: "summary", investmentProfile: "balanced" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const navValuation = factor(report, "nav_valuation");
+    const navGrowth = factor(report, "nav_growth");
+
+    expect(navValuation?.status).toBe("available");
+    expect(navGrowth?.status).toBe("missing");
+    expect(navGrowth?.value).toBeNull();
+    expect(report.dataCoverage).toBeCloseTo(0.22, 12);
+    expect(report.recommendation).toBe("No Rating");
+    expect(navSources(report)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: currentNavUrl, dataAsOf: "2027-08-28" }),
+      expect.objectContaining({ url: annualHistoryUrl, version: "official-investment-company-nav-annual-history-v1" }),
+    ]));
+    expect(result.sources.filter((source) => (
+      source.provider === "official-investment-company-nav"
+      && source.url === annualHistoryUrl
+    ))).toHaveLength(1);
+  });
 });
