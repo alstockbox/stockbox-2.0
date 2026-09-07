@@ -140,7 +140,7 @@ describe("large ticker diagnostic root-cause classification", () => {
     } as CompanySearchResult;
 
     expect(classifyAnalysisFailure(
-      "Live fundamentals are not available for this security.",
+      "Closed-end fund specialist analysis is not yet available for this security.",
       company,
       [],
     )).toEqual({
