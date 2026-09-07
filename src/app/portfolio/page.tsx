@@ -267,14 +267,14 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                       <>
                         <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
 
-                        {positions.length ? (
-                          <>
-                        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        {latest ? (
+                        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.portfolio_value, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.invested_capital, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.total_pl, portfolio.base_currency, locale)}</p></div>
-                          <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest?.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
                         </div>
+
+                        ) : null}
 
                         {latest ? (
                           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -284,6 +284,12 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                             <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Avgifter" : "Fees"}</p><p className="mt-1 font-semibold text-red-200">{money(latest.total_fees, portfolio.base_currency, locale)}</p><p className="mt-1 text-[10px] text-[#6f7b8c]">{sv ? "Courtage" : "Trading"}: {money(latest.trading_fees, portfolio.base_currency, locale)} · {sv ? "Övrigt" : "Other"}: {money(latest.standalone_fees, portfolio.base_currency, locale)}</p></div>
                             <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
                           </div>
+                        ) : null}
+
+                        {positions.length ? (
+                          <>
+                        {latest ? (
+                          <div className="mt-5 rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
                         ) : null}
 
                         {latest ? (
