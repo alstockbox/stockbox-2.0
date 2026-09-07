@@ -28,6 +28,17 @@ describe("portfolio cash-flow UI", () => {
     expect(page).toContain("currency={position.currency}");
   });
 
+  it("lets dividend and fee history rows correct amount, currency and date", () => {
+    const page = source("src/app/portfolio/page.tsx");
+
+    expect(page).toContain("updatePortfolioCashFlowTransactionAction");
+    expect(page).toContain('name="amount"');
+    expect(page).toContain('name="transactionDate"');
+    expect(page).toContain('name="currency"');
+    expect(page).toContain("Spara kassaflöde");
+    expect(page).toContain("Save cash flow");
+  });
+
   it("reads and displays persisted realized, dividend, fee and total P/L metrics", () => {
     const page = source("src/app/portfolio/page.tsx");
 
