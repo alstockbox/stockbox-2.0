@@ -1,0 +1,163 @@
+name: Batch Resilience DB CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/batch/**"
+      - "src/lib/jobs/**"
+      - "tests/batch/**"
+      - "tests/db/quota-reservation-recovery.test.ts"
+      - "supabase/migrations/20260824090000_analysis_quota_reservations.sql"
+      - "supabase/migrations/20260901153822_background_job_durability.sql"
+      - "supabase/migrations/20260901154120_durable_batch_runs.sql"
+      - "supabase/migrations/20260905132000_align_batch_items_company_column.sql"
+      - "supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql"
+      - "supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql"
+      - ".github/workflows/batch-resilience-db-ci.yml"
+
+jobs:
+  batch-resilience-migration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Isolate required migrations
+        run: |
+          mkdir -p /tmp/stockbox-batch-migrations
+          cp supabase/migrations/20260820220000_initial_stockbox.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260824090000_analysis_quota_reservations.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260901153822_background_job_durability.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260901154120_durable_batch_runs.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260905132000_align_batch_items_company_column.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql /tmp/stockbox-batch-migrations/
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+      - name: Start disposable Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Apply base schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260820220000_initial_stockbox.sql
+      - name: Apply quota reservation schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260824090000_analysis_quota_reservations.sql
+      - name: Install entitlement smoke stub
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create or replace function private.workspace_entitlements(p_user_id uuid)
+          returns jsonb
+          language sql
+          stable
+          as $$
+            select jsonb_build_object(
+              'plan', 'free',
+              'configured', true,
+              'entitlements', jsonb_build_object(
+                'monthlyAnalyses', 5,
+                'deepAnalyses', 1
+              )
+            );
+          $$;
+          SQL
+      - name: Apply stale quota recovery
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260907154000_stale_analysis_quota_recovery.sql
+      - name: Assert stale quota reservation recovery
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          set session_replication_role = replica;
+          insert into public.profiles (id, email, created_at, updated_at)
+          values (
+            '11111111-1111-4111-8111-111111111111',
+            'batch-resilience-smoke@example.invalid',
+            now() - interval '60 days',
+            now() - interval '60 days'
+          );
+          set session_replication_role = origin;
+
+          insert into public.analysis_quota_reservations (
+            user_id, analysis_type, period_start, status, created_at, updated_at
+          ) values (
+            '11111111-1111-4111-8111-111111111111',
+            'summary',
+            date_trunc('month', now()),
+            'reserved',
+            now() - interval '20 minutes',
+            now() - interval '20 minutes'
+          );
+
+          select public.reserve_analysis_entitlement(
+            '11111111-1111-4111-8111-111111111111',
+            'summary'
+          );
+
+          do $$
+          declare
+            v_failed integer;
+            v_reserved integer;
+          begin
+            select count(*) into v_failed
+            from public.analysis_quota_reservations
+            where user_id = '11111111-1111-4111-8111-111111111111'
+              and status = 'failed';
+
+            select count(*) into v_reserved
+            from public.analysis_quota_reservations
+            where user_id = '11111111-1111-4111-8111-111111111111'
+              and status = 'reserved';
+
+            if v_failed <> 1 or v_reserved <> 1 then
+              raise exception 'Expected one reclaimed stale reservation and one new reservation, got failed=% reserved=%', v_failed, v_reserved;
+            end if;
+          end
+          $$;
+          SQL
+      - name: Apply background job durability
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260901153822_background_job_durability.sql
+      - name: Apply durable batch schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260901154120_durable_batch_runs.sql
+      - name: Apply batch company alignment
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260905132000_align_batch_items_company_column.sql
+      - name: Apply batch resilience indexes
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260907133500_batch_extreme_resilience_indexes.sql
+      - name: Assert batch resilience indexes
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_valid integer;
+          begin
+            select count(*) into v_valid
+            from pg_class idx
+            join pg_index i on i.indexrelid = idx.oid
+            join pg_namespace n on n.oid = idx.relnamespace
+            where n.nspname = 'public'
+              and idx.relname in (
+                'batch_items_processing_updated_idx',
+                'batch_items_queued_updated_idx',
+                'batch_items_batch_status_idx',
+                'background_jobs_queued_kind_available_idx',
+                'background_jobs_running_kind_locked_idx'
+              )
+              and i.indisvalid = true
+              and i.indisready = true;
+            if v_valid <> 5 then
+              raise exception 'Expected five valid/ready batch resilience indexes, found %', v_valid;
+            end if;
+          end
+          $$;
+          SQL
+      - name: Assert concurrent migration stays outside explicit transaction
+        run: |
+          ! grep -Eiq '^[[:space:]]*(begin|commit)[[:space:]]*;' /tmp/stockbox-batch-migrations/20260907133500_batch_extreme_resilience_indexes.sql
+          test "$(grep -Eic 'create index concurrently if not exists' /tmp/stockbox-batch-migrations/20260907133500_batch_extreme_resilience_indexes.sql)" -ge 5
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup

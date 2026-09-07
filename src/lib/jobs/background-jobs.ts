@@ -27,6 +27,14 @@ export function retryScheduleForJob(
   };
 }
 
+export function staleJobRecoverySchedule(
+  job: Pick<BackgroundJob, "attempts" | "maxAttempts">,
+  now = new Date(),
+): { status: "queued" | "failed"; availableAt: string | null } {
+  if (job.attempts >= job.maxAttempts) return { status: "failed", availableAt: null };
+  return { status: "queued", availableAt: now.toISOString() };
+}
+
 function mapJob(row: Record<string, unknown>): BackgroundJob {
   return {
     id: String(row.id),
@@ -107,6 +115,44 @@ export async function cancelQueuedBackgroundJobsByDedupeKeys(input: {
   return result.data?.length ?? 0;
 }
 
+async function recoverStaleBackgroundJobs(input: {
+  kinds: string[];
+  staleCutoff: string;
+  now: Date;
+}): Promise<void> {
+  const admin = createAdminClient();
+  if (!admin) return;
+  const stale = await admin.from("background_jobs")
+    .select("id,attempts,max_attempts,locked_at")
+    .eq("status", "running")
+    .lt("locked_at", input.staleCutoff)
+    .in("kind", input.kinds)
+    .limit(250);
+  if (stale.error) return;
+
+  await Promise.all((stale.data ?? []).map(async (row) => {
+    const attempts = Number(row.attempts ?? 0);
+    const schedule = staleJobRecoverySchedule({
+      attempts,
+      maxAttempts: Number(row.max_attempts ?? 5),
+    }, input.now);
+    let update = admin.from("background_jobs").update({
+      status: schedule.status,
+      locked_at: null,
+      completed_at: schedule.status === "failed" ? input.now.toISOString() : null,
+      available_at: schedule.availableAt ?? input.now.toISOString(),
+      last_error: schedule.status === "failed"
+        ? "Background job lease expired after exhausting its retry budget."
+        : "Recovered stale background job lease.",
+      updated_at: input.now.toISOString(),
+    }).eq("id", row.id)
+      .eq("status", "running")
+      .eq("attempts", attempts);
+    if (typeof row.locked_at === "string") update = update.eq("locked_at", row.locked_at);
+    await update;
+  }));
+}
+
 export async function claimBackgroundJobs(input: {
   kinds: string[];
   limit?: number;
@@ -119,12 +165,7 @@ export async function claimBackgroundJobs(input: {
     now.getTime() - Math.max(5, input.staleAfterMinutes ?? 15) * 60_000,
   ).toISOString();
 
-  await admin.from("background_jobs").update({
-    status: "queued",
-    locked_at: null,
-    available_at: now.toISOString(),
-    updated_at: now.toISOString(),
-  }).eq("status", "running").lt("locked_at", staleCutoff).in("kind", input.kinds);
+  await recoverStaleBackgroundJobs({ kinds: input.kinds, staleCutoff, now });
 
   const candidates = await admin.from("background_jobs")
     .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
@@ -137,12 +178,28 @@ export async function claimBackgroundJobs(input: {
 
   const claimed: BackgroundJob[] = [];
   for (const candidate of candidates.data ?? []) {
+    const attempts = Number(candidate.attempts ?? 0);
+    const maxAttempts = Number(candidate.max_attempts ?? 5);
+    if (attempts >= maxAttempts) {
+      await admin.from("background_jobs").update({
+        status: "failed",
+        completed_at: now.toISOString(),
+        locked_at: null,
+        last_error: "Background job retry budget exhausted before claim.",
+        updated_at: now.toISOString(),
+      }).eq("id", candidate.id)
+        .eq("status", "queued")
+        .eq("attempts", attempts);
+      continue;
+    }
     const claim = await admin.from("background_jobs").update({
       status: "running",
-      attempts: Number(candidate.attempts ?? 0) + 1,
+      attempts: attempts + 1,
       locked_at: now.toISOString(),
       updated_at: now.toISOString(),
-    }).eq("id", candidate.id).eq("status", "queued")
+    }).eq("id", candidate.id)
+      .eq("status", "queued")
+      .eq("attempts", attempts)
       .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
       .maybeSingle();
     if (claim.data) claimed.push(mapJob(claim.data as Record<string, unknown>));
@@ -150,59 +207,76 @@ export async function claimBackgroundJobs(input: {
   return claimed;
 }
 
-export async function completeBackgroundJob(jobId: string): Promise<void> {
+export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin) return false;
   const now = new Date().toISOString();
-  await admin.from("background_jobs").update({
+  let update = admin.from("background_jobs").update({
     status: "completed",
     locked_at: null,
     completed_at: now,
     last_error: null,
     updated_at: now,
-  }).eq("id", jobId).eq("status", "running");
+  }).eq("id", job.id)
+    .eq("status", "running")
+    .eq("attempts", job.attempts);
+  update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
+  const result = await update.select("id").maybeSingle();
+  return Boolean(result.data);
 }
 
-export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<void> {
+export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin) return false;
   const now = new Date();
   const schedule = retryScheduleForJob(job, now);
-  await admin.from("background_jobs").update({
+  let update = admin.from("background_jobs").update({
     status: schedule.status,
     locked_at: null,
     completed_at: schedule.status === "failed" ? now.toISOString() : null,
     available_at: schedule.availableAt ?? now.toISOString(),
     last_error: sanitizeDiagnosticMessage(error, "Background job failed."),
     updated_at: now.toISOString(),
-  }).eq("id", job.id).eq("status", "running");
+  }).eq("id", job.id)
+    .eq("status", "running")
+    .eq("attempts", job.attempts);
+  update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
+  const result = await update.select("id").maybeSingle();
+  return Boolean(result.data);
 }
 
 export async function runBackgroundJobs(input: {
   handlers: Record<string, BackgroundJobHandler>;
   kinds?: string[];
   limit?: number;
+  staleAfterMinutes?: number;
 }): Promise<{ claimed: number; completed: number; failed: number }> {
   const kinds = input.kinds ?? Object.keys(input.handlers);
-  const jobs = await claimBackgroundJobs({ kinds, limit: input.limit });
-  let completed = 0;
-  let failed = 0;
+  const jobs = await claimBackgroundJobs({
+    kinds,
+    limit: input.limit,
+    staleAfterMinutes: input.staleAfterMinutes,
+  });
 
-  for (const job of jobs) {
+  const outcomes = await Promise.all(jobs.map(async (job) => {
     const handler = input.handlers[job.kind];
     if (!handler) {
-      await failBackgroundJob(job, new Error(`No handler registered for ${job.kind}.`));
-      failed += 1;
-      continue;
+      const applied = await failBackgroundJob(job, new Error(`No handler registered for ${job.kind}.`));
+      return applied ? "failed" as const : "superseded" as const;
     }
     try {
       await handler(job);
-      await completeBackgroundJob(job.id);
-      completed += 1;
+      const applied = await completeBackgroundJob(job);
+      return applied ? "completed" as const : "superseded" as const;
     } catch (error) {
-      await failBackgroundJob(job, error);
-      failed += 1;
+      const applied = await failBackgroundJob(job, error);
+      return applied ? "failed" as const : "superseded" as const;
     }
-  }
-  return { claimed: jobs.length, completed, failed };
+  }));
+
+  return {
+    claimed: jobs.length,
+    completed: outcomes.filter((outcome) => outcome === "completed").length,
+    failed: outcomes.filter((outcome) => outcome === "failed").length,
+  };
 }

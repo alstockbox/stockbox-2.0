@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
   const rateLimit = await checkDistributedRateLimit(
     clientRateLimitKey(request, "batch-create", user.id),
-    RATE_LIMITS.batchResolve,
+    user.role === "admin" ? RATE_LIMITS.adminBatchResolve : RATE_LIMITS.batchResolve,
   );
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit);
 
