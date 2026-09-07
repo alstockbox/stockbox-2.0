@@ -30,13 +30,19 @@ describe("portfolio cash-flow UI", () => {
 
   it("lets dividend and fee history rows correct amount, currency and date", () => {
     const page = source("src/app/portfolio/page.tsx");
+    const historyRow = source("src/components/portfolio/portfolio-cash-flow-history-row.tsx");
 
-    expect(page).toContain("updatePortfolioCashFlowTransactionAction");
-    expect(page).toContain('name="amount"');
-    expect(page).toContain('name="transactionDate"');
-    expect(page).toContain('name="currency"');
-    expect(page).toContain("Spara kassaflöde");
-    expect(page).toContain("Save cash flow");
+    expect(page).toContain('import { PortfolioCashFlowHistoryRow } from "@/components/portfolio/portfolio-cash-flow-history-row"');
+    expect(page).toContain("<PortfolioCashFlowHistoryRow");
+    expect(page).toContain("cashAmount={transaction.cash_amount}");
+    expect(page).toContain("executedAt={transaction.executed_at}");
+
+    expect(historyRow).toContain("updatePortfolioCashFlowTransactionAction");
+    expect(historyRow).toContain('name="amount"');
+    expect(historyRow).toContain('name="transactionDate"');
+    expect(historyRow).toContain('name="currency"');
+    expect(historyRow).toContain("Spara kassaflöde");
+    expect(historyRow).toContain("Save cash flow");
   });
 
   it("reads and displays persisted realized, dividend, fee and total P/L metrics", () => {
