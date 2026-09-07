@@ -19,7 +19,7 @@ type RawFact = {
 
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 const TARGETS = ["MSFT", "KO", "NVDA", "SHOP", "BF-B", "COSM"] as const;
-const DEBT_CONCEPT_PATTERN = /(Debt|Borrow|CommercialPaper|FinanceLease|CapitalLease)/i;
+const DEBT_CONCEPT_PATTERN = /(Debt|Borrow|CommercialPaper|FinanceLease|CapitalLease|Loan|Notes?Payable)/i;
 const MIN_END = "2024-01-01";
 
 function object(value: unknown): JsonObject | null {
