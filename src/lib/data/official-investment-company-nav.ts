@@ -10,7 +10,7 @@ export type OfficialInvestmentCompanyNavData = {
   navAsOf: string | null;
   navPerShareHistory: NavPerShareObservation[];
   annualNavPerShareHistory: AnnualNavPerShareObservation[];
-  historySource: AnalysisSource | null;
+  annualNavHistorySource: AnalysisSource | null;
   source: AnalysisSource;
   diagnostic: ProviderDiagnostic;
 };
@@ -477,7 +477,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
   }
 
   const accessedAt = new Date().toISOString();
-  const historySource: AnalysisSource | null = historyUrl && annualNavPerShareHistory.length > 0
+  const annualNavHistorySource: AnalysisSource | null = historyUrl && annualNavPerShareHistory.length > 0
     ? {
       name: `${company.name} official annual NAV history`,
       url: historyUrl,
@@ -486,7 +486,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
       provider: PROVIDER_ID,
       capability: "specialized",
       dataAsOf: null,
-      version: "official-investment-company-nav-annual-history-v1",
+      version: "official-investment-company-nav-v3",
     }
     : null;
 
@@ -496,7 +496,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
       ...parsed,
       navPerShareHistory,
       annualNavPerShareHistory,
-      historySource,
+      annualNavHistorySource,
       source: {
         name: `${company.name} official NAV disclosure`,
         url,
