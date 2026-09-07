@@ -125,6 +125,7 @@ export function resolveCvmIssuerFromFcaRows(
 export function deriveCvmTotalDebt(
   rows: CvmCsvRow[],
   issuer: CvmIssuerIdentity,
+  requestedPeriodEnd?: string,
 ): CvmDebtObservation | null {
   const issuerCnpj = digits(issuer.cnpj);
   if (issuerCnpj.length !== 14) return null;
@@ -146,16 +147,21 @@ export function deriveCvmTotalDebt(
   if (versions.length === 0) return null;
   const latestVersion = Math.max(...versions);
 
-  const currentRows = referenceRows.filter((row) => (
+  const periodEnd = requestedPeriodEnd?.trim() || latestReference;
+  if (!validIsoDate(periodEnd) || periodEnd > latestReference) return null;
+  const isCurrentExercise = periodEnd === latestReference;
+  const expectedExerciseOrder = isCurrentExercise ? "ULTIMO" : "PENULTIMO";
+
+  const selectedRows = referenceRows.filter((row) => (
     Number(row.VERSAO) === latestVersion
-    && normalizedText(row.ORDEM_EXERC) === "ULTIMO"
-    && row.DT_FIM_EXERC?.trim() === latestReference
+    && normalizedText(row.ORDEM_EXERC) === expectedExerciseOrder
+    && row.DT_FIM_EXERC?.trim() === periodEnd
     && normalizedText(row.MOEDA) === "REAL"
     && normalizedText(row.ST_CONTA_FIXA) === "S"
   ));
 
-  const currentDebtRows = currentRows.filter((row) => row.CD_CONTA?.trim() === "2.01.04");
-  const nonCurrentDebtRows = currentRows.filter((row) => row.CD_CONTA?.trim() === "2.02.01");
+  const currentDebtRows = selectedRows.filter((row) => row.CD_CONTA?.trim() === "2.01.04");
+  const nonCurrentDebtRows = selectedRows.filter((row) => row.CD_CONTA?.trim() === "2.02.01");
   if (currentDebtRows.length !== 1 || nonCurrentDebtRows.length !== 1) return null;
 
   const currentDebtRow = currentDebtRows[0];
@@ -177,16 +183,18 @@ export function deriveCvmTotalDebt(
     cvmCode: issuer.cvmCode,
     totalDebt,
     currency: "BRL",
-    periodEnd: latestReference,
+    periodEnd,
     provenance: {
       source: "CVM ITR",
       provider: "cvm-brazil-itr",
       concept: "2.01.04+2.02.01",
       unit: "BRL",
-      periodEnd: latestReference,
+      periodEnd,
       valueKind: "derived",
       inputs: ["2.01.04", "2.02.01"],
-      note: "Total debt derived from the two directly reported fixed CVM ITR top-level current and non-current borrowing accounts; child accounts are not re-summed.",
+      note: isCurrentExercise
+        ? "Total debt derived from the two directly reported fixed CVM ITR top-level current and non-current borrowing accounts; child accounts are not re-summed."
+        : "Comparative total debt derived from the exact PENULTIMO balance-sheet period reported in the latest CVM ITR, using only the two fixed top-level current and non-current borrowing accounts; child accounts are not re-summed.",
     },
   };
 }
