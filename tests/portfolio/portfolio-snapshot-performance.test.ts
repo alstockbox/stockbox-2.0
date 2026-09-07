@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   rateLimitExceededResponse: vi.fn(),
   resolveComparisonFxContexts: vi.fn(),
   convertWithComparisonFxContext: vi.fn(),
-  snapshotInsert: vi.fn(),
+  snapshotRpc: vi.fn(),
 }));
 
 vi.mock("@/lib/analytics/events", () => ({ captureServerEvent: mocks.captureServerEvent }));
@@ -55,6 +55,11 @@ describe("portfolio snapshot performance persistence", () => {
       data: { id: "00000000-0000-4000-8000-000000000222", name: "US", base_currency: "SEK" },
     });
 
+    const revisionQuery: Record<string, unknown> = {};
+    revisionQuery.select = vi.fn(() => revisionQuery);
+    revisionQuery.eq = vi.fn(() => revisionQuery);
+    revisionQuery.maybeSingle = vi.fn().mockResolvedValue({ data: { revision: 4 }, error: null });
+
     const transactionQuery: Record<string, unknown> = {};
     transactionQuery.select = vi.fn(() => transactionQuery);
     transactionQuery.eq = vi.fn(() => transactionQuery);
@@ -88,20 +93,20 @@ describe("portfolio snapshot performance persistence", () => {
       }],
     });
 
-    const snapshotQuery: Record<string, unknown> = {};
-    mocks.snapshotInsert.mockReturnValue(snapshotQuery);
-    snapshotQuery.insert = mocks.snapshotInsert;
-    snapshotQuery.select = vi.fn(() => snapshotQuery);
-    snapshotQuery.single = vi.fn().mockResolvedValue({ data: { id: "snapshot-1", created_at: "2026-09-07T09:00:00.000Z" }, error: null });
+    mocks.snapshotRpc.mockResolvedValue({
+      data: [{ id: "snapshot-1", created_at: "2026-09-07T09:00:00.000Z", ledger_revision: 4 }],
+      error: null,
+    });
 
     mocks.createClient.mockResolvedValue({
       from: vi.fn((table: string) => {
         if (table === "portfolios") return portfolioQuery;
+        if (table === "portfolio_ledger_revisions") return revisionQuery;
         if (table === "portfolio_transactions") return transactionQuery;
         if (table === "analyses") return analysisQuery;
-        if (table === "portfolio_snapshots") return snapshotQuery;
         throw new Error(`Unexpected table ${table}`);
       }),
+      rpc: mocks.snapshotRpc,
     });
   });
 
@@ -113,19 +118,24 @@ describe("portfolio snapshot performance persistence", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.snapshotInsert).toHaveBeenCalledWith(expect.objectContaining({
-      invested_capital: 6060,
-      portfolio_value: 10080,
-      unrealized_pl: 4020,
-      realized_pl: 2538,
-      dividend_income: 345,
-      standalone_fees: 56,
-      trading_fees: 122,
-      total_fees: 178,
-      total_pl: 6847,
+    expect(mocks.snapshotRpc).toHaveBeenCalledWith("insert_portfolio_snapshot_if_current", expect.objectContaining({
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_expected_revision: 4,
+      p_snapshot: expect.objectContaining({
+        invested_capital: 6060,
+        portfolio_value: 10080,
+        unrealized_pl: 4020,
+        realized_pl: 2538,
+        dividend_income: 345,
+        standalone_fees: 56,
+        trading_fees: 122,
+        total_fees: 178,
+        total_pl: 6847,
+      }),
     }));
 
     const body = await response.json();
+    expect(body.snapshot.ledgerRevision).toBe(4);
     expect(body.snapshot.performance).toEqual({
       realizedProfitLoss: 2538,
       unrealizedProfitLoss: 4020,
