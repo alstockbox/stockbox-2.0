@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   holdingEq: vi.fn(),
   transactionSelect: vi.fn(),
   transactionEq: vi.fn(),
+  transactionLimit: vi.fn(),
   transactionMaybeSingle: vi.fn(),
   searchCompanies: vi.fn(),
   resolveCanonicalCompanySelection: vi.fn(),
@@ -77,6 +78,7 @@ describe("workspace server actions", () => {
     const transactionQuery = {
       select: mocks.transactionSelect,
       eq: mocks.transactionEq,
+      limit: mocks.transactionLimit,
       maybeSingle: mocks.transactionMaybeSingle,
     };
     mocks.portfolioSelect.mockReturnValue(portfolioQuery);
@@ -99,6 +101,7 @@ describe("workspace server actions", () => {
     mocks.holdingDelete.mockReturnValue(holdingQuery);
     mocks.transactionSelect.mockReturnValue(transactionQuery);
     mocks.transactionEq.mockReturnValue(transactionQuery);
+    mocks.transactionLimit.mockReturnValue(transactionQuery);
     mocks.transactionMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000444" } });
     mocks.from.mockImplementation((table: string) => {
       if (table === "portfolios") return portfolioQuery;
@@ -233,6 +236,7 @@ describe("workspace server actions", () => {
     expect(mocks.transactionEq).toHaveBeenCalledWith("portfolio_id", "00000000-0000-4000-8000-000000000222");
     expect(mocks.transactionEq).toHaveBeenCalledWith("ticker", "AAPL");
     expect(mocks.transactionEq).toHaveBeenCalledWith("currency", "USD");
+    expect(mocks.transactionLimit).toHaveBeenCalledWith(1);
     expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", expect.objectContaining({
       p_transaction_type: "dividend",
       p_cash_amount: 12.75,
