@@ -320,10 +320,15 @@ describe("Industrivärden annual NAV-growth production wiring", () => {
     const navGrowth = report.securityAnalysis?.investmentCompany?.score.factors.find(
       (factor) => factor.key === "nav_growth",
     );
+    const leverage = report.securityAnalysis?.investmentCompany?.score.factors.find(
+      (factor) => factor.key === "leverage",
+    );
 
     expect(navGrowth?.status).toBe("missing");
     expect(navGrowth?.value).toBeNull();
-    expect(report.dataCoverage).toBeCloseTo(0.46, 12);
+    expect(leverage?.status).toBe("missing");
+    expect(leverage?.value).toBeNull();
+    expect(report.dataCoverage).toBeCloseTo(0.38, 12);
     expect(report.recommendation).toBe("No Rating");
   });
 
