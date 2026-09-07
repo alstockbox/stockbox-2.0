@@ -10,6 +10,7 @@ on:
       - "tests/diagnostics/live-coverage-batch.test.ts"
       - "tests/diagnostics/live-reit-specialized.test.ts"
       - "tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts"
+      - "tests/diagnostics/live-yahoo-margin-history-fingerprint.test.ts"
       - "tests/diagnostics/live-sec-debt-concepts-fingerprint.test.ts"
       - "tests/diagnostics/live-sec-interest-expense-fingerprint.test.ts"
       - "tests/diagnostics/live-yahoo-cash-flow-fingerprint.test.ts"
@@ -72,7 +73,7 @@ jobs:
         env:
           RUN_LIVE_COVERAGE: "1"
           SEC_USER_AGENT: "StockBox/1.0 https://www.getstockbox.app/contact"
-        run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts tests/diagnostics/live-reit-specialized.test.ts tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts tests/diagnostics/live-sec-debt-concepts-fingerprint.test.ts tests/diagnostics/live-sec-interest-expense-fingerprint.test.ts tests/diagnostics/live-yahoo-cash-flow-fingerprint.test.ts tests/diagnostics/live-yahoo-share-count-fingerprint.test.ts tests/diagnostics/live-yahoo-interest-expense-fingerprint.test.ts tests/diagnostics/live-yahoo-fcf-currency-fingerprint.test.ts tests/diagnostics/live-yahoo-debt-fingerprint.test.ts tests/diagnostics/live-cvm-brazil-fundamentals-fingerprint.test.ts tests/diagnostics/live-beta-overlap.test.ts --reporter=verbose
+        run: npx vitest run tests/diagnostics/live-coverage-batch.test.ts tests/diagnostics/live-reit-specialized.test.ts tests/diagnostics/live-sec-yahoo-period-fingerprint.test.ts tests/diagnostics/live-yahoo-margin-history-fingerprint.test.ts tests/diagnostics/live-sec-debt-concepts-fingerprint.test.ts tests/diagnostics/live-sec-interest-expense-fingerprint.test.ts tests/diagnostics/live-yahoo-cash-flow-fingerprint.test.ts tests/diagnostics/live-yahoo-share-count-fingerprint.test.ts tests/diagnostics/live-yahoo-interest-expense-fingerprint.test.ts tests/diagnostics/live-yahoo-fcf-currency-fingerprint.test.ts tests/diagnostics/live-yahoo-debt-fingerprint.test.ts tests/diagnostics/live-cvm-brazil-fundamentals-fingerprint.test.ts tests/diagnostics/live-beta-overlap.test.ts --reporter=verbose
 
       - name: Upload coverage diagnostic
         if: always()
@@ -98,6 +99,15 @@ jobs:
         with:
           name: yahoo-eps-history-fingerprint
           path: artifacts/coverage-live/yahoo-eps-history-fingerprint.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Yahoo margin history fingerprint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yahoo-margin-history-fingerprint
+          path: artifacts/coverage-live/yahoo-margin-history-fingerprint.json
           if-no-files-found: warn
           retention-days: 7
 
