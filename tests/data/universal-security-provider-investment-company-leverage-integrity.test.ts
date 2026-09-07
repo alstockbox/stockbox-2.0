@@ -268,6 +268,28 @@ describe("investment-company leverage source integrity", () => {
     expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
   });
 
+  it("uses a fresh verified issuer leverage ratio even when NAV is unavailable", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(unavailable("Official investment-company NAV"));
+    mocks.fetchOfficialInvestmentCompanyKeyRatios.mockResolvedValueOnce(officialKeyRatiosSuccess(2025, 0.04));
+
+    const result = await analyzeCompany({ company, analysisType: "summary", investmentProfile: "balanced" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const specialist = report.securityAnalysis?.investmentCompany;
+    const nav = specialist?.score.factors.find((factor) => factor.key === "nav_valuation");
+    const leverage = specialist?.score.factors.find((factor) => factor.key === "leverage");
+
+    expect(nav?.status).toBe("missing");
+    expect(leverage?.status).toBe("available");
+    expect(leverage?.value).toBeCloseTo(0.04, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.08, 12);
+    expect(report.recommendation).toBe("No Rating");
+    expect(report.sources.some((source) => source.provider === "official-investment-company-key-ratios")).toBe(true);
+  });
+
   it("fails verified annual leverage closed when the latest ratio is more than one year behind the market year", async () => {
     const report = coreHoldingCompanyReport("2028-09-05");
     mocks.analyzeOperatingCompany.mockResolvedValueOnce({ ok: true, data: report, sources: report.sources, warnings: [] });
