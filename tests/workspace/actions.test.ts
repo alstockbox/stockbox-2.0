@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   holdingUpdate: vi.fn(),
   holdingDelete: vi.fn(),
   holdingEq: vi.fn(),
+  transactionSelect: vi.fn(),
+  transactionEq: vi.fn(),
+  transactionMaybeSingle: vi.fn(),
   searchCompanies: vi.fn(),
   resolveCanonicalCompanySelection: vi.fn(),
 }));
@@ -71,6 +74,11 @@ describe("workspace server actions", () => {
       delete: mocks.holdingDelete,
       eq: mocks.holdingEq,
     };
+    const transactionQuery = {
+      select: mocks.transactionSelect,
+      eq: mocks.transactionEq,
+      maybeSingle: mocks.transactionMaybeSingle,
+    };
     mocks.portfolioSelect.mockReturnValue(portfolioQuery);
     mocks.portfolioEq.mockReturnValue(portfolioQuery);
     mocks.portfolioDelete.mockReturnValue(portfolioQuery);
@@ -89,7 +97,14 @@ describe("workspace server actions", () => {
     mocks.holdingInsert.mockResolvedValue({ error: null });
     mocks.holdingUpdate.mockReturnValue(holdingQuery);
     mocks.holdingDelete.mockReturnValue(holdingQuery);
-    mocks.from.mockImplementation((table: string) => table === "portfolios" ? portfolioQuery : holdingQuery);
+    mocks.transactionSelect.mockReturnValue(transactionQuery);
+    mocks.transactionEq.mockReturnValue(transactionQuery);
+    mocks.transactionMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000444" } });
+    mocks.from.mockImplementation((table: string) => {
+      if (table === "portfolios") return portfolioQuery;
+      if (table === "portfolio_transactions") return transactionQuery;
+      return holdingQuery;
+    });
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
   });
 
@@ -201,6 +216,28 @@ describe("workspace server actions", () => {
       p_security_id: null,
       p_notes: null,
     });
+  });
+
+  it("records dividend cash flow for a closed position when the security exists in the ledger", async () => {
+    mocks.holdingMaybeSingle.mockResolvedValueOnce({ data: null });
+
+    await recordPortfolioDividendAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "12.75",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.transactionSelect).toHaveBeenCalledWith("id");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("portfolio_id", "00000000-0000-4000-8000-000000000222");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("ticker", "AAPL");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("currency", "USD");
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", expect.objectContaining({
+      p_transaction_type: "dividend",
+      p_cash_amount: 12.75,
+    }));
+    expect(mocks.redirect).not.toHaveBeenCalledWith("/portfolio?error=holding_identity");
   });
 
   it("records a security-specific standalone fee against an existing owned position", async () => {
