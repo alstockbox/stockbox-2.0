@@ -265,6 +265,8 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
                     {positions.length || portfolioTransactions.length ? (
                       <>
+                        <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
+
                         {positions.length ? (
                           <>
                         <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -283,8 +285,6 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                             <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
                           </div>
                         ) : null}
-
-                        <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
 
                         {latest ? (
                           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
