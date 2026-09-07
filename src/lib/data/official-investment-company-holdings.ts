@@ -29,7 +29,7 @@ export type OfficialInvestmentCompanyHoldingsResult =
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
 
 type OfficialHoldingsRegistryEntry = {
-  id: "industrivarden" | "svolder";
+  id: "industrivarden" | "svolder" | "lundbergs";
   url: string;
   sourceName: string;
   matches: (company: CompanySearchResult) => boolean;
@@ -320,6 +320,62 @@ export function parseSvolderOfficialHoldings(
   };
 }
 
+function parseLundbergsListItems(html: string): Array<{ name: string; reportedWeight: number }> {
+  const rows: Array<{ name: string; reportedWeight: number }> = [];
+  const itemPattern = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+  let itemMatch: RegExpExecArray | null;
+
+  while ((itemMatch = itemPattern.exec(html)) !== null) {
+    const text = htmlToText(itemMatch[1]);
+    const match = /^(.+?)\s+(-?\d+(?:[.,]\d+)?)\s*%$/.exec(text);
+    if (!match) continue;
+    const name = match[1].trim().replace(/\s+/g, " ");
+    const percentage = Number.parseFloat(match[2].replace(",", "."));
+    if (!name || !/[A-Za-zÅÄÖåäö]/.test(name) || !Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
+      return [];
+    }
+    rows.push({ name, reportedWeight: percentage / 100 });
+  }
+
+  return rows;
+}
+
+export function parseLundbergsOfficialHoldings(
+  html: string,
+): ParsedOfficialInvestmentCompanyHoldings | null {
+  const text = htmlToText(html);
+  const navIndex = text.toLocaleLowerCase("sv-SE").lastIndexOf("substansvärde");
+  if (navIndex < 0) return null;
+  const dateMatch = /\b(20\d{2})-(\d{2})-(\d{2})\b/.exec(text.slice(navIndex, navIndex + 160));
+  const asOf = dateMatch
+    ? isoDate(Number(dateMatch[1]), Number(dateMatch[2]), Number(dateMatch[3]))
+    : null;
+  if (!asOf) return null;
+
+  const rows = parseLundbergsListItems(html);
+  if (rows.length < 5) return null;
+  const uniqueNames = new Set(rows.map((holding) => holding.name.toLocaleLowerCase("sv-SE")));
+  if (uniqueNames.size !== rows.length) return null;
+
+  const rawWeightSum = rows.reduce((sum, holding) => sum + holding.reportedWeight, 0);
+  if (
+    !Number.isFinite(rawWeightSum)
+    || rawWeightSum < MIN_REPRESENTED_WEIGHT
+    || rawWeightSum > MAX_ROUNDING_WEIGHT_SUM
+  ) {
+    return null;
+  }
+
+  return {
+    holdings: rows.map((holding) => ({
+      ...holding,
+      weight: holding.reportedWeight / rawWeightSum,
+    })),
+    rawWeightSum,
+    asOf,
+  };
+}
+
 const REGISTRY: OfficialHoldingsRegistryEntry[] = [
   {
     id: "industrivarden",
@@ -340,6 +396,18 @@ const REGISTRY: OfficialHoldingsRegistryEntry[] = [
       return /\bsvol(?:-[ab])?\.st\b/.test(identity) || identity.includes("svolder");
     },
     parse: parseSvolderOfficialHoldings,
+  },
+  {
+    id: "lundbergs",
+    url: "https://www.lundbergforetagen.se/sv",
+    sourceName: "Lundbergs official portfolio",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\blund(?:-[ab])?\.st\b/.test(identity)
+        || identity.includes("lundbergföretagen")
+        || identity.includes("lundbergforetagen");
+    },
+    parse: parseLundbergsOfficialHoldings,
   },
 ];
 
