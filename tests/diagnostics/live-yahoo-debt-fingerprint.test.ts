@@ -88,6 +88,51 @@ async function rawYahooDebt(symbol: string) {
   };
 }
 
+function selectedQuoteFields(value: unknown, pattern: RegExp): Record<string, unknown> {
+  const source = object(value);
+  if (!source) return {};
+  return Object.fromEntries(Object.entries(source).flatMap(([key, field]) => {
+    if (!pattern.test(key)) return [];
+    const wrapped = object(field);
+    return [[key, wrapped ? {
+      raw: wrapped.raw ?? null,
+      fmt: wrapped.fmt ?? null,
+      longFmt: wrapped.longFmt ?? null,
+    } : field]];
+  }));
+}
+
+async function rawYahooQuoteSummaryDebt(symbol: string) {
+  const url = new URL(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`);
+  url.searchParams.set("modules", "financialData,balanceSheetHistoryQuarterly");
+  const response = await fetch(url, {
+    headers: { accept: "application/json", "user-agent": "Mozilla/5.0 StockBox/1.0" },
+  });
+  let payload: JsonObject | null = null;
+  try {
+    payload = object(await response.json());
+  } catch {
+    payload = null;
+  }
+  const quoteSummary = object(payload?.quoteSummary);
+  const result = Array.isArray(quoteSummary?.result) ? object(quoteSummary.result[0]) : null;
+  const financialData = object(result?.financialData);
+  const balanceSheetHistoryQuarterly = object(result?.balanceSheetHistoryQuarterly);
+  const statements = Array.isArray(balanceSheetHistoryQuarterly?.balanceSheetStatements)
+    ? balanceSheetHistoryQuarterly.balanceSheetStatements
+    : [];
+
+  return {
+    status: response.status,
+    error: quoteSummary?.error ?? payload,
+    financialData: selectedQuoteFields(financialData, /debt|cash|currency/i),
+    quarterlyBalanceSheets: statements.map((statement) => ({
+      endDate: selectedQuoteFields(statement, /^endDate$/i).endDate ?? null,
+      fields: selectedQuoteFields(statement, /debt|cash|borrow|lease/i),
+    })),
+  };
+}
+
 liveDescribe("live Yahoo debt fingerprint", () => {
   it("traces raw debt concepts against canonical balance-sheet periods", async () => {
     const rows: Array<Record<string, unknown>> = [];
@@ -101,8 +146,9 @@ liveDescribe("live Yahoo debt fingerprint", () => {
       if (!company) continue;
 
       const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
-      const [raw, yahoo] = await Promise.all([
+      const [raw, quoteSummary, yahoo] = await Promise.all([
         rawYahooDebt(symbol),
+        rawYahooQuoteSummaryDebt(symbol),
         fetchYahooFundamentalsResult(company),
       ]);
 
@@ -111,6 +157,7 @@ liveDescribe("live Yahoo debt fingerprint", () => {
         symbol,
         rawStatus: raw.status,
         rawError: raw.error,
+        quoteSummary,
         rawConcepts: Object.fromEntries(Object.entries(raw.concepts).map(([concept, facts]) => [concept, {
           count: facts.length,
           facts,
