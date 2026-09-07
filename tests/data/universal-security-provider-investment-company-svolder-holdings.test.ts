@@ -181,7 +181,12 @@ function officialHoldingsSuccess() {
   return {
     ok: true as const,
     data: {
-      holdings: holdings.map(([name, weight]) => ({ name, reportedWeight: weight, weight })),
+      holdings: holdings.map(([name, weight]) => ({
+        name,
+        reportedWeight: weight,
+        weight,
+        issuerFundamentalsEligible: name !== "Net receivable / cash",
+      })),
       rawWeightSum: 1,
       asOf: "2026-05-31",
       source: {
@@ -289,11 +294,11 @@ describe("Svolder official-holdings production coverage", () => {
       "FM Mattsson Group",
       "Troax Group",
       "Systemair",
-      "Net receivable / cash",
       "Arjo",
       "Platzer Fastigheter",
       "MilDef Group",
     ]);
+    expect(mocks.searchCompanies.mock.calls.map(([query]) => query)).not.toContain("Net receivable / cash");
     expect(mocks.fetchYahooEtfHoldingFundamentals).toHaveBeenCalledTimes(10);
     expect(mocks.fetchYahooEtfHoldingFundamentals.mock.calls.map(([holding]) => holding.ticker)).not.toContain(undefined);
     expect(mocks.fetchYahooEtfHoldingFundamentals.mock.calls.some(([holding]) => holding.name === "Net receivable / cash")).toBe(false);
