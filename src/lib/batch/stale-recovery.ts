@@ -11,10 +11,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const RECOVERY_SCAN_LIMIT = 250;
 const QUEUED_ORPHAN_AFTER_MS = 60_000;
+const BATCH_RUN_RECONCILE_AFTER_MS = 60_000;
 
 type BatchItemStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+type NonterminalBatchRunStatus = "queued" | "processing";
 
-function deriveRunStatus(statuses: BatchItemStatus[]) {
+export function deriveRecoveredBatchRunState(statuses: BatchItemStatus[]) {
   const total = statuses.length;
   const queued = statuses.filter((status) => status === "queued").length;
   const processing = statuses.filter((status) => status === "processing").length;
@@ -35,22 +37,75 @@ function deriveRunStatus(statuses: BatchItemStatus[]) {
   return { total, queued, processing, completed, failed, cancelled, status };
 }
 
-async function reconcileBatchRun(batchId: string): Promise<void> {
+async function reconcileBatchRun(
+  batchId: string,
+  expectedRun?: { status: NonterminalBatchRunStatus; updatedAt: string | null },
+): Promise<void> {
   const admin = createAdminClient();
   if (!admin) return;
+
+  let runStatus = expectedRun?.status ?? null;
+  let runUpdatedAt = expectedRun?.updatedAt ?? null;
+  if (!runStatus) {
+    const runResult = await admin.from("batch_runs")
+      .select("status,updated_at")
+      .eq("id", batchId)
+      .maybeSingle();
+    if (runResult.error || !runResult.data) return;
+    if (runResult.data.status !== "queued" && runResult.data.status !== "processing") return;
+    runStatus = runResult.data.status;
+    runUpdatedAt = typeof runResult.data.updated_at === "string" ? runResult.data.updated_at : null;
+  }
+
   const result = await admin.from("batch_items").select("status").eq("batch_id", batchId);
   if (result.error) return;
-  const state = deriveRunStatus((result.data ?? []).map((row) => row.status as BatchItemStatus));
+  const state = deriveRecoveredBatchRunState((result.data ?? []).map((row) => row.status as BatchItemStatus));
   const terminal = ["completed", "partial", "failed", "cancelled"].includes(state.status);
   const now = new Date().toISOString();
-  await admin.from("batch_runs").update({
+  let update = admin.from("batch_runs").update({
     status: state.status,
     completed_items: state.completed,
     failed_items: state.failed,
     cancelled_items: state.cancelled,
     completed_at: terminal ? now : null,
     updated_at: now,
-  }).eq("id", batchId);
+  }).eq("id", batchId).eq("status", runStatus);
+  if (runUpdatedAt) update = update.eq("updated_at", runUpdatedAt);
+  await update;
+}
+
+async function recoverNonterminalBatchRuns(input: {
+  batchId?: string;
+  userId?: string;
+  now: Date;
+}): Promise<number> {
+  const admin = createAdminClient();
+  if (!admin) return 0;
+
+  let query = admin.from("batch_runs")
+    .select("id,status,updated_at")
+    .in("status", ["queued", "processing"])
+    .order("updated_at", { ascending: true })
+    .limit(RECOVERY_SCAN_LIMIT);
+  if (input.batchId) {
+    query = query.eq("id", input.batchId);
+  } else {
+    const cutoff = new Date(input.now.getTime() - BATCH_RUN_RECONCILE_AFTER_MS).toISOString();
+    query = query.lt("updated_at", cutoff);
+  }
+  if (input.userId) query = query.eq("user_id", input.userId);
+
+  const result = await query;
+  if (result.error) return 0;
+
+  await mapWithBoundedConcurrency(result.data ?? [], BATCH_ORCHESTRATION_CONCURRENCY, async (row) => {
+    if (row.status !== "queued" && row.status !== "processing") return;
+    await reconcileBatchRun(String(row.id), {
+      status: row.status,
+      updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+    });
+  });
+  return result.data?.length ?? 0;
 }
 
 async function recoverOrphanedQueuedBatchItems(input: {
@@ -221,5 +276,6 @@ export async function recoverStaleBatchItems(input: {
   failed += orphaned.failed;
 
   await Promise.all([...affectedBatches].map((batchId) => reconcileBatchRun(batchId)));
+  await recoverNonterminalBatchRuns({ batchId: input.batchId, userId: input.userId, now });
   return { scanned: (result.data?.length ?? 0) + orphaned.scanned, requeued, failed };
 }
