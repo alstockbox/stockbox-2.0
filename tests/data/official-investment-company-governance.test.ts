@@ -108,8 +108,8 @@ describe("official investment-company governance adapter", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await fetchOfficialInvestmentCompanyGovernance({
-      ticker: "LATO-B.ST",
-      name: "Investment AB Latour",
+      ticker: "UNCONFIGURED-IC.ST",
+      name: "Unconfigured Investment Company AB",
       securityType: "Common Stock",
     });
 
