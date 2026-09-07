@@ -5,6 +5,7 @@ const PROVIDER_ID = "official-investment-company-holdings";
 const PROVIDER_VERSION = "v1";
 const MIN_REPRESENTED_WEIGHT = 0.95;
 const MAX_ROUNDING_WEIGHT_SUM = 1.05;
+const SVOLDER_RECONCILIATION_TOLERANCE = 0.005;
 
 export type OfficialInvestmentCompanyHolding = {
   name: string;
@@ -28,8 +29,9 @@ export type OfficialInvestmentCompanyHoldingsResult =
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
 
 type OfficialHoldingsRegistryEntry = {
-  id: "industrivarden";
+  id: "industrivarden" | "svolder";
   url: string;
+  sourceName: string;
   matches: (company: CompanySearchResult) => boolean;
   parse: (html: string) => ParsedOfficialInvestmentCompanyHoldings | null;
 };
@@ -78,6 +80,13 @@ function parsePercentage(value: string): number | null {
   const percentage = Number.parseFloat(match[1].replace(",", "."));
   if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) return null;
   return percentage / 100;
+}
+
+function parseSwedishNumber(value: string): number | null {
+  const normalized = value.replace(/\s/g, "").replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 const MONTHS: Record<string, number> = {
@@ -184,15 +193,153 @@ export function parseIndustrivardenOfficialHoldings(
   };
 }
 
+type SvolderEquityHolding = {
+  name: string;
+  marketValue: number;
+  reportedWeight: number;
+};
+
+function parseSvolderEquityHeadings(html: string): SvolderEquityHolding[] {
+  const headings = [...html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)];
+  const holdings: SvolderEquityHolding[] = [];
+
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index];
+    const name = htmlToText(heading[1]);
+    if (!name || /^(?:aktieportföljen|svolder ab)/i.test(name)) continue;
+
+    const blockStart = (heading.index ?? 0) + heading[0].length;
+    const blockEnd = index + 1 < headings.length ? (headings[index + 1].index ?? html.length) : html.length;
+    const blockText = htmlToText(html.slice(blockStart, blockEnd));
+    const values = /^(\d[\d\s]*[.,]\d{2})\s+(\d[\d\s]*)\s+(\d{1,3}(?:[.,]\d+)?)\b/.exec(blockText);
+    if (!values) continue;
+
+    const marketValue = parseSwedishNumber(values[2]);
+    const weightPercent = parseSwedishNumber(values[3]);
+    if (
+      marketValue === null
+      || marketValue <= 0
+      || weightPercent === null
+      || weightPercent <= 0
+      || weightPercent > 100
+    ) {
+      return [];
+    }
+
+    holdings.push({
+      name,
+      marketValue,
+      reportedWeight: weightPercent / 100,
+    });
+  }
+
+  return holdings;
+}
+
+export function parseSvolderOfficialHoldings(
+  html: string,
+): ParsedOfficialInvestmentCompanyHoldings | null {
+  const text = htmlToText(html);
+  const dateMatch = /\bSvolders? innehav per\s+(20\d{2})-(\d{2})-(\d{2})\b/i.exec(text);
+  const asOf = dateMatch
+    ? isoDate(Number(dateMatch[1]), Number(dateMatch[2]), Number(dateMatch[3]))
+    : null;
+  if (!asOf) return null;
+
+  const summary = /Aktieportföljen\s+([\d\s]+)\s+(\d+(?:[.,]\d+)?)\s+Nettofordran\(\+\)\/nettoskuld\(-\)\s+(-?[\d\s]+)\s+(-?\d+(?:[.,]\d+)?)\s+Totalt\/Substansvärde\s+([\d\s]+)\s+(\d+(?:[.,]\d+)?)/i.exec(text);
+  if (!summary) return null;
+
+  const equityMarketValue = parseSwedishNumber(summary[1]);
+  const equityWeightPercent = parseSwedishNumber(summary[2]);
+  const netReceivableValue = parseSwedishNumber(summary[3]);
+  const netReceivableWeightPercent = parseSwedishNumber(summary[4]);
+  const totalMarketValue = parseSwedishNumber(summary[5]);
+  const totalWeightPercent = parseSwedishNumber(summary[6]);
+  if (
+    equityMarketValue === null
+    || equityMarketValue <= 0
+    || equityWeightPercent === null
+    || equityWeightPercent <= 0
+    || netReceivableValue === null
+    || netReceivableValue <= 0
+    || netReceivableWeightPercent === null
+    || netReceivableWeightPercent <= 0
+    || totalMarketValue === null
+    || totalMarketValue <= 0
+    || totalWeightPercent === null
+    || totalWeightPercent <= 0
+  ) {
+    return null;
+  }
+
+  const equityWeight = equityWeightPercent / 100;
+  const netReceivableWeight = netReceivableWeightPercent / 100;
+  const publishedTotalWeight = totalWeightPercent / 100;
+  if (
+    Math.abs(publishedTotalWeight - 1) > SVOLDER_RECONCILIATION_TOLERANCE
+    || Math.abs((equityWeight + netReceivableWeight) - publishedTotalWeight) > SVOLDER_RECONCILIATION_TOLERANCE
+    || Math.abs((equityMarketValue + netReceivableValue) - totalMarketValue) > Math.max(2, totalMarketValue * 0.002)
+  ) {
+    return null;
+  }
+
+  const equities = parseSvolderEquityHeadings(html);
+  if (equities.length < 5) return null;
+  const uniqueNames = new Set(equities.map((holding) => holding.name.toLocaleLowerCase("sv-SE")));
+  if (uniqueNames.size !== equities.length) return null;
+
+  const representedEquityWeight = equities.reduce((sum, holding) => sum + holding.reportedWeight, 0);
+  const representedEquityValue = equities.reduce((sum, holding) => sum + holding.marketValue, 0);
+  if (
+    Math.abs(representedEquityWeight - equityWeight) > SVOLDER_RECONCILIATION_TOLERANCE
+    || Math.abs(representedEquityValue - equityMarketValue) > Math.max(2, equityMarketValue * 0.002)
+  ) {
+    return null;
+  }
+
+  const rows = [
+    ...equities.map(({ name, reportedWeight }) => ({ name, reportedWeight })),
+    { name: "Net receivable / cash", reportedWeight: netReceivableWeight },
+  ];
+  const rawWeightSum = rows.reduce((sum, holding) => sum + holding.reportedWeight, 0);
+  if (
+    rawWeightSum < MIN_REPRESENTED_WEIGHT
+    || rawWeightSum > MAX_ROUNDING_WEIGHT_SUM
+    || Math.abs(rawWeightSum - publishedTotalWeight) > SVOLDER_RECONCILIATION_TOLERANCE
+  ) {
+    return null;
+  }
+
+  return {
+    holdings: rows.map((holding) => ({
+      ...holding,
+      weight: holding.reportedWeight / rawWeightSum,
+    })),
+    rawWeightSum,
+    asOf,
+  };
+}
+
 const REGISTRY: OfficialHoldingsRegistryEntry[] = [
   {
     id: "industrivarden",
     url: "https://www.industrivarden.se/en-gb/operations/portfolio/ownership-and-development/",
+    sourceName: "Industrivärden official portfolio",
     matches: (company) => {
       const identity = normalizeIdentity(company);
       return /\bindu(?:-[ac])?\.st\b/.test(identity) || identity.includes("industrivärden") || identity.includes("industrivarden");
     },
     parse: parseIndustrivardenOfficialHoldings,
+  },
+  {
+    id: "svolder",
+    url: "https://svolder.se/om-svolder/innehav/",
+    sourceName: "Svolder official portfolio",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\bsvol(?:-[ab])?\.st\b/.test(identity) || identity.includes("svolder");
+    },
+    parse: parseSvolderOfficialHoldings,
   },
 ];
 
@@ -231,16 +378,16 @@ export async function fetchOfficialInvestmentCompanyHoldings(
     if (!parsed) {
       return failure(
         "official_holdings_incomplete_or_unparseable",
-        "Official holdings were unavailable, incomplete below the 95% representation threshold, or outside the allowed rounding tolerance.",
+        "Official holdings were unavailable, incomplete below the 95% representation threshold, failed issuer-specific reconciliation, or were outside the allowed rounding tolerance.",
       );
     }
 
     const accessedAt = new Date().toISOString();
     const source: AnalysisSource = {
-      name: "Industrivärden official portfolio",
+      name: entry.sourceName,
       url: entry.url,
       accessedAt,
-      freshness: "Official portfolio weights published by the investment company; rounded published weights are normalized only when total representation remains within 95–105%.",
+      freshness: "Official portfolio weights published by the investment company; rounded published weights are normalized only when total representation remains within 95–105% and issuer-specific reconciliation checks pass.",
       provider: PROVIDER_ID,
       version: PROVIDER_VERSION,
       capability: "specialized",
