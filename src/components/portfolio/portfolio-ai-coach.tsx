@@ -1,20 +1,20 @@
 "use client";
 
-import { ArrowRight, Bot, CheckCircle2, Lightbulb, ShieldAlert, Sparkles, Target } from "lucide-react";
+import { ArrowRight, Bot, CheckCircle2, CircleDollarSign, Lightbulb, RefreshCw, ShieldAlert, Sparkles, Target } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ButtonLink } from "@/components/ui/button";
-
-type Candidate = {
-  ticker: string;
-  name: string;
-  score: number | null;
-  recommendation: string | null;
-  valuation: number | null;
-  growth: number | null;
-  quality: number | null;
-  risk: number | null;
-  momentum: number | null;
-};
+import {
+  buildPortfolioActionPlan,
+  buildRebalancePlan,
+  createPortfolioPlan,
+  type Horizon,
+  type PortfolioAction,
+  type PortfolioAiCandidate,
+  type PortfolioBreadth,
+  type PortfolioSnapshotDelta,
+  type PortfolioStyle,
+  type RiskPreference,
+} from "@/lib/portfolio/portfolio-ai-planner";
 
 type HoldingSignal = {
   ticker: string;
@@ -26,205 +26,179 @@ type HoldingSignal = {
 type PortfolioSummary = {
   id: string;
   name: string;
+  baseCurrency: string;
+  portfolioValue: number | null;
   portfolioScore: number | null;
   riskScore: number | null;
   diversificationScore: number | null;
   largestPosition: string | null;
   largestPositionWeight: number | null;
+  snapshotDelta: PortfolioSnapshotDelta | null;
   holdings: HoldingSignal[];
 };
 
 type Props = {
   locale: "sv" | "en";
   portfolios: PortfolioSummary[];
-  candidates: Candidate[];
+  candidates: PortfolioAiCandidate[];
+  asOf: string;
 };
 
-type RiskPreference = "defensive" | "balanced" | "aggressive";
-type Horizon = "short" | "medium" | "long";
-type Style = "balanced" | "growth" | "quality" | "value";
-type Breadth = "focused" | "balanced" | "broad";
-type Idea = { level: "high" | "medium" | "positive"; title: string; detail: string };
-
-const recommendationAdjustment: Record<string, number> = {
-  "Strong Buy": 10,
-  Buy: 6,
-  Hold: 0,
-  Sell: -28,
-  "Strong Sell": -45,
-  "No Rating": -8,
-};
-
-function n(value: number | null | undefined, fallback = 50) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function candidateRank(candidate: Candidate, risk: RiskPreference, style: Style, horizon: Horizon) {
-  const overall = n(candidate.score);
-  const valuation = n(candidate.valuation);
-  const growth = n(candidate.growth);
-  const quality = n(candidate.quality);
-  const riskScore = n(candidate.risk);
-  const momentum = n(candidate.momentum);
-  let rank = overall * 0.42 + quality * 0.14 + riskScore * 0.1 + valuation * 0.1 + growth * 0.14 + momentum * 0.1;
-
-  if (style === "growth") rank += growth * 0.18 + momentum * 0.08 - valuation * 0.04;
-  if (style === "quality") rank += quality * 0.2 + riskScore * 0.08;
-  if (style === "value") rank += valuation * 0.22 + quality * 0.06;
-  if (risk === "defensive") rank += riskScore * 0.16 + quality * 0.08 - momentum * 0.03;
-  if (risk === "aggressive") rank += growth * 0.1 + momentum * 0.12;
-  if (horizon === "long") rank += quality * 0.07 + growth * 0.05;
-  if (horizon === "short") rank += momentum * 0.1;
-  rank += recommendationAdjustment[candidate.recommendation ?? "No Rating"] ?? 0;
-  return rank;
-}
-
-function targetCount(breadth: Breadth) {
-  return breadth === "focused" ? 6 : breadth === "broad" ? 14 : 10;
-}
-
-function targetMaxWeight(risk: RiskPreference, breadth: Breadth) {
-  const breadthCap = breadth === "focused" ? 0.22 : breadth === "broad" ? 0.1 : 0.15;
-  if (risk === "defensive") return Math.min(breadthCap, 0.12);
-  if (risk === "aggressive") return Math.min(0.25, breadthCap + 0.04);
-  return breadthCap;
-}
-
-function buildWeights(count: number, maxWeight: number) {
-  if (count <= 0) return [];
-  const feasibleCap = Math.max(maxWeight, 1 / count);
-  const raw = Array.from({ length: count }, (_, index) => Math.max(1, count - index * 0.28));
-  const rawTotal = raw.reduce((sum, value) => sum + value, 0);
-  let weights = raw.map((value) => value / rawTotal);
-
-  for (let pass = 0; pass < count + 2; pass += 1) {
-    const excess = weights.reduce((sum, weight) => sum + Math.max(0, weight - feasibleCap), 0);
-    weights = weights.map((weight) => Math.min(weight, feasibleCap));
-    if (excess < 0.000001) break;
-
-    const eligible = weights
-      .map((weight, index) => ({ weight, index }))
-      .filter((item) => item.weight < feasibleCap - 0.000001);
-    if (!eligible.length) break;
-    const room = eligible.reduce((sum, item) => sum + (feasibleCap - item.weight), 0);
-    for (const item of eligible) {
-      weights[item.index] += excess * ((feasibleCap - item.weight) / room);
-    }
+function formatMoney(value: number, currency: string, locale: "sv" | "en") {
+  try {
+    return new Intl.NumberFormat(locale === "sv" ? "sv-SE" : "en-GB", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `${Math.round(value).toLocaleString(locale === "sv" ? "sv-SE" : "en-GB")} ${currency}`;
   }
-
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  return total > 0 ? weights.map((weight) => weight / total) : [];
 }
 
-export function PortfolioAiCoach({ locale, portfolios, candidates }: Props) {
+function formatPercent(value: number | null | undefined, digits = 1) {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : "—";
+}
+
+function signed(value: number | null | undefined, digits = 1) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function signedPercentPoints(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const points = value * 100;
+  return `${points > 0 ? "+" : ""}${points.toFixed(1)} pp`;
+}
+
+function actionText(action: PortfolioAction, sv: boolean) {
+  switch (action.code) {
+    case "negative_signal":
+      return {
+        title: sv ? `Prioritet: granska ${action.ticker ?? "innehavet"}` : `Priority: review ${action.ticker ?? "holding"}`,
+        detail: sv
+          ? `Senaste StockBox-signalen är ${action.recommendation ?? "negativ"}. Verifiera caset och den nya analysen innan du tillför mer kapital.`
+          : `Latest StockBox signal is ${action.recommendation ?? "negative"}. Verify the thesis and latest analysis before adding more capital.`,
+      };
+    case "concentration":
+      return {
+        title: sv ? "Sänk koncentrationsrisken" : "Reduce concentration risk",
+        detail: sv
+          ? `${action.ticker ?? "Största positionen"} ligger på ${formatPercent(action.currentValue)} mot målprofilens cirka ${formatPercent(action.targetValue)} maxvikt.`
+          : `${action.ticker ?? "Largest position"} is ${formatPercent(action.currentValue)} versus the profile target of roughly ${formatPercent(action.targetValue)} maximum.`,
+      };
+    case "risk_mismatch":
+      return {
+        title: sv ? "Matcha risken mot defensiv profil" : "Align risk with defensive profile",
+        detail: sv
+          ? `Risk-score är ${Math.round(action.currentValue ?? 0)}/100. Prioritera högre risk-score, kvalitet och mindre positionsstorlekar.`
+          : `Risk score is ${Math.round(action.currentValue ?? 0)}/100. Prioritize higher risk scores, quality and smaller position sizes.`,
+      };
+    case "weak_holding":
+      return {
+        title: sv ? `Granska svagaste innehavet: ${action.ticker ?? "—"}` : `Review weakest holding: ${action.ticker ?? "—"}`,
+        detail: sv
+          ? `Aktuell StockBox-score är ${Math.round(action.currentValue ?? 0)}/100. Jämför investeringscaset med starkare analyserade alternativ.`
+          : `Current StockBox score is ${Math.round(action.currentValue ?? 0)}/100. Compare the thesis with stronger analyzed alternatives.`,
+      };
+    case "diversification":
+      return {
+        title: sv ? "Förbättra diversifieringen" : "Improve diversification",
+        detail: sv
+          ? `Diversifieringsscore är ${Math.round(action.currentValue ?? 0)}/100. Fokusera på oberoende avkastningsdrivare, inte bara fler tickers.`
+          : `Diversification score is ${Math.round(action.currentValue ?? 0)}/100. Focus on independent return drivers, not simply more tickers.`,
+      };
+    case "stale_data":
+      return {
+        title: sv ? "Uppdatera analysunderlaget" : "Refresh analysis coverage",
+        detail: sv
+          ? `Minst ${action.count ?? 0} ytterligare färska analyser behövs för den valda målprofilen. AI:n fyller inte dataluckor med gissningar.`
+          : `At least ${action.count ?? 0} additional fresh analyses are needed for the selected profile. The AI does not fill data gaps with guesses.`,
+      };
+    case "portfolio_score":
+      return {
+        title: sv ? "Stärk Portfolio Score" : "Strengthen Portfolio Score",
+        detail: sv
+          ? `Helhetsbetyget är ${Math.round(action.currentValue ?? 0)}/100. Börja med svaga signaler, koncentration och daterade analyser.`
+          : `Overall score is ${Math.round(action.currentValue ?? 0)}/100. Start with weak signals, concentration and stale analyses.`,
+      };
+    case "healthy":
+      return {
+        title: sv ? "Inga akuta strukturproblem" : "No urgent structural issues",
+        detail: sv
+          ? "Portföljen ligger rimligt mot den valda profilen utifrån aktuell StockBox-data. Fortsätt följa förändringar och håll analyserna färska."
+          : "The portfolio is reasonably aligned with the selected profile based on current StockBox data. Keep monitoring changes and refresh analyses.",
+      };
+  }
+}
+
+function priorityLabel(action: PortfolioAction, sv: boolean) {
+  if (action.priority === "high") return sv ? "Hög" : "High";
+  if (action.priority === "medium") return sv ? "Medel" : "Medium";
+  if (action.priority === "low") return sv ? "Låg" : "Low";
+  return sv ? "Stabil" : "Stable";
+}
+
+function priorityClasses(action: PortfolioAction) {
+  if (action.priority === "high") return "border-red-400/20 bg-red-950/15";
+  if (action.priority === "positive") return "border-emerald-400/20 bg-emerald-950/15";
+  return "border-amber-300/20 bg-amber-950/15";
+}
+
+export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props) {
   const sv = locale === "sv";
   const [mode, setMode] = useState<"improve" | "build">(portfolios.length ? "improve" : "build");
   const [portfolioId, setPortfolioId] = useState(portfolios[0]?.id ?? "");
   const [risk, setRisk] = useState<RiskPreference>("balanced");
   const [horizon, setHorizon] = useState<Horizon>("long");
-  const [style, setStyle] = useState<Style>("balanced");
-  const [breadth, setBreadth] = useState<Breadth>("balanced");
+  const [style, setStyle] = useState<PortfolioStyle>("balanced");
+  const [breadth, setBreadth] = useState<PortfolioBreadth>("balanced");
+  const [budget, setBudget] = useState(() => {
+    const portfolioValue = portfolios[0]?.portfolioValue;
+    if (typeof portfolioValue === "number" && Number.isFinite(portfolioValue) && portfolioValue > 0) return Math.round(portfolioValue);
+    return sv ? 100_000 : 10_000;
+  });
+  const [cashReservePercent, setCashReservePercent] = useState(10);
 
   const selected = portfolios.find((portfolio) => portfolio.id === portfolioId) ?? portfolios[0] ?? null;
-  const maxWeight = targetMaxWeight(risk, breadth);
-  const desiredHoldingCount = Math.max(targetCount(breadth), Math.ceil(1 / maxWeight));
+  const budgetCurrency = selected?.baseCurrency ?? (sv ? "SEK" : "USD");
 
-  const rankedCandidates = useMemo(() => candidates
-    .filter((candidate) => candidate.score !== null && !["Sell", "Strong Sell"].includes(candidate.recommendation ?? ""))
-    .map((candidate) => ({ ...candidate, rank: candidateRank(candidate, risk, style, horizon) }))
-    .sort((a, b) => b.rank - a.rank), [candidates, horizon, risk, style]);
+  const plan = useMemo(() => createPortfolioPlan({
+    candidates,
+    budget,
+    cashReservePercent,
+    risk,
+    horizon,
+    style,
+    breadth,
+    now: asOf,
+  }), [asOf, breadth, budget, candidates, cashReservePercent, horizon, risk, style]);
 
-  const modelPortfolio = useMemo(() => {
-    const count = Math.min(desiredHoldingCount, rankedCandidates.length);
-    const chosen = rankedCandidates.slice(0, count);
-    const effectiveMaxWeight = chosen.length ? Math.max(maxWeight, 1 / chosen.length) : maxWeight;
-    const weights = buildWeights(chosen.length, effectiveMaxWeight);
-    return chosen.map((candidate, index) => ({ ...candidate, targetWeight: weights[index] ?? 0 }));
-  }, [desiredHoldingCount, maxWeight, rankedCandidates]);
+  const actionPlan = useMemo(() => selected ? buildPortfolioActionPlan({
+    portfolioScore: selected.portfolioScore,
+    riskScore: selected.riskScore,
+    diversificationScore: selected.diversificationScore,
+    largestPosition: selected.largestPosition,
+    largestPositionWeight: selected.largestPositionWeight,
+    requestedMaxPositionWeight: plan.requestedMaxPositionWeight,
+    holdings: selected.holdings,
+    dataQuality: plan.dataQuality,
+    risk,
+  }) : [], [plan.dataQuality, plan.requestedMaxPositionWeight, risk, selected]);
 
-  const effectiveBuildMaxWeight = modelPortfolio.length ? Math.max(maxWeight, 1 / modelPortfolio.length) : maxWeight;
-  const buildCapRelaxed = effectiveBuildMaxWeight > maxWeight + 0.000001;
+  const rebalancePlan = useMemo(() => {
+    if (!selected) return [];
+    const current = selected.holdings
+      .filter((holding) => typeof holding.weight === "number" && Number.isFinite(holding.weight))
+      .map((holding) => ({ ticker: holding.ticker, currentWeight: holding.weight as number }));
+    if (!current.length) return [];
+    return buildRebalancePlan(
+      current,
+      plan.allocation.map((item) => ({ ticker: item.ticker, targetPortfolioWeight: item.targetPortfolioWeight })),
+    );
+  }, [plan.allocation, selected]);
 
-  const improvementIdeas = useMemo(() => {
-    if (!selected) return [] as Idea[];
-    const ideas: Idea[] = [];
-    const concentration = selected.largestPositionWeight;
-
-    if (concentration !== null && concentration > maxWeight) {
-      ideas.push({
-        level: "high",
-        title: sv ? "Koncentrationen är högre än din målprofil" : "Concentration is above your target profile",
-        detail: sv
-          ? `${selected.largestPosition ?? "Största positionen"} väger cirka ${(concentration * 100).toFixed(1)} %. Med dina val är riktmärket högst cirka ${(maxWeight * 100).toFixed(0)} % per position.`
-          : `${selected.largestPosition ?? "Largest position"} is about ${(concentration * 100).toFixed(1)}%. Your selected profile targets roughly ${(maxWeight * 100).toFixed(0)}% or less per position.`,
-      });
-    }
-
-    if (n(selected.diversificationScore, 100) < 60) {
-      ideas.push({
-        level: "medium",
-        title: sv ? "Diversifieringen kan förbättras" : "Diversification can improve",
-        detail: sv
-          ? `Diversifieringsscore är ${Math.round(n(selected.diversificationScore))}/100. Prioritera fler oberoende avkastningsdrivare framför fler positioner som beter sig likadant.`
-          : `Diversification score is ${Math.round(n(selected.diversificationScore))}/100. Prioritize independent return drivers rather than simply adding more correlated positions.`,
-      });
-    }
-
-    if (risk === "defensive" && n(selected.riskScore, 100) < 65) {
-      ideas.push({
-        level: "high",
-        title: sv ? "Riskprofilen matchar inte defensivt mål" : "Risk profile does not match a defensive target",
-        detail: sv
-          ? `Risk-score är ${Math.round(n(selected.riskScore))}/100. Prioritera högre kvalitet/risk-score och mindre positionsstorlekar innan du jagar mer uppsida.`
-          : `Risk score is ${Math.round(n(selected.riskScore))}/100. Prioritize higher quality/risk scores and smaller position sizes before pursuing more upside.`,
-      });
-    }
-
-    if (n(selected.portfolioScore, 100) < 55) {
-      ideas.push({
-        level: "medium",
-        title: sv ? "Helhetsbetyget behöver stärkas" : "Overall portfolio score needs improvement",
-        detail: sv
-          ? `Portfolio Score är ${Math.round(n(selected.portfolioScore))}/100. Börja med de svagaste innehaven och kontrollera om de fortfarande förtjänar kapital jämfört med bättre analyserade alternativ.`
-          : `Portfolio Score is ${Math.round(n(selected.portfolioScore))}/100. Start with the weakest holdings and check whether they still deserve capital versus stronger analyzed alternatives.`,
-      });
-    }
-
-    const weak = [...selected.holdings]
-      .filter((holding) => holding.score !== null)
-      .sort((a, b) => n(a.score) - n(b.score))[0];
-    if (weak && n(weak.score) < 55) {
-      ideas.push({
-        level: "medium",
-        title: sv ? `Granska ${weak.ticker}` : `Review ${weak.ticker}`,
-        detail: sv
-          ? `${weak.ticker} har lägst aktuell StockBox-score i portföljen (${Math.round(n(weak.score))}/100). Kontrollera om investeringscaset fortfarande passar din valda stil innan du ökar positionen.`
-          : `${weak.ticker} has the lowest current StockBox score in the portfolio (${Math.round(n(weak.score))}/100). Re-check whether the thesis still fits your chosen style before adding exposure.`,
-      });
-    }
-
-    const negativeSignal = selected.holdings.find((holding) => ["Sell", "Strong Sell"].includes(holding.recommendation ?? ""));
-    if (negativeSignal) {
-      ideas.push({
-        level: "high",
-        title: sv ? `Ny analys krävs för ${negativeSignal.ticker}` : `Fresh review needed for ${negativeSignal.ticker}`,
-        detail: sv
-          ? `Senaste StockBox-signalen är ${negativeSignal.recommendation}. Det är en analysindikator, inte en automatisk order; öppna caset och verifiera vad som driver signalen.`
-          : `Latest StockBox signal is ${negativeSignal.recommendation}. This is a research indicator, not an automatic order; open the case and verify what drives the signal.`,
-      });
-    }
-
-    if (!ideas.length) {
-      ideas.push({
-        level: "positive",
-        title: sv ? "Inga uppenbara strukturproblem hittades" : "No obvious structural issues found",
-        detail: sv
-          ? "Utifrån dina val och den data som finns ser portföljen rimligt balanserad ut. Håll analyserna färska och följ förändringar i score, risk och koncentration."
-          : "Based on your preferences and available data, the portfolio looks reasonably balanced. Keep analyses fresh and monitor score, risk and concentration changes.",
-      });
-    }
-    return ideas;
-  }, [maxWeight, risk, selected, sv]);
+  const snapshotDelta = selected?.snapshotDelta ?? null;
 
   return (
     <div className="rounded-2xl border border-[#e1cb95]/20 bg-gradient-to-br from-[#0d1b2c] to-[#08111d] p-4 sm:p-6">
@@ -232,7 +206,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates }: Props) {
         <div className="max-w-3xl">
           <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#e1cb95]"><Bot className="h-4 w-4" />StockBox AI</p>
           <h2 className="mt-2 text-xl font-semibold text-[#f4efe5]">{sv ? "Portföljcoach & portföljbyggare" : "Portfolio coach & builder"}</h2>
-          <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">{sv ? "Ställ in hur du vill investera. StockBox väger ihop verifierade analyser, riskscore, kvalitet, värdering, tillväxt, momentum och portföljkoncentration till konkreta förbättringar eller ett portföljutkast." : "Set how you want to invest. StockBox combines verified analyses, risk, quality, valuation, growth, momentum and concentration into concrete improvements or a portfolio draft."}</p>
+          <p className="mt-2 text-sm leading-6 text-[#9aa7b8]">{sv ? "Bygg en målportfölj eller få en prioriterad förbättringsplan. Allt härleds från dina färska StockBox-analyser och portföljdata; inga order skapas." : "Build a target portfolio or get a prioritized improvement plan. Everything is derived from your fresh StockBox analyses and portfolio data; no orders are created."}</p>
         </div>
         <div className="flex rounded-lg border border-white/10 bg-black/15 p-1">
           <button type="button" onClick={() => setMode("improve")} disabled={!portfolios.length} className={`rounded-md px-3 py-2 text-xs font-semibold ${mode === "improve" ? "bg-[#b99b5f] text-[#07111f]" : "text-[#b8c2cf] hover:bg-white/5"}`}>{sv ? "Förbättra" : "Improve"}</button>
@@ -240,66 +214,105 @@ export function PortfolioAiCoach({ locale, portfolios, candidates }: Props) {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {mode === "improve" && portfolios.length ? (
           <label className="text-xs text-[#8f9bac]">{sv ? "Portfölj" : "Portfolio"}<select value={portfolioId} onChange={(event) => setPortfolioId(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]">{portfolios.map((portfolio) => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}</select></label>
         ) : null}
         <label className="text-xs text-[#8f9bac]">{sv ? "Risknivå" : "Risk level"}<select value={risk} onChange={(event) => setRisk(event.target.value as RiskPreference)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="defensive">{sv ? "Defensiv" : "Defensive"}</option><option value="balanced">{sv ? "Balanserad" : "Balanced"}</option><option value="aggressive">{sv ? "Offensiv" : "Aggressive"}</option></select></label>
         <label className="text-xs text-[#8f9bac]">{sv ? "Tidshorisont" : "Horizon"}<select value={horizon} onChange={(event) => setHorizon(event.target.value as Horizon)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="short">{sv ? "0–3 år" : "0–3 years"}</option><option value="medium">{sv ? "3–7 år" : "3–7 years"}</option><option value="long">{sv ? "7+ år" : "7+ years"}</option></select></label>
-        <label className="text-xs text-[#8f9bac]">{sv ? "Stil" : "Style"}<select value={style} onChange={(event) => setStyle(event.target.value as Style)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="balanced">{sv ? "Balanserad" : "Balanced"}</option><option value="growth">Growth</option><option value="quality">Quality</option><option value="value">Value</option></select></label>
-        <label className="text-xs text-[#8f9bac]">{sv ? "Spridning" : "Breadth"}<select value={breadth} onChange={(event) => setBreadth(event.target.value as Breadth)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="focused">{sv ? "Fokuserad" : "Focused"}</option><option value="balanced">{sv ? "Balanserad" : "Balanced"}</option><option value="broad">{sv ? "Bred" : "Broad"}</option></select></label>
+        <label className="text-xs text-[#8f9bac]">{sv ? "Stil" : "Style"}<select value={style} onChange={(event) => setStyle(event.target.value as PortfolioStyle)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="balanced">{sv ? "Balanserad" : "Balanced"}</option><option value="growth">Growth</option><option value="quality">Quality</option><option value="value">Value</option></select></label>
+        <label className="text-xs text-[#8f9bac]">{sv ? "Spridning" : "Breadth"}<select value={breadth} onChange={(event) => setBreadth(event.target.value as PortfolioBreadth)} className="mt-1 h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 text-sm text-[#f4efe5]"><option value="focused">{sv ? "Fokuserad" : "Focused"}</option><option value="balanced">{sv ? "Balanserad" : "Balanced"}</option><option value="broad">{sv ? "Bred" : "Broad"}</option></select></label>
+        <label className="text-xs text-[#8f9bac]">{sv ? "Investeringsbelopp" : "Investment amount"}<div className="relative mt-1"><input type="number" min="0" step="100" value={budget} onChange={(event) => setBudget(Math.max(0, Number(event.target.value) || 0))} className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 pr-14 text-sm text-[#f4efe5]" /><span className="pointer-events-none absolute right-3 top-3 text-xs text-[#8f9bac]">{budgetCurrency}</span></div></label>
+        <label className="text-xs text-[#8f9bac]">{sv ? "Kassareserv" : "Cash reserve"}<div className="relative mt-1"><input type="number" min="0" max="80" step="1" value={cashReservePercent} onChange={(event) => setCashReservePercent(Math.min(80, Math.max(0, Number(event.target.value) || 0)))} className="h-11 w-full rounded-md border border-white/12 bg-[#07111f] px-3 pr-9 text-sm text-[#f4efe5]" /><span className="pointer-events-none absolute right-3 top-3 text-xs text-[#8f9bac]">%</span></div></label>
+        {selected?.portfolioValue && selected.portfolioValue > 0 ? (
+          <div className="flex items-end"><button type="button" onClick={() => setBudget(Math.round(selected.portfolioValue ?? 0))} className="h-11 w-full rounded-md border border-white/10 bg-white/5 px-3 text-xs font-semibold text-[#c9d2df] hover:bg-white/10"><RefreshCw className="mr-2 inline h-3.5 w-3.5" />{sv ? "Använd portföljvärde" : "Use portfolio value"}</button></div>
+        ) : null}
       </div>
 
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-white/10 bg-black/10 p-3"><p className="text-[10px] uppercase tracking-wide text-[#6f7b8c]">{sv ? "Investeras" : "Invested"}</p><p className="mt-1 text-base font-semibold text-[#f4efe5]">{formatMoney(plan.investableAmount, budgetCurrency, locale)}</p></div>
+        <div className="rounded-xl border border-white/10 bg-black/10 p-3"><p className="text-[10px] uppercase tracking-wide text-[#6f7b8c]">{sv ? "Kassareserv" : "Cash reserve"}</p><p className="mt-1 text-base font-semibold text-[#f4efe5]">{formatMoney(plan.cashReserveAmount, budgetCurrency, locale)}</p></div>
+        <div className="rounded-xl border border-white/10 bg-black/10 p-3"><p className="text-[10px] uppercase tracking-wide text-[#6f7b8c]">{sv ? "Mål max/position" : "Target max/position"}</p><p className="mt-1 text-base font-semibold text-[#f4efe5]">{formatPercent(plan.requestedMaxPositionWeight, 0)}</p></div>
+      </div>
+
+      {plan.dataQuality.status !== "good" ? (
+        <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">
+          <p className="font-semibold">{sv ? "AI-underlaget behöver stärkas" : "AI data coverage needs improvement"}</p>
+          <p className="mt-1">{sv ? `${plan.dataQuality.freshCount} färska kvalificerade analyser finns. ${plan.dataQuality.recommendedAdditionalAnalyses} ytterligare färska analyser rekommenderas för målprofilen.` : `${plan.dataQuality.freshCount} fresh qualifying analyses are available. ${plan.dataQuality.recommendedAdditionalAnalyses} additional fresh analyses are recommended for this profile.`}</p>
+          {plan.dataQuality.staleTickers.length ? <p className="mt-1 text-amber-200/80">{sv ? "Daterade/okända analysdatum:" : "Stale/unknown analysis dates:"} {plan.dataQuality.staleTickers.slice(0, 8).join(", ")}{plan.dataQuality.staleTickers.length > 8 ? "…" : ""}</p> : null}
+          <ButtonLink href="/analyze" variant="ghost" className="mt-2 w-fit">{sv ? "Uppdatera analyser" : "Refresh analyses"}<ArrowRight className="h-4 w-4" /></ButtonLink>
+        </div>
+      ) : (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-400/15 bg-emerald-950/10 p-3 text-xs text-emerald-100"><CheckCircle2 className="h-4 w-4" />{sv ? "Underlaget har tillräckligt många färska StockBox-analyser för vald målprofil." : "The data set has enough fresh StockBox analyses for the selected target profile."}</div>
+      )}
+
       {mode === "improve" && selected ? (
-        <div className="mt-6 grid gap-3 lg:grid-cols-3">
-          {improvementIdeas.slice(0, 6).map((idea, index) => (
-            <div key={`${idea.title}-${index}`} className={`rounded-xl border p-4 ${idea.level === "high" ? "border-red-400/20 bg-red-950/15" : idea.level === "positive" ? "border-emerald-400/20 bg-emerald-950/15" : "border-amber-300/20 bg-amber-950/15"}`}>
-              <div className="flex items-start gap-2">
-                {idea.level === "high" ? <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-200" /> : idea.level === "positive" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" /> : <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />}
-                <div><h3 className="text-sm font-semibold text-[#eef2f7]">{idea.title}</h3><p className="mt-2 text-xs leading-5 text-[#aab4c2]">{idea.detail}</p></div>
-              </div>
+        <div className="mt-6 space-y-5">
+          <div>
+            <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Prioriterad AI Action Plan" : "Prioritized AI Action Plan"}</p><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Åtgärder sorteras efter vad som mest behöver din uppmärksamhet först." : "Actions are sorted by what needs your attention first."}</p></div><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Prioritet" : "Priority"}</span></div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              {actionPlan.slice(0, 6).map((action, index) => {
+                const copy = actionText(action, sv);
+                return (
+                  <div key={`${action.code}-${action.ticker ?? index}`} className={`rounded-xl border p-4 ${priorityClasses(action)}`}>
+                    <div className="flex items-start gap-2">
+                      {action.priority === "high" ? <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-200" /> : action.priority === "positive" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" /> : <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />}
+                      <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[#8f9bac]">{priorityLabel(action, sv)}</p><h3 className="mt-1 text-sm font-semibold text-[#eef2f7]">{copy.title}</h3><p className="mt-2 text-xs leading-5 text-[#aab4c2]">{copy.detail}</p></div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Vad har förändrats?" : "What changed?"}</p>
+            {snapshotDelta ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">Portfolio Score</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{signed(snapshotDelta.portfolioScore)}</p></div>
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">{sv ? "Risk-score" : "Risk score"}</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{signed(snapshotDelta.riskScore)}</p></div>
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">{sv ? "Diversifiering" : "Diversification"}</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{signed(snapshotDelta.diversificationScore)}</p></div>
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">{sv ? "Orealiserad P/L" : "Unrealized P/L"}</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{snapshotDelta.unrealizedProfitLoss === null ? "—" : `${snapshotDelta.unrealizedProfitLoss > 0 ? "+" : ""}${formatMoney(snapshotDelta.unrealizedProfitLoss, selected.baseCurrency, locale)}`}</p></div>
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{snapshotDelta.portfolioValue === null ? "—" : `${snapshotDelta.portfolioValue > 0 ? "+" : ""}${formatMoney(snapshotDelta.portfolioValue, selected.baseCurrency, locale)}`}</p></div>
+                <div className="rounded-lg bg-white/[0.035] p-3"><p className="text-[10px] text-[#6f7b8c]">{sv ? "Största position" : "Largest position"}</p><p className="mt-1 text-sm font-semibold text-[#eef2f7]">{signedPercentPoints(snapshotDelta.largestPositionWeight)}</p></div>
+              </div>
+            ) : <p className="mt-2 text-xs leading-5 text-[#8f9bac]">{sv ? "Minst två portföljsnapshots behövs innan StockBox kan visa förändringen över tid." : "At least two portfolio snapshots are needed before StockBox can show changes over time."}</p>}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2"><RefreshCw className="h-4 w-4 text-[#e1cb95]" /><p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Rebalanseringsvy" : "Rebalancing view"}</p></div>
+            <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Jämför aktuell vikt mot AI-utkastets målvikt. Detta är beslutsstöd och skapar inga köp- eller säljorder." : "Compare current weights with the AI draft target weights. This is decision support and creates no buy or sell orders."}</p>
+            {rebalancePlan.length ? (
+              <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
+                <table className="w-full min-w-[560px] text-left text-xs"><thead className="bg-white/[0.035] text-[#8f9bac]"><tr><th className="px-3 py-2">Ticker</th><th className="px-3 py-2">{sv ? "Nuvarande" : "Current"}</th><th className="px-3 py-2">{sv ? "Målvikt" : "Target weight"}</th><th className="px-3 py-2">Delta</th></tr></thead><tbody>{rebalancePlan.slice(0, 12).map((item) => <tr key={item.ticker} className="border-t border-white/10"><td className="px-3 py-2 font-mono font-semibold text-[#e1cb95]">{item.ticker}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.currentWeight)}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.targetPortfolioWeight)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signedPercentPoints(item.deltaWeight)}</td></tr>)}</tbody></table>
+              </div>
+            ) : <p className="mt-3 rounded-lg border border-dashed border-white/10 p-3 text-xs text-[#8f9bac]">{sv ? "Kör en portföljanalys så att aktuella positionsvikter finns tillgängliga för jämförelsen." : "Run a portfolio analysis so current position weights are available for comparison."}</p>}
+          </div>
         </div>
       ) : null}
 
       {mode === "build" ? (
         <div className="mt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="flex items-center gap-2 text-sm font-semibold text-[#f4efe5]"><Target className="h-4 w-4 text-[#e1cb95]" />{sv ? "AI-utkast" : "AI draft"}</p>
-              <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? `Mål: minst ${desiredHoldingCount} innehav för vald profil, cirka ${(maxWeight * 100).toFixed(0)} % maxvikt. Kandidater rankas endast bland dina senaste StockBox-analyser.` : `Target: at least ${desiredHoldingCount} holdings for this profile, roughly ${(maxWeight * 100).toFixed(0)}% max weight. Candidates are ranked only from your recent StockBox analyses.`}</p>
-            </div>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#c9d2df]">{rankedCandidates.length} {sv ? "godkända kandidater" : "eligible candidates"}</span>
+            <div><p className="flex items-center gap-2 text-sm font-semibold text-[#f4efe5]"><Target className="h-4 w-4 text-[#e1cb95]" />{sv ? "AI-portföljutkast" : "AI portfolio draft"}</p><p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? `Mål: cirka ${plan.desiredHoldingCount} innehav, ${(plan.requestedMaxPositionWeight * 100).toFixed(0)} % maxvikt och ${cashReservePercent}% kassareserv. Endast färska kvalificerade StockBox-analyser kan väljas.` : `Target: roughly ${plan.desiredHoldingCount} holdings, ${(plan.requestedMaxPositionWeight * 100).toFixed(0)}% max weight and ${cashReservePercent}% cash reserve. Only fresh qualifying StockBox analyses can be selected.`}</p></div>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#c9d2df]">{plan.allocation.length} {sv ? "valda kandidater" : "selected candidates"}</span>
           </div>
 
-          {buildCapRelaxed ? (
-            <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">
-              {sv
-                ? `Underlaget innehåller bara ${modelPortfolio.length} kvalificerade kandidater. För att kunna allokera 100 % måste utkastet därför tillfälligt tillåta upp till ${(effectiveBuildMaxWeight * 100).toFixed(1)} % per position. Analysera fler bolag för att nå målprofilens ${(maxWeight * 100).toFixed(0)} %-tak.`
-                : `Only ${modelPortfolio.length} eligible candidates are available. To allocate 100%, the draft must temporarily allow up to ${(effectiveBuildMaxWeight * 100).toFixed(1)}% per position. Analyze more companies to reach the profile's ${(maxWeight * 100).toFixed(0)}% cap.`}
-            </div>
-          ) : null}
+          {plan.capRelaxed ? <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">{sv ? `För få färska kandidater finns för målprofilens viktgräns. Utkastet måste därför tillfälligt tillåta upp till ${(plan.effectiveMaxPositionWeight * 100).toFixed(1)} % per position. Analysera fler bolag innan du betraktar fördelningen som färdig.` : `There are too few fresh candidates for the profile's weight cap. The draft must temporarily allow up to ${(plan.effectiveMaxPositionWeight * 100).toFixed(1)}% per position. Analyze more companies before treating the allocation as complete.`}</div> : null}
 
-          {modelPortfolio.length ? (
+          {plan.allocation.length ? (
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {modelPortfolio.map((candidate, index) => (
+              {plan.allocation.map((candidate, index) => (
                 <div key={candidate.ticker} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div><span className="text-[10px] font-semibold text-[#6f7b8c]">#{index + 1}</span><p className="mt-0.5 font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div>
-                    <div className="text-right"><p className="text-lg font-semibold text-[#f4efe5]">{(candidate.targetWeight * 100).toFixed(1)}%</p><p className="text-[10px] text-[#6f7b8c]">{sv ? "målvikt" : "target"}</p></div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-[#9aa7b8]"><span className="rounded bg-white/5 px-2 py-1">Score {Math.round(n(candidate.score))}</span>{candidate.recommendation ? <span className="rounded bg-white/5 px-2 py-1">{candidate.recommendation}</span> : null}<span className="rounded bg-white/5 px-2 py-1">Q {Math.round(n(candidate.quality))}</span><span className="rounded bg-white/5 px-2 py-1">R {Math.round(n(candidate.risk))}</span></div>
+                  <div className="flex items-start justify-between gap-3"><div><span className="text-[10px] font-semibold text-[#6f7b8c]">#{index + 1}</span><p className="mt-0.5 font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div><div className="text-right"><p className="text-lg font-semibold text-[#f4efe5]">{formatPercent(candidate.targetPortfolioWeight)}</p><p className="mt-0.5 text-xs font-semibold text-[#c9d2df]">{formatMoney(candidate.targetAmount, budgetCurrency, locale)}</p><p className="mt-0.5 text-[10px] text-[#6f7b8c]">{sv ? "målvikt / belopp" : "target / amount"}</p></div></div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-[#9aa7b8]"><span className="rounded bg-white/5 px-2 py-1">Score {Math.round(candidate.score ?? 0)}</span>{candidate.recommendation ? <span className="rounded bg-white/5 px-2 py-1">{candidate.recommendation}</span> : null}<span className="rounded bg-white/5 px-2 py-1">Q {Math.round(candidate.quality ?? 0)}</span><span className="rounded bg-white/5 px-2 py-1">R {Math.round(candidate.risk ?? 0)}</span></div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-white/15 p-5 text-sm text-[#9aa7b8]">
-              {sv ? "Det finns inte tillräckligt med färska StockBox-analyser för att bygga ett datagrundat utkast ännu. Analysera några bolag först så kan AI-byggaren rangordna dem." : "There are not enough recent StockBox analyses to build a grounded draft yet. Analyze a few companies first and the builder can rank them."}
-              <ButtonLink href="/analyze" variant="secondary" className="mt-3 w-fit"><Sparkles className="h-4 w-4" />{sv ? "Analysera kandidater" : "Analyze candidates"}</ButtonLink>
-            </div>
+            <div className="mt-4 rounded-xl border border-dashed border-white/15 p-5 text-sm text-[#9aa7b8]">{sv ? "Det finns inte tillräckligt med färska StockBox-analyser för ett datagrundat portföljutkast. AI:n väljer hellre inga bolag än att gissa." : "There are not enough fresh StockBox analyses for a grounded portfolio draft. The AI prefers selecting no companies over guessing."}<ButtonLink href="/analyze" variant="secondary" className="mt-3 w-fit"><Sparkles className="h-4 w-4" />{sv ? "Analysera kandidater" : "Analyze candidates"}</ButtonLink></div>
           )}
-          <p className="mt-4 text-[11px] leading-5 text-[#6f7b8c]">{sv ? "AI-utkastet är ett analys- och beslutsstöd. Det skapar inga köporder och använder inga bolag som saknar StockBox-data. Bekräfta alltid pris, valuta, riskspridning och investeringscase innan du agerar." : "The AI draft is research and decision support. It creates no orders and never introduces companies without StockBox data. Verify price, currency, diversification and the investment thesis before acting."}</p>
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-black/10 p-3 text-[11px] leading-5 text-[#7f8b9c]"><CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0" /><p>{sv ? "Beloppen är målfördelningar av din angivna budget, inte orderstorlekar. StockBox genomför inga transaktioner och tar inte hänsyn till courtage, skatt, fractional-share-stöd eller livepris i denna plan." : "Amounts are target allocations of your entered budget, not order sizes. StockBox executes no transactions and this plan does not account for fees, taxes, fractional-share support or live execution price."}</p></div>
         </div>
       ) : null}
 
