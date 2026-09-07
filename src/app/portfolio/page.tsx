@@ -9,6 +9,7 @@ import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getP0Copy } from "@/lib/i18n/p0-copy";
 import { getLocale } from "@/lib/i18n/server";
+import { comparePortfolioSnapshots } from "@/lib/portfolio/portfolio-ai-planner";
 import { buildPortfolioPositions, calculateRealizedPortfolioPerformance, type PortfolioTransactionInput } from "@/lib/portfolio/portfolio-math";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -108,10 +109,23 @@ function recommendationTone(recommendation: string | null | undefined) {
   return "border-amber-300/25 bg-amber-950/25 text-amber-100";
 }
 
+function snapshotSignal(snapshot: SnapshotRow | null | undefined) {
+  if (!snapshot) return null;
+  return {
+    portfolioScore: numeric(snapshot.portfolio_score),
+    riskScore: numeric(snapshot.risk_score),
+    diversificationScore: numeric(snapshot.diversification_score),
+    unrealizedProfitLoss: numeric(snapshot.unrealized_pl),
+    portfolioValue: numeric(snapshot.portfolio_value),
+    largestPositionWeight: typeof snapshot.analysis_summary?.largestPositionWeight === "number" ? snapshot.analysis_summary.largestPositionWeight : null,
+  };
+}
+
 export default async function PortfolioPage({ searchParams }: PageProps) {
   const [params, user, locale] = await Promise.all([searchParams, getCurrentUser(), getLocale()]);
   const copy = getP0Copy(locale).portfolio;
   const sv = locale === "sv";
+  const aiAsOf = new Date().toISOString();
   const supabase = user ? await createClient() : null;
 
   const { data: rawPortfolios } = supabase
@@ -161,11 +175,12 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
     const realizedPerformance = calculateRealizedPortfolioPerformance(transactionInputs);
     const latest = latestSnapshot.get(portfolio.id) ?? null;
     const history = snapshots.filter((snapshot) => snapshot.portfolio_id === portfolio.id).slice(0, 10);
+    const previous = history[1] ?? null;
     const snapshotHoldings = Array.isArray(latest?.holdings) ? latest.holdings : [];
     const summary = latest?.analysis_summary ?? null;
     const concentration = typeof summary?.largestPositionWeight === "number" ? summary.largestPositionWeight : null;
     const analyzerHoldings = positions.map((position) => ({ ticker: position.ticker, lastAnalysisAt: analysisHistory.get(position.ticker)?.[0]?.created_at ?? null }));
-    return { portfolio, portfolioTransactions, positions, realizedPerformance, latest, history, snapshotHoldings, summary, concentration, analyzerHoldings };
+    return { portfolio, portfolioTransactions, positions, realizedPerformance, latest, previous, history, snapshotHoldings, summary, concentration, analyzerHoldings };
   });
 
   const selectedState = params.portfolio ? portfolioStates.find((state) => state.portfolio.id === params.portfolio) ?? null : null;
@@ -182,17 +197,24 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
       quality: dimension(latest?.report, "quality"),
       risk: dimension(latest?.report, "risk"),
       momentum: dimension(latest?.report, "momentum"),
+      analyzedAt: latest?.created_at ?? null,
     };
   });
 
   const aiPortfolioSummaries = portfolioStates.map((state) => ({
     id: state.portfolio.id,
     name: state.portfolio.name,
+    baseCurrency: state.portfolio.base_currency,
+    portfolioValue: numeric(state.latest?.portfolio_value),
     portfolioScore: numeric(state.latest?.portfolio_score),
     riskScore: numeric(state.latest?.risk_score),
     diversificationScore: numeric(state.latest?.diversification_score),
     largestPosition: state.summary?.largestPosition ?? null,
     largestPositionWeight: state.concentration,
+    snapshotDelta: comparePortfolioSnapshots(
+      snapshotSignal(state.latest),
+      snapshotSignal(state.previous),
+    ),
     holdings: state.positions.map((position) => {
       const latestAnalysis = analysisHistory.get(position.ticker)?.[0];
       const snapshotPosition = state.snapshotHoldings.find((item) => item.ticker === position.ticker && item.currency === position.currency) ?? state.snapshotHoldings.find((item) => item.ticker === position.ticker);
@@ -220,7 +242,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
               : params.error
                 ? copy.error
                 : null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = aiAsOf.slice(0, 10);
   const portfolioOptions = portfolios.map((portfolio) => ({ id: portfolio.id, name: portfolio.name, baseCurrency: portfolio.base_currency }));
 
   return (
@@ -262,7 +284,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                   <div className="rounded-xl border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-4"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-xl font-semibold">{score(selectedState.latest?.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
                 </div>
 
-                <div className="mt-5"><PortfolioAiCoach locale={locale} portfolios={aiPortfolioSummaries.filter((portfolio) => portfolio.id === selectedState.portfolio.id)} candidates={recentCandidates} /></div>
+                <div className="mt-5"><PortfolioAiCoach locale={locale} portfolios={aiPortfolioSummaries.filter((portfolio) => portfolio.id === selectedState.portfolio.id)} candidates={recentCandidates} asOf={aiAsOf} /></div>
                 <div className="mt-5"><PortfolioAnalyzer portfolioId={selectedState.portfolio.id} holdings={selectedState.analyzerHoldings} locale={locale} lastSnapshotAt={selectedState.latest?.created_at ?? null} /></div>
 
                 {selectedState.latest ? (
@@ -384,7 +406,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
             {feedback ? <p className="mt-5 rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3 text-sm text-[#e1cb95]" role="status">{feedback}</p> : null}
             {!transactionsAvailable || !snapshotsAvailable ? <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100"><AlertTriangle className="mr-2 inline h-4 w-4" />{sv ? "Portfolio 2.0-databasmigreringen saknas i den här miljön. Befintliga innehav visas utan att förstöras." : "The Portfolio 2.0 database migration is missing in this environment. Existing holdings remain visible."}</div> : null}
 
-            <div className="mt-8"><PortfolioAiCoach locale={locale} portfolios={aiPortfolioSummaries} candidates={recentCandidates} /></div>
+            <div className="mt-8"><PortfolioAiCoach locale={locale} portfolios={aiPortfolioSummaries} candidates={recentCandidates} asOf={aiAsOf} /></div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
               <Card>
