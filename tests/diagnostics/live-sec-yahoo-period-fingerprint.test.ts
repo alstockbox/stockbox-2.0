@@ -8,32 +8,12 @@ import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundament
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 const PROBE_TICKERS = ["AAPL", "NVDA", "SBUX", "MSFT", "KO", "SHOP"] as const;
 const FIVE_YEAR_PROBE_TICKERS = [
-  "AAPL",
-  "FMT.BK",
-  "SIG.CO",
-  "0205.KL",
-  "054540.KQ",
-  "002900.KS",
-  "012160.KS",
-  "GTT.PA",
-  "600403.SS",
-  "PXT.TO",
-  "B.V",
-  "RELIANCE.NS",
-  "BHP.AX",
+  "AAPL", "FMT.BK", "SIG.CO", "0205.KL", "054540.KQ", "002900.KS", "012160.KS",
+  "GTT.PA", "600403.SS", "PXT.TO", "B.V", "RELIANCE.NS", "BHP.AX",
 ] as const;
 const FIELDS = [
-  "revenue",
-  "grossProfit",
-  "operatingIncome",
-  "netIncome",
-  "operatingCashFlow",
-  "capitalExpenditures",
-  "cashAndEquivalents",
-  "totalDebt",
-  "totalEquity",
-  "totalAssets",
-  "stockBasedCompensation",
+  "revenue", "grossProfit", "operatingIncome", "netIncome", "operatingCashFlow", "capitalExpenditures",
+  "cashAndEquivalents", "totalDebt", "totalEquity", "totalAssets", "stockBasedCompensation",
 ] as const satisfies ReadonlyArray<keyof FinancialPeriod>;
 
 type JsonObject = Record<string, unknown>;
@@ -65,21 +45,16 @@ function fingerprint(period: FinancialPeriod | null | undefined) {
 }
 
 function providerFingerprint(fundamentals: CompanyFundamentals) {
-  return {
-    annual: (fundamentals.annualPeriods ?? []).map(fingerprint),
-    ttm: fingerprint(fundamentals.trailingTwelveMonths),
-  };
+  return { annual: (fundamentals.annualPeriods ?? []).map(fingerprint), ttm: fingerprint(fundamentals.trailingTwelveMonths) };
 }
 
-async function rawYahooAnnualRevenue(symbol: string) {
+async function rawYahooAnnualRevenue(symbol: string, period2Unix?: number) {
   const url = new URL(`https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("type", "annualTotalRevenue");
   url.searchParams.set("period1", "1262304000");
-  url.searchParams.set("period2", String(Math.floor(Date.now() / 1000) + 86_400));
-  const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": "Mozilla/5.0 StockBox/1.0" },
-  });
+  url.searchParams.set("period2", String(period2Unix ?? Math.floor(Date.now() / 1000) + 86_400));
+  const response = await fetch(url, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 StockBox/1.0" } });
   const payload = response.ok ? object(await response.json()) : null;
   const timeseries = object(payload?.timeseries);
   const results = Array.isArray(timeseries?.result) ? timeseries.result : [];
@@ -99,31 +74,18 @@ async function rawYahooAnnualRevenue(symbol: string) {
       }];
     });
   }).sort((a, b) => a.date.localeCompare(b.date));
-  return {
-    status: response.status,
-    rows,
-    resultCount: results.length,
-    error: object(timeseries?.error),
-  };
+  return { status: response.status, rows, resultCount: results.length, error: object(timeseries?.error) };
 }
 
 liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
   it("captures provider period identity and field completeness before resolver merging", async () => {
     const rows: Array<Record<string, unknown>> = [];
-
     for (const ticker of PROBE_TICKERS) {
       const candidates = await searchCompanies(ticker);
-      const company = candidates.find((candidate) =>
-        (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker
-      );
+      const company = candidates.find((candidate) => (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker);
       expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
       if (!company) continue;
-
-      const [sec, yahoo] = await Promise.all([
-        fetchCompanyFundamentalsResult(company),
-        fetchYahooFundamentalsResult(company),
-      ]);
-
+      const [sec, yahoo] = await Promise.all([fetchCompanyFundamentalsResult(company), fetchYahooFundamentalsResult(company)]);
       rows.push({
         ticker,
         cik: company.cik ?? null,
@@ -131,23 +93,22 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
         yahoo: yahoo.ok ? providerFingerprint(yahoo.data) : { failure: yahoo.reason, diagnostic: yahoo.diagnostic },
       });
     }
-
     console.log(`SEC_YAHOO_PERIOD_FINGERPRINT ${JSON.stringify(rows)}`);
     expect(rows).toHaveLength(PROBE_TICKERS.length);
   }, 180_000);
 
   it("traces raw Yahoo annual revenue rows against the adapter for five-year CAGR gaps", async () => {
     const rows: Array<Record<string, unknown>> = [];
+    const historicalWindowEnd = Math.floor(Date.UTC(2022, 0, 1) / 1000);
     for (const ticker of FIVE_YEAR_PROBE_TICKERS) {
       const candidates = await searchCompanies(ticker);
-      const company = candidates.find((candidate) =>
-        (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker
-      );
+      const company = candidates.find((candidate) => (candidate.canonicalTicker ?? candidate.ticker).toUpperCase() === ticker);
       expect(company, `Expected exact candidate for ${ticker}`).toBeTruthy();
       if (!company) continue;
       const symbol = (company.canonicalTicker ?? company.ticker).toUpperCase();
-      const [raw, yahoo] = await Promise.all([
+      const [raw, historicalRaw, yahoo] = await Promise.all([
         rawYahooAnnualRevenue(symbol),
+        rawYahooAnnualRevenue(symbol, historicalWindowEnd),
         fetchYahooFundamentalsResult(company),
       ]);
       rows.push({
@@ -158,6 +119,12 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
         rawRevenueCount: raw.rows.length,
         rawResultCount: raw.resultCount,
         rawError: raw.error,
+        historicalWindowEnd: "2022-01-01",
+        historicalRawStatus: historicalRaw.status,
+        historicalRawRevenueRows: historicalRaw.rows,
+        historicalRawRevenueCount: historicalRaw.rows.length,
+        historicalRawResultCount: historicalRaw.resultCount,
+        historicalRawError: historicalRaw.error,
         adapterAnnualRows: yahoo.ok ? (yahoo.data.annualPeriods ?? []).map((period) => ({
           periodEndDate: period.periodEndDate ?? null,
           fiscalYear: period.fiscalYear ?? null,
@@ -167,7 +134,7 @@ liveDescribe("live SEC/Yahoo period alignment diagnostic", () => {
         })) : [],
         adapterAnnualCount: yahoo.ok ? (yahoo.data.annualPeriods ?? []).length : 0,
         adapterFailure: yahoo.ok ? null : yahoo.reason,
-        adapterDiagnostic: yahoo.ok ? yahoo.diagnostic ?? null : yahoo.diagnostic,
+        adapterDiagnostic: yahoo.diagnostic,
       });
     }
     const outputPath = "artifacts/coverage-live/yahoo-five-year-history-fingerprint.json";
