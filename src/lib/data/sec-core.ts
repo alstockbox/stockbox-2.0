@@ -167,18 +167,23 @@ function debtAt(maps: FactMaps, end: string): { value: number | null; provenance
   const currentPortion = factAt(maps.currentPortionLongTermDebt, end);
   const commercialPaper = factAt(maps.commercialPaper, end);
   const shortTerm = factAt(maps.shortTermDebt, end);
-  const nonOverlappingDebtStack = longTerm && currentPortion && commercialPaper && !shortTerm;
+  const explicitShortTerm = commercialPaper && !shortTerm
+    ? commercialPaper
+    : shortTerm && !commercialPaper
+      ? shortTerm
+      : null;
+  const nonOverlappingDebtStack = longTerm && currentPortion && explicitShortTerm;
   if (!nonOverlappingDebtStack) return { value: null };
 
   return {
-    value: longTerm.val + currentPortion.val + commercialPaper.val,
+    value: longTerm.val + currentPortion.val + explicitShortTerm.val,
     provenance: {
       source: "StockBox SEC resolver",
       provider: "sec",
       valueKind: "derived",
       periodEnd: end,
-      inputs: [longTerm.concept, currentPortion.concept, commercialPaper.concept],
-      note: "Total debt derived from noncurrent long-term debt, current portion of long-term debt and commercial paper when no separate short-term-borrowings fact is present.",
+      inputs: [longTerm.concept, currentPortion.concept, explicitShortTerm.concept],
+      note: "Total debt derived from noncurrent long-term debt, current portion of long-term debt and one explicit standalone short-term debt component; ambiguous overlapping short-term facts are not summed.",
     },
   };
 }
