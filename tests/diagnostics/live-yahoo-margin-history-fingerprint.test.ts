@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { searchCompanies } from "../../src/lib/data/provider";
 import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundamentals";
 
+// Trigger live-audit verification for margin-stability applicability changes.
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 const PROBE_TICKERS = ["SIG.CO", "SRV1V.HE", "BESTE.IS", "0082.KL", "CASH3.SA", "B.V", "BEX.V"] as const;
 const TYPES = [
