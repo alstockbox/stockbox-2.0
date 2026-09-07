@@ -1,5 +1,5 @@
 import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
-import type { NavPerShareObservation } from "./investment-company-nav-history";
+import type { AnnualNavPerShareObservation, NavPerShareObservation } from "./investment-company-nav-history";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROVIDER_ID = "official-investment-company-nav";
@@ -122,6 +122,34 @@ function rowNumbers(row: string | null): number[] {
     });
 }
 
+function fiscalYearEnd(label: string): number | null {
+  const match = /^(\d{2}|\d{4})\/(\d{2}|\d{4})$/.exec(label.trim());
+  if (!match) return null;
+
+  const startRaw = Number.parseInt(match[1], 10);
+  const endRaw = Number.parseInt(match[2], 10);
+  let startYear = match[1].length === 4 ? startRaw : 2000 + startRaw;
+  let endYear: number;
+
+  if (match[2].length === 4) {
+    endYear = endRaw;
+    if (match[1].length === 2) {
+      const century = Math.floor(endYear / 100) * 100;
+      startYear = century + startRaw;
+      if (startYear > endYear) startYear -= 100;
+    }
+  } else if (match[1].length === 4) {
+    const century = Math.floor(startYear / 100) * 100;
+    endYear = century + endRaw;
+    if (endYear < startYear) endYear += 100;
+  } else {
+    endYear = 2000 + endRaw;
+  }
+
+  if (startYear < 2000 || endYear > 2200 || endYear !== startYear + 1) return null;
+  return endYear;
+}
+
 export function parseInvestorOfficialNav(html: string): ParsedNav | null {
   const text = htmlToText(html);
   const match = text.match(
@@ -217,6 +245,38 @@ export function parseSvolderOfficialNav(html: string): ParsedNav | null {
   const perShare = parseSwedishTableNumber(match[2]);
   if (perShare === null || perShare <= 0) return null;
   return { reportedNav: null, reportedNavPerShare: perShare, navAsOf: match[1] };
+}
+
+export function parseSvolderOfficialAnnualNavHistory(html: string): AnnualNavPerShareObservation[] {
+  const labelPattern = /^Substansvärde,?\s*SEK\b/i;
+  const table = tableContainingRow(html, labelPattern);
+  if (!table) return [];
+
+  const navRow = tableRow(table, labelPattern);
+  if (!navRow) return [];
+  const navCells = (navRow.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map(htmlToText);
+  if (navCells.length < 2 || !labelPattern.test(navCells[0])) return [];
+  const navValues = navCells.slice(1).map(parseSwedishTableNumber);
+  if (navValues.some((value) => value === null || !Number.isFinite(value) || value <= 0)) return [];
+
+  const rows = table.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) ?? [];
+  const headerYears = rows.flatMap((row) => {
+    const cells = (row.match(/<t[dh]\b[^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map(htmlToText);
+    const years = cells.flatMap((cell) => {
+      const year = fiscalYearEnd(cell);
+      return year === null ? [] : [year];
+    });
+    return years.length === navValues.length ? [years] : [];
+  })[0] ?? [];
+
+  if (headerYears.length === 0 || headerYears.length !== navValues.length) return [];
+  if (new Set(headerYears).size !== headerYears.length) return [];
+  if (!headerYears.every((year, index) => index === 0 || year === headerYears[index - 1] - 1)) return [];
+
+  return headerYears.map((year, index) => ({
+    year,
+    navPerShare: navValues[index] as number,
+  }));
 }
 
 export function parseCreadesOfficialNav(html: string): ParsedNav | null {
