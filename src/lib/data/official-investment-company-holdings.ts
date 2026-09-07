@@ -6,6 +6,7 @@ const PROVIDER_VERSION = "v1";
 const MIN_REPRESENTED_WEIGHT = 0.95;
 const MAX_ROUNDING_WEIGHT_SUM = 1.05;
 const SVOLDER_RECONCILIATION_TOLERANCE = 0.005;
+const CREADES_RECONCILIATION_TOLERANCE = 0.005;
 
 export type OfficialInvestmentCompanyHolding = {
   name: string;
@@ -30,7 +31,7 @@ export type OfficialInvestmentCompanyHoldingsResult =
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
 
 type OfficialHoldingsRegistryEntry = {
-  id: "industrivarden" | "svolder" | "lundbergs";
+  id: "industrivarden" | "svolder" | "creades" | "lundbergs";
   url: string;
   sourceName: string;
   matches: (company: CompanySearchResult) => boolean;
@@ -329,6 +330,123 @@ export function parseSvolderOfficialHoldings(
   };
 }
 
+type CreadesSection = "listed" | "unlisted";
+
+function creadesCellText(value: string): string {
+  return htmlToText(value.replace(/<sup\b[^>]*>[\s\S]*?<\/sup>/gi, " "));
+}
+
+function parseCreadesWeight(value: string): number | null {
+  const text = htmlToText(value).replace(/\u00a0/g, " ").trim();
+  const match = /^(-?\d+(?:[.,]\d+)?)\s*%?$/.exec(text);
+  if (!match) return null;
+  const percentage = Number.parseFloat(match[1].replace(",", "."));
+  if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) return null;
+  return percentage / 100;
+}
+
+export function parseCreadesOfficialHoldings(
+  html: string,
+): ParsedOfficialInvestmentCompanyHoldings | null {
+  const text = htmlToText(html);
+  const dateMatch = /\bSubstansvärde per\s+(20\d{2})-(\d{2})-(\d{2})\b/i.exec(text);
+  const asOf = dateMatch
+    ? isoDate(Number(dateMatch[1]), Number(dateMatch[2]), Number(dateMatch[3]))
+    : null;
+  if (!asOf) return null;
+
+  const table = (html.match(/<table\b[^>]*>[\s\S]*?<\/table>/gi) ?? []).find((candidate) => {
+    const tableText = htmlToText(candidate);
+    return /\bInnehav\b/i.test(tableText)
+      && /\bAndel\s*%/i.test(tableText)
+      && /\bNoterade tillgångar\b/i.test(tableText)
+      && /\bOnoterade tillgångar\b/i.test(tableText)
+      && /\bTotalt\b/i.test(tableText);
+  });
+  if (!table) return null;
+
+  const tableRows = table.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) ?? [];
+  let nameIndex = -1;
+  let weightIndex = -1;
+  let section: CreadesSection | null = null;
+  let publishedTotalWeight: number | null = null;
+  const rows: Array<{
+    name: string;
+    reportedWeight: number;
+    issuerFundamentalsEligible: boolean;
+  }> = [];
+
+  for (const row of tableRows) {
+    const cells = [...row.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((match) => match[1]);
+    if (cells.length === 0) continue;
+    const cellTexts = cells.map(creadesCellText);
+
+    if (nameIndex < 0 || weightIndex < 0) {
+      const candidateNameIndex = cellTexts.findIndex((value) => /^Innehav$/i.test(value));
+      const candidateWeightIndex = cellTexts.findIndex((value) => /^Andel\s*%$/i.test(value));
+      if (candidateNameIndex >= 0 && candidateWeightIndex >= 0) {
+        nameIndex = candidateNameIndex;
+        weightIndex = candidateWeightIndex;
+      }
+      continue;
+    }
+    if (nameIndex >= cells.length || weightIndex >= cells.length) continue;
+
+    const name = creadesCellText(cells[nameIndex]).trim().replace(/\s+/g, " ");
+    const normalizedName = name.toLocaleLowerCase("sv-SE");
+    if (normalizedName === "noterade tillgångar") {
+      section = "listed";
+      continue;
+    }
+    if (normalizedName === "onoterade tillgångar") {
+      section = "unlisted";
+      continue;
+    }
+    if (normalizedName === "totalt") {
+      const totalText = htmlToText(cells[weightIndex]).trim();
+      if (!totalText) return null;
+      publishedTotalWeight = parseCreadesWeight(cells[weightIndex]);
+      if (publishedTotalWeight === null) return null;
+      continue;
+    }
+    if (!name || section === null) continue;
+
+    const weightText = htmlToText(cells[weightIndex]).trim();
+    if (!weightText) continue;
+    const reportedWeight = parseCreadesWeight(cells[weightIndex]);
+    if (reportedWeight === null) return null;
+
+    const issuerFundamentalsEligible = section === "listed"
+      && normalizedName !== "aktiv förvaltning i kapitalförsäkring"
+      && !/^övriga\b/i.test(normalizedName);
+    rows.push({ name, reportedWeight, issuerFundamentalsEligible });
+  }
+
+  if (rows.length < 5 || publishedTotalWeight === null) return null;
+  const uniqueNames = new Set(rows.map((holding) => holding.name.toLocaleLowerCase("sv-SE")));
+  if (uniqueNames.size !== rows.length) return null;
+
+  const rawWeightSum = rows.reduce((sum, holding) => sum + holding.reportedWeight, 0);
+  if (
+    !Number.isFinite(rawWeightSum)
+    || rawWeightSum < MIN_REPRESENTED_WEIGHT
+    || rawWeightSum > MAX_ROUNDING_WEIGHT_SUM
+    || Math.abs(publishedTotalWeight - 1) > CREADES_RECONCILIATION_TOLERANCE
+    || Math.abs(rawWeightSum - publishedTotalWeight) > CREADES_RECONCILIATION_TOLERANCE
+  ) {
+    return null;
+  }
+
+  return {
+    holdings: rows.map((holding) => ({
+      ...holding,
+      weight: holding.reportedWeight / rawWeightSum,
+    })),
+    rawWeightSum,
+    asOf,
+  };
+}
+
 const LUNDBERGS_ALLOCATION_START = "Lundbergs investerar i fastigheter och börsnoterade företag.";
 const LUNDBERGS_ALLOCATION_END = "De börsnoterade innehaven är värderade till marknadsvärde.";
 const LUNDBERGS_NON_ISSUER_EXPOSURES = new Set(["lundbergs fastigheter", "övriga värdepapper"]);
@@ -421,6 +539,16 @@ const REGISTRY: OfficialHoldingsRegistryEntry[] = [
       return /\bsvol(?:-[ab])?\.st\b/.test(identity) || identity.includes("svolder");
     },
     parse: parseSvolderOfficialHoldings,
+  },
+  {
+    id: "creades",
+    url: "https://www.creades.se/innehav/substansvarde/",
+    sourceName: "Creades official NAV portfolio",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\bcred(?:-a)?\.st\b/.test(identity) || identity.includes("creades");
+    },
+    parse: parseCreadesOfficialHoldings,
   },
   {
     id: "lundbergs",
