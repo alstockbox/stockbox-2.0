@@ -269,6 +269,10 @@ function normalizeFraction(value: number | null | undefined): number | null {
   return Math.abs(value) > 2 ? value / 100 : value;
 }
 
+function validHoldingCompanyLeverageRatio(value: number | null | undefined): number | null {
+  return isFiniteNumber(value) && value >= 0 && value < 1 ? value : null;
+}
+
 function percentageScore(value: number | null | undefined): number | null {
   if (!isFiniteNumber(value)) return null;
   return clamp(value, 0, 100);
@@ -468,8 +472,8 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
   const shareholderReturn = [input.shareholderReturn5yCagr, input.shareholderReturn3yCagr].find(isFiniteNumber) ?? null;
   const grossAssets = isFiniteNumber(nav.total) && isFiniteNumber(input.debt) ? nav.total + input.debt : null;
   const derivedGrossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
-  const explicitLeverage = normalizeFraction(input.holdingCompanyLeverageRatio);
-  const grossLeverageToNav = isFiniteNumber(explicitLeverage) && explicitLeverage >= 0 ? explicitLeverage : derivedGrossLeverageToNav;
+  const explicitLeverage = validHoldingCompanyLeverageRatio(input.holdingCompanyLeverageRatio);
+  const grossLeverageToNav = explicitLeverage ?? derivedGrossLeverageToNav;
   const holdingsQuality = percentageScore(input.holdings?.length ? lookThrough.stockBoxQuality : null);
   const factors: WeightedSecurityFactor[] = [
     {
@@ -657,7 +661,7 @@ function leveragedEtfOverlay(input: EtfAnalysisInput): WeightedSecurityFactor[] 
   return [{
     key: "path_dependency", label: "Leverage / path dependency", weight: 0.20, value: leverage,
     score: structuralScore, status: isFiniteNumber(structuralScore) ? "available" : "missing",
-    rationale: "Daily reset, leverage and volatility decay are explicit structural risks; long-horizon compounding is not assumed to equal leverage times index return.",
+    rationale: "Daily reset, leverage and volatility decay are explicit structural risks; long-horizon compounding is not assumed to equal leverage times benchmark returns.",
   }];
 }
 
