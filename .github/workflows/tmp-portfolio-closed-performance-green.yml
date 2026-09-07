@@ -1,0 +1,96 @@
+name: Temporary Portfolio closed performance GREEN
+
+on:
+  push:
+    branches:
+      - fix/portfolio-closed-performance-summary-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/portfolio-closed-performance-summary-20260907
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply minimal GREEN patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/app/portfolio/page.tsx')
+          page = path.read_text()
+
+          old = '''                        {positions.length ? (
+                          <>
+                        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.portfolio_value, portfolio.base_currency, locale)}</p></div>
+                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.invested_capital, portfolio.base_currency, locale)}</p></div>
+                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.total_pl, portfolio.base_currency, locale)}</p></div>
+                          <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest?.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
+                        </div>
+
+                        {latest ? (
+                          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Realiserat P/L" : "Realized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.realized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.realized_pl, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest.unrealized_pl_percent)})</span></p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Utdelningar" : "Dividends"}</p><p className="mt-1 font-semibold text-emerald-200">{money(latest.dividend_income, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Avgifter" : "Fees"}</p><p className="mt-1 font-semibold text-red-200">{money(latest.total_fees, portfolio.base_currency, locale)}</p><p className="mt-1 text-[10px] text-[#6f7b8c]">{sv ? "Courtage" : "Trading"}: {money(latest.trading_fees, portfolio.base_currency, locale)} · {sv ? "Övrigt" : "Other"}: {money(latest.standalone_fees, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
+                          </div>
+                        ) : null}
+
+                        {latest ? (
+'''
+
+          new = '''                        {latest ? (
+                          <>
+                            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
+                              <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest.portfolio_value, portfolio.base_currency, locale)}</p></div>
+                              <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest.invested_capital, portfolio.base_currency, locale)}</p></div>
+                              <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Realiserat P/L" : "Realized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.realized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.realized_pl, portfolio.base_currency, locale)}</p></div>
+                              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest.unrealized_pl_percent)})</span></p></div>
+                              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Utdelningar" : "Dividends"}</p><p className="mt-1 font-semibold text-emerald-200">{money(latest.dividend_income, portfolio.base_currency, locale)}</p></div>
+                              <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Avgifter" : "Fees"}</p><p className="mt-1 font-semibold text-red-200">{money(latest.total_fees, portfolio.base_currency, locale)}</p><p className="mt-1 text-[10px] text-[#6f7b8c]">{sv ? "Courtage" : "Trading"}: {money(latest.trading_fees, portfolio.base_currency, locale)} · {sv ? "Övrigt" : "Other"}: {money(latest.standalone_fees, portfolio.base_currency, locale)}</p></div>
+                              <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
+                            </div>
+                          </>
+                        ) : null}
+
+                        {positions.length ? (
+                          <>
+                        {latest ? (
+                          <div className="mt-5 rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
+                        ) : null}
+
+                        {latest ? (
+'''
+
+          if page.count(old) != 1:
+              raise SystemExit(f'expected one financial summary block, found {page.count(old)}')
+          page = page.replace(old, new, 1)
+          path.write_text(page)
+          PY
+      - run: npm ci
+      - name: Verify focused GREEN test
+        run: npm test -- tests/portfolio/portfolio-closed-performance-summary.test.ts
+      - name: Commit GREEN patch and remove temporary workflows
+        run: |
+          rm .github/workflows/tmp-portfolio-closed-performance-red.yml
+          rm .github/workflows/tmp-portfolio-closed-performance-green.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/portfolio/page.tsx .github/workflows/tmp-portfolio-closed-performance-red.yml .github/workflows/tmp-portfolio-closed-performance-green.yml
+          git commit -m "fix(portfolio): keep closed performance summary visible"
+          git push origin HEAD:fix/portfolio-closed-performance-summary-20260907
