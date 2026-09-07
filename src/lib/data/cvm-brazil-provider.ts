@@ -3,6 +3,7 @@ import type {
   AnalysisSource,
   CompanyFundamentals,
   CompanySearchResult,
+  FinancialPeriod,
   ProviderDiagnostic,
 } from "@/lib/analysis/types";
 import {
@@ -152,26 +153,33 @@ function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isMissingBrlDebtPeriod(period: FinancialPeriod | null | undefined): period is FinancialPeriod {
+  return Boolean(
+    period?.periodEndDate
+    && !finite(period.totalDebt)
+    && period.currency?.trim().toUpperCase() === "BRL",
+  );
+}
+
 function targetMissingDebtPeriod(fundamentals: CompanyFundamentals) {
   const trailing = fundamentals.trailingTwelveMonths;
-  if (
-    trailing
-    && trailing.periodEndDate
-    && !finite(trailing.totalDebt)
-    && trailing.currency?.trim().toUpperCase() === "BRL"
-  ) {
-    return trailing;
-  }
+  if (isMissingBrlDebtPeriod(trailing)) return trailing;
 
   const annual = [...(fundamentals.annualPeriods ?? [])]
-    .filter((period) => (
-      Boolean(period.periodEndDate)
-      && !finite(period.totalDebt)
-      && period.currency?.trim().toUpperCase() === "BRL"
-    ))
+    .filter(isMissingBrlDebtPeriod)
     .sort((left, right) => (left.periodEndDate ?? "").localeCompare(right.periodEndDate ?? ""))
     .at(-1);
   return annual ?? null;
+}
+
+function missingDebtPeriodEnds(fundamentals: CompanyFundamentals): string[] {
+  const periods = [
+    fundamentals.trailingTwelveMonths,
+    ...(fundamentals.annualPeriods ?? []),
+    fundamentals.priorTrailingTwelveMonths,
+  ].filter(isMissingBrlDebtPeriod);
+
+  return [...new Set(periods.flatMap((period) => period.periodEndDate ? [period.periodEndDate] : []))];
 }
 
 export function resetCvmBrazilDatasetCacheForTests(): void {
@@ -260,11 +268,22 @@ export async function enrichBrazilFundamentalsWithCvmDebt(
       };
     }
 
-    const supplementedFundamentals = supplementFundamentalsWithCvmDebt(
+    let supplementedFundamentals = supplementFundamentalsWithCvmDebt(
       company,
       fundamentals,
       observation,
     );
+    for (const periodEnd of missingDebtPeriodEnds(fundamentals)) {
+      if (periodEnd === observation.periodEnd) continue;
+      const comparativeObservation = deriveCvmTotalDebt(itrRows, issuer, periodEnd);
+      if (!comparativeObservation) continue;
+      supplementedFundamentals = supplementFundamentalsWithCvmDebt(
+        company,
+        supplementedFundamentals,
+        comparativeObservation,
+      );
+    }
+
     if (supplementedFundamentals === fundamentals) {
       return {
         fundamentals,
