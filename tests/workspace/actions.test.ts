@@ -222,8 +222,6 @@ describe("workspace server actions", () => {
   });
 
   it("records dividend cash flow for a closed position when the security exists in the ledger", async () => {
-    mocks.holdingMaybeSingle.mockResolvedValueOnce({ data: null });
-
     await recordPortfolioDividendAction(data({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "aapl",
@@ -232,6 +230,7 @@ describe("workspace server actions", () => {
       transactionDate: "2026-09-06",
     }));
 
+    expect(mocks.holdingSelect).not.toHaveBeenCalled();
     expect(mocks.transactionSelect).toHaveBeenCalledWith("id");
     expect(mocks.transactionEq).toHaveBeenCalledWith("portfolio_id", "00000000-0000-4000-8000-000000000222");
     expect(mocks.transactionEq).toHaveBeenCalledWith("ticker", "AAPL");
