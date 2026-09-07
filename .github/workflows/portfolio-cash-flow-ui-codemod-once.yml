@@ -1,0 +1,33 @@
+name: Portfolio cash-flow UI codemod once
+
+on:
+  push:
+    branches:
+      - "fix/portfolio-cash-flow-edit-20260907"
+    paths:
+      - "scripts/portfolio/apply-cash-flow-history-ui.mjs"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/portfolio-cash-flow-edit-20260907
+      - name: Apply exact Portfolio UI patch
+        run: node scripts/portfolio/apply-cash-flow-history-ui.mjs
+      - name: Commit generated page change
+        run: |
+          if git diff --quiet -- src/app/portfolio/page.tsx; then
+            echo "Codemod produced no page change" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/portfolio/page.tsx
+          git commit -m "feat(portfolio): wire editable cash-flow history rows"
+          git push origin HEAD:fix/portfolio-cash-flow-edit-20260907
