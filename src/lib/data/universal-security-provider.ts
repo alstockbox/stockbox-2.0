@@ -476,6 +476,7 @@ async function enrichInvestmentCompanyReport(
     ? officialHoldings.data.holdings.map((holding) => ({
       name: holding.name,
       weight: holding.weight,
+      issuerFundamentalsEligible: holding.issuerFundamentalsEligible,
     }))
     : undefined;
   const holdingsQualitySources: AnalysisSource[] = [];
