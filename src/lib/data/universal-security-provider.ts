@@ -283,19 +283,11 @@ function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
   };
 }
 
-function verifiedInvestmentCompanyLeverageDebtEquivalent(
+function verifiedInvestmentCompanyLeverageRatio(
   years: Array<{ year: number; debtEquitiesRatio: number }> | null | undefined,
   marketYear: number | undefined,
-  navTotal: number | null | undefined,
 ): number | null {
-  if (
-    marketYear === undefined
-    || typeof navTotal !== "number"
-    || !Number.isFinite(navTotal)
-    || navTotal <= 0
-  ) {
-    return null;
-  }
+  if (marketYear === undefined) return null;
 
   const latest = [...(years ?? [])]
     .filter((point) => Number.isInteger(point.year))
@@ -306,11 +298,7 @@ function verifiedInvestmentCompanyLeverageDebtEquivalent(
   if (yearLag < 0 || yearLag > INVESTMENT_COMPANY_ANNUAL_LEVERAGE_MAX_YEAR_LAG) return null;
 
   const ratio = latest.debtEquitiesRatio;
-  if (!Number.isFinite(ratio) || ratio < 0 || ratio >= 1) return null;
-  if (ratio === 0) return 0;
-
-  const debtEquivalent = ratio * navTotal / (1 - ratio);
-  return Number.isFinite(debtEquivalent) && debtEquivalent >= 0 ? debtEquivalent : null;
+  return Number.isFinite(ratio) && ratio >= 0 && ratio < 1 ? ratio : null;
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
@@ -564,24 +552,10 @@ async function enrichInvestmentCompanyReport(
     ?? latest?.currentSharesOutstanding
     ?? latest?.sharesDiluted
     ?? null;
-  const comparableNavTotal = navComparable
-    ? officialNav.data.reportedNav
-      ?? (
-        typeof officialNav.data.reportedNavPerShare === "number"
-        && Number.isFinite(officialNav.data.reportedNavPerShare)
-        && officialNav.data.reportedNavPerShare > 0
-        && typeof dilutedShares === "number"
-        && Number.isFinite(dilutedShares)
-        && dilutedShares > 0
-          ? officialNav.data.reportedNavPerShare * dilutedShares
-          : null
-      )
-    : null;
-  const verifiedLeverageDebtEquivalent = officialKeyRatios.ok
-    ? verifiedInvestmentCompanyLeverageDebtEquivalent(
+  const verifiedLeverageRatio = officialKeyRatios.ok
+    ? verifiedInvestmentCompanyLeverageRatio(
       officialKeyRatios.data.years,
       marketYear,
-      comparableNavTotal,
     )
     : null;
 
@@ -590,7 +564,7 @@ async function enrichInvestmentCompanyReport(
     dilutedShares,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
-    debt: verifiedLeverageDebtEquivalent,
+    holdingCompanyLeverageRatio: verifiedLeverageRatio,
     ...navGrowth,
     ...shareholderReturns,
     capitalAllocationScore: capitalAllocation?.score ?? null,
