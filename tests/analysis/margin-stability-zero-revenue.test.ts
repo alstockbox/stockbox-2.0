@@ -31,6 +31,26 @@ describe("margin stability applicability", () => {
     }));
   });
 
+  it("keeps margin stability available when one zero-revenue period still leaves three valid observations", () => {
+    const input = structuredClone(durableCompounderInput);
+    input.annualPeriods = input.annualPeriods.slice(-4);
+    const zeroRevenuePeriod = input.annualPeriods[0];
+    expect(zeroRevenuePeriod).toBeTruthy();
+    if (!zeroRevenuePeriod) return;
+    zeroRevenuePeriod.revenue = 0;
+    zeroRevenuePeriod.grossProfit = 0;
+    zeroRevenuePeriod.operatingIncome = 0;
+
+    const result = analyzeFinancials(input);
+    const gross = contributorByLabel(result, "quality", "Gross margin stability");
+    const operating = contributorByLabel(result, "earningsQuality", "Operating margin stability");
+
+    expect(result.metrics.cashFlow.grossMarginStability).not.toBeNull();
+    expect(result.metrics.cashFlow.operatingMarginStability).not.toBeNull();
+    expect(gross?.availability).toBe("available");
+    expect(operating?.availability).toBe("available");
+  });
+
   it("keeps genuinely short margin history classified as missing", () => {
     const input = structuredClone(durableCompounderInput);
     input.annualPeriods = input.annualPeriods.slice(-2);
