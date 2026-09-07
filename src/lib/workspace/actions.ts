@@ -286,14 +286,15 @@ async function recordPortfolioCashFlowAction(formData: FormData, transactionType
     redirect("/portfolio?error=configuration");
     return;
   }
-  const { data: holding } = await supabase
-    .from("holdings")
+  const { data: priorTransaction } = await supabase
+    .from("portfolio_transactions")
     .select("id")
     .eq("portfolio_id", parsed.data.portfolioId)
     .eq("ticker", parsed.data.ticker)
     .eq("currency", parsed.data.currency)
+    .limit(1)
     .maybeSingle();
-  if (!holding) {
+  if (!priorTransaction) {
     redirect("/portfolio?error=holding_identity");
     return;
   }
