@@ -6,6 +6,8 @@ import { convertWithComparisonFxContext, resolveComparisonFxContexts } from "@/l
 import {
   applyPortfolioWeights,
   buildPortfolioPositions,
+  calculatePortfolioLedgerPerformance,
+  calculatePortfolioTotalProfitLoss,
   calculatePortfolioTotals,
   diversificationScore,
   weightedAverage,
@@ -91,45 +93,6 @@ function reportSignal(analysis: StoredAnalysis | null, ticker: string): Position
   };
 }
 
-async function baseCostByPosition(
-  transactions: PortfolioTransactionInput[],
-  baseCurrency: string,
-): Promise<Map<string, number | null>> {
-  const buyTransactions = transactions.filter((transaction) => transaction.type === "buy" && transaction.quantity && transaction.price !== null && transaction.price !== undefined);
-  const requests = buyTransactions.map((transaction, index) => ({
-    id: transaction.id ?? `buy-${index}`,
-    currency: transaction.currency,
-    date: transaction.executedAt,
-  }));
-  const fx = await resolveComparisonFxContexts(requests, baseCurrency);
-  const states = new Map<string, { quantity: number; baseCost: number | null }>();
-
-  for (const transaction of [...transactions].sort((left, right) => left.executedAt.localeCompare(right.executedAt))) {
-    if (transaction.type !== "buy" && transaction.type !== "sell") continue;
-    const key = `${transaction.ticker.trim().toUpperCase()}:${normalizeCurrency(transaction.currency)}`;
-    const state = states.get(key) ?? { quantity: 0, baseCost: 0 };
-    const quantity = numeric(transaction.quantity);
-    if (quantity === null || quantity <= 0) continue;
-    if (transaction.type === "buy") {
-      const price = numeric(transaction.price);
-      if (price === null || price < 0) continue;
-      const nativeAmount = quantity * price + (numeric(transaction.fees) ?? 0);
-      const requestId = transaction.id ?? requests.find((request) => request.currency === transaction.currency && request.date === transaction.executedAt)?.id;
-      const converted = requestId ? convertWithComparisonFxContext(nativeAmount, fx.get(requestId)) : null;
-      state.baseCost = state.baseCost === null || converted === null ? null : state.baseCost + converted;
-      state.quantity += quantity;
-    } else if (state.quantity > 0) {
-      const sold = Math.min(quantity, state.quantity);
-      if (state.baseCost !== null) state.baseCost = Math.max(0, state.baseCost - (state.baseCost / state.quantity) * sold);
-      state.quantity -= sold;
-    }
-    if (state.quantity <= 1e-10) states.delete(key);
-    else states.set(key, state);
-  }
-
-  return new Map([...states.entries()].map(([key, state]) => [key, state.baseCost]));
-}
-
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Sign in to analyze a portfolio." }, { status: 401 });
@@ -178,7 +141,22 @@ export async function POST(request: Request) {
   }
 
   const baseCurrency = normalizeCurrency(portfolio.base_currency);
-  const baseCosts = await baseCostByPosition(transactions, baseCurrency);
+  const historicalRequests = transactions
+    .filter((transaction): transaction is PortfolioTransactionInput & { id: string } => Boolean(transaction.id))
+    .map((transaction) => ({
+      id: transaction.id,
+      currency: transaction.currency,
+      date: transaction.executedAt,
+    }));
+  const historicalFx = await resolveComparisonFxContexts(historicalRequests, baseCurrency);
+  const historicalRates = new Map<string, number | null>(
+    historicalRequests.map((historicalRequest) => [
+      historicalRequest.id,
+      convertWithComparisonFxContext(1, historicalFx.get(historicalRequest.id)),
+    ]),
+  );
+  const ledger = calculatePortfolioLedgerPerformance(transactions, historicalRates);
+
   const marketRequests = positions.map((position, index) => {
     const analysis = latest.get(position.ticker) ?? null;
     const report = analysis?.report ?? null;
@@ -196,7 +174,7 @@ export async function POST(request: Request) {
     const report = analysis?.report ?? null;
     const currentPrice = numeric(report?.market?.price);
     const marketCurrency = report?.market?.currency ?? position.currency;
-    const baseCost = baseCosts.get(`${position.ticker}:${position.currency}`) ?? null;
+    const baseCost = ledger.costBasisBaseByPosition.get(`${position.ticker}:${position.currency}`) ?? null;
     const marketRate = convertWithComparisonFxContext(1, marketFx.get(`market-${index}`));
     const nativeMarketValue = currentPrice === null ? null : currentPrice * position.quantity;
     const marketValueBase = nativeMarketValue === null || marketRate === null ? null : nativeMarketValue * marketRate;
@@ -221,6 +199,12 @@ export async function POST(request: Request) {
   const allValued = rawValued.every((position) => position.valuationStatus === "available");
   const valued = allValued ? applyPortfolioWeights(rawValued) : rawValued;
   const totals = calculatePortfolioTotals(valued);
+  const totalProfitLoss = calculatePortfolioTotalProfitLoss({
+    realizedProfitLossBase: ledger.realizedProfitLossBase,
+    unrealizedProfitLossBase: totals.unrealizedProfitLoss,
+    dividendIncomeBase: ledger.dividendIncomeBase,
+    standaloneFeesBase: ledger.standaloneFeesBase,
+  });
   const signals = valued.map((position) => ({ position, signal: reportSignal(latest.get(position.ticker) ?? null, position.ticker) }));
   const aggregate = (key: keyof PositionSignal) => allValued
     ? weightedAverage(signals.map(({ position, signal }) => ({ value: typeof signal[key] === "number" ? signal[key] as number : null, weight: position.weight })))
@@ -245,6 +229,12 @@ export async function POST(request: Request) {
     invested_capital: totals.investedCapital,
     unrealized_pl: totals.unrealizedProfitLoss,
     unrealized_pl_percent: totals.unrealizedProfitLossPercent,
+    realized_pl: ledger.realizedProfitLossBase,
+    dividend_income: ledger.dividendIncomeBase,
+    standalone_fees: ledger.standaloneFeesBase,
+    trading_fees: ledger.tradingFeesBase,
+    total_fees: ledger.totalFeesBase,
+    total_pl: totalProfitLoss,
     portfolio_score: portfolioScore,
     risk_score: riskScore,
     valuation_score: valuationScore,
@@ -281,6 +271,15 @@ export async function POST(request: Request) {
       createdAt: snapshot.created_at,
       baseCurrency,
       totals,
+      performance: {
+        realizedProfitLoss: ledger.realizedProfitLossBase,
+        unrealizedProfitLoss: totals.unrealizedProfitLoss,
+        dividendIncome: ledger.dividendIncomeBase,
+        standaloneFees: ledger.standaloneFeesBase,
+        tradingFees: ledger.tradingFeesBase,
+        totalFees: ledger.totalFeesBase,
+        totalProfitLoss,
+      },
       portfolioScore,
       riskScore,
       valuationScore,
