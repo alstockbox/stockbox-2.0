@@ -23,7 +23,7 @@ describe("investment-company holdings quality issuer eligibility", () => {
       name: query,
       securityType: "Common Stock",
     }]);
-    const fetchHoldingFundamentals = vi.fn(async () => ({
+    const fetchHoldingFundamentals = vi.fn(async (_holding: EtfHolding) => ({
       ok: false as const,
       message: "fixture unavailable",
       diagnostic: {
