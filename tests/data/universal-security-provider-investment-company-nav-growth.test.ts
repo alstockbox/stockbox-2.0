@@ -4,6 +4,10 @@ const mocks = vi.hoisted(() => ({
   analyzeOperatingCompany: vi.fn(),
   fetchConfiguredMarketData: vi.fn(),
   fetchOfficialInvestmentCompanyNav: vi.fn(),
+  fetchOfficialInvestmentCompanyHoldings: vi.fn(),
+  fetchYahooLongHistory: vi.fn(),
+  fetchOfficialInvestmentCompanyKeyRatios: vi.fn(),
+  fetchOfficialInvestmentCompanyGovernance: vi.fn(),
   searchCompanies: vi.fn(),
 }));
 
@@ -17,7 +21,25 @@ vi.mock("@/lib/data/official-investment-company-nav", () => ({
   fetchOfficialInvestmentCompanyNav: mocks.fetchOfficialInvestmentCompanyNav,
 }));
 
+vi.mock("@/lib/data/official-investment-company-holdings", () => ({
+  fetchOfficialInvestmentCompanyHoldings: mocks.fetchOfficialInvestmentCompanyHoldings,
+}));
+
+vi.mock("@/lib/data/yahoo-long-history", () => ({
+  fetchYahooLongHistory: mocks.fetchYahooLongHistory,
+}));
+
+vi.mock("@/lib/data/official-investment-company-key-ratios", () => ({
+  fetchOfficialInvestmentCompanyKeyRatios: mocks.fetchOfficialInvestmentCompanyKeyRatios,
+}));
+
+vi.mock("@/lib/data/official-investment-company-governance", () => ({
+  fetchOfficialInvestmentCompanyGovernance: mocks.fetchOfficialInvestmentCompanyGovernance,
+}));
+
 import { analyzeCompany, type UniversalSecurityReport } from "../../src/lib/data/universal-security-provider";
+
+const observedAt = "2026-09-06T18:00:00.000Z";
 
 function coreReport(): UniversalSecurityReport {
   return {
@@ -58,6 +80,21 @@ function coreReport(): UniversalSecurityReport {
   } as unknown as UniversalSecurityReport;
 }
 
+function unavailable(provider: string) {
+  return {
+    ok: false as const,
+    reason: "fixture_unavailable",
+    message: "fixture unavailable",
+    diagnostic: {
+      provider,
+      capability: "specialized" as const,
+      status: "unavailable" as const,
+      reason: "fixture_unavailable",
+      observedAt,
+    },
+  };
+}
+
 function officialNav(navAsOf: string, history: Array<{ date: string; navPerShare: number }>) {
   return {
     ok: true as const,
@@ -66,10 +103,12 @@ function officialNav(navAsOf: string, history: Array<{ date: string; navPerShare
       reportedNavPerShare: history.find((item) => item.date === navAsOf)?.navPerShare ?? 180,
       navAsOf,
       navPerShareHistory: history,
+      annualNavPerShareHistory: [],
+      historySource: null,
       source: {
         name: "Latour official NAV disclosure",
         url: "https://www.latour.se/sv/investerare/substansvarde",
-        accessedAt: "2026-09-06T18:00:00.000Z",
+        accessedAt: observedAt,
         freshness: "official fixture",
         provider: "official-investment-company-nav",
         capability: "specialized" as const,
@@ -80,7 +119,7 @@ function officialNav(navAsOf: string, history: Array<{ date: string; navPerShare
         provider: "Official investment-company NAV",
         capability: "specialized" as const,
         status: "available" as const,
-        observedAt: "2026-09-06T18:00:00.000Z",
+        observedAt,
       },
     },
   };
@@ -91,6 +130,10 @@ describe("investment-company NAV growth production wiring", () => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     const report = coreReport();
     mocks.analyzeOperatingCompany.mockResolvedValue({ ok: true, data: report, sources: [], warnings: [] });
+    mocks.fetchOfficialInvestmentCompanyHoldings.mockResolvedValue(unavailable("Official investment-company holdings"));
+    mocks.fetchYahooLongHistory.mockResolvedValue(null);
+    mocks.fetchOfficialInvestmentCompanyKeyRatios.mockResolvedValue(unavailable("Official investment-company key ratios"));
+    mocks.fetchOfficialInvestmentCompanyGovernance.mockResolvedValue(unavailable("Official investment-company governance"));
   });
 
   it("uses verified fresh NAV/share history to make the 3Y NAV-growth factor available", async () => {
