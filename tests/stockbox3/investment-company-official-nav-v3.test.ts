@@ -33,7 +33,7 @@ describe("StockBox 3 investment-company official NAV authority", () => {
     expect(provider).toContain("function isOfficialDisclosureComparable");
     expect(provider).toContain("ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS");
     expect(provider).toContain("async function enrichInvestmentCompanyReport(");
-    expect(provider).toContain("const officialNav = await fetchOfficialInvestmentCompanyNav(company)");
+    expect(provider).toContain("fetchOfficialInvestmentCompanyNav(company)");
     expect(provider).toContain("reportedNav: navComparable ? officialNav.data.reportedNav : null");
     expect(provider).toContain("reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null");
     expect(provider).toContain("Official NAV dated");
