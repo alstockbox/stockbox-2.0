@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   rateLimitExceededResponse: vi.fn(),
   resolveComparisonFxContexts: vi.fn(),
   convertWithComparisonFxContext: vi.fn(),
-  snapshotInsert: vi.fn(),
+  snapshotRpc: vi.fn(),
 }));
 
 vi.mock("@/lib/analytics/events", () => ({ captureServerEvent: mocks.captureServerEvent }));
@@ -55,6 +55,11 @@ describe("closed portfolio snapshot", () => {
       data: { id: "00000000-0000-4000-8000-000000000222", name: "Closed", base_currency: "SEK" },
     });
 
+    const revisionQuery: Record<string, unknown> = {};
+    revisionQuery.select = vi.fn(() => revisionQuery);
+    revisionQuery.eq = vi.fn(() => revisionQuery);
+    revisionQuery.maybeSingle = vi.fn().mockResolvedValue({ data: { revision: 8 }, error: null });
+
     const transactionQuery: Record<string, unknown> = {};
     transactionQuery.select = vi.fn(() => transactionQuery);
     transactionQuery.eq = vi.fn(() => transactionQuery);
@@ -68,20 +73,20 @@ describe("closed portfolio snapshot", () => {
       error: null,
     });
 
-    const snapshotQuery: Record<string, unknown> = {};
-    mocks.snapshotInsert.mockReturnValue(snapshotQuery);
-    snapshotQuery.insert = mocks.snapshotInsert;
-    snapshotQuery.select = vi.fn(() => snapshotQuery);
-    snapshotQuery.single = vi.fn().mockResolvedValue({ data: { id: "snapshot-closed", created_at: "2026-09-07T13:00:00.000Z" }, error: null });
+    mocks.snapshotRpc.mockResolvedValue({
+      data: [{ id: "snapshot-closed", created_at: "2026-09-07T13:00:00.000Z", ledger_revision: 8 }],
+      error: null,
+    });
 
     mocks.createClient.mockResolvedValue({
       from: vi.fn((table: string) => {
         if (table === "portfolios") return portfolioQuery;
+        if (table === "portfolio_ledger_revisions") return revisionQuery;
         if (table === "portfolio_transactions") return transactionQuery;
-        if (table === "portfolio_snapshots") return snapshotQuery;
         if (table === "analyses") throw new Error("Closed portfolios must not query analyses when there are no active positions.");
         throw new Error(`Unexpected table ${table}`);
       }),
+      rpc: mocks.snapshotRpc,
     });
   });
 
@@ -93,23 +98,28 @@ describe("closed portfolio snapshot", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.snapshotInsert).toHaveBeenCalledWith(expect.objectContaining({
-      invested_capital: 0,
-      portfolio_value: 0,
-      unrealized_pl: 0,
-      unrealized_pl_percent: null,
-      realized_pl: 6378,
-      dividend_income: 345,
-      standalone_fees: 56,
-      trading_fees: 122,
-      total_fees: 178,
-      total_pl: 6667,
-      portfolio_score: null,
-      diversification_score: null,
-      holdings: [],
+    expect(mocks.snapshotRpc).toHaveBeenCalledWith("insert_portfolio_snapshot_if_current", expect.objectContaining({
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_expected_revision: 8,
+      p_snapshot: expect.objectContaining({
+        invested_capital: 0,
+        portfolio_value: 0,
+        unrealized_pl: 0,
+        unrealized_pl_percent: null,
+        realized_pl: 6378,
+        dividend_income: 345,
+        standalone_fees: 56,
+        trading_fees: 122,
+        total_fees: 178,
+        total_pl: 6667,
+        portfolio_score: null,
+        diversification_score: null,
+        holdings: [],
+      }),
     }));
 
     const body = await response.json();
+    expect(body.snapshot.ledgerRevision).toBe(8);
     expect(body.snapshot.totals).toEqual({
       investedCapital: 0,
       marketValue: 0,
