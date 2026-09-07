@@ -3,6 +3,7 @@ import { AlertTriangle, BriefcaseBusiness, CalendarDays, Plus, Save, Trash2, Tre
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { PortfolioAnalyzer } from "@/components/portfolio/portfolio-analyzer";
 import { PortfolioCashFlowForm } from "@/components/portfolio/portfolio-cash-flow-form";
+import { PortfolioCashFlowHistoryRow } from "@/components/portfolio/portfolio-cash-flow-history-row";
 import { PortfolioPurchaseForm } from "@/components/portfolio/portfolio-purchase-form";
 import { PortfolioSaleForm } from "@/components/portfolio/portfolio-sale-form";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -355,7 +356,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                       <form action={removePortfolioTransactionAction}><input type="hidden" name="id" value={transaction.id} /><Button variant="ghost" className="min-h-10" title={sv ? "Ta bort transaktion" : "Delete transaction"}><Trash2 className="h-4 w-4" /><span className="sr-only">{sv ? "Ta bort" : "Delete"} {transaction.ticker}</span></Button></form>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center justify-between gap-3 text-sm"><span><span className="mr-2 rounded bg-white/8 px-2 py-1 text-[10px] uppercase">{transaction.transaction_type}</span><strong>{transaction.ticker}</strong> · {money(transaction.cash_amount, transaction.currency, locale)} · {transaction.executed_at}</span><form action={removePortfolioTransactionAction}><input type="hidden" name="id" value={transaction.id} /><Button variant="ghost" className="min-h-10"><Trash2 className="h-4 w-4" /><span className="sr-only">{sv ? "Ta bort" : "Delete"}</span></Button></form></div>
+                                    <PortfolioCashFlowHistoryRow
+                                      id={transaction.id}
+                                      ticker={transaction.ticker}
+                                      transactionType={transaction.transaction_type}
+                                      cashAmount={transaction.cash_amount}
+                                      currency={transaction.currency}
+                                      executedAt={transaction.executed_at}
+                                      today={today}
+                                      locale={locale}
+                                    />
                                   )}
                                 </div>
                               ))}
