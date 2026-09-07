@@ -50,6 +50,14 @@ describe("official Lundbergs holdings", () => {
     expect(parsed?.holdings.find((holding) => holding.name === "Industrivärden")?.reportedWeight).toBeCloseTo(0.297, 12);
     expect(parsed?.holdings.find((holding) => holding.name === "Lundbergs Fastigheter")?.reportedWeight).toBeCloseTo(0.16, 12);
     expect(parsed?.holdings.find((holding) => holding.name === "Övriga värdepapper")?.reportedWeight).toBeCloseTo(0.016, 12);
+
+    const classifiedHoldings = parsed?.holdings as Array<{
+      name: string;
+      issuerFundamentalsEligible?: boolean;
+    }> | undefined;
+    expect(classifiedHoldings?.find((holding) => holding.name === "Industrivärden")?.issuerFundamentalsEligible).toBe(true);
+    expect(classifiedHoldings?.find((holding) => holding.name === "Lundbergs Fastigheter")?.issuerFundamentalsEligible).toBe(false);
+    expect(classifiedHoldings?.find((holding) => holding.name === "Övriga värdepapper")?.issuerFundamentalsEligible).toBe(false);
   });
 
   it("ignores unrelated percentage list items outside the issuer's official allocation section", () => {
