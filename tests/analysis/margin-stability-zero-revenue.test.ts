@@ -3,7 +3,7 @@ import { analyzeFinancials } from "../../src/lib/analysis";
 import { durableCompounderInput } from "./fixtures";
 
 function contributorByLabel(result: ReturnType<typeof analyzeFinancials>, dimension: "quality" | "earningsQuality", label: string) {
-  return result.scores.dimensions[dimension].contributors.find((item) => item.label === label);
+  return result.scores.dimensions[dimension]?.contributors.find((item) => item.label === label);
 }
 
 describe("margin stability applicability", () => {
