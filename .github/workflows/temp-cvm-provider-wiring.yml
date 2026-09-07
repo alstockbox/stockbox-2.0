@@ -1,0 +1,102 @@
+name: Temp CVM Provider Wiring
+
+on:
+  push:
+    branches:
+      - fix/coverage-engine-root-cause
+    paths:
+      - .github/workflows/temp-cvm-provider-wiring.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/coverage-engine-root-cause
+          fetch-depth: 0
+
+      - name: Guard and wire CVM supplement
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/provider-core.ts")
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'import { searchCompanyCatalog } from "./company-search";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";',
+                  'import { searchCompanyCatalog } from "./company-search";\nimport { enrichBrazilFundamentalsWithCvmDebt } from "./cvm-brazil-provider";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";',
+              ),
+              (
+                  '''  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
+  const rawMarket = marketResult.ok ? marketResult.data : null;
+  const fundamentals = rawFundamentals ? await enrichFundamentalsWithEcbFcfYield(rawFundamentals) : null;
+  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
+  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];''',
+                  '''  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
+  const rawMarket = marketResult.ok ? marketResult.data : null;
+  const cvmEnrichment = rawFundamentals
+    ? await enrichBrazilFundamentalsWithCvmDebt(company, rawFundamentals)
+    : null;
+  const regionalFundamentals = cvmEnrichment?.fundamentals ?? rawFundamentals;
+  const fundamentals = regionalFundamentals ? await enrichFundamentalsWithEcbFcfYield(regionalFundamentals) : null;
+  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
+  const providerDiagnostics = [
+    ...fundamentalsResolution.diagnostics,
+    ...(cvmEnrichment?.diagnostic ? [cvmEnrichment.diagnostic] : []),
+    ...marketResolution.diagnostics,
+    ...(filingsResult ? [filingsResult.diagnostic] : []),
+  ];''',
+              ),
+              (
+                  '''    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({
+      ...source,
+      accessedAt,
+      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,
+    })));
+  } else {''',
+                  '''    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({
+      ...source,
+      accessedAt,
+      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,
+    })));
+    if (cvmEnrichment?.source) {
+      sources.push({
+        ...cvmEnrichment.source,
+        accessedAt,
+      });
+    }
+  } else {''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Guard failed: expected exactly one match, found {count}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- src/lib/data/provider-core.ts
+
+      - name: Commit wiring
+        shell: bash
+        run: |
+          if git diff --quiet -- src/lib/data/provider-core.ts; then
+            echo "No provider-core change to commit"
+            exit 1
+          fi
+          git config user.name "stockbox-ci"
+          git config user.email "stockbox-ci@users.noreply.github.com"
+          git add src/lib/data/provider-core.ts
+          git commit -m "fix: wire CVM debt supplement into provider core"
+          git push origin HEAD:fix/coverage-engine-root-cause
