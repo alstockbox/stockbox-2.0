@@ -57,7 +57,7 @@ const company = {
   securityType: "Common Stock" as const,
 };
 
-function coreHoldingCompanyReport(): UniversalSecurityReport {
+function coreHoldingCompanyReport(marketDate = "2026-09-05"): UniversalSecurityReport {
   return {
     id: "industrivarden-nav-growth-fixture",
     ticker: company.ticker,
@@ -112,7 +112,7 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
       ticker: company.ticker,
       price: 420,
       currency: "SEK",
-      date: "2026-09-05",
+      date: marketDate,
       volume: null,
       marketCap: 182_000_000_000,
       sharesOutstanding: 432_000_000,
@@ -123,8 +123,8 @@ function coreHoldingCompanyReport(): UniversalSecurityReport {
     engine: {
       metrics: {
         latestPeriod: {
-          fiscalYear: 2025,
-          periodEndDate: "2025-12-31",
+          fiscalYear: Number(marketDate.slice(0, 4)) - 1,
+          periodEndDate: `${Number(marketDate.slice(0, 4)) - 1}-12-31`,
           cashAndEquivalents: 2_000_000_000,
           totalDebt: 8_000_000_000,
         },
@@ -162,14 +162,17 @@ function unavailableLongHistory() {
   };
 }
 
-function officialNavSuccess() {
+function officialNavSuccess(
+  navAsOf = "2026-06-30",
+  navPerShareHistory: Array<{ date: string; navPerShare: number }> = [],
+) {
   return {
     ok: true as const,
     data: {
       reportedNav: 216_000_000_000,
       reportedNavPerShare: 500,
-      navAsOf: "2026-06-30",
-      navPerShareHistory: [],
+      navAsOf,
+      navPerShareHistory,
       source: {
         name: "Industrivärden official NAV disclosure",
         url: "https://www.industrivarden.se/en-gb/investors/the-industrivarden-share/net-asset-value/",
@@ -177,7 +180,7 @@ function officialNavSuccess() {
         freshness: "current official NAV fixture",
         provider: "official-investment-company-nav",
         capability: "specialized" as const,
-        dataAsOf: "2026-06-30",
+        dataAsOf: navAsOf,
         version: "official-investment-company-nav-v3",
       },
       diagnostic: {
@@ -213,8 +216,8 @@ function keyRatioYear(
   };
 }
 
-function officialKeyRatiosSuccess() {
-  const years = [
+function defaultKeyRatioYears(): InvestmentCompanyKeyRatioYear[] {
+  return [
     keyRatioYear(2025, 300),
     keyRatioYear(2024, 285),
     keyRatioYear(2023, 270),
@@ -222,6 +225,9 @@ function officialKeyRatiosSuccess() {
     keyRatioYear(2021, 225),
     keyRatioYear(2020, 200),
   ];
+}
+
+function officialKeyRatiosSuccess(years = defaultKeyRatioYears()) {
   return {
     ok: true as const,
     data: {
@@ -233,7 +239,7 @@ function officialKeyRatiosSuccess() {
         freshness: "official annual history fixture",
         provider: "official-investment-company-key-ratios",
         capability: "specialized" as const,
-        dataAsOf: "2025-12-31",
+        dataAsOf: `${years[0]?.year ?? 2025}-12-31`,
         version: "v2",
       },
       diagnostic: {
@@ -289,6 +295,62 @@ describe("Industrivärden annual NAV-growth production wiring", () => {
       item.provider === "Official investment-company key ratios"
       && item.status === "available"
     ))).toBe(true);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("fails annual NAV growth closed when the latest annual observation is more than one year behind the market year", async () => {
+    mocks.analyzeOperatingCompany.mockResolvedValueOnce({
+      ok: true,
+      data: coreHoldingCompanyReport("2028-09-05"),
+      sources: [],
+      warnings: [],
+    });
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2028-06-30"));
+
+    const result = await analyzeCompany({
+      company,
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const navGrowth = report.securityAnalysis?.investmentCompany?.score.factors.find(
+      (factor) => factor.key === "nav_growth",
+    );
+
+    expect(navGrowth?.status).toBe("missing");
+    expect(navGrowth?.value).toBeNull();
+    expect(report.dataCoverage).toBeCloseTo(0.46, 12);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("uses annual history for missing longer periods when fresh dated NAV history only supports a shorter period", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2026-06-30", [
+      { date: "2025-06-30", navPerShare: 450 },
+      { date: "2026-06-30", navPerShare: 500 },
+    ]));
+
+    const result = await analyzeCompany({
+      company,
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const navGrowth = report.securityAnalysis?.investmentCompany?.score.factors.find(
+      (factor) => factor.key === "nav_growth",
+    );
+    const expected5yCagr = (300 / 200) ** (1 / 5) - 1;
+
+    expect(navGrowth?.status).toBe("available");
+    expect(navGrowth?.value).toBeCloseTo(expected5yCagr, 12);
+    expect(report.dataCoverage).toBeCloseTo(0.61, 12);
     expect(report.recommendation).toBe("No Rating");
   });
 });
