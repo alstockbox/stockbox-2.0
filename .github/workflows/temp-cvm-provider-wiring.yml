@@ -28,54 +28,61 @@ jobs:
           path = Path("src/lib/data/provider-core.ts")
           text = path.read_text()
 
-          replacements = [
-              (
-                  'import { searchCompanyCatalog } from "./company-search";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";',
-                  'import { searchCompanyCatalog } from "./company-search";\nimport { enrichBrazilFundamentalsWithCvmDebt } from "./cvm-brazil-provider";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";',
-              ),
-              (
-                  '''  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
-  const rawMarket = marketResult.ok ? marketResult.data : null;
-  const fundamentals = rawFundamentals ? await enrichFundamentalsWithEcbFcfYield(rawFundamentals) : null;
-  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
-  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];''',
-                  '''  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
-  const rawMarket = marketResult.ok ? marketResult.data : null;
-  const cvmEnrichment = rawFundamentals
-    ? await enrichBrazilFundamentalsWithCvmDebt(company, rawFundamentals)
-    : null;
-  const regionalFundamentals = cvmEnrichment?.fundamentals ?? rawFundamentals;
-  const fundamentals = regionalFundamentals ? await enrichFundamentalsWithEcbFcfYield(regionalFundamentals) : null;
-  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
-  const providerDiagnostics = [
-    ...fundamentalsResolution.diagnostics,
-    ...(cvmEnrichment?.diagnostic ? [cvmEnrichment.diagnostic] : []),
-    ...marketResolution.diagnostics,
-    ...(filingsResult ? [filingsResult.diagnostic] : []),
-  ];''',
-              ),
-              (
-                  '''    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({
-      ...source,
-      accessedAt,
-      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,
-    })));
-  } else {''',
-                  '''    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({
-      ...source,
-      accessedAt,
-      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,
-    })));
-    if (cvmEnrichment?.source) {
-      sources.push({
-        ...cvmEnrichment.source,
-        accessedAt,
-      });
-    }
-  } else {''',
-              ),
-          ]
+          old_import = 'import { searchCompanyCatalog } from "./company-search";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";'
+          new_import = 'import { searchCompanyCatalog } from "./company-search";\nimport { enrichBrazilFundamentalsWithCvmDebt } from "./cvm-brazil-provider";\nimport { enrichFundamentalsWithEcbFcfYield } from "./fcf-yield-fx";'
 
+          old_analysis = "\n".join([
+              "  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;",
+              "  const rawMarket = marketResult.ok ? marketResult.data : null;",
+              "  const fundamentals = rawFundamentals ? await enrichFundamentalsWithEcbFcfYield(rawFundamentals) : null;",
+              "  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);",
+              "  const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];",
+          ])
+          new_analysis = "\n".join([
+              "  const rawFundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;",
+              "  const rawMarket = marketResult.ok ? marketResult.data : null;",
+              "  const cvmEnrichment = rawFundamentals",
+              "    ? await enrichBrazilFundamentalsWithCvmDebt(company, rawFundamentals)",
+              "    : null;",
+              "  const regionalFundamentals = cvmEnrichment?.fundamentals ?? rawFundamentals;",
+              "  const fundamentals = regionalFundamentals ? await enrichFundamentalsWithEcbFcfYield(regionalFundamentals) : null;",
+              "  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);",
+              "  const providerDiagnostics = [",
+              "    ...fundamentalsResolution.diagnostics,",
+              "    ...(cvmEnrichment?.diagnostic ? [cvmEnrichment.diagnostic] : []),",
+              "    ...marketResolution.diagnostics,",
+              "    ...(filingsResult ? [filingsResult.diagnostic] : []),",
+              "  ];",
+          ])
+
+          old_sources = "\n".join([
+              "    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({",
+              "      ...source,",
+              "      accessedAt,",
+              "      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,",
+              "    })));",
+              "  } else {",
+          ])
+          new_sources = "\n".join([
+              "    sources.push(...(fundamentalsResolution.sources ?? []).map((source) => ({",
+              "      ...source,",
+              "      accessedAt,",
+              "      dataAsOf: source.dataAsOf ?? fundamentals.diagnostics?.latestFinancialPeriodEnd ?? null,",
+              "    })));",
+              "    if (cvmEnrichment?.source) {",
+              "      sources.push({",
+              "        ...cvmEnrichment.source,",
+              "        accessedAt,",
+              "      });",
+              "    }",
+              "  } else {",
+          ])
+
+          replacements = [
+              (old_import, new_import),
+              (old_analysis, new_analysis),
+              (old_sources, new_sources),
+          ]
           for old, new in replacements:
               count = text.count(old)
               if count != 1:
