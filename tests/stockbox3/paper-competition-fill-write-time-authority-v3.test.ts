@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 const migrationPath = "supabase/migrations/20260907141500_paper_competition_fill_write_time_authority_v3.sql";
 
 describe("Paper Trading V3 competition fill write-time authority", () => {
-  it("atomically revalidates competition state and the half-open trading window using the DB clock at fill persistence", () => {
+  it("atomically revalidates active competition state and the official inclusive-end window using the DB clock at fill persistence", () => {
     expect(existsSync(migrationPath)).toBe(true);
     const sql = readFileSync(migrationPath, "utf8").toLowerCase();
 
@@ -14,11 +14,11 @@ describe("Paper Trading V3 competition fill write-time authority", () => {
     expect(sql).toContain("for update");
     expect(sql).toContain("v_competition.status <> 'active'");
     expect(sql).toContain("v_now < v_competition.starts_at");
-    expect(sql).toContain("v_now >= v_competition.ends_at");
+    expect(sql).toContain("v_now > v_competition.ends_at");
     expect(sql).toContain("new.executed_at < v_competition.starts_at");
-    expect(sql).toContain("new.executed_at >= v_competition.ends_at");
+    expect(sql).toContain("new.executed_at > v_competition.ends_at");
     expect(sql).toContain("new.market_observed_at < v_competition.starts_at");
-    expect(sql).toContain("new.market_observed_at >= v_competition.ends_at");
+    expect(sql).toContain("new.market_observed_at > v_competition.ends_at");
     expect(sql).toContain("if v_account_type <> 'competition' then");
     expect(sql).toContain("return new;");
     expect(sql).toContain("paper competition fill outside official window");
