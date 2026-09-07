@@ -52,6 +52,20 @@ describe("official Lundbergs holdings", () => {
     expect(parsed?.holdings.find((holding) => holding.name === "Övriga värdepapper")?.reportedWeight).toBeCloseTo(0.016, 12);
   });
 
+  it("ignores unrelated percentage list items outside the issuer's official allocation section", () => {
+    const withUnrelatedPercentageList = COMPLETE_LUNDBERGS_HTML.replace(
+      "<main>",
+      "<main><nav><ul><li>Unrelated navigation metric 4,0%</li></ul></nav>",
+    );
+
+    const parsed = parseLundbergsOfficialHoldings(withUnrelatedPercentageList);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.rawWeightSum).toBeCloseTo(1.01, 12);
+    expect(parsed?.holdings).toHaveLength(11);
+    expect(parsed?.holdings.some((holding) => holding.name === "Unrelated navigation metric")).toBe(false);
+  });
+
   it("fails closed when a material portfolio row is missing instead of renormalizing incomplete exposure", () => {
     const incomplete = COMPLETE_LUNDBERGS_HTML.replace("<li>Industrivärden 29,7%</li>", "");
 
