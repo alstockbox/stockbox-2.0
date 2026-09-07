@@ -9,6 +9,8 @@ export type OfficialInvestmentCompanyNavData = {
   reportedNavPerShare: number | null;
   navAsOf: string | null;
   navPerShareHistory: NavPerShareObservation[];
+  annualNavPerShareHistory: AnnualNavPerShareObservation[];
+  historySource: AnalysisSource | null;
   source: AnalysisSource;
   diagnostic: ProviderDiagnostic;
 };
@@ -27,6 +29,8 @@ type OfficialNavFetchResult = {
   parsed: ParsedNav | null;
   url: string;
   navPerShareHistory: NavPerShareObservation[];
+  annualNavPerShareHistory: AnnualNavPerShareObservation[];
+  historyUrl: string | null;
 };
 
 type OfficialNavRegistryEntry = {
@@ -326,6 +330,10 @@ async function fetchText(url: string): Promise<string | null> {
   }
 }
 
+function emptyHistoryFields(): Pick<OfficialNavFetchResult, "annualNavPerShareHistory" | "historyUrl"> {
+  return { annualNavPerShareHistory: [], historyUrl: null };
+}
+
 async function investorFetcher(): Promise<OfficialNavFetchResult> {
   const year = new Date().getUTCFullYear();
   const url = `https://www.investorab.com/investors-media/reports-presentations/${year}`;
@@ -334,6 +342,7 @@ async function investorFetcher(): Promise<OfficialNavFetchResult> {
     parsed: html ? parseInvestorOfficialNav(html) : null,
     url,
     navPerShareHistory: [],
+    ...emptyHistoryFields(),
   };
 }
 
@@ -344,6 +353,7 @@ async function latourFetcher(): Promise<OfficialNavFetchResult> {
     parsed: html ? parseLatourOfficialNav(html) : null,
     url,
     navPerShareHistory: html ? parseLatourOfficialNavHistory(html) : [],
+    ...emptyHistoryFields(),
   };
 }
 
@@ -364,7 +374,7 @@ async function industrivardenFetcher(): Promise<OfficialNavFetchResult> {
     for (const url of [...new Set(hrefs)].slice(0, 4)) {
       const html = await fetchText(url);
       const parsed = html ? parseIndustrivardenOfficialNav(html) : null;
-      if (parsed) return { parsed, url, navPerShareHistory: [] };
+      if (parsed) return { parsed, url, navPerShareHistory: [], ...emptyHistoryFields() };
     }
   }
 
@@ -374,16 +384,21 @@ async function industrivardenFetcher(): Promise<OfficialNavFetchResult> {
     parsed: fallbackHtml ? parseIndustrivardenOfficialNav(fallbackHtml) : null,
     url: fallbackUrl,
     navPerShareHistory: [],
+    ...emptyHistoryFields(),
   };
 }
 
 async function svolderFetcher(): Promise<OfficialNavFetchResult> {
   const url = "https://svolder.se/pressreleaser/";
-  const html = await fetchText(url);
+  const historyUrl = "https://svolder.se/investor-relations/svolderaktien/";
+  const [html, historyHtml] = await Promise.all([fetchText(url), fetchText(historyUrl)]);
+  const annualNavPerShareHistory = historyHtml ? parseSvolderOfficialAnnualNavHistory(historyHtml) : [];
   return {
     parsed: html ? parseSvolderOfficialNav(html) : null,
     url,
     navPerShareHistory: [],
+    annualNavPerShareHistory,
+    historyUrl: annualNavPerShareHistory.length > 0 ? historyUrl : null,
   };
 }
 
@@ -394,6 +409,7 @@ async function creadesFetcher(): Promise<OfficialNavFetchResult> {
     parsed: html ? parseCreadesOfficialNav(html) : null,
     url,
     navPerShareHistory: [],
+    ...emptyHistoryFields(),
   };
 }
 
@@ -404,6 +420,7 @@ async function lundbergsFetcher(): Promise<OfficialNavFetchResult> {
     parsed: html ? parseLundbergsOfficialNav(html) : null,
     url,
     navPerShareHistory: [],
+    ...emptyHistoryFields(),
   };
 }
 
@@ -450,7 +467,7 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
     };
   }
 
-  const { parsed, url, navPerShareHistory } = await entry.fetch();
+  const { parsed, url, navPerShareHistory, annualNavPerShareHistory, historyUrl } = await entry.fetch();
   if (!parsed || (parsed.reportedNav === null && parsed.reportedNavPerShare === null)) {
     return {
       ok: false,
@@ -460,11 +477,26 @@ export async function fetchOfficialInvestmentCompanyNav(company: CompanySearchRe
   }
 
   const accessedAt = new Date().toISOString();
+  const historySource: AnalysisSource | null = historyUrl && annualNavPerShareHistory.length > 0
+    ? {
+      name: `${company.name} official annual NAV history`,
+      url: historyUrl,
+      accessedAt,
+      freshness: "Fiscal-year NAV/share history is fetched directly from the investment company's official investor-relations key-figures table at analysis time.",
+      provider: PROVIDER_ID,
+      capability: "specialized",
+      dataAsOf: null,
+      version: "official-investment-company-nav-annual-history-v1",
+    }
+    : null;
+
   return {
     ok: true,
     data: {
       ...parsed,
       navPerShareHistory,
+      annualNavPerShareHistory,
+      historySource,
       source: {
         name: `${company.name} official NAV disclosure`,
         url,
