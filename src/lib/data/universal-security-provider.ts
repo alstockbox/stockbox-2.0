@@ -46,7 +46,10 @@ import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-c
 import { deriveInvestmentCompanyDividendQuality } from "./investment-company-dividend-quality";
 import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
-import { deriveInvestmentCompanyNavGrowth } from "./investment-company-nav-history";
+import {
+  deriveInvestmentCompanyNavGrowth,
+  type InvestmentCompanyNavGrowth,
+} from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
@@ -270,6 +273,65 @@ function isOfficialDisclosureComparable(asOf: string | null | undefined, marketA
   return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS;
 }
 
+type AnnualNavPerShareObservation = {
+  year: number;
+  navPerShare: number;
+};
+
+function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
+  return {
+    navGrowth1y: null,
+    navGrowth3yCagr: null,
+    navGrowth5yCagr: null,
+  };
+}
+
+function deriveAnnualInvestmentCompanyNavGrowth(
+  years: AnnualNavPerShareObservation[] | null | undefined,
+): InvestmentCompanyNavGrowth {
+  const empty = emptyInvestmentCompanyNavGrowth();
+  const byYear = new Map<number, number>();
+
+  for (const observation of years ?? []) {
+    if (
+      !Number.isInteger(observation.year)
+      || !Number.isFinite(observation.navPerShare)
+      || observation.navPerShare <= 0
+      || byYear.has(observation.year)
+    ) {
+      return empty;
+    }
+    byYear.set(observation.year, observation.navPerShare);
+  }
+
+  if (byYear.size === 0) return empty;
+  const latestYear = Math.max(...byYear.keys());
+  const current = byYear.get(latestYear);
+  if (current === undefined) return empty;
+
+  const periodGrowth = (yearsBack: 1 | 3 | 5): number | null => {
+    const anchor = byYear.get(latestYear - yearsBack);
+    if (anchor === undefined) return null;
+    const ratio = current / anchor;
+    if (!Number.isFinite(ratio) || ratio <= 0) return null;
+    if (yearsBack === 1) return ratio - 1;
+    const cagr = ratio ** (1 / yearsBack) - 1;
+    return Number.isFinite(cagr) ? cagr : null;
+  };
+
+  return {
+    navGrowth1y: periodGrowth(1),
+    navGrowth3yCagr: periodGrowth(3),
+    navGrowth5yCagr: periodGrowth(5),
+  };
+}
+
+function hasInvestmentCompanyNavGrowth(growth: InvestmentCompanyNavGrowth): boolean {
+  return growth.navGrowth1y !== null
+    || growth.navGrowth3yCagr !== null
+    || growth.navGrowth5yCagr !== null;
+}
+
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
   const env = getServerEnv();
@@ -440,9 +502,15 @@ async function enrichInvestmentCompanyReport(
   const holdingsFreshnessMessage = officialHoldings.ok && !holdingsComparable
     ? `Official holdings dated ${officialHoldings.data.asOf} are stale or not comparable with market price date ${marketDate ?? "unknown"}. Diversification requires verified official holdings no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
     : null;
-  const navGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
+  const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
-    : { navGrowth1y: null, navGrowth3yCagr: null, navGrowth5yCagr: null };
+    : emptyInvestmentCompanyNavGrowth();
+  const annualNavGrowth = officialKeyRatios.ok
+    ? deriveAnnualInvestmentCompanyNavGrowth(officialKeyRatios.data.years)
+    : emptyInvestmentCompanyNavGrowth();
+  const navGrowth = hasInvestmentCompanyNavGrowth(datedNavGrowth)
+    ? datedNavGrowth
+    : annualNavGrowth;
   const shareholderReturns = longHistory?.ok && marketDate
     ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
