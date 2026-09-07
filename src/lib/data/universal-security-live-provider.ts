@@ -38,10 +38,14 @@ function applyInvestmentCompanyCoverageGate(report: UniversalSecurityReport): Un
   if (!specialist) return report;
 
   const coverage = specialist.score.coverage;
-  // Investment-company coverage must come from the investment-company model.
-  // Never let strong generic corporate coverage mask missing NAV/look-through inputs.
+  const specialistScore = specialist.score.score;
+  // Investment-company coverage and score must come from the same specialist model.
+  // Never let strong generic corporate coverage or a stale generic score mask missing
+  // NAV/look-through inputs after an issuer is routed into the investment-company regime.
   report.dataCoverage = coverage;
-  report.recommendation = recommendationForScore(specialist.score.score, coverage);
+  report.recommendation = recommendationForScore(specialistScore, coverage);
+  report.score.score = specialistScore;
+  report.score.personalizedScore = specialistScore;
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, coverage * 100)));
 
   const gateMessage = specialistCoverageGateMessage("Investment-company", coverage);
@@ -55,6 +59,14 @@ async function enrichWithOfficialInvestmentCompanyNav(
   report: UniversalSecurityReport,
   args: AnalyzeArgs,
 ): Promise<UniversalSecurityReport> {
+  // The primary universal provider already performs the full investment-company enrichment
+  // (NAV history, holdings quality, shareholder return, governance, capital allocation, etc.).
+  // If that specialist result exists, it is authoritative. Re-running a NAV-only fallback here
+  // would discard verified factors and can incorrectly downgrade 99-100% coverage to No Rating.
+  if (report.securityAnalysis?.investmentCompany) {
+    return applyInvestmentCompanyCoverageGate(report);
+  }
+
   const alreadyClassifiedAsHoldingCompany = report.analysisArchetype === "holding_company";
   const navResult = await fetchOfficialInvestmentCompanyNav(args.company);
 
@@ -101,12 +113,6 @@ async function enrichWithOfficialInvestmentCompanyNav(
     navResult.data.source,
     (item) => `${item.provider ?? item.name}|${item.url}|${item.dataAsOf ?? ""}`,
   );
-
-  const securityScore = analysis.score.score;
-  if (typeof securityScore === "number" && Number.isFinite(securityScore)) {
-    report.score.score = securityScore;
-    report.score.personalizedScore = securityScore;
-  }
 
   report.score.missingData = [...new Set([
     ...report.score.missingData.filter((item) => !item.startsWith("Investment-company model requires verified NAV/SOTP inputs")),
