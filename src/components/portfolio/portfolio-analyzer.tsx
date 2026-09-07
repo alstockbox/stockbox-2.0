@@ -78,7 +78,7 @@ export function PortfolioAnalyzer({ portfolioId, holdings, locale, lastSnapshotA
   }
 
   async function run(forceLatest: boolean, retryOnly = false) {
-    if (running || !holdings.length) return;
+    if (running) return;
     const source = retryOnly && failures.length
       ? holdings.filter((holding) => failures.some((failure) => failure.ticker === holding.ticker))
       : forceLatest ? holdings : stale;
@@ -135,12 +135,20 @@ export function PortfolioAnalyzer({ portfolioId, holdings, locale, lastSnapshotA
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button type="button" onClick={() => void run(false)} disabled={running || !holdings.length} className="min-h-11">
-            <Sparkles className="h-4 w-4" />{running ? (sv ? "Analyserar…" : "Analyzing…") : (sv ? "Analysera hela portföljen" : "Analyze entire portfolio")}
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => void run(true)} disabled={running || !holdings.length} className="min-h-11">
-            <RefreshCw className={`h-4 w-4 ${running ? "animate-spin" : ""}`} />{sv ? "Senaste data" : "Latest data"}
-          </Button>
+          {holdings.length ? (
+            <>
+              <Button type="button" onClick={() => void run(false)} disabled={running} className="min-h-11">
+                <Sparkles className="h-4 w-4" />{running ? (sv ? "Analyserar…" : "Analyzing…") : (sv ? "Analysera hela portföljen" : "Analyze entire portfolio")}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => void run(true)} disabled={running} className="min-h-11">
+                <RefreshCw className={`h-4 w-4 ${running ? "animate-spin" : ""}`} />{sv ? "Senaste data" : "Latest data"}
+              </Button>
+            </>
+          ) : (
+            <Button type="button" onClick={() => void run(false)} disabled={running} className="min-h-11">
+              <Sparkles className="h-4 w-4" />{running ? (sv ? "Sparar…" : "Saving…") : (sv ? "Spara slut-snapshot" : "Save final snapshot")}
+            </Button>
+          )}
         </div>
       </div>
 
