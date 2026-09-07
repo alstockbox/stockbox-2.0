@@ -22,7 +22,7 @@ type ParsedNav = {
 };
 
 type OfficialNavRegistryEntry = {
-  id: "investor" | "latour" | "industrivarden";
+  id: "investor" | "latour" | "industrivarden" | "svolder" | "creades" | "lundbergs";
   matches: (company: CompanySearchResult) => boolean;
   fetch: () => Promise<{ parsed: ParsedNav | null; url: string }>;
 };
@@ -167,6 +167,43 @@ export function parseIndustrivardenOfficialNav(html: string): ParsedNav | null {
   return { reportedNav: null, reportedNavPerShare: perShare, navAsOf: isoDate(homepage[2]) };
 }
 
+export function parseSvolderOfficialNav(html: string): ParsedNav | null {
+  const text = htmlToText(html);
+  const match = text.match(/Svolders? substansvärde\s+(\d{4}-\d{2}-\d{2})\s*:\s*([\d\s.,]+)\s*SEK per aktie/i)
+    ?? text.match(/Substansvärde\s+(\d{4}-\d{2}-\d{2})\s*[:\-]?\s*([\d\s.,]+)\s*SEK\s*(?:per aktie)?/i);
+  if (!match) return null;
+  const perShare = parseSwedishTableNumber(match[2]);
+  if (perShare === null || perShare <= 0) return null;
+  return { reportedNav: null, reportedNavPerShare: perShare, navAsOf: match[1] };
+}
+
+export function parseCreadesOfficialNav(html: string): ParsedNav | null {
+  const text = htmlToText(html);
+  const dated = text.match(/Substansvärde per\s+(\d{4}-\d{2}-\d{2})/i);
+  const perShareMatch = text.match(/substansvärde[^.]{0,180}?uppgår till\s+([\d\s.,]+)\s+kronor per aktie/i)
+    ?? text.match(/substansvärde per aktie[^\d]{0,30}([\d\s.,]+)/i);
+  const perShare = perShareMatch ? parseSwedishTableNumber(perShareMatch[1]) : null;
+  if (perShare === null || perShare <= 0) return null;
+
+  const totalValues = rowNumbers(tableRow(html, /^Totalt\b/i));
+  const totalMsek = totalValues.find((value) => value > 1_000) ?? null;
+  return {
+    reportedNav: totalMsek !== null ? totalMsek * 1_000_000 : null,
+    reportedNavPerShare: perShare,
+    navAsOf: dated?.[1] ?? null,
+  };
+}
+
+export function parseLundbergsOfficialNav(html: string): ParsedNav | null {
+  const text = htmlToText(html);
+  const match = text.match(/Substansvärde\s+([\d\s.,]+)\s*Mdkr\s+(\d{4}-\d{2}-\d{2})/i)
+    ?? text.match(/substansvärdet[^.]{0,120}?([\d\s.,]+)\s*mdkr[^.]{0,80}?(\d{4}-\d{2}-\d{2})/i);
+  if (!match) return null;
+  const totalBn = parseSwedishTableNumber(match[1]);
+  if (totalBn === null || totalBn <= 0) return null;
+  return { reportedNav: totalBn * 1_000_000_000, reportedNavPerShare: null, navAsOf: match[2] };
+}
+
 async function fetchText(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -226,6 +263,24 @@ async function industrivardenFetcher(): Promise<{ parsed: ParsedNav | null; url:
   return { parsed: fallbackHtml ? parseIndustrivardenOfficialNav(fallbackHtml) : null, url: fallbackUrl };
 }
 
+async function svolderFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+  const url = "https://svolder.se/pressreleaser/";
+  const html = await fetchText(url);
+  return { parsed: html ? parseSvolderOfficialNav(html) : null, url };
+}
+
+async function creadesFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+  const url = "https://www.creades.se/innehav/substansvarde/";
+  const html = await fetchText(url);
+  return { parsed: html ? parseCreadesOfficialNav(html) : null, url };
+}
+
+async function lundbergsFetcher(): Promise<{ parsed: ParsedNav | null; url: string }> {
+  const url = "https://www.lundbergforetagen.se/sv";
+  const html = await fetchText(url);
+  return { parsed: html ? parseLundbergsOfficialNav(html) : null, url };
+}
+
 const REGISTRY: OfficialNavRegistryEntry[] = [
   {
     id: "investor",
@@ -241,6 +296,21 @@ const REGISTRY: OfficialNavRegistryEntry[] = [
     id: "industrivarden",
     matches: (company) => /\bindu[-_ ]?[ac]?\.st\b|industriv[aä]rden/i.test(normalizeIdentity(company)),
     fetch: industrivardenFetcher,
+  },
+  {
+    id: "svolder",
+    matches: (company) => /\bsvol[-_ ]?[ab]?\.st\b|\bsvolder\b/i.test(normalizeIdentity(company)),
+    fetch: svolderFetcher,
+  },
+  {
+    id: "creades",
+    matches: (company) => /\bcred[-_ ]?a?\.st\b|\bcreades\b/i.test(normalizeIdentity(company)),
+    fetch: creadesFetcher,
+  },
+  {
+    id: "lundbergs",
+    matches: (company) => /\blund[-_ ]?[ab]?\.st\b|lundbergf[oö]retagen|\blundbergs\b/i.test(normalizeIdentity(company)),
+    fetch: lundbergsFetcher,
   },
 ];
 
