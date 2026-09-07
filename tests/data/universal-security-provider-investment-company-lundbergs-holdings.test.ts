@@ -181,6 +181,7 @@ function officialHoldingsSuccess() {
         name,
         reportedWeight,
         weight: reportedWeight / rawWeightSum,
+        issuerFundamentalsEligible: name !== "Lundbergs Fastigheter" && name !== "Övriga värdepapper",
       })),
       rawWeightSum,
       asOf: "2026-05-19",
@@ -281,7 +282,7 @@ describe("Lundbergs official-holdings production coverage", () => {
     expect(analysis?.lookThrough.qualityCoveredWeight).toBeGreaterThanOrEqual(0.80);
     expect(analysis?.lookThrough.stockBoxQuality).not.toBeNull();
 
-    expect(mocks.searchCompanies).toHaveBeenCalledWith("Lundbergs Fastigheter");
+    expect(mocks.searchCompanies).not.toHaveBeenCalledWith("Lundbergs Fastigheter");
     expect(mocks.searchCompanies).not.toHaveBeenCalledWith("Övriga värdepapper");
     expect(mocks.fetchYahooEtfHoldingFundamentals.mock.calls.some(([holding]) => holding.name === "Lundbergs Fastigheter")).toBe(false);
     expect(mocks.fetchYahooEtfHoldingFundamentals.mock.calls.some(([holding]) => holding.name === "Övriga värdepapper")).toBe(false);
