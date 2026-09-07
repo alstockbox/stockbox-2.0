@@ -67,6 +67,74 @@ function finite(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function deriveYahooRevenueForPeriod(period: FinancialPeriod): FinancialPeriod {
+  if (finite(period.revenue) || !period.periodEndDate) return period;
+
+  const grossProfit = period.grossProfit;
+  const costOfRevenue = period.costOfRevenue;
+  const grossProvenance = period.provenance?.grossProfit;
+  const costProvenance = period.provenance?.costOfRevenue;
+  const currency = normalizedCurrency(period.currency);
+  const periodBasis = period.periodBasis;
+
+  if (
+    !finite(grossProfit)
+    || !finite(costOfRevenue)
+    || !currency
+    || !["FY", "TTM_REPORTED"].includes(periodBasis ?? "")
+    || grossProvenance?.provider !== YAHOO_PROVIDER_ID
+    || grossProvenance.valueKind !== "reported"
+    || grossProvenance.periodEnd !== period.periodEndDate
+    || grossProvenance.periodBasis !== periodBasis
+    || normalizedCurrency(grossProvenance.unit) !== currency
+    || !grossProvenance.concept
+    || costProvenance?.provider !== YAHOO_PROVIDER_ID
+    || costProvenance.valueKind !== "reported"
+    || costProvenance.periodEnd !== period.periodEndDate
+    || costProvenance.periodBasis !== periodBasis
+    || normalizedCurrency(costProvenance.unit) !== currency
+    || !costProvenance.concept
+  ) {
+    return period;
+  }
+
+  const revenue = grossProfit + costOfRevenue;
+  if (!Number.isFinite(revenue)) return period;
+
+  const revenueProvenance: MetricProvenance = {
+    source: "Yahoo Finance fundamentals timeseries",
+    provider: YAHOO_PROVIDER_ID,
+    unit: currency,
+    periodEnd: period.periodEndDate,
+    periodBasis,
+    inputs: [grossProvenance.concept, costProvenance.concept],
+    valueKind: "derived",
+    note: "Revenue derived as same-period Yahoo GrossProfit plus CostOfRevenue because direct TotalRevenue was unavailable.",
+  };
+
+  return {
+    ...period,
+    revenue,
+    provenance: {
+      ...(period.provenance ?? {}),
+      revenue: revenueProvenance,
+    },
+  };
+}
+
+function deriveYahooRevenueFromComponents(
+  fundamentals: CompanyFundamentals,
+): CompanyFundamentals {
+  return {
+    ...fundamentals,
+    annual: fundamentals.annual.map(deriveYahooRevenueForPeriod),
+    annualPeriods: fundamentals.annualPeriods?.map(deriveYahooRevenueForPeriod),
+    trailingTwelveMonths: fundamentals.trailingTwelveMonths
+      ? deriveYahooRevenueForPeriod(fundamentals.trailingTwelveMonths)
+      : fundamentals.trailingTwelveMonths,
+  };
+}
+
 function annualDilutedEpsInputs(period: FinancialPeriod): {
   value: number;
   inputs: string[];
@@ -310,7 +378,8 @@ export async function fetchYahooFundamentalsResult(
   const core = await fetchCoreYahooFundamentalsResult(company);
   if (!core.ok) return core;
 
-  const withReconciledEps = deriveReconciledAnnualDilutedEps(core.data);
+  const withDerivedRevenue = deriveYahooRevenueFromComponents(core.data);
+  const withReconciledEps = deriveReconciledAnnualDilutedEps(withDerivedRevenue);
   const aligned = alignReportedValuationFcfWithAnnualFallback(withReconciledEps);
   const withFcfBasis = attachReportedValuationFcfPeriodBasis(aligned);
   const enrichment = await enrichSpecializedFundamentals(company, withFcfBasis);
