@@ -11,6 +11,7 @@ export type OfficialInvestmentCompanyHolding = {
   name: string;
   weight: number;
   reportedWeight: number;
+  issuerFundamentalsEligible?: boolean;
 };
 
 export type ParsedOfficialInvestmentCompanyHoldings = {
@@ -322,6 +323,7 @@ export function parseSvolderOfficialHoldings(
 
 const LUNDBERGS_ALLOCATION_START = "Lundbergs investerar i fastigheter och börsnoterade företag.";
 const LUNDBERGS_ALLOCATION_END = "De börsnoterade innehaven är värderade till marknadsvärde.";
+const LUNDBERGS_NON_ISSUER_EXPOSURES = new Set(["lundbergs fastigheter", "övriga värdepapper"]);
 
 function parseLundbergsAllocationRows(html: string): Array<{ name: string; reportedWeight: number }> {
   const text = htmlToText(html);
@@ -382,6 +384,9 @@ export function parseLundbergsOfficialHoldings(
     holdings: rows.map((holding) => ({
       ...holding,
       weight: holding.reportedWeight / rawWeightSum,
+      issuerFundamentalsEligible: !LUNDBERGS_NON_ISSUER_EXPOSURES.has(
+        holding.name.trim().toLocaleLowerCase("sv-SE"),
+      ),
     })),
     rawWeightSum,
     asOf,
