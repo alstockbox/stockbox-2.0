@@ -6,6 +6,11 @@ export type NavPerShareObservation = {
   navPerShare: number;
 };
 
+export type AnnualNavPerShareObservation = {
+  year: number;
+  navPerShare: number;
+};
+
 export type InvestmentCompanyNavGrowth = {
   navGrowth1y: number | null;
   navGrowth3yCagr: number | null;
@@ -15,6 +20,14 @@ export type InvestmentCompanyNavGrowth = {
 type ValidObservation = NavPerShareObservation & {
   timestamp: number;
 };
+
+function emptyNavGrowth(): InvestmentCompanyNavGrowth {
+  return {
+    navGrowth1y: null,
+    navGrowth3yCagr: null,
+    navGrowth5yCagr: null,
+  };
+}
 
 function parseIsoDay(value: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -104,15 +117,27 @@ function periodGrowth(
   return Number.isFinite(cagr) ? cagr : null;
 }
 
+function annualPeriodGrowth(
+  current: AnnualNavPerShareObservation,
+  observations: Map<number, AnnualNavPerShareObservation>,
+  years: 1 | 3 | 5,
+): number | null {
+  const anchor = observations.get(current.year - years);
+  if (!anchor) return null;
+
+  const ratio = current.navPerShare / anchor.navPerShare;
+  if (!Number.isFinite(ratio) || ratio <= 0) return null;
+  if (years === 1) return ratio - 1;
+
+  const cagr = ratio ** (1 / years) - 1;
+  return Number.isFinite(cagr) ? cagr : null;
+}
+
 export function deriveInvestmentCompanyNavGrowth(
   observations: NavPerShareObservation[] | null | undefined,
   referenceDate: string,
 ): InvestmentCompanyNavGrowth {
-  const empty: InvestmentCompanyNavGrowth = {
-    navGrowth1y: null,
-    navGrowth3yCagr: null,
-    navGrowth5yCagr: null,
-  };
+  const empty = emptyNavGrowth();
 
   const referenceTimestamp = parseIsoDay(referenceDate);
   if (referenceTimestamp === null) return empty;
@@ -128,5 +153,42 @@ export function deriveInvestmentCompanyNavGrowth(
     navGrowth1y: periodGrowth(current, valid, 1),
     navGrowth3yCagr: periodGrowth(current, valid, 3),
     navGrowth5yCagr: periodGrowth(current, valid, 5),
+  };
+}
+
+export function deriveInvestmentCompanyAnnualNavGrowth(
+  observations: AnnualNavPerShareObservation[] | null | undefined,
+  referenceYear?: number,
+): InvestmentCompanyNavGrowth {
+  const empty = emptyNavGrowth();
+  const annual = observations ?? [];
+  if (annual.length === 0) return empty;
+  if (annual.some((observation) => (
+    !Number.isInteger(observation.year)
+    || observation.year < 1900
+    || observation.year > 2200
+    || !Number.isFinite(observation.navPerShare)
+    || observation.navPerShare <= 0
+  ))) {
+    return empty;
+  }
+
+  const byYear = new Map<number, AnnualNavPerShareObservation>();
+  for (const observation of annual) {
+    if (byYear.has(observation.year)) return empty;
+    byYear.set(observation.year, observation);
+  }
+
+  const current = [...annual].sort((left, right) => right.year - left.year)[0];
+  if (!current) return empty;
+  if (referenceYear !== undefined) {
+    if (!Number.isInteger(referenceYear)) return empty;
+    if (current.year > referenceYear || referenceYear - current.year > 1) return empty;
+  }
+
+  return {
+    navGrowth1y: annualPeriodGrowth(current, byYear, 1),
+    navGrowth3yCagr: annualPeriodGrowth(current, byYear, 3),
+    navGrowth5yCagr: annualPeriodGrowth(current, byYear, 5),
   };
 }
