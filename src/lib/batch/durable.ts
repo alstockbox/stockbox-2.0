@@ -409,28 +409,41 @@ export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<n
 
 export async function getDurableBatchRun(input: { userId: string; batchId: string }) {
   const admin = createAdminClient();
-  if (!admin) return null;
-  const { data: run } = await admin.from("batch_runs")
+  if (!admin) return { status: "unavailable" } as const;
+
+  const { data: run, error: runError } = await admin.from("batch_runs")
     .select("id,user_id,status,analysis_type,investment_profile,total_items,completed_items,failed_items,cancelled_items,created_at,started_at,completed_at")
     .eq("id", input.batchId)
     .eq("user_id", input.userId)
     .maybeSingle();
-  if (!run) return null;
-  const { data: items } = await admin.from("batch_items")
+  if (runError) return { status: "unavailable" } as const;
+  if (!run) return { status: "not_found" } as const;
+
+  const { data: items, error: itemsError } = await admin.from("batch_items")
     .select("id,input_ticker,canonical_ticker,company_name,status,analysis_id,last_error,attempts,created_at,started_at,completed_at")
     .eq("batch_id", input.batchId)
     .eq("user_id", input.userId)
     .order("created_at", { ascending: true });
+  if (itemsError) return { status: "unavailable" } as const;
+
   const analysisIds = (items ?? []).map((item) => item.analysis_id).filter((id): id is string => typeof id === "string");
   const reportById = new Map<string, AnalysisReport>();
   if (analysisIds.length) {
-    const { data: analyses } = await admin.from("analyses").select("id,report").eq("user_id", input.userId).in("id", analysisIds);
+    const { data: analyses, error: analysesError } = await admin.from("analyses")
+      .select("id,report")
+      .eq("user_id", input.userId)
+      .in("id", analysisIds);
+    if (analysesError) return { status: "unavailable" } as const;
     for (const analysis of analyses ?? []) reportById.set(String(analysis.id), analysis.report as AnalysisReport);
   }
+
   return {
-    run,
-    items: (items ?? []).map((item) => ({ ...item, report: item.analysis_id ? reportById.get(item.analysis_id) ?? null : null })),
-  };
+    status: "found",
+    batch: {
+      run,
+      items: (items ?? []).map((item) => ({ ...item, report: item.analysis_id ? reportById.get(item.analysis_id) ?? null : null })),
+    },
+  } as const;
 }
 
 export async function retryDurableBatchFailures(input: { userId: string; batchId: string }) {
