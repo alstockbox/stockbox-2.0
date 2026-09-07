@@ -231,6 +231,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                   ? portfolioTransactions.map((row) => ({ id: row.id, ticker: row.ticker, type: row.transaction_type, quantity: numeric(row.quantity), price: numeric(row.price), cashAmount: numeric(row.cash_amount), fees: numeric(row.fees), currency: row.currency, executedAt: row.executed_at }))
                   : portfolioHoldings.map((holding) => ({ id: holding.id, ticker: holding.ticker, type: "buy", quantity: numeric(holding.quantity), price: numeric(holding.average_cost), fees: 0, currency: holding.currency, executedAt: holding.acquired_at ?? holding.created_at.slice(0, 10) }));
                 const positions = buildPortfolioPositions(transactionInputs);
+                const activePositionKeys = new Set(positions.map((position) => `${position.ticker}:${position.currency}`));
+                const closedCashFlowPositions = portfolioTransactions.reduce<Array<{ ticker: string; currency: string }>>((closed, transaction) => {
+                  if (transaction.transaction_type !== "buy") return closed;
+                  const ticker = transaction.ticker.trim().toUpperCase();
+                  const currency = transaction.currency.trim().toUpperCase();
+                  const key = `${ticker}:${currency}`;
+                  if (!ticker || !currency || activePositionKeys.has(key) || closed.some((identity) => `${identity.ticker}:${identity.currency}` === key)) return closed;
+                  closed.push({ ticker, currency });
+                  return closed;
+                }, []);
                 const latest = latestSnapshot.get(portfolio.id) ?? null;
                 const history = snapshots.filter((snapshot) => snapshot.portfolio_id === portfolio.id).slice(0, 10);
                 const snapshotHoldings = Array.isArray(latest?.holdings) ? latest.holdings : [];
@@ -252,8 +262,10 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                       </form>
                     </div>
 
-                    {positions.length ? (
+                    {positions.length || portfolioTransactions.length ? (
                       <>
+                        {positions.length ? (
+                          <>
                         <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.portfolio_value, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.invested_capital, portfolio.base_currency, locale)}</p></div>
@@ -332,6 +344,29 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                             })}
                           </div>
                         </div>
+                          </>
+                        ) : (
+                          <div className="mt-6 rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-6 text-center">
+                            <BriefcaseBusiness className="mx-auto h-8 w-8 text-[#e1cb95]" />
+                            <h3 className="mt-3 font-semibold">{sv ? "Inga aktiva positioner" : "No active positions"}</h3>
+                            <p className="mx-auto mt-2 max-w-lg text-sm text-[#8f9bac]">{sv ? "Alla positioner är stängda. Transaktionshistorik, portföljhistorik och kassaflöden finns kvar nedan." : "All positions are closed. Transaction history, portfolio history and cash-flow entries remain available below."}</p>
+                          </div>
+                        )}
+
+                        {closedCashFlowPositions.length ? (
+                          <div className="mt-7 border-t border-white/10 pt-6">
+                            <h3 className="font-semibold text-[#f4efe5]">{sv ? "Stängda positioner" : "Closed positions"}</h3>
+                            <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Utdelningar och värdepappersspecifika avgifter kan fortfarande registreras mot värdepapper som tidigare funnits i portföljen." : "Dividends and security-specific fees can still be recorded against securities previously held in this portfolio."}</p>
+                            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                              {closedCashFlowPositions.map((identity) => (
+                                <div key={`closed-${identity.ticker}-${identity.currency}`} className="rounded-xl border border-white/10 bg-[#0b1829] p-4">
+                                  <div className="flex items-center justify-between gap-3"><p className="font-mono text-sm font-semibold text-[#e1cb95]">{identity.ticker}</p><span className="text-xs text-[#8f9bac]">{identity.currency}</span></div>
+                                  <PortfolioCashFlowForm portfolioId={portfolio.id} ticker={identity.ticker} currency={identity.currency} today={today} locale={locale} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <h3 className="font-semibold text-[#f4efe5]">{sv ? "Köp- och transaktionshistorik" : "Purchase and transaction history"}</h3>
