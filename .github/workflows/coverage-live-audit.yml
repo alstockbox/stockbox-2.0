@@ -34,6 +34,8 @@ on:
       - "src/lib/data/security-classification.ts"
       - "src/lib/data/provider.ts"
       - "src/lib/data/provider-core.ts"
+      - "src/lib/data/cvm-brazil-provider.ts"
+      - "src/lib/data/cvm-brazil-fundamentals.ts"
       - "src/lib/data/provider-history-diagnostics.ts"
       - "src/lib/data/period-alignment.ts"
       - "src/lib/data/sec.ts"
