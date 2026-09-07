@@ -32,6 +32,7 @@ import {
   fetchConfiguredMarketData,
   searchCompanies,
 } from "./enhanced-provider";
+import { classifyFundStructure } from "./fund-structure-classification";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
 
@@ -214,6 +215,24 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
       sources: [],
       warnings: [etfResult.message],
       providerDiagnostics: [marketResult.diagnostic, etfResult.diagnostic],
+    };
+  }
+
+  const fundStructure = classifyFundStructure({
+    company: args.company,
+    quoteType: etfResult.data.quoteType,
+    category: etfResult.data.category,
+  });
+  if (fundStructure.structure !== "exchange_traded_fund") {
+    const closedEnd = fundStructure.structure === "closed_end_fund";
+    return {
+      ok: false,
+      error: closedEnd
+        ? "Closed-end fund specialist analysis is not yet available for this security."
+        : "Fund structure could not be verified well enough to select a specialist model.",
+      sources: [etfResult.data.source],
+      warnings: [fundStructure.reason],
+      providerDiagnostics: [marketResult.diagnostic, etfResult.data.diagnostic],
     };
   }
 
