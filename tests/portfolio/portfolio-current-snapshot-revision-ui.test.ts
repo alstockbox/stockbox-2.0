@@ -10,6 +10,7 @@ describe("portfolio current snapshot revision UI", () => {
   it("uses only snapshots that match the current portfolio ledger revision", () => {
     const page = source("src/app/portfolio/page.tsx");
 
+    // Current summary metrics must fail closed when the ledger has advanced; historical snapshots remain available separately.
     expect(page).toContain('from("portfolio_ledger_revisions")');
     expect(page).toContain('select("portfolio_id,revision")');
     expect(page).toContain('ledger_revision');
