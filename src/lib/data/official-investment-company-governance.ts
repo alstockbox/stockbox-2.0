@@ -9,6 +9,7 @@ const INDUSTRIVARDEN_BOARD_URL = "https://www.industrivarden.se/en-gb/corporate-
 const INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL = "https://www.industrivarden.se/globalassets/arsstamma/2026/engelska/05b_nominating-committees-proposals-report-and-statement.pdf";
 const INVESTOR_BOARD_URL = "https://www.investorab.com/about-investor/board-management/board-of-directors";
 const INVESTOR_INDEPENDENCE_STATEMENT_URL = "https://www.investorab.com/media/e3hbxzb5/information-about-proposed-board-of-directors-2026.pdf";
+const SVOLDER_BOARD_URL = "https://svolder.se/bolagsstyrning/styrelse/";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -46,7 +47,8 @@ export type OfficialInvestmentCompanyGovernanceResult =
   | { ok: true; data: OfficialInvestmentCompanyGovernanceData }
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
 
-type OfficialGovernanceRegistryEntry = {
+type VersionedRosterGovernanceRegistryEntry = {
+  evidenceMode: "versioned-roster";
   id: "industrivarden" | "investor";
   label: string;
   boardUrl: string;
@@ -57,6 +59,18 @@ type OfficialGovernanceRegistryEntry = {
   matches: (company: CompanySearchResult) => boolean;
   parseRoster: (html: string) => string[] | null;
 };
+
+type LivePageGovernanceRegistryEntry = {
+  evidenceMode: "live-page";
+  id: "svolder";
+  label: string;
+  boardUrl: string;
+  boardSourceName: string;
+  matches: (company: CompanySearchResult) => boolean;
+  parseEvidence: (html: string) => InvestmentCompanyDirectorGovernanceEvidence[] | null;
+};
+
+type OfficialGovernanceRegistryEntry = VersionedRosterGovernanceRegistryEntry | LivePageGovernanceRegistryEntry;
 
 function diagnostic(status: ProviderDiagnostic["status"], reason?: string): ProviderDiagnostic {
   return {
@@ -148,8 +162,81 @@ export function parseInvestorOfficialBoardRoster(html: string): string[] | null 
   return names.length > 0 ? names : null;
 }
 
+function parseSwedishBoardCount(text: string): number | null {
+  const match = text.match(/består\s+av\s+(\d+|en|ett|två|tre|fyra|fem|sex|sju|åtta|nio|tio)\s+ledamöter/i);
+  if (!match) return null;
+  const token = match[1].toLocaleLowerCase("sv-SE");
+  if (/^\d+$/.test(token)) return Number(token);
+  const counts: Record<string, number> = {
+    en: 1,
+    ett: 1,
+    två: 2,
+    tre: 3,
+    fyra: 4,
+    fem: 5,
+    sex: 6,
+    sju: 7,
+    åtta: 8,
+    nio: 9,
+    tio: 10,
+  };
+  return counts[token] ?? null;
+}
+
+export function parseSvolderOfficialGovernanceEvidence(
+  html: string,
+): InvestmentCompanyDirectorGovernanceEvidence[] | null {
+  const decodedHtml = decodeHtml(html);
+  const text = htmlToText(decodedHtml);
+  const expectedCount = parseSwedishBoardCount(text);
+  if (!expectedCount || expectedCount < 1) return null;
+
+  const boardHeading = /<h[1-4]\b[^>]*>\s*Styrelse\s*<\/h[1-4]>/i.exec(decodedHtml);
+  if (!boardHeading || boardHeading.index === undefined) return null;
+  const afterBoardHeading = decodedHtml.slice(boardHeading.index + boardHeading[0].length);
+  const independenceHeading = /<h[1-4]\b[^>]*>\s*Beroendeförhållanden\s*<\/h[1-4]>/i.exec(afterBoardHeading);
+  if (!independenceHeading || independenceHeading.index === undefined) return null;
+
+  const boardHtml = afterBoardHeading.slice(0, independenceHeading.index);
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const headingPattern = /<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>([\s\S]*?)(?=<h[1-4]\b|$)/gi;
+  let headingMatch: RegExpExecArray | null;
+  while ((headingMatch = headingPattern.exec(boardHtml)) !== null) {
+    const name = htmlToText(headingMatch[1]);
+    const followingText = htmlToText(headingMatch[2]);
+    if (!name || !/\b(?:styrelsens\s+ordförande|styrelseledamot)\b/i.test(followingText)) continue;
+    const normalized = normalizeDirectorName(name);
+    if (seen.has(normalized)) return null;
+    names.push(name);
+    seen.add(normalized);
+  }
+
+  if (names.length !== expectedCount || seen.size !== expectedCount) return null;
+
+  const independenceText = htmlToText(afterBoardHeading.slice(independenceHeading.index));
+  if (!/styrelsens\s+ledamöter\s+är\s+samtliga\s+oberoende\s+i\s+förhållande\s+till\s+bolaget\s+och\s+bolagsledningen/i.test(independenceText)) {
+    return null;
+  }
+
+  const dependentMatch = independenceText.match(
+    /av\s+dessa\s+ledamöter\s+är\s+(.+?)\s+beroende\s+i\s+förhållande\s+till\s+svolders\s+största\s+aktieägare/i,
+  );
+  if (!dependentMatch) return null;
+  const dependentName = dependentMatch[1].trim().replace(/\s+/g, " ");
+  const dependentNormalized = normalizeDirectorName(dependentName);
+  if (!seen.has(dependentNormalized)) return null;
+
+  return names.map((name) => ({
+    name,
+    independentFromCompanyManagement: true,
+    independentFromMajorShareholders: normalizeDirectorName(name) !== dependentNormalized,
+  }));
+}
+
 const REGISTRY: OfficialGovernanceRegistryEntry[] = [
   {
+    evidenceMode: "versioned-roster",
     id: "industrivarden",
     label: "Industrivärden",
     boardUrl: INDUSTRIVARDEN_BOARD_URL,
@@ -166,6 +253,7 @@ const REGISTRY: OfficialGovernanceRegistryEntry[] = [
     parseRoster: parseIndustrivardenOfficialBoardRoster,
   },
   {
+    evidenceMode: "versioned-roster",
     id: "investor",
     label: "Investor",
     boardUrl: INVESTOR_BOARD_URL,
@@ -179,6 +267,19 @@ const REGISTRY: OfficialGovernanceRegistryEntry[] = [
         || identity.includes("investor ab");
     },
     parseRoster: parseInvestorOfficialBoardRoster,
+  },
+  {
+    evidenceMode: "live-page",
+    id: "svolder",
+    label: "Svolder",
+    boardUrl: SVOLDER_BOARD_URL,
+    boardSourceName: "Svolder current Board of Directors and independence relationships",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\bsvol(?:-[ab])?\.st\b/.test(identity)
+        || identity.includes("svolder");
+    },
+    parseEvidence: parseSvolderOfficialGovernanceEvidence,
   },
 ];
 
@@ -233,7 +334,39 @@ export async function fetchOfficialInvestmentCompanyGovernance(
       );
     }
 
-    const currentRoster = entry.parseRoster(await response.text());
+    const html = await response.text();
+    const accessedAt = new Date().toISOString();
+
+    if (entry.evidenceMode === "live-page") {
+      const directors = entry.parseEvidence(html);
+      if (!directors) {
+        return failure(
+          "svolder_governance_independence_evidence_unavailable",
+          "The current official Svolder page does not contain a complete board roster plus explicit independence evidence that can be verified safely.",
+        );
+      }
+
+      return {
+        ok: true,
+        data: {
+          directors,
+          sources: [
+            {
+              name: entry.boardSourceName,
+              url: entry.boardUrl,
+              accessedAt,
+              freshness: "Live official board roster and explicit independence relationships fetched together at analysis time with cache disabled; incomplete or changed evidence fails closed.",
+              provider: PROVIDER_ID,
+              version: PROVIDER_VERSION,
+              capability: "specialized",
+            },
+          ],
+          diagnostic: diagnostic("available"),
+        },
+      };
+    }
+
+    const currentRoster = entry.parseRoster(html);
     if (!currentRoster) {
       return failure(
         `${entry.id}_current_board_roster_unavailable`,
@@ -248,7 +381,6 @@ export async function fetchOfficialInvestmentCompanyGovernance(
       );
     }
 
-    const accessedAt = new Date().toISOString();
     const sources: AnalysisSource[] = [
       {
         name: entry.statementName,
