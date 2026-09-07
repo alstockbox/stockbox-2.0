@@ -6,7 +6,7 @@ type NavResultWithHistory = Awaited<ReturnType<typeof fetchOfficialInvestmentCom
   data?: {
     navPerShareHistory?: NavPerShareObservation[];
     annualNavPerShareHistory?: AnnualNavPerShareObservation[];
-    annualNavHistorySource?: {
+    historySource?: {
       url?: string;
       provider?: string;
       version?: string;
@@ -116,10 +116,10 @@ describe("official investment-company NAV adapter history", () => {
       { year: 2022, navPerShare: 57.3 },
       { year: 2021, navPerShare: 69.5 },
     ]);
-    expect(result.data.annualNavHistorySource).toEqual(expect.objectContaining({
+    expect(result.data.historySource).toEqual(expect.objectContaining({
       url: annualUrl,
       provider: "official-investment-company-nav",
-      version: "official-investment-company-nav-v3",
+      version: "official-investment-company-nav-annual-history-v1",
     }));
   });
 });
