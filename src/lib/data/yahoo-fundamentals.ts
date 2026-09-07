@@ -125,10 +125,25 @@ function deriveYahooRevenueForPeriod(period: FinancialPeriod): FinancialPeriod {
 function deriveYahooRevenueFromComponents(
   fundamentals: CompanyFundamentals,
 ): CompanyFundamentals {
+  const annualPeriods = fundamentals.annualPeriods?.map(deriveYahooRevenueForPeriod);
+  const periodsByDate = new Map((annualPeriods ?? []).flatMap((period) => (
+    period.periodEndDate ? [[period.periodEndDate, period] as const] : []
+  )));
+  const annual = fundamentals.annual.map((period) => {
+    if (finite(period.revenue) || !period.periodEndDate) return period;
+    const enriched = periodsByDate.get(period.periodEndDate);
+    if (!enriched || !finite(enriched.revenue)) return period;
+    return {
+      ...period,
+      revenue: enriched.revenue,
+      provenance: enriched.provenance,
+    };
+  });
+
   return {
     ...fundamentals,
-    annual: fundamentals.annual.map(deriveYahooRevenueForPeriod),
-    annualPeriods: fundamentals.annualPeriods?.map(deriveYahooRevenueForPeriod),
+    annual,
+    annualPeriods,
     trailingTwelveMonths: fundamentals.trailingTwelveMonths
       ? deriveYahooRevenueForPeriod(fundamentals.trailingTwelveMonths)
       : fundamentals.trailingTwelveMonths,
