@@ -1,6 +1,7 @@
 import type {
   CompanyFundamentals,
   CompanySearchResult,
+  FinancialPeriod,
   MetricProvenance,
   ProviderDiagnostic,
 } from "@/lib/analysis/types";
@@ -16,6 +17,12 @@ export * from "./yahoo-fundamentals-core";
 type ReportedValuationWithFcfBasis = NonNullable<CompanyFundamentals["reportedValuation"]> & {
   freeCashFlowPeriodBasis?: MetricProvenance["periodBasis"];
 };
+
+const YAHOO_PROVIDER_ID = "yahoo-fundamentals";
+const EPS_RECONCILIATION_TOLERANCE = 0.03;
+const EPS_RECONCILIATION_MIN_POINTS = 2;
+const EPS_RECONCILIATION_MAX_POINTS = 3;
+const EPS_RECONCILIATION_MAX_AGE_DAYS = 800;
 
 function diagnosticKey(diagnostic: ProviderDiagnostic): string {
   return [
@@ -54,6 +61,151 @@ function appendUniqueDiagnostics(
 function normalizedCurrency(value: string | null | undefined): string | null {
   const normalized = value?.trim().toUpperCase();
   return normalized || null;
+}
+
+function finite(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function annualDilutedEpsInputs(period: FinancialPeriod): {
+  value: number;
+  inputs: string[];
+} | null {
+  const date = period.periodEndDate;
+  const income = period.dilutedNetIncomeAvailableToCommon;
+  const shares = period.sharesDiluted;
+  const incomeProvenance = period.provenance?.dilutedNetIncomeAvailableToCommon;
+  const sharesProvenance = period.provenance?.sharesDiluted;
+  const periodCurrency = normalizedCurrency(period.currency);
+  const incomeCurrency = normalizedCurrency(incomeProvenance?.unit);
+
+  if (
+    period.periodBasis !== "FY"
+    || !date
+    || !finite(income)
+    || !finite(shares)
+    || shares <= 0
+    || !periodCurrency
+    || incomeCurrency !== periodCurrency
+    || incomeProvenance?.provider !== YAHOO_PROVIDER_ID
+    || incomeProvenance.valueKind !== "reported"
+    || incomeProvenance.periodEnd !== date
+    || incomeProvenance.periodBasis !== "FY"
+    || sharesProvenance?.provider !== YAHOO_PROVIDER_ID
+    || sharesProvenance.valueKind !== "reported"
+    || sharesProvenance.periodEnd !== date
+    || !["FY", "TTM_REPORTED"].includes(sharesProvenance.periodBasis ?? "")
+  ) {
+    return null;
+  }
+
+  const value = income / shares;
+  if (!Number.isFinite(value)) return null;
+  return {
+    value,
+    inputs: [
+      incomeProvenance.concept ?? "annualDilutedNIAvailtoComStockholders",
+      sharesProvenance.concept ?? "annualDilutedAverageShares",
+    ],
+  };
+}
+
+function directAnnualDilutedEpsReconciliation(
+  period: FinancialPeriod,
+): { date: string; relativeError: number } | null {
+  const date = period.periodEndDate;
+  const directEps = period.epsDiluted;
+  const epsProvenance = period.provenance?.epsDiluted;
+  const periodCurrency = normalizedCurrency(period.currency);
+  const epsCurrency = normalizedCurrency(epsProvenance?.unit);
+  const inputs = annualDilutedEpsInputs(period);
+  if (
+    !date
+    || !finite(directEps)
+    || !inputs
+    || !periodCurrency
+    || epsCurrency !== periodCurrency
+    || epsProvenance?.provider !== YAHOO_PROVIDER_ID
+    || epsProvenance.valueKind !== "reported"
+    || epsProvenance.periodEnd !== date
+    || epsProvenance.periodBasis !== "FY"
+  ) {
+    return null;
+  }
+  const denominator = Math.max(Math.abs(directEps), 0.01);
+  return {
+    date,
+    relativeError: Math.abs(inputs.value - directEps) / denominator,
+  };
+}
+
+function historicallyReconciledDilutedEps(
+  periods: FinancialPeriod[],
+  currentDate: string,
+): boolean {
+  const points = periods
+    .filter((period) => Boolean(period.periodEndDate && period.periodEndDate < currentDate))
+    .flatMap((period) => {
+      const point = directAnnualDilutedEpsReconciliation(period);
+      return point ? [point] : [];
+    })
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .slice(0, EPS_RECONCILIATION_MAX_POINTS);
+
+  if (points.length < EPS_RECONCILIATION_MIN_POINTS) return false;
+  const latestPoint = points[0];
+  const ageDays = (Date.parse(`${currentDate}T00:00:00Z`) - Date.parse(`${latestPoint.date}T00:00:00Z`)) / 86_400_000;
+  if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > EPS_RECONCILIATION_MAX_AGE_DAYS) return false;
+  return points.every((point) => point.relativeError <= EPS_RECONCILIATION_TOLERANCE);
+}
+
+function deriveReconciledAnnualDilutedEps(
+  fundamentals: CompanyFundamentals,
+): CompanyFundamentals {
+  const periods = fundamentals.annualPeriods ?? [];
+  if (!periods.length) return fundamentals;
+
+  const annualPeriods = periods.map((period) => {
+    if (finite(period.epsDiluted) || !period.periodEndDate) return period;
+    const inputs = annualDilutedEpsInputs(period);
+    if (!inputs || !historicallyReconciledDilutedEps(periods, period.periodEndDate)) return period;
+
+    const epsProvenance: MetricProvenance = {
+      source: "Yahoo Finance fundamentals timeseries",
+      provider: YAHOO_PROVIDER_ID,
+      unit: period.currency ?? undefined,
+      periodEnd: period.periodEndDate,
+      periodBasis: "FY",
+      inputs: inputs.inputs,
+      valueKind: "derived",
+      note: "Diluted EPS derived from same-date Yahoo diluted income available to common divided by diluted average shares only after at least two recent annual periods reconciled the same formula to Yahoo reported diluted EPS within 3%.",
+    };
+    return {
+      ...period,
+      epsDiluted: inputs.value,
+      provenance: {
+        ...(period.provenance ?? {}),
+        epsDiluted: epsProvenance,
+      },
+    };
+  });
+
+  const periodsByDate = new Map(annualPeriods.flatMap((period) => period.periodEndDate ? [[period.periodEndDate, period] as const] : []));
+  const annual = fundamentals.annual.map((period) => {
+    const enriched = period.periodEndDate ? periodsByDate.get(period.periodEndDate) : undefined;
+    if (!enriched) return period;
+    return {
+      ...period,
+      epsDiluted: enriched.epsDiluted ?? null,
+      provenance: enriched.provenance,
+    };
+  });
+
+  return {
+    ...fundamentals,
+    annual,
+    annualPeriods,
+  };
 }
 
 function alignReportedValuationFcfWithAnnualFallback(
@@ -158,7 +310,8 @@ export async function fetchYahooFundamentalsResult(
   const core = await fetchCoreYahooFundamentalsResult(company);
   if (!core.ok) return core;
 
-  const aligned = alignReportedValuationFcfWithAnnualFallback(core.data);
+  const withReconciledEps = deriveReconciledAnnualDilutedEps(core.data);
+  const aligned = alignReportedValuationFcfWithAnnualFallback(withReconciledEps);
   const withFcfBasis = attachReportedValuationFcfPeriodBasis(aligned);
   const enrichment = await enrichSpecializedFundamentals(company, withFcfBasis);
   return {
