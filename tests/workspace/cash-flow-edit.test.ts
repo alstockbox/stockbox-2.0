@@ -12,11 +12,8 @@ vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/auth/session", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
-vi.mock("@/lib/data/provider", () => ({ searchCompanies: vi.fn() }));
-vi.mock("@/lib/data/company-search", () => ({ resolveCanonicalCompanySelection: vi.fn() }));
 
-import { updatePortfolioCashFlowTransactionAction } from "../../src/lib/workspace/actions";
+import { updatePortfolioCashFlowTransactionAction } from "../../src/lib/workspace/portfolio-cash-flow-actions";
 
 function form(values: Record<string, string>) {
   const data = new FormData();
