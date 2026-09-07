@@ -8,6 +8,7 @@ import {
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const migrationPath = "supabase/migrations/20260905224800_paper_competition_final_valuation_candidates_v3.sql";
+const fairnessMigrationPath = "supabase/migrations/20260907104500_paper_competition_final_valuation_fairness_v3.sql";
 
 describe("Paper Trading V3 final valuation candidate authority", () => {
   it("defines a bounded service-role-only DB candidate function for completed competitions missing an exact final", () => {
@@ -36,6 +37,22 @@ describe("Paper Trading V3 final valuation candidate authority", () => {
     expect(sql).not.toContain("p_kind");
     expect(sql).not.toContain("p_user");
     expect(sql).not.toContain("p_account");
+  });
+
+  it("prioritizes never-final-attempted work and least-recently retried finals so bounded sweeps cannot starve newer competitions", () => {
+    expect(existsSync(fairnessMigrationPath)).toBe(true);
+    const sql = readFileSync(fairnessMigrationPath, "utf8").toLowerCase();
+
+    expect(sql).toContain("create or replace function public.list_due_paper_competition_final_valuations_v3()");
+    expect(sql).toContain("case when control.last_evaluation_cutoff is distinct from c.ends_at then 0 else 1 end asc");
+    expect(sql).toContain("control.last_completed_at asc nulls first");
+    expect(sql).toContain("c.ends_at asc");
+    expect(sql).toContain("c.id asc");
+    expect(sql).toContain("limit 8");
+    expect(sql).toContain("revoke all on function public.list_due_paper_competition_final_valuations_v3() from public, anon, authenticated");
+    expect(sql).toContain("grant execute on function public.list_due_paper_competition_final_valuations_v3() to service_role");
+    expect(sql).not.toContain("p_now");
+    expect(sql).not.toContain("p_limit");
   });
 
   it("calls exactly one no-argument trusted RPC and accepts only unique bounded UUID rows", async () => {
