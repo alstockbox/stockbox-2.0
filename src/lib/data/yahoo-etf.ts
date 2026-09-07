@@ -261,7 +261,7 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const dailyReset = classification.kind === "leveraged_inverse_etf" ? explicitDailyReset(company, category) : null;
 
   const input: EtfAnalysisInput = {
-    subtype: classification.kind === "operating_company" || classification.kind === "investment_company" || classification.kind === "bank" || classification.kind === "insurance" || classification.kind === "reit" || classification.kind === "real_estate" || classification.kind === "utility" || classification.kind === "commodity_mining" || classification.kind === "pre_profit_growth"
+    subtype: classification.kind === "operating_company" || classification.kind === "investment_company" || classification.kind === "business_development_company" || classification.kind === "bank" || classification.kind === "insurance" || classification.kind === "reit" || classification.kind === "real_estate" || classification.kind === "utility" || classification.kind === "commodity_mining" || classification.kind === "pre_profit_growth"
       ? "equity_etf"
       : classification.kind,
     expenseRatio,
