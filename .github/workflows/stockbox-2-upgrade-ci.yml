@@ -55,25 +55,10 @@ jobs:
         run: npm test -- tests/analytics
       - name: Auth regression tests
         run: npm test -- tests/auth
-      - name: Full suite excluding known main archetype baseline
+      - name: Full test suite
         id: full_tests
         continue-on-error: true
-        run: npm test -- --exclude tests/analysis/archetypes.test.ts
-      - name: Verify known archetype baseline fingerprint
-        id: baseline_fingerprint
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          NO_COLOR=1 npm test -- tests/analysis/archetypes.test.ts > /tmp/archetypes-baseline.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/archetypes-baseline.log
-          test "$status" -ne 0
-          grep -Fq "2 failed" /tmp/archetypes-baseline.log
-          grep -Fq "50 passed" /tmp/archetypes-baseline.log
-          grep -Fq "diagnoses valuation multiple gaps by failed input condition" /tmp/archetypes-baseline.log
-          grep -Fq "diagnoses FCF yield by missing simple free-cash-flow inputs" /tmp/archetypes-baseline.log
+        run: npm test
       - name: Typecheck
         id: typecheck
         continue-on-error: true
@@ -99,7 +84,6 @@ jobs:
         if: always()
         run: |
           test "${{ steps.full_tests.outcome }}" = "success"
-          test "${{ steps.baseline_fingerprint.outcome }}" = "success"
           test "${{ steps.typecheck.outcome }}" = "success"
           test "${{ steps.lint.outcome }}" = "success"
           test "${{ steps.build.outcome }}" = "success"
