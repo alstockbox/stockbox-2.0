@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessDepositaryReceiptFundamentalsAccess,
   assessDepositaryReceiptValuationAccess,
+  disableDepositaryReceiptValuationInputs,
   gateDepositaryReceiptValuationInputs,
   type DepositaryReceiptRepresentation,
 } from "../../src/lib/data/depositary-receipt";
@@ -175,5 +176,25 @@ describe("depositary receipt reconciliation", () => {
     expect(gated.fundamentals.reportedSharesOutstanding).toBe(2_000_000_000);
     expect(gated.fundamentals.reportedValuation?.priceEarnings).toBe(25);
     expect(gated.warning).toBeNull();
+  });
+
+  it("persists a verified primary-listing price disagreement as a high unresolved market-price source conflict", () => {
+    const rawMarket = { ...market(), provider: "adr-market-provider" };
+    const reason = "Primary listing price conflicts materially with the normalized ADR-implied underlying price.";
+    const disabled = disableDepositaryReceiptValuationInputs(rawMarket, fundamentals(), reason);
+
+    expect(disabled.market?.price).toBeNull();
+    expect(disabled.fundamentals.sourceConflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        metric: "marketPrice",
+        periodEnd: "2026-09-08",
+        primaryProvider: "adr-market-provider",
+        secondaryProvider: "primary-listing-market",
+        severity: "high",
+        kind: "share_basis_mismatch",
+        resolved: false,
+        reason,
+      }),
+    ]));
   });
 });
