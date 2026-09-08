@@ -9,6 +9,7 @@ import {
   buildRebalancePlan,
   createPortfolioPlan,
   findPortfolioUpgradeCandidates,
+  simulatePortfolioWhatIf,
   type Horizon,
   type PortfolioAction,
   type PortfolioAiCandidate,
@@ -256,6 +257,20 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     );
   }, [plan.allocation, selected]);
 
+  const whatIfSimulation = useMemo(() => {
+    if (!selected || !plan.allocation.length) return null;
+    const current = selected.holdings
+      .filter((holding) => typeof holding.weight === "number" && Number.isFinite(holding.weight) && (holding.weight ?? 0) > 0)
+      .map((holding) => ({ ticker: holding.ticker, weight: holding.weight as number }));
+    if (!current.length) return null;
+    return simulatePortfolioWhatIf({
+      current,
+      target: plan.allocation.map((item) => ({ ticker: item.ticker, targetPortfolioWeight: item.targetPortfolioWeight })),
+      candidates,
+      minimumCoverage: 0.8,
+    });
+  }, [candidates, plan.allocation, selected]);
+
   const snapshotDelta = selected?.snapshotDelta ?? null;
 
   return (
@@ -380,6 +395,41 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
               </div>
             ) : <p className="mt-2 text-xs leading-5 text-[#8f9bac]">{sv ? "Minst två portföljsnapshots behövs innan StockBox kan visa förändringen över tid." : "At least two portfolio snapshots are needed before StockBox can show changes over time."}</p>}
           </div>
+
+          {whatIfSimulation ? (
+            <div className="rounded-xl border border-[#e1cb95]/15 bg-[#e1cb95]/[0.025] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="max-w-3xl">
+                  <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "What-if: om jag följde detta utkast?" : "What-if: if I followed this draft?"}</p>
+                  <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Simulerar portföljens struktur och StockBox-signaler mot AI-utkastet. Det är inte en prognos för framtida avkastning och skapar inga order." : "Simulates portfolio structure and StockBox signals against the AI draft. It is not a forecast of future returns and creates no orders."}</p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-black/10 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Beslutsstöd" : "Decision support"}</span>
+              </div>
+
+              {whatIfSimulation.status === "insufficient" ? (
+                <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">
+                  <p className="font-semibold">{sv ? "Otillräckligt jämförbart analysunderlag" : "Insufficient comparable analysis coverage"}</p>
+                  <p className="mt-1">{sv ? `Nuvarande portfölj: ${formatPercent(whatIfSimulation.current.analysisCoverage)} täckning. AI-utkast: ${formatPercent(whatIfSimulation.target.analysisCoverage)}. Minst ${formatPercent(whatIfSimulation.minimumCoverage)} krävs för att visa viktade StockBox-signaler.` : `Current portfolio: ${formatPercent(whatIfSimulation.current.analysisCoverage)} coverage. AI draft: ${formatPercent(whatIfSimulation.target.analysisCoverage)}. At least ${formatPercent(whatIfSimulation.minimumCoverage)} is required to show weighted StockBox signals.`}</p>
+                </div>
+              ) : null}
+
+              <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">
+                <table className="w-full min-w-[680px] text-left text-xs">
+                  <thead className="bg-white/[0.035] text-[#8f9bac]"><tr><th className="px-3 py-2">{sv ? "Mått" : "Metric"}</th><th className="px-3 py-2">{sv ? "Nuvarande" : "Current"}</th><th className="px-3 py-2">AI draft</th><th className="px-3 py-2">Δ</th></tr></thead>
+                  <tbody>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktad StockBox-score" : "Weighted StockBox score"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightedScore === null ? "—" : whatIfSimulation.current.weightedScore.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightedScore === null ? "—" : whatIfSimulation.target.weightedScore.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightedScore)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktad risk-score" : "Weighted risk score"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightedRisk === null ? "—" : whatIfSimulation.current.weightedRisk.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightedRisk === null ? "—" : whatIfSimulation.target.weightedRisk.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightedRisk)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktad kvalitet" : "Weighted quality"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightedQuality === null ? "—" : whatIfSimulation.current.weightedQuality.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightedQuality === null ? "—" : whatIfSimulation.target.weightedQuality.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightedQuality)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktad tillväxt" : "Weighted growth"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightedGrowth === null ? "—" : whatIfSimulation.current.weightedGrowth.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightedGrowth === null ? "—" : whatIfSimulation.target.weightedGrowth.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightedGrowth)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktad värdering" : "Weighted valuation"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightedValuation === null ? "—" : whatIfSimulation.current.weightedValuation.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightedValuation === null ? "—" : whatIfSimulation.target.weightedValuation.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightedValuation)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Viktdiversifiering" : "Weight diversification"}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.current.weightDiversificationScore.toFixed(1)}</td><td className="px-3 py-2 text-[#eef2f7]">{whatIfSimulation.target.weightDiversificationScore.toFixed(1)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signed(whatIfSimulation.delta.weightDiversificationScore)}</td></tr>
+                    <tr className="border-t border-white/10"><td className="px-3 py-2 text-[#c9d2df]">{sv ? "Största position" : "Largest position"}</td><td className="px-3 py-2 text-[#eef2f7]">{formatPercent(whatIfSimulation.current.largestPositionWeight)}</td><td className="px-3 py-2 text-[#eef2f7]">{formatPercent(whatIfSimulation.target.largestPositionWeight)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signedPercentPoints(whatIfSimulation.delta.largestPositionWeight)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[10px] leading-4 text-[#6f7b8c]">{sv ? "Viktdiversifiering mäter endast hur jämnt kapitalet är fördelat mellan investerade positioner. Den ersätter inte StockBox fulla diversifieringsscore." : "Weight diversification measures only how evenly capital is distributed across invested positions. It does not replace the full StockBox diversification score."}</p>
+            </div>
+          ) : null}
 
           <div>
             <div className="flex items-center gap-2"><RefreshCw className="h-4 w-4 text-[#e1cb95]" /><p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Rebalanseringsvy" : "Rebalancing view"}</p></div>
