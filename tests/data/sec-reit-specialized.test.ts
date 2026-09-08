@@ -40,6 +40,42 @@ describe("SEC REIT specialist document parser", () => {
     });
   });
 
+  it("prefers the percentage immediately before occupancy over a following geographic mix percentage", () => {
+    const metrics = metricMap(`
+      <p>Portfolio Overview As of June 30, 2026</p>
+      <p>98.8% occupancy United States 79.5% Total ABR United Kingdom 15.0% Total ABR</p>
+    `, filingContext);
+
+    expect(metrics.occupancy).toMatchObject({
+      value: 0.988,
+      unit: "ratio",
+      dataAsOf: "2026-06-30",
+    });
+  });
+
+  it("prefers an explicit fixed-charge actual over covenant minimums", () => {
+    const metrics = metricMap(`
+      <p>Second Quarter 2026 Supplemental Information</p>
+      <p>Debt Covenants as of June 30, 2026 Covenant Actual Fixed charge coverage ratio &gt;1.5x 7.1x</p>
+      <p>Debt Metrics - Prologis Share June 30, 2026 March 31, 2026 Fixed charge coverage ratio 6.4x 6.4x</p>
+    `, filingContext);
+
+    expect(metrics.fixedChargeCoverage).toMatchObject({
+      value: 6.4,
+      unit: "ratio",
+      dataAsOf: "2026-06-30",
+    });
+  });
+
+  it("does not promote a covenant minimum into fixed-charge coverage when no actual metric is reported", () => {
+    const metrics = metricMap(`
+      <p>Debt Covenants as of June 30, 2026</p>
+      <p>Required Actuals Fixed Charge Coverage Ratio &gt;1.5x</p>
+    `, filingContext);
+
+    expect(metrics.fixedChargeCoverage).toBeUndefined();
+  });
+
   it("extracts table-style period-end occupancy and same-store NOI growth", () => {
     const metrics = metricMap(`
       <table>
