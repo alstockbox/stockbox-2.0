@@ -3,6 +3,7 @@
 import { ArrowRight, Bot, CheckCircle2, CircleDollarSign, Lightbulb, RefreshCw, ShieldAlert, Sparkles, Target } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ButtonLink } from "@/components/ui/button";
+import { comparePortfolioUpgradeEvidence } from "@/lib/portfolio/portfolio-ai-upgrade-evidence";
 import {
   buildPortfolioActionPlan,
   buildPortfolioUpgradeDrivers,
@@ -245,6 +246,21 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     return result;
   }, [horizon, risk, style, upgradeCandidates, weakAnalysis]);
 
+  const upgradeEvidenceByTicker = useMemo(() => {
+    const result = new Map<string, ReturnType<typeof comparePortfolioUpgradeEvidence>>();
+    if (!weakAnalysis) return result;
+    for (const candidate of upgradeCandidates) {
+      result.set(candidate.ticker, comparePortfolioUpgradeEvidence({
+        weakCandidate: weakAnalysis,
+        upgradeCandidate: candidate,
+        risk,
+        style,
+        horizon,
+      }));
+    }
+    return result;
+  }, [horizon, risk, style, upgradeCandidates, weakAnalysis]);
+
   const rebalancePlan = useMemo(() => {
     if (!selected) return [];
     const current = selected.holdings
@@ -350,6 +366,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
               <div className="mt-3 grid gap-3 lg:grid-cols-3">
                 {upgradeCandidates.map((candidate) => {
                   const drivers = upgradeDriversByTicker.get(candidate.ticker) ?? [];
+                  const evidence = upgradeEvidenceByTicker.get(candidate.ticker);
                   return (
                     <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -371,6 +388,30 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                                 {driverLabel(driver.dimension, sv)} +{driver.improvement.toFixed(0)}
                               </span>
                             ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {evidence && (evidence.strengths.length || evidence.tradeoffs.length) ? (
+                        <div className="mt-3 grid gap-2 border-t border-white/10 pt-3 sm:grid-cols-2">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200">{sv ? "Starkare på" : "Stronger on"}</p>
+                            <div className="mt-1 space-y-1">
+                              {evidence.strengths.map((item) => (
+                                <p key={`strength-${item.dimension}`} className="text-[10px] text-emerald-100">
+                                  {driverLabel(item.dimension, sv)} +{item.delta.toFixed(0)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-200">{sv ? "Svagare på" : "Weaker on"}</p>
+                            <div className="mt-1 space-y-1">
+                              {evidence.tradeoffs.map((item) => (
+                                <p key={`tradeoff-${item.dimension}`} className="text-[10px] text-amber-100">
+                                  {driverLabel(item.dimension, sv)} {item.delta.toFixed(0)}
+                                </p>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       ) : null}
