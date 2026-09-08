@@ -26,6 +26,7 @@ describe("StockBox coverage and integrity SLO", () => {
       discoveryRate: 1,
       identityRate: 1,
       classificationRate: 1,
+      supportCoverageRate: 1,
       analysisCompletionRate: 1,
       engineErrorRate: 0,
       directionalHighConflictRate: 0,
@@ -45,7 +46,7 @@ describe("StockBox coverage and integrity SLO", () => {
     expect(result.violations.some((item) => item.includes("Engine error rate"))).toBe(true);
   });
 
-  it("fails when a directional rating survives an unresolved high-severity source conflict", () => {
+  it("fails when a scored rating survives an unresolved high-severity source conflict", () => {
     const result = evaluateCoverageSlo([
       healthy({ sourceConflicts: [{ severity: "high", resolved: false }] }),
     ]);
@@ -81,8 +82,28 @@ describe("StockBox coverage and integrity SLO", () => {
     expect(result.metrics.fabricatedCriticalInputRate).toBe(1);
   });
 
+  it("fails when discovered securities are silently unsupported", () => {
+    const records = Array.from({ length: 100 }, () => healthy());
+    records[0] = healthy({ status: "unsupported_security_type", rating: null, score: null });
+
+    const result = evaluateCoverageSlo(records);
+
+    expect(result.pass).toBe(false);
+    expect(result.metrics.discoveryRate).toBe(1);
+    expect(result.metrics.supportCoverageRate).toBe(0.99);
+    expect(result.metrics.analysisCompletionRate).toBe(1);
+    expect(result.violations.some((item) => item.includes("Support coverage rate"))).toBe(false);
+
+    records[1] = healthy({ status: "unsupported_security_type", rating: null, score: null });
+    const belowTarget = evaluateCoverageSlo(records);
+    expect(belowTarget.metrics.supportCoverageRate).toBe(0.98);
+    expect(belowTarget.pass).toBe(false);
+    expect(belowTarget.violations.some((item) => item.includes("Support coverage rate"))).toBe(true);
+  });
+
   it("keeps 99%+ availability targets separate from 100% integrity invariants", () => {
     expect(STOCKBOX_COVERAGE_SLO.minimumDiscoveryRate).toBe(0.995);
+    expect(STOCKBOX_COVERAGE_SLO.minimumSupportCoverageRate).toBe(0.99);
     expect(STOCKBOX_COVERAGE_SLO.minimumAnalysisCompletionRate).toBe(0.99);
     expect(STOCKBOX_COVERAGE_SLO.maximumEngineErrorRate).toBe(0);
     expect(STOCKBOX_COVERAGE_SLO.maximumScoreRatingMismatchRate).toBe(0);
@@ -100,6 +121,7 @@ describe("StockBox coverage and integrity SLO", () => {
       minimumDiscoveryRate: 1,
       minimumIdentityRate: 1,
       minimumClassificationRate: 1,
+      minimumSupportCoverageRate: 1,
       minimumAnalysisCompletionRate: 1,
     });
 
