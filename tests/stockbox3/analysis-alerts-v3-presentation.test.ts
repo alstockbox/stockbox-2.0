@@ -31,6 +31,33 @@ describe("Analysis Alerts V3 presentation", () => {
     expect(result.body).toContain("WAIT");
   });
 
+  it("explains a same-rating weakening without claiming the rating changed", () => {
+    const result = presentAnalysisAlertEventV3(event({
+      severity: "watch",
+      message_key: "alerts.recommendationWeakened",
+      payload: { currentRating: "BUY", previousScore: 80, currentScore: 72, scoreDelta: -8 },
+    }), "sv");
+
+    expect(result.title).toContain("försvagades");
+    expect(result.body).toContain("kvar på KÖP");
+    expect(result.body).toContain("80");
+    expect(result.body).toContain("72");
+    expect(result.body).not.toContain("ratingen ändrades");
+  });
+
+  it("explains a same-rating strengthening in English", () => {
+    const result = presentAnalysisAlertEventV3(event({
+      severity: "watch",
+      message_key: "alerts.recommendationStrengthened",
+      payload: { currentRating: "HOLD", previousScore: 61, currentScore: 69, scoreDelta: 8 },
+    }), "en");
+
+    expect(result.title).toContain("strengthened");
+    expect(result.body).toContain("remains HOLD");
+    expect(result.body).toContain("61");
+    expect(result.body).toContain("69");
+  });
+
   it("states that data-quality deterioration is not a company rating", () => {
     const result = presentAnalysisAlertEventV3(event({
       alert_kind: "DATA_QUALITY_DROP",
