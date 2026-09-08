@@ -13,9 +13,14 @@ export type GlobalAuditKpiInput = {
 
 type AuditRateSummary = {
   input: number;
+  discovered: number;
+  supported: number;
   completed: number;
   rated: number;
   noRating: number;
+  discoveryRate: number | null;
+  supportCoverageRate: number | null;
+  completionRate: number | null;
   ratingRate: number | null;
   noRatingRate: number | null;
 };
@@ -39,8 +44,19 @@ export type GlobalAuditKpis = {
   byMarket: Record<string, AuditRateSummary>;
 };
 
+const UNDISCOVERED_STATUSES = new Set(["input_invalid", "not_found", "no_exact_match"]);
+const UNSUPPORTED_STATUS = "unsupported_security_type";
+
 function rate(numerator: number, denominator: number): number | null {
   return denominator > 0 ? numerator / denominator : null;
+}
+
+function isDiscovered(item: GlobalAuditKpiInput): boolean {
+  return !UNDISCOVERED_STATUSES.has(item.status);
+}
+
+function isSupported(item: GlobalAuditKpiInput): boolean {
+  return isDiscovered(item) && item.status !== UNSUPPORTED_STATUS;
 }
 
 function isCompleted(item: GlobalAuditKpiInput): boolean {
@@ -59,14 +75,21 @@ function isRated(item: GlobalAuditKpiInput): boolean {
 }
 
 function summarize(items: GlobalAuditKpiInput[]): AuditRateSummary {
+  const discovered = items.filter(isDiscovered).length;
+  const supported = items.filter(isSupported).length;
   const completed = items.filter(isCompleted).length;
   const rated = items.filter(isRated).length;
   const noRating = items.filter(isNoRating).length;
   return {
     input: items.length,
+    discovered,
+    supported,
     completed,
     rated,
     noRating,
+    discoveryRate: rate(discovered, items.length),
+    supportCoverageRate: rate(supported, discovered),
+    completionRate: rate(completed, supported),
     ratingRate: rate(rated, completed),
     noRatingRate: rate(noRating, completed),
   };
