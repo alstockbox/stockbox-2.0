@@ -55,11 +55,16 @@ export type RecommendationOutcomeJobPayloadV3 = {
   expectedAt: string;
 };
 
+export type RecommendationOutcomePauseReasonV3 =
+  | "recommendation_v3_disabled"
+  | "recommendation_engine_killed"
+  | "background_jobs_killed";
+
 export type RecommendationOutcomeTrackingGateV3 =
   | { allowed: true }
   | {
       allowed: false;
-      reason: "recommendation_v3_disabled" | "recommendation_engine_killed" | "background_jobs_killed";
+      reason: RecommendationOutcomePauseReasonV3;
     };
 
 export function recommendationOutcomeTrackingGateV3(overrides: {
@@ -215,7 +220,7 @@ export type RecommendationOutcomeEnqueueResultV3 = {
   deduplicated: number;
   failed: number;
   due: number;
-  pausedReason?: RecommendationOutcomeTrackingGateV3 extends { allowed: false; reason: infer R } ? R : never;
+  pausedReason?: RecommendationOutcomePauseReasonV3;
 };
 
 export async function enqueueDueRecommendationOutcomeJobsV3(options: {
