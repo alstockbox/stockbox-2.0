@@ -124,6 +124,10 @@ export function assessDepositaryReceiptValuationAccess(
   };
 }
 
+function scaleFinite(value: number | null | undefined, scale: number): number | null | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value * scale : value;
+}
+
 export function gateDepositaryReceiptValuationInputs(
   company: CompanySearchResult,
   market: MarketSnapshot | null,
@@ -136,26 +140,39 @@ export function gateDepositaryReceiptValuationInputs(
   if (!isDepositaryReceipt(company)) return { market, fundamentals, warning: null };
 
   const valuation = assessDepositaryReceiptValuationAccess(company);
-  if (valuation.allowed) return { market, fundamentals, warning: null };
+  if (!valuation.allowed || valuation.underlyingSharesPerReceipt === null) {
+    return {
+      market: market ? {
+        ...market,
+        marketCap: null,
+        marketCapAsOf: null,
+        marketCapCurrency: null,
+        sharesOutstanding: null,
+        sharesOutstandingAsOf: null,
+      } : null,
+      fundamentals: {
+        ...fundamentals,
+        reportedMarketCap: null,
+        reportedMarketCapDate: null,
+        reportedMarketCapCurrency: null,
+        reportedSharesOutstanding: null,
+        reportedSharesDate: null,
+        reportedValuation: undefined,
+      },
+      warning: `ADR/ADS issuer fundamentals are available, but valuation is disabled because ${valuation.reason}`,
+    };
+  }
 
+  const ratio = valuation.underlyingSharesPerReceipt;
   return {
     market: market ? {
       ...market,
-      marketCap: null,
-      marketCapAsOf: null,
-      marketCapCurrency: null,
-      sharesOutstanding: null,
-      sharesOutstandingAsOf: null,
+      price: scaleFinite(market.price, 1 / ratio) ?? null,
+      yearHigh: scaleFinite(market.yearHigh, 1 / ratio) ?? null,
+      yearLow: scaleFinite(market.yearLow, 1 / ratio) ?? null,
+      sharesOutstanding: scaleFinite(market.sharesOutstanding, ratio) ?? null,
     } : null,
-    fundamentals: {
-      ...fundamentals,
-      reportedMarketCap: null,
-      reportedMarketCapDate: null,
-      reportedMarketCapCurrency: null,
-      reportedSharesOutstanding: null,
-      reportedSharesDate: null,
-      reportedValuation: undefined,
-    },
-    warning: `ADR/ADS issuer fundamentals are available, but valuation is disabled because ${valuation.reason}`,
+    fundamentals,
+    warning: null,
   };
 }
