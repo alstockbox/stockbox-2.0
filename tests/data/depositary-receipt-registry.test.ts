@@ -14,6 +14,11 @@ const verifiedEntry = (overrides: Partial<DepositaryReceiptRegistryEntry> = {}):
   primaryListingTicker: "NOVO-B.CO",
   kind: "ADR",
   underlyingSharesPerReceipt: 0.5,
+  issuerReportingCurrency: "DKK",
+  primaryListingCurrency: "DKK",
+  receiptTradingCurrency: "DKK",
+  ratioSource: "depositary disclosure",
+  ratioAsOf: "2026-09-01",
   source: "issuer filing",
   sourceUrl: "https://example.invalid/issuer-filing",
   sourceAsOf: "2026-09-01",
@@ -37,6 +42,7 @@ describe("depositary receipt registry", () => {
     const result = attachVerifiedDepositaryReceiptRepresentation(company(), [verifiedEntry()]);
     expect(result.depositaryReceipt?.primaryListingTicker).toBe("NOVO-B.CO");
     expect(result.depositaryReceipt?.underlyingSharesPerReceipt).toBe(0.5);
+    expect(result.depositaryReceipt?.ratioSource).toBe("depositary disclosure");
   });
 
   it("does not attach a ticker-only match when stable identity disagrees", () => {
@@ -53,6 +59,8 @@ describe("depositary receipt registry", () => {
     const result = attachVerifiedDepositaryReceiptRepresentation(company(), [verifiedEntry({
       ratioVerified: false,
       underlyingSharesPerReceipt: null,
+      ratioSource: null,
+      ratioAsOf: null,
     })]);
 
     expect(result.depositaryReceipt?.mappingVerified).toBe(true);
@@ -75,7 +83,7 @@ describe("depositary receipt registry", () => {
 
   it("tracks unverified ratios without treating issuer mapping as invalid", () => {
     const report = qaDepositaryReceiptRegistry([
-      verifiedEntry({ ratioVerified: false, underlyingSharesPerReceipt: null }),
+      verifiedEntry({ ratioVerified: false, underlyingSharesPerReceipt: null, ratioSource: null, ratioAsOf: null }),
     ]);
 
     expect(report.unverifiedMappingSecurityIds).toEqual([]);
@@ -83,13 +91,22 @@ describe("depositary receipt registry", () => {
     expect(report.pass).toBe(true);
   });
 
-  it("requires source provenance and primary-listing identity", () => {
+  it("requires mapping source provenance and primary-listing identity", () => {
     const report = qaDepositaryReceiptRegistry([
       verifiedEntry({ source: "", sourceUrl: "", primaryListingTicker: "" }),
     ]);
 
     expect(report.missingSourceSecurityIds).toEqual(["adr:issuer-novo:nvo"]);
     expect(report.missingPrimaryListingSecurityIds).toEqual(["adr:issuer-novo:nvo"]);
+    expect(report.pass).toBe(false);
+  });
+
+  it("requires ratio provenance whenever a ratio is marked verified", () => {
+    const report = qaDepositaryReceiptRegistry([
+      verifiedEntry({ ratioSource: null, ratioAsOf: null }),
+    ]);
+
+    expect(report.invalidRatioProvenanceSecurityIds).toEqual(["adr:issuer-novo:nvo"]);
     expect(report.pass).toBe(false);
   });
 });
