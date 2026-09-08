@@ -8,11 +8,14 @@ describe("batch quota persistence race", () => {
     const persistIndex = durable.indexOf("const persisted = await persistAnalysis");
     const analysisIdIndex = durable.indexOf("const analysisId = persisted.id", persistIndex);
     const completeIndex = durable.indexOf("await completeAnalysisReservation", analysisIdIndex);
-    const postPersistLeaseIndex = durable.indexOf("await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);", analysisIdIndex);
+    const firstPostPersistLeaseIndex = durable.indexOf(
+      "await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);",
+      persistIndex,
+    );
 
     expect(persistIndex).toBeGreaterThanOrEqual(0);
     expect(analysisIdIndex).toBeGreaterThan(persistIndex);
     expect(completeIndex).toBeGreaterThan(analysisIdIndex);
-    expect(postPersistLeaseIndex).toBeGreaterThan(completeIndex);
+    expect(firstPostPersistLeaseIndex).toBeGreaterThan(completeIndex);
   });
 });
