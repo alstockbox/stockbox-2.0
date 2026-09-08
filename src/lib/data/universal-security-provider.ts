@@ -8,6 +8,7 @@ import {
   analyzeInvestmentCompany,
   classifyUniversalSecurity,
   type EtfAnalysisResult,
+  type EtfHolding,
   type InvestmentCompanyAnalysisResult,
   type UniversalSecurityClassification,
   type WeightedSecurityFactor,
@@ -33,6 +34,7 @@ import {
   searchCompanies,
 } from "./enhanced-provider";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import {
   deriveInvestmentCompanyAnnualNavGrowth,
   deriveInvestmentCompanyNavGrowth,
@@ -43,6 +45,7 @@ import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-co
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
+import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
 import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
@@ -359,13 +362,35 @@ async function enrichInvestmentCompanyReport(
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
   const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
     || shareholderReturns.shareholderReturn5yCagr !== null;
-  const investmentHoldings = holdingsComparable
+  let investmentHoldings: EtfHolding[] | undefined = holdingsComparable
     ? officialHoldings.data.holdings.map((holding) => ({
       name: holding.name,
       weight: holding.weight,
       issuerFundamentalsEligible: holding.issuerFundamentalsEligible,
     }))
     : undefined;
+  const holdingsQualitySources = [];
+  const holdingsQualityDiagnostics: ProviderDiagnostic[] = [];
+  let holdingsQualityMessage: string | null = null;
+
+  if (investmentHoldings?.length) {
+    const enrichment = await enrichInvestmentCompanyHoldingsQuality(
+      investmentHoldings,
+      {
+        searchCompanies,
+        fetchHoldingFundamentals: fetchYahooEtfHoldingFundamentals,
+      },
+      { maxSearches: 12 },
+    );
+    investmentHoldings = enrichment.holdings;
+    holdingsQualitySources.push(...enrichment.sources);
+    holdingsQualityDiagnostics.push(...enrichment.diagnostics);
+    if (!enrichment.targetReached) {
+      holdingsQualityMessage = enrichment.budgetExhausted
+        ? "Investment-company holdings-quality enrichment reached its search budget before 80% of total portfolio weight had verified quality evidence; unresolved and private holdings remain in the denominator and holdings quality stays N/A."
+        : "Investment-company holdings quality could not be verified across 80% of total official portfolio weight; unresolved and private holdings remain in the denominator and holdings quality stays N/A.";
+    }
+  }
 
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -445,6 +470,32 @@ async function enrichInvestmentCompanyReport(
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       `Official investment-company holdings unavailable: ${officialHoldings.message}`,
+    ])];
+  }
+
+  for (const source of holdingsQualitySources) {
+    if (!report.sources.some((existing) => (
+      existing.provider === source.provider
+      && existing.url === source.url
+      && existing.version === source.version
+    ))) {
+      report.sources = [...report.sources, source];
+    }
+  }
+  for (const diagnostic of holdingsQualityDiagnostics) {
+    if (!(report.providerDiagnostics ?? []).some((existing) => (
+      existing.provider === diagnostic.provider
+      && existing.capability === diagnostic.capability
+      && existing.status === diagnostic.status
+      && existing.reason === diagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), diagnostic];
+    }
+  }
+  if (holdingsQualityMessage) {
+    report.score.missingData = [...new Set([
+      ...report.score.missingData,
+      holdingsQualityMessage,
     ])];
   }
 
