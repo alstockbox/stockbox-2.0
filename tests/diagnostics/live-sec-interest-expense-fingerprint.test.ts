@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { searchCompanies } from "../../src/lib/data/provider";
 import { fetchCompanyFundamentalsResult } from "../../src/lib/data/sec";
@@ -17,11 +18,17 @@ const RAW_INTEREST_CONCEPTS = [
   "InterestAndDebtExpense",
   "InterestAndOtherNet",
 ] as const;
+const ARTIFACT_DIR = "artifacts/coverage-live";
 
 type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
+}
+
+async function persistArtifact(fileName: string, value: unknown) {
+  await mkdir(ARTIFACT_DIR, { recursive: true });
+  await writeFile(`${ARTIFACT_DIR}/${fileName}`, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
 async function rawCompanyFacts(cik: string): Promise<SecCompanyFacts> {
@@ -119,6 +126,7 @@ liveDescribe("live SEC interest-expense fingerprint", () => {
     }
 
     console.log(`SEC_INTEREST_EXPENSE_FINGERPRINT ${JSON.stringify(rows)}`);
+    await persistArtifact("sec-interest-expense-fingerprint.json", rows);
     expect(rows).toHaveLength(SEC_INTEREST_SYMBOLS.length);
   }, 240_000);
 });

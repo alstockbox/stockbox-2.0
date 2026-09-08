@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { searchCompanies } from "../../src/lib/data/provider";
 import { fetchYahooFundamentalsResult } from "../../src/lib/data/yahoo-fundamentals";
@@ -27,6 +28,7 @@ const INTEREST_TYPES = [
   "annualTotalOtherFinanceCost",
   "trailingTotalOtherFinanceCost",
 ] as const;
+const ARTIFACT_DIR = "artifacts/coverage-live";
 
 type JsonObject = Record<string, unknown>;
 type RawFact = {
@@ -38,6 +40,11 @@ type RawFact = {
 
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : null;
+}
+
+async function persistArtifact(fileName: string, value: unknown) {
+  await mkdir(ARTIFACT_DIR, { recursive: true });
+  await writeFile(`${ARTIFACT_DIR}/${fileName}`, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
 async function rawYahooInterest(symbol: string) {
@@ -136,6 +143,7 @@ liveDescribe("live Yahoo interest-expense fingerprint", () => {
     }
 
     console.log(`YAHOO_INTEREST_EXPENSE_FINGERPRINT ${JSON.stringify(rows)}`);
+    await persistArtifact("yahoo-interest-expense-fingerprint.json", rows);
     expect(rows).toHaveLength(INTEREST_GAP_TICKERS.length);
   }, 240_000);
 
@@ -185,6 +193,7 @@ liveDescribe("live Yahoo interest-expense fingerprint", () => {
     }
 
     console.log(`YAHOO_INTEREST_IDENTITY_RECONCILIATION ${JSON.stringify(rows)}`);
+    await persistArtifact("yahoo-interest-identity-reconciliation.json", rows);
     expect(directComparisonCount).toBeGreaterThan(10);
   }, 240_000);
 });

@@ -146,3 +146,15 @@ jobs:
           path: artifacts/coverage-live/sec-debt-concepts-fingerprint.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload interest-expense fingerprints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interest-expense-fingerprints
+          path: |
+            artifacts/coverage-live/sec-interest-expense-fingerprint.json
+            artifacts/coverage-live/yahoo-interest-expense-fingerprint.json
+            artifacts/coverage-live/yahoo-interest-identity-reconciliation.json
+          if-no-files-found: warn
+          retention-days: 7
