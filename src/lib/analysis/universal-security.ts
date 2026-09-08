@@ -383,13 +383,14 @@ export function computeSotP(
   options: { cash?: number | null; debt?: number | null; otherLiabilities?: number | null; dilutedShares?: number | null },
 ): SotPResult | null {
   if (!segments?.length) return null;
+  if (![options.cash, options.debt, options.otherLiabilities].every(isFiniteNumber)) return null;
+  const cash = options.cash as number;
+  const debt = options.debt as number;
+  const liabilities = options.otherLiabilities as number;
   const scenario = (field: "bearValue" | "baseValue" | "bullValue") => {
     const values = segments.map((segment) => segment[field]);
     if (!values.every(isFiniteNumber)) return null;
     const assets = values.reduce((sum, value) => sum + (value as number), 0);
-    const cash = isFiniteNumber(options.cash) ? options.cash : 0;
-    const debt = isFiniteNumber(options.debt) ? options.debt : 0;
-    const liabilities = isFiniteNumber(options.otherLiabilities) ? options.otherLiabilities : 0;
     return assets + cash - debt - liabilities;
   };
   const bear = scenario("bearValue");
@@ -417,18 +418,17 @@ function investmentNav(input: InvestmentCompanyAnalysisInput, sotp: SotPResult |
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? input.reportedNav / input.dilutedShares : null;
     return { total: input.reportedNav, perShare, source: "reported_nav" as const };
   }
-  const components = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
-  if ([input.listedHoldingsValue, input.unlistedHoldingsValue].some(isFiniteNumber)) {
-    const total = (isFiniteNumber(input.listedHoldingsValue) ? input.listedHoldingsValue : 0)
-      + (isFiniteNumber(input.unlistedHoldingsValue) ? input.unlistedHoldingsValue : 0)
-      + (isFiniteNumber(input.cash) ? input.cash : 0)
-      - (isFiniteNumber(input.debt) ? input.debt : 0)
-      - (isFiniteNumber(input.otherLiabilities) ? input.otherLiabilities : 0);
+  const componentInputs = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
+  if (componentInputs.every(isFiniteNumber)) {
+    const total = (input.listedHoldingsValue as number)
+      + (input.unlistedHoldingsValue as number)
+      + (input.cash as number)
+      - (input.debt as number)
+      - (input.otherLiabilities as number);
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? total / input.dilutedShares : null;
     if (isFiniteNumber(total) && total > 0) return { total, perShare, source: "component_nav" as const };
   }
   if (isFiniteNumber(sotp?.baseEquityValue) && sotp!.baseEquityValue! > 0) return { total: sotp!.baseEquityValue, perShare: sotp!.baseNavPerShare, source: "sotp_base" as const };
-  void components;
   return { total: null, perShare: null, source: "unavailable" as const };
 }
 
