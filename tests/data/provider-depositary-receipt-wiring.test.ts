@@ -44,6 +44,8 @@ describe("provider depositary-receipt wiring", () => {
     expect(source).toContain("reconcileDepositaryReceiptPrimaryListingPrice(");
     expect(source).toContain('primaryListingReconciliation.status === "conflict"');
     expect(source).toContain("disableDepositaryReceiptValuationInputs(");
+    expect(source).toContain("depositaryReceiptPrimaryListingSourceConflict(");
+    expect(source).toMatch(/sourceConflicts:\s*\[[\s\S]*?\.\.\.\(disabled\.fundamentals\.sourceConflicts\s*\?\?\s*\[\]\)[\s\S]*?primaryListingConflict/);
 
     expect(source).toMatch(/const\s+legacyInput\s*=\s*\{[\s\S]*?market,[\s\S]*?fundamentals,/);
     expect(source).toMatch(/toFinancialAnalysisInput\(\{[\s\S]*?market:\s*valuationInputs\.market,[\s\S]*?fundamentals:\s*valuationInputs\.fundamentals/);
