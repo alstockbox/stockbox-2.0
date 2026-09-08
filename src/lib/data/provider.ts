@@ -16,7 +16,15 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
-import { gateDepositaryReceiptValuationInputs, verifyDepositaryReceiptFundamentalsIdentity } from "./depositary-receipt";
+import {
+  disableDepositaryReceiptValuationInputs,
+  gateDepositaryReceiptValuationInputs,
+  verifyDepositaryReceiptFundamentalsIdentity,
+} from "./depositary-receipt";
+import {
+  buildDepositaryReceiptPrimaryListingCompany,
+  reconcileDepositaryReceiptPrimaryListingPrice,
+} from "./depositary-receipt-primary-listing";
 import { depositaryReceiptFxSource, resolveDepositaryReceiptFxContext } from "./depositary-receipt-provider-fx";
 import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 import { fetchCompanyFundamentalsResult } from "./sec";
@@ -904,15 +912,53 @@ export async function analyzeCompany({
   const depositaryReceiptFxContext = await resolveDepositaryReceiptFxContext(analysisCompany, market);
   const fxSource = depositaryReceiptFxSource(depositaryReceiptFxContext, accessedAt);
   if (fxSource) sources.push(fxSource);
-  const providerOrchestrationMs = Date.now() - startedAt;
 
-  const valuationInputs = gateDepositaryReceiptValuationInputs(
+  let valuationInputs = gateDepositaryReceiptValuationInputs(
     analysisCompany,
     market,
     fundamentals,
     depositaryReceiptFxContext ?? undefined,
   );
   if (valuationInputs.warning) warnings.push(valuationInputs.warning);
+
+  const primaryListingCompany = buildDepositaryReceiptPrimaryListingCompany(
+    analysisCompany,
+    depositaryReceiptFxContext ?? undefined,
+  );
+  if (primaryListingCompany && valuationInputs.market?.price !== null) {
+    const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
+    providerDiagnostics.push(...primaryListingResolution.diagnostics);
+    if (primaryListingResolution.result.ok) {
+      const primaryListingMarket = primaryListingResolution.result.data;
+      if (primaryListingResolution.source) {
+        sources.push({
+          ...primaryListingResolution.source,
+          accessedAt,
+          provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
+          capability: "market_data",
+          dataAsOf: primaryListingMarket.date,
+          version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
+        });
+      }
+      const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
+        analysisCompany,
+        valuationInputs.market,
+        primaryListingMarket,
+      );
+      if (primaryListingReconciliation.status === "conflict") {
+        valuationInputs = disableDepositaryReceiptValuationInputs(
+          market,
+          fundamentals,
+          primaryListingReconciliation.reason,
+        );
+        warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
+      } else if (primaryListingReconciliation.status === "unavailable") {
+        warnings.push(`ADR/ADS primary-listing reconciliation was unavailable: ${primaryListingReconciliation.reason}`);
+      }
+    }
+  }
+
+  const providerOrchestrationMs = Date.now() - startedAt;
 
   const legacyInput = {
     company: analysisCompany,
