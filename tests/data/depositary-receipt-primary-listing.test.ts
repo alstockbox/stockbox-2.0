@@ -4,6 +4,7 @@ import type { ComparisonFxContext } from "../../src/lib/data/ecb-fx";
 import type { DepositaryReceiptRepresentation } from "../../src/lib/data/depositary-receipt";
 import {
   buildDepositaryReceiptPrimaryListingCompany,
+  depositaryReceiptPrimaryListingSourceConflict,
   reconcileDepositaryReceiptPrimaryListingPrice,
 } from "../../src/lib/data/depositary-receipt-primary-listing";
 
@@ -51,7 +52,7 @@ function fx(): ComparisonFxContext {
   };
 }
 
-function market(price: number, currency: string, date = "2026-09-08"): MarketSnapshot {
+function market(price: number, currency: string, date = "2026-09-08", provider = "test-market"): MarketSnapshot {
   return {
     ticker: "EXAMPLE",
     price,
@@ -61,6 +62,7 @@ function market(price: number, currency: string, date = "2026-09-08"): MarketSna
     yearHigh: null,
     yearLow: null,
     performance: {},
+    provider,
   };
 }
 
@@ -96,6 +98,7 @@ describe("depositary-receipt primary-listing reconciliation", () => {
 
     expect(result.status).toBe("aligned");
     expect(result.relativeDifference).toBeLessThan(0.05);
+    expect(depositaryReceiptPrimaryListingSourceConflict(market(625, "DKK"), market(620, "DKK"), result)).toBeNull();
   });
 
   it("normalizes quote units such as GBp before comparing with primary-listing economic currency", () => {
@@ -116,28 +119,51 @@ describe("depositary-receipt primary-listing reconciliation", () => {
   });
 
   it("flags a material same-date primary-listing disagreement above 5%", () => {
-    const result = reconcileDepositaryReceiptPrimaryListingPrice(
-      adr(),
-      market(625, "DKK"),
-      market(500, "DKK"),
-    );
+    const normalizedAdr = market(625, "DKK", "2026-09-08", "adr-normalized-market");
+    const primary = market(500, "DKK", "2026-09-08", "primary-listing-market");
+    const result = reconcileDepositaryReceiptPrimaryListingPrice(adr(), normalizedAdr, primary);
 
     expect(result.status).toBe("conflict");
     expect(result.relativeDifference).toBeGreaterThan(0.05);
     expect(result.reason).toMatch(/primary listing|conflict|difference/i);
+    expect(depositaryReceiptPrimaryListingSourceConflict(normalizedAdr, primary, result)).toEqual({
+      metric: "marketPrice",
+      periodEnd: "2026-09-08",
+      primaryProvider: "adr-normalized-market",
+      secondaryProvider: "primary-listing-market",
+      primaryValue: 625,
+      secondaryValue: 500,
+      relativeDifference: 0.2,
+      severity: "high",
+      kind: "share_basis_mismatch",
+      resolved: false,
+      reason: result.reason,
+    });
   });
 
   it("returns unavailable instead of fabricating a comparison across different quote dates or currencies", () => {
-    expect(reconcileDepositaryReceiptPrimaryListingPrice(
+    const differentDate = reconcileDepositaryReceiptPrimaryListingPrice(
       adr(),
       market(625, "DKK", "2026-09-08"),
       market(620, "DKK", "2026-09-07"),
-    ).status).toBe("unavailable");
+    );
+    expect(differentDate.status).toBe("unavailable");
+    expect(depositaryReceiptPrimaryListingSourceConflict(
+      market(625, "DKK", "2026-09-08"),
+      market(620, "DKK", "2026-09-07"),
+      differentDate,
+    )).toBeNull();
 
-    expect(reconcileDepositaryReceiptPrimaryListingPrice(
+    const differentCurrency = reconcileDepositaryReceiptPrimaryListingPrice(
       adr(),
       market(625, "DKK"),
       market(620, "SEK"),
-    ).status).toBe("unavailable");
+    );
+    expect(differentCurrency.status).toBe("unavailable");
+    expect(depositaryReceiptPrimaryListingSourceConflict(
+      market(625, "DKK"),
+      market(620, "SEK"),
+      differentCurrency,
+    )).toBeNull();
   });
 });
