@@ -5,6 +5,7 @@ import {
   buildRebalancePlan,
   comparePortfolioSnapshots,
   createPortfolioPlan,
+  findPortfolioUpgradeCandidates,
   type PortfolioAiCandidate,
 } from "../../src/lib/portfolio/portfolio-ai-planner";
 
@@ -157,5 +158,74 @@ describe("Portfolio AI planner V3", () => {
     expect(actions.some((action) => action.code === "concentration")).toBe(true);
     expect(actions.some((action) => action.code === "stale_data")).toBe(true);
     expect(actions.some((action) => action.code === "weak_holding")).toBe(true);
+  });
+
+  it("suggests only fresh analyzed upgrades that materially outrank a weak holding and excludes current holdings", () => {
+    const upgrades = findPortfolioUpgradeCandidates({
+      weakHolding: { ticker: "WEAK", score: 48 },
+      currentHoldingTickers: ["WEAK", "OWNED"],
+      candidates: [
+        {
+          ticker: "BEST",
+          name: "Best Candidate",
+          score: 84,
+          recommendation: "Buy",
+          valuation: 72,
+          growth: 80,
+          quality: 88,
+          risk: 74,
+          momentum: 77,
+          analyzedAt: "2026-09-06T12:00:00.000Z",
+        },
+        {
+          ticker: "OWNED",
+          name: "Already Owned",
+          score: 90,
+          recommendation: "Strong Buy",
+          valuation: 80,
+          growth: 85,
+          quality: 91,
+          risk: 79,
+          momentum: 82,
+          analyzedAt: "2026-09-06T12:00:00.000Z",
+        },
+        {
+          ticker: "OLD",
+          name: "Stale Candidate",
+          score: 92,
+          recommendation: "Strong Buy",
+          valuation: 83,
+          growth: 88,
+          quality: 93,
+          risk: 80,
+          momentum: 90,
+          analyzedAt: "2026-05-01T12:00:00.000Z",
+        },
+        {
+          ticker: "SMALL",
+          name: "Marginal Improvement",
+          score: 51,
+          recommendation: "Hold",
+          valuation: 55,
+          growth: 54,
+          quality: 57,
+          risk: 58,
+          momentum: 52,
+          analyzedAt: "2026-09-06T12:00:00.000Z",
+        },
+      ],
+      risk: "balanced",
+      style: "quality",
+      horizon: "long",
+      now: "2026-09-07T12:00:00.000Z",
+      minimumScoreImprovement: 8,
+      limit: 3,
+    });
+
+    expect(upgrades).toHaveLength(1);
+    expect(upgrades[0]?.ticker).toBe("BEST");
+    expect(upgrades[0]?.scoreImprovement).toBe(36);
+    expect(upgrades[0]?.profileRank).toBeGreaterThan(0);
+    expect(upgrades.every((item) => !["WEAK", "OWNED", "OLD", "SMALL"].includes(item.ticker) || item.ticker === "BEST")).toBe(true);
   });
 });
