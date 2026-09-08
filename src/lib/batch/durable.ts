@@ -446,7 +446,6 @@ async function executeBatchItem(
       throw new Error(persisted.error || "Analysis persistence failed.");
     }
 
-    await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
     const analysisId = persisted.id;
     if (reservationId) {
       if ("replayed" in persisted && persisted.replayed) {
