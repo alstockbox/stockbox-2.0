@@ -19,6 +19,7 @@ export type ParsedOfficialInvestmentCompanyHoldings = {
   holdings: OfficialInvestmentCompanyHolding[];
   rawWeightSum: number;
   asOf: string;
+  holdingCompanyLeverageRatio?: number | null;
 };
 
 export type OfficialInvestmentCompanyHoldingsData = ParsedOfficialInvestmentCompanyHoldings & {
@@ -263,9 +264,7 @@ export function parseSvolderOfficialHoldings(
     || equityWeightPercent === null
     || equityWeightPercent <= 0
     || netReceivableValue === null
-    || netReceivableValue <= 0
     || netReceivableWeightPercent === null
-    || netReceivableWeightPercent <= 0
     || totalMarketValue === null
     || totalMarketValue <= 0
     || totalWeightPercent === null
@@ -277,10 +276,27 @@ export function parseSvolderOfficialHoldings(
   const equityWeight = equityWeightPercent / 100;
   const netReceivableWeight = netReceivableWeightPercent / 100;
   const publishedTotalWeight = totalWeightPercent / 100;
+  const financingSignsAlign = (
+    (netReceivableValue > 0 && netReceivableWeight > 0)
+    || (netReceivableValue < 0 && netReceivableWeight < 0)
+    || (netReceivableValue === 0 && netReceivableWeight === 0)
+  );
   if (
-    Math.abs(publishedTotalWeight - 1) > SVOLDER_RECONCILIATION_TOLERANCE
+    !financingSignsAlign
+    || Math.abs(publishedTotalWeight - 1) > SVOLDER_RECONCILIATION_TOLERANCE
     || Math.abs((equityWeight + netReceivableWeight) - publishedTotalWeight) > SVOLDER_RECONCILIATION_TOLERANCE
     || Math.abs((equityMarketValue + netReceivableValue) - totalMarketValue) > Math.max(2, totalMarketValue * 0.002)
+  ) {
+    return null;
+  }
+
+  const holdingCompanyLeverageRatio = netReceivableValue >= 0
+    ? 0
+    : Math.abs(netReceivableValue) / equityMarketValue;
+  if (
+    !Number.isFinite(holdingCompanyLeverageRatio)
+    || holdingCompanyLeverageRatio < 0
+    || holdingCompanyLeverageRatio >= 1
   ) {
     return null;
   }
@@ -299,23 +315,29 @@ export function parseSvolderOfficialHoldings(
     return null;
   }
 
-  const rows = [
-    ...equities.map(({ name, reportedWeight }) => ({
-      name,
-      reportedWeight,
-      issuerFundamentalsEligible: true,
-    })),
-    {
+  const rows: Array<{
+    name: string;
+    reportedWeight: number;
+    issuerFundamentalsEligible: boolean;
+  }> = equities.map(({ name, reportedWeight }) => ({
+    name,
+    reportedWeight,
+    issuerFundamentalsEligible: true,
+  }));
+  if (netReceivableValue > 0) {
+    rows.push({
       name: "Net receivable / cash",
       reportedWeight: netReceivableWeight,
       issuerFundamentalsEligible: false,
-    },
-  ];
+    });
+  }
+
   const rawWeightSum = rows.reduce((sum, holding) => sum + holding.reportedWeight, 0);
+  const expectedPositiveWeight = netReceivableValue > 0 ? publishedTotalWeight : equityWeight;
   if (
     rawWeightSum < MIN_REPRESENTED_WEIGHT
     || rawWeightSum > MAX_ROUNDING_WEIGHT_SUM
-    || Math.abs(rawWeightSum - publishedTotalWeight) > SVOLDER_RECONCILIATION_TOLERANCE
+    || Math.abs(rawWeightSum - expectedPositiveWeight) > SVOLDER_RECONCILIATION_TOLERANCE
   ) {
     return null;
   }
@@ -327,6 +349,7 @@ export function parseSvolderOfficialHoldings(
     })),
     rawWeightSum,
     asOf,
+    holdingCompanyLeverageRatio,
   };
 }
 
