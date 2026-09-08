@@ -16,7 +16,7 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
-import { gateDepositaryReceiptValuationInputs } from "./depositary-receipt";
+import { gateDepositaryReceiptValuationInputs, verifyDepositaryReceiptFundamentalsIdentity } from "./depositary-receipt";
 import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
@@ -128,6 +128,7 @@ function fundamentalsMatchCompany(company: CompanySearchResult, fundamentals: Co
     const sourceCiks = (fundamentals.sourceCiks ?? []).map((cik) => cik.replace(/\D/g, "").padStart(10, "0"));
     if (expected !== actual && !sourceCiks.includes(expected)) return false;
   }
+  if (company.securityType === "ADR" && !verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals).verified) return false;
   return !company.entityId || !fundamentals.entityId || company.entityId === fundamentals.entityId;
 }
 
