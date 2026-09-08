@@ -87,7 +87,8 @@ describe("global audit release gate", () => {
   });
 
   it("fails closed when zero-tolerance integrity fields are missing", () => {
-    const kpis = fixture() as GateFixture & { integrity: Record<string, string[]> };
+    const kpis: Parameters<typeof evaluateGlobalAuditGate>[0] = fixture();
+    if (!kpis?.integrity) throw new Error("fixture integrity payload is missing");
     delete kpis.integrity.analysisEngineErrors;
     const result = evaluateGlobalAuditGate(kpis);
     expect(result.pass).toBe(false);
