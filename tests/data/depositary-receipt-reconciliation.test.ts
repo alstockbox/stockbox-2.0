@@ -145,10 +145,10 @@ describe("depositary receipt reconciliation", () => {
     expect(result.reason).toMatch(/issuer/i);
   });
 
-  it("preserves price and momentum but strips all representation-sensitive valuation inputs when ratio is unresolved", () => {
+  it("preserves momentum but removes current price and all representation-sensitive valuation inputs when ratio is unresolved", () => {
     const gated = gateDepositaryReceiptValuationInputs(mappedAdr(), market(), fundamentals());
 
-    expect(gated.market?.price).toBe(50);
+    expect(gated.market?.price).toBeNull();
     expect(gated.market?.performance["1Y"]).toBe(0.1);
     expect(gated.market?.marketCap).toBeNull();
     expect(gated.market?.sharesOutstanding).toBeNull();
