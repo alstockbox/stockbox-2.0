@@ -16,12 +16,12 @@ function input(overrides: Partial<GlobalAuditKpiInput> = {}): GlobalAuditKpiInpu
 }
 
 describe("global ticker audit KPIs", () => {
-  it("separates discovery, support and completion denominators", () => {
+  it("separates discovery, support and completion denominators using live audit statuses", () => {
     const kpis = buildGlobalAuditKpis([
       input({ query: "OK" }),
-      input({ query: "UNSUPPORTED", status: "unsupported_security_type", score: null, rating: null }),
+      input({ query: "UNSUPPORTED", status: "unsupported", score: null, rating: null }),
       input({ query: "NOT_FOUND", status: "not_found", score: null, rating: null }),
-      input({ query: "PROVIDER", status: "fundamentals_provider_error", score: null, rating: null }),
+      input({ query: "PROVIDER", status: "provider_failure", score: null, rating: null }),
     ]);
 
     expect(kpis.overall).toMatchObject({
@@ -38,7 +38,7 @@ describe("global ticker audit KPIs", () => {
   it("reports support coverage independently for markets and security types", () => {
     const kpis = buildGlobalAuditKpis([
       input({ query: "US_OK", market: "UNSUFFIXED", securityType: "Common Stock" }),
-      input({ query: "US_UNSUPPORTED", market: "UNSUFFIXED", securityType: "Preferred", status: "unsupported_security_type", score: null, rating: null }),
+      input({ query: "US_UNSUPPORTED", market: "UNSUFFIXED", securityType: "Preferred", status: "unsupported", score: null, rating: null }),
       input({ query: "SE_OK", market: "ST", securityType: "Common Stock" }),
     ]);
 
@@ -51,12 +51,22 @@ describe("global ticker audit KPIs", () => {
   it("keeps honest No Rating separate from unsupported securities", () => {
     const kpis = buildGlobalAuditKpis([
       input({ query: "NO_RATING", rating: "No Rating", score: null, coverage: 0.6 }),
-      input({ query: "UNSUPPORTED", status: "unsupported_security_type", rating: null, score: null, coverage: null }),
+      input({ query: "UNSUPPORTED", status: "unsupported", rating: null, score: null, coverage: null }),
     ]);
 
     expect(kpis.overall.noRating).toBe(1);
     expect(kpis.overall.completed).toBe(1);
     expect(kpis.overall.supported).toBe(1);
     expect(kpis.overall.supportCoverageRate).toBe(0.5);
+  });
+
+  it("also understands the canonical SLO unsupported status", () => {
+    const kpis = buildGlobalAuditKpis([
+      input({ query: "CANONICAL", status: "unsupported_security_type", score: null, rating: null }),
+    ]);
+
+    expect(kpis.overall.discovered).toBe(1);
+    expect(kpis.overall.supported).toBe(0);
+    expect(kpis.overall.supportCoverageRate).toBe(0);
   });
 });
