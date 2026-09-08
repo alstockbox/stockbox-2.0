@@ -395,8 +395,7 @@ async function enrichInvestmentCompanyReport(
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
-    cash: latest?.cashAndEquivalents ?? null,
-    debt: latest?.totalDebt ?? null,
+    holdingCompanyLeverageRatio: null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
