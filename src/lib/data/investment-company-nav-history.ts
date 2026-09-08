@@ -179,12 +179,13 @@ export function deriveInvestmentCompanyAnnualNavGrowth(
     byYear.set(observation.year, observation);
   }
 
-  const current = [...annual].sort((left, right) => right.year - left.year)[0];
+  if (referenceYear !== undefined && !Number.isInteger(referenceYear)) return empty;
+
+  const current = [...annual]
+    .filter((observation) => referenceYear === undefined || observation.year < referenceYear)
+    .sort((left, right) => right.year - left.year)[0];
   if (!current) return empty;
-  if (referenceYear !== undefined) {
-    if (!Number.isInteger(referenceYear)) return empty;
-    if (current.year > referenceYear || referenceYear - current.year > 1) return empty;
-  }
+  if (referenceYear !== undefined && referenceYear - current.year > 1) return empty;
 
   return {
     navGrowth1y: annualPeriodGrowth(current, byYear, 1),
