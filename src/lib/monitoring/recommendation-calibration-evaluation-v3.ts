@@ -1,0 +1,266 @@
+import {
+  RECOMMENDATION_OUTCOME_POLICY_VERSION,
+  evaluateRecommendationPerformanceV3,
+  proposeRecommendationCalibrationV3,
+  type RecommendationOutcomeHorizonV3,
+  type RecommendationOutcomeV3,
+} from "@/lib/analysis/recommendation-learning-v3";
+import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
+import { persistRecommendationCalibrationCandidateV3 } from "@/lib/db/recommendation-calibration-v3";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { recommendationOutcomeTrackingGateV3 } from "./recommendation-outcome-jobs-v3";
+
+const OUTCOME_HORIZONS = new Set<RecommendationOutcomeHorizonV3>(["1d", "7d", "30d", "90d", "180d", "1y"]);
+const RATINGS = new Set<RecommendationV3Rating>([
+  "STRONG_BUY",
+  "BUY",
+  "WAIT",
+  "HOLD",
+  "REDUCE",
+  "SELL",
+  "UNAVAILABLE",
+]);
+
+const OUTCOME_PROJECTION = [
+  "recommendation_audit_id",
+  "policy_version",
+  "horizon",
+  "expected_at",
+  "evaluated_at",
+  "lag_days",
+  "entry_price",
+  "observed_price",
+  "security_return",
+  "benchmark_ticker",
+  "benchmark_entry_price",
+  "benchmark_observed_price",
+  "benchmark_return",
+  "excess_return",
+  "directional_hit",
+].join(",");
+
+const AUDIT_PROJECTION = [
+  "id",
+  "ticker",
+  "analysis_archetype",
+  "model_version",
+  "recommendation_policy_version",
+  "v3_rating",
+  "conviction",
+  "data_quality",
+].join(",");
+
+type AuditLineageRowV3 = {
+  id: string;
+  ticker: string;
+  analysisArchetype: string;
+  modelVersion: string;
+  recommendationPolicyVersion: string;
+  rating: RecommendationV3Rating;
+  conviction: number;
+  dataQuality: number;
+};
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function validDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.ticker !== "string") return null;
+  if (typeof row.analysis_archetype !== "string"
+      || typeof row.model_version !== "string"
+      || typeof row.recommendation_policy_version !== "string") return null;
+  if (typeof row.v3_rating !== "string" || !RATINGS.has(row.v3_rating as RecommendationV3Rating)) return null;
+
+  return {
+    id: row.id,
+    ticker: row.ticker.trim().toUpperCase(),
+    analysisArchetype: row.analysis_archetype,
+    modelVersion: row.model_version,
+    recommendationPolicyVersion: row.recommendation_policy_version,
+    rating: row.v3_rating as RecommendationV3Rating,
+    conviction: finiteNumber(row.conviction) ?? 0,
+    dataQuality: finiteNumber(row.data_quality) ?? 0,
+  };
+}
+
+export function recommendationOutcomeFromPersistenceV3(
+  value: unknown,
+  lineage: AuditLineageRowV3,
+): RecommendationOutcomeV3 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (row.policy_version !== RECOMMENDATION_OUTCOME_POLICY_VERSION) return null;
+  if (typeof row.horizon !== "string" || !OUTCOME_HORIZONS.has(row.horizon as RecommendationOutcomeHorizonV3)) return null;
+  if (!validDate(row.expected_at) || !validDate(row.evaluated_at)) return null;
+
+  const entryPrice = finiteNumber(row.entry_price);
+  const observedPrice = finiteNumber(row.observed_price);
+  const securityReturn = finiteNumber(row.security_return);
+  if (entryPrice === null || entryPrice <= 0 || observedPrice === null || observedPrice <= 0 || securityReturn === null) return null;
+
+  const benchmarkEntryPrice = finiteNumber(row.benchmark_entry_price);
+  const benchmarkObservedPrice = finiteNumber(row.benchmark_observed_price);
+  const benchmarkReturn = finiteNumber(row.benchmark_return);
+  const excessReturn = finiteNumber(row.excess_return);
+  const directionalHit = typeof row.directional_hit === "boolean" ? row.directional_hit : null;
+
+  return {
+    policyVersion: RECOMMENDATION_OUTCOME_POLICY_VERSION,
+    snapshotId: lineage.id,
+    ticker: lineage.ticker,
+    rating: lineage.rating,
+    analysisArchetype: lineage.analysisArchetype,
+    modelVersion: lineage.modelVersion,
+    recommendationPolicyVersion: lineage.recommendationPolicyVersion,
+    horizon: row.horizon as RecommendationOutcomeHorizonV3,
+    expectedAt: row.expected_at,
+    evaluatedAt: row.evaluated_at,
+    lagDays: Math.max(0, Math.trunc(finiteNumber(row.lag_days) ?? 0)),
+    entryPrice,
+    observedPrice,
+    securityReturn,
+    benchmarkTicker: typeof row.benchmark_ticker === "string" && row.benchmark_ticker.trim()
+      ? row.benchmark_ticker.trim().toUpperCase()
+      : null,
+    benchmarkEntryPrice,
+    benchmarkObservedPrice,
+    benchmarkReturn,
+    excessReturn,
+    directionalHit,
+    conviction: lineage.conviction,
+    dataQuality: lineage.dataQuality,
+  };
+}
+
+async function loadAuditLineageV3(ids: string[]): Promise<Map<string, AuditLineageRowV3>> {
+  const admin = createAdminClient();
+  if (!admin) throw new Error("Supabase admin client is unavailable.");
+  const map = new Map<string, AuditLineageRowV3>();
+  const unique = [...new Set(ids.filter(Boolean))];
+
+  for (let offset = 0; offset < unique.length; offset += 500) {
+    const chunk = unique.slice(offset, offset + 500);
+    const { data, error } = await admin
+      .from("analysis_recommendation_v3_audit")
+      .select(AUDIT_PROJECTION)
+      .in("id", chunk);
+    if (error) throw new Error(`Unable to load recommendation lineage for calibration: ${error.message}`);
+    for (const value of data ?? []) {
+      const parsed = auditLineageRow(value);
+      if (parsed) map.set(parsed.id, parsed);
+    }
+  }
+  return map;
+}
+
+export async function loadRecommendationOutcomesForCalibrationV3(options: {
+  limit?: number;
+} = {}): Promise<RecommendationOutcomeV3[]> {
+  const admin = createAdminClient();
+  if (!admin) throw new Error("Supabase admin client is unavailable.");
+  const limit = Math.max(30, Math.min(options.limit ?? 5_000, 20_000));
+
+  const { data, error } = await admin
+    .from("analysis_recommendation_v3_outcomes")
+    .select(OUTCOME_PROJECTION)
+    .eq("policy_version", RECOMMENDATION_OUTCOME_POLICY_VERSION)
+    .order("evaluated_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Unable to load recommendation outcomes for calibration: ${error.message}`);
+
+  const rows = data ?? [];
+  const auditIds = rows.flatMap((row) => typeof row.recommendation_audit_id === "string"
+    ? [row.recommendation_audit_id]
+    : []);
+  if (auditIds.length === 0) return [];
+  const lineage = await loadAuditLineageV3(auditIds);
+
+  return rows.flatMap((row) => {
+    const id = typeof row.recommendation_audit_id === "string" ? row.recommendation_audit_id : "";
+    const audit = lineage.get(id);
+    if (!audit) return [];
+    const parsed = recommendationOutcomeFromPersistenceV3(row, audit);
+    return parsed ? [parsed] : [];
+  });
+}
+
+export type RecommendationCalibrationEvaluationResultV3 = {
+  pausedReason?: "recommendation_v3_disabled" | "recommendation_engine_killed" | "background_jobs_killed";
+  outcomes: number;
+  performanceSlices: number;
+  driftSlices: number;
+  created: number;
+  refreshed: number;
+  deduplicated: number;
+  failed: number;
+};
+
+export async function runRecommendationCalibrationEvaluationV3(options: {
+  limit?: number;
+  minimumBenchmarkSample?: number;
+  now?: Date;
+} = {}): Promise<RecommendationCalibrationEvaluationResultV3> {
+  const gate = recommendationOutcomeTrackingGateV3();
+  if (!gate.allowed) {
+    return {
+      pausedReason: gate.reason,
+      outcomes: 0,
+      performanceSlices: 0,
+      driftSlices: 0,
+      created: 0,
+      refreshed: 0,
+      deduplicated: 0,
+      failed: 0,
+    };
+  }
+
+  const outcomes = await loadRecommendationOutcomesForCalibrationV3({ limit: options.limit });
+  const performance = evaluateRecommendationPerformanceV3(outcomes);
+  const createdAt = (options.now ?? new Date()).toISOString();
+  const candidates = performance.flatMap((slice) => {
+    const candidate = proposeRecommendationCalibrationV3(slice, {
+      minimumBenchmarkSample: options.minimumBenchmarkSample,
+      createdAt,
+    });
+    return candidate ? [candidate] : [];
+  });
+
+  let created = 0;
+  let refreshed = 0;
+  let deduplicated = 0;
+  let failed = 0;
+  for (const candidate of candidates) {
+    const persisted = await persistRecommendationCalibrationCandidateV3(candidate);
+    if (!persisted.ok) {
+      failed += 1;
+    } else if (persisted.created) {
+      created += 1;
+    } else if (persisted.refreshed) {
+      refreshed += 1;
+    } else {
+      deduplicated += 1;
+    }
+  }
+
+  return {
+    outcomes: outcomes.length,
+    performanceSlices: performance.length,
+    driftSlices: candidates.length,
+    created,
+    refreshed,
+    deduplicated,
+    failed,
+  };
+}
