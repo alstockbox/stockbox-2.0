@@ -35,6 +35,8 @@ export type DepositaryReceiptValuationAccess = {
   reason: string;
 };
 
+const MAX_ADR_MARKET_CAP_SHARE_BASIS_DIFFERENCE = 0.05;
+
 function isDepositaryReceipt(company: CompanySearchResult): boolean {
   return company.securityType === "ADR";
 }
@@ -50,6 +52,10 @@ function normalizedCurrency(value: string | null | undefined): string | null {
 
 function positiveFinite(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function relativeDifference(left: number, right: number): number {
+  return Math.abs(left - right) / Math.max(Math.abs(left), Math.abs(right), 1);
 }
 
 function verifiedIssuerMapping(
@@ -288,6 +294,11 @@ function normalizedMarketCapForPrimaryCurrency(
     : { value: null, currency: null, asOf: null };
 }
 
+function marketCapMatchesVerifiedShareBasis(candidate: number | null, impliedMarketCap: number | null): boolean {
+  if (!positiveFinite(candidate) || !positiveFinite(impliedMarketCap)) return false;
+  return relativeDifference(candidate, impliedMarketCap) <= MAX_ADR_MARKET_CAP_SHARE_BASIS_DIFFERENCE;
+}
+
 export function gateDepositaryReceiptValuationInputs(
   company: CompanySearchResult,
   market: MarketSnapshot | null,
@@ -356,25 +367,43 @@ export function gateDepositaryReceiptValuationInputs(
     return disabledValuationInputs(market, fundamentals, "current depositary-receipt price could not be normalized through verified FX.");
   }
 
-  const marketCap = normalizedMarketCapForPrimaryCurrency(market, primaryCurrency, receiptCurrency, fxContext);
-  const normalizedFundamentalsMarketCap = normalizedCurrency(fundamentals.reportedMarketCapCurrency) === primaryCurrency
-    ? fundamentals.reportedMarketCap ?? null
+  const underlyingPrice = convertedPrice === null ? null : convertedPrice / ratio;
+  const impliedMarketCap = positiveFinite(underlyingPrice) && issuerShares !== null
+    ? underlyingPrice * issuerShares
     : null;
+  const convertedMarketCap = normalizedMarketCapForPrimaryCurrency(market, primaryCurrency, receiptCurrency, fxContext);
+  const normalizedFundamentalsMarketCap = normalizedCurrency(fundamentals.reportedMarketCapCurrency) === primaryCurrency
+    && positiveFinite(fundamentals.reportedMarketCap)
+    ? fundamentals.reportedMarketCap
+    : null;
+
+  const convertedCapUsable = marketCapMatchesVerifiedShareBasis(convertedMarketCap.value, impliedMarketCap);
+  const fundamentalsCapUsable = marketCapMatchesVerifiedShareBasis(normalizedFundamentalsMarketCap, impliedMarketCap);
+  const hasComparableCandidate = positiveFinite(impliedMarketCap)
+    && (positiveFinite(convertedMarketCap.value) || positiveFinite(normalizedFundamentalsMarketCap));
+  const shareBasisConflict = hasComparableCandidate && !convertedCapUsable && !fundamentalsCapUsable;
+
+  const selectedMarketCap = convertedCapUsable
+    ? convertedMarketCap.value
+    : fundamentalsCapUsable
+      ? normalizedFundamentalsMarketCap
+      : null;
+  const selectedMarketCapAsOf = convertedCapUsable
+    ? convertedMarketCap.asOf
+    : fundamentalsCapUsable
+      ? fundamentals.reportedMarketCapDate ?? null
+      : null;
 
   return {
     market: {
       ...market,
-      price: convertedPrice === null ? null : convertedPrice / ratio,
+      price: underlyingPrice,
       currency: primaryCurrency,
       yearHigh: null,
       yearLow: null,
-      marketCap: marketCap.value ?? normalizedFundamentalsMarketCap,
-      marketCapAsOf: marketCap.value !== null
-        ? marketCap.asOf
-        : normalizedFundamentalsMarketCap !== null
-          ? fundamentals.reportedMarketCapDate ?? null
-          : null,
-      marketCapCurrency: marketCap.value !== null || normalizedFundamentalsMarketCap !== null ? primaryCurrency : null,
+      marketCap: selectedMarketCap,
+      marketCapAsOf: selectedMarketCapAsOf,
+      marketCapCurrency: selectedMarketCap !== null ? primaryCurrency : null,
       sharesOutstanding: issuerShares,
       sharesOutstandingAsOf: issuerShares !== null ? fundamentals.reportedSharesDate ?? null : null,
       priceHistory: undefined,
@@ -382,8 +411,13 @@ export function gateDepositaryReceiptValuationInputs(
     },
     fundamentals: {
       ...fundamentals,
+      reportedMarketCap: shareBasisConflict ? null : fundamentals.reportedMarketCap,
+      reportedMarketCapDate: shareBasisConflict ? null : fundamentals.reportedMarketCapDate,
+      reportedMarketCapCurrency: shareBasisConflict ? null : fundamentals.reportedMarketCapCurrency,
       reportedValuation: undefined,
     },
-    warning: null,
+    warning: shareBasisConflict
+      ? "ADR/ADS market cap was discarded because converted provider and issuer-reported market caps conflict by more than 5% with verified normalized price times issuer shares; canonical valuation must derive market cap from the verified share basis instead."
+      : null,
   };
 }
