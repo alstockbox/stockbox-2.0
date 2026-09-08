@@ -47,6 +47,7 @@ import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-
 import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import {
+  annualNavPerShareHistoryFromKeyRatios,
   fetchOfficialInvestmentCompanyKeyRatios,
   selectVerifiedAnnualLeverageRatio,
 } from "./official-investment-company-key-ratios";
@@ -384,12 +385,27 @@ async function enrichInvestmentCompanyReport(
     )
     : null;
   const dividendQualityContributes = dividendQuality?.score !== null && dividendQuality?.score !== undefined;
+  const keyRatioAnnualNavHistory = officialKeyRatios.ok
+    ? annualNavPerShareHistoryFromKeyRatios(officialKeyRatios.data.years)
+    : [];
+  const dedicatedAnnualNavHistory = officialNav.ok && officialNav.data.annualNavPerShareHistory.length > 0
+    ? officialNav.data.annualNavPerShareHistory
+    : [];
+  const usesKeyRatioAnnualNavHistory = dedicatedAnnualNavHistory.length === 0 && keyRatioAnnualNavHistory.length > 0;
+  const verifiedAnnualNavHistory = dedicatedAnnualNavHistory.length > 0
+    ? dedicatedAnnualNavHistory
+    : keyRatioAnnualNavHistory;
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
-  const annualNavGrowth = officialNav.ok && marketYear !== undefined
-    ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
+  const annualNavGrowth = marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(verifiedAnnualNavHistory, marketYear)
     : emptyInvestmentCompanyNavGrowth();
+  const keyRatioNavGrowthContributes = usesKeyRatioAnnualNavHistory && (
+    annualNavGrowth.navGrowth1y !== null
+    || annualNavGrowth.navGrowth3yCagr !== null
+    || annualNavGrowth.navGrowth5yCagr !== null
+  );
   const navGrowth: InvestmentCompanyNavGrowth = {
     navGrowth1y: datedNavGrowth.navGrowth1y ?? annualNavGrowth.navGrowth1y,
     navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? annualNavGrowth.navGrowth3yCagr,
@@ -522,7 +538,10 @@ async function enrichInvestmentCompanyReport(
     ))) {
       report.sources = [...report.sources, keyRatioSource];
     }
-    const keyRatiosContribute = annualLeverageContributes || capitalAllocationContributes || dividendQualityContributes;
+    const keyRatiosContribute = annualLeverageContributes
+      || capitalAllocationContributes
+      || dividendQualityContributes
+      || keyRatioNavGrowthContributes;
     const keyRatioDiagnostic: ProviderDiagnostic = keyRatiosContribute
       ? officialKeyRatios.data.diagnostic
       : {
