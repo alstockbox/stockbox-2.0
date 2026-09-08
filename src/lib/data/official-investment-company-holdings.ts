@@ -590,7 +590,7 @@ export async function fetchOfficialInvestmentCompanyHoldings(
     const response = await fetch(entry.url, {
       headers: { accept: "text/html,application/xhtml+xml" },
       signal: controller.signal,
-      next: { revalidate: 60 * 60 },
+      cache: "no-store",
     });
     if (!response.ok) {
       return failure(response.status === 429 ? "rate_limited" : `http_${response.status}`, "Official holdings page could not be fetched.");
@@ -598,7 +598,7 @@ export async function fetchOfficialInvestmentCompanyHoldings(
     const parsed = entry.parse(await response.text());
     if (!parsed) {
       return failure(
-        "official_holdings_incomplete_or_unparseable",
+        "official_holdings_parse_failed",
         "Official holdings were unavailable, incomplete below the 95% representation threshold, failed issuer-specific reconciliation, or were outside the allowed rounding tolerance.",
       );
     }
