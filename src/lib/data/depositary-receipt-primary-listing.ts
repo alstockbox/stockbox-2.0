@@ -1,5 +1,5 @@
 import { economicCurrencyCode, quotePriceToEconomic } from "@/lib/analysis/currency-units";
-import type { CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
+import type { CompanySearchResult, MarketSnapshot, ProviderSourceConflict } from "@/lib/analysis/types";
 import type { ComparisonFxContext } from "./ecb-fx";
 import {
   assessDepositaryReceiptValuationAccess,
@@ -123,5 +123,33 @@ export function reconcileDepositaryReceiptPrimaryListingPrice(
     status: "aligned",
     relativeDifference: difference,
     reason: "Primary listing price aligns with the normalized ADR-implied underlying price within the 5% integrity tolerance.",
+  };
+}
+
+export function depositaryReceiptPrimaryListingSourceConflict(
+  normalizedAdrMarket: MarketSnapshot | null,
+  primaryListingMarket: MarketSnapshot | null,
+  reconciliation: DepositaryReceiptPrimaryListingReconciliation,
+): ProviderSourceConflict | null {
+  if (reconciliation.status !== "conflict" || reconciliation.relativeDifference === null) return null;
+  if (!normalizedAdrMarket || !primaryListingMarket) return null;
+  if (!normalizedAdrMarket.date || !primaryListingMarket.date || normalizedAdrMarket.date.slice(0, 10) !== primaryListingMarket.date.slice(0, 10)) return null;
+
+  const adrPrice = quotePriceToEconomic(normalizedAdrMarket.price, normalizedAdrMarket.currency);
+  const primaryPrice = quotePriceToEconomic(primaryListingMarket.price, primaryListingMarket.currency);
+  if (!positiveFinite(adrPrice) || !positiveFinite(primaryPrice)) return null;
+
+  return {
+    metric: "marketPrice",
+    periodEnd: normalizedAdrMarket.date.slice(0, 10),
+    primaryProvider: normalizedAdrMarket.provider ?? "adr-normalized-market",
+    secondaryProvider: primaryListingMarket.provider ?? "primary-listing-market",
+    primaryValue: adrPrice,
+    secondaryValue: primaryPrice,
+    relativeDifference: reconciliation.relativeDifference,
+    severity: "high",
+    kind: "share_basis_mismatch",
+    resolved: false,
+    reason: reconciliation.reason,
   };
 }
