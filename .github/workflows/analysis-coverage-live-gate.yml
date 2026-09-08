@@ -26,21 +26,48 @@ jobs:
 
       - run: npm ci
 
-      - name: Run live global ticker audit
-        env:
-          STOCKBOX_BATCH_OFFSET: "0"
-          STOCKBOX_BATCH_CONCURRENCY: "3"
-          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
-        run: npx vitest run scripts/diagnostics/user-large-ticker-audit.test.ts --config scripts/diagnostics/vitest.live.config.ts
-
-      - name: Locate audit artifact
-        id: audit
+      - name: Run live global ticker audit in contiguous shards
         shell: bash
+        env:
+          STOCKBOX_BATCH_CONCURRENCY: "3"
+          STOCKBOX_AUDIT_SHARD_SIZE: "100"
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
         run: |
           set -euo pipefail
-          file="$(find .stockbox-diagnostics -maxdepth 1 -type f -name 'user-large-ticker-audit-*.json' | sort | head -n 1)"
-          test -n "$file"
-          echo "file=$file" >> "$GITHUB_OUTPUT"
+          rm -rf .stockbox-diagnostics
+          mkdir -p .stockbox-diagnostics/shards
+
+          offset=0
+          shard_size="$STOCKBOX_AUDIT_SHARD_SIZE"
+          while true; do
+            echo "Running global audit shard offset=$offset limit=$shard_size"
+            STOCKBOX_BATCH_OFFSET="$offset" \
+            STOCKBOX_BATCH_LIMIT="$shard_size" \
+            npx vitest run scripts/diagnostics/user-large-ticker-audit.test.ts --config scripts/diagnostics/vitest.live.config.ts
+
+            shard_file=".stockbox-diagnostics/user-large-ticker-audit-${offset}-${shard_size}.json"
+            test -f "$shard_file"
+            cp "$shard_file" ".stockbox-diagnostics/shards/shard-${offset}.json"
+
+            actual="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(String(x.results.length));' "$shard_file")"
+            total="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(String(x.totalInput));' "$shard_file")"
+            test "$actual" -gt 0
+
+            offset=$((offset + actual))
+            if [ "$offset" -eq "$total" ]; then
+              break
+            fi
+            if [ "$offset" -gt "$total" ]; then
+              echo "Audit shard offsets exceeded totalInput: offset=$offset total=$total" >&2
+              exit 1
+            fi
+          done
+
+      - name: Merge audit shards and verify corpus continuity
+        run: |
+          node scripts/diagnostics/merge-global-audit-shards.mjs \
+            --output .stockbox-diagnostics/global-audit-merged.json \
+            .stockbox-diagnostics/shards/*.json
 
       - name: Enforce coverage and integrity thresholds
         env:
@@ -49,13 +76,15 @@ jobs:
           STOCKBOX_GATE_MIN_COMPLETION: "0.99"
           STOCKBOX_GATE_MIN_SPECIALIST_COVERAGE: "0.99"
           STOCKBOX_GATE_MIN_GROUP_SIZE: "20"
-        run: node scripts/diagnostics/evaluate-global-audit-gate.mjs "${{ steps.audit.outputs.file }}"
+        run: node scripts/diagnostics/evaluate-global-audit-gate.mjs .stockbox-diagnostics/global-audit-merged.json
 
       - name: Upload live audit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stockbox-global-analysis-coverage-audit
-          path: .stockbox-diagnostics/*.json
+          path: |
+            .stockbox-diagnostics/global-audit-merged.json
+            .stockbox-diagnostics/shards/*.json
           if-no-files-found: error
           retention-days: 30
