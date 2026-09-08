@@ -109,9 +109,13 @@ function matchingRegistryEntry(
   return entry;
 }
 
+// Intentionally empty until each mapping is backed by an authoritative issuer/depositary source.
+// Ticker-only guesses are forbidden; add entries through reviewed source-backed data changes.
+export const verifiedDepositaryReceiptRegistry: DepositaryReceiptRegistryEntry[] = [];
+
 export function attachVerifiedDepositaryReceiptRepresentation(
   company: CompanySearchResult,
-  entries: DepositaryReceiptRegistryEntry[],
+  entries: DepositaryReceiptRegistryEntry[] = verifiedDepositaryReceiptRegistry,
 ): DepositaryReceiptCompany {
   const entry = matchingRegistryEntry(company, entries);
   if (!entry) return company as DepositaryReceiptCompany;
@@ -135,7 +139,3 @@ export function attachVerifiedDepositaryReceiptRepresentation(
     },
   };
 }
-
-// Intentionally empty until each mapping is backed by an authoritative issuer/depositary source.
-// Ticker-only guesses are forbidden; add entries through reviewed source-backed data changes.
-export const verifiedDepositaryReceiptRegistry: DepositaryReceiptRegistryEntry[] = [];
