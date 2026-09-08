@@ -1,4 +1,4 @@
-import type { CompanySearchResult } from "@/lib/analysis/types";
+import type { CompanyFundamentals, CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
 
 export type DepositaryReceiptRepresentation = {
   kind: "ADR" | "ADS";
@@ -121,5 +121,41 @@ export function assessDepositaryReceiptValuationAccess(
     allowed: true,
     underlyingSharesPerReceipt: ratio,
     reason: "Verified depositary-receipt share ratio reconciles receipt and underlying share basis.",
+  };
+}
+
+export function gateDepositaryReceiptValuationInputs(
+  company: CompanySearchResult,
+  market: MarketSnapshot | null,
+  fundamentals: CompanyFundamentals,
+): {
+  market: MarketSnapshot | null;
+  fundamentals: CompanyFundamentals;
+  warning: string | null;
+} {
+  if (!isDepositaryReceipt(company)) return { market, fundamentals, warning: null };
+
+  const valuation = assessDepositaryReceiptValuationAccess(company);
+  if (valuation.allowed) return { market, fundamentals, warning: null };
+
+  return {
+    market: market ? {
+      ...market,
+      marketCap: null,
+      marketCapAsOf: null,
+      marketCapCurrency: null,
+      sharesOutstanding: null,
+      sharesOutstandingAsOf: null,
+    } : null,
+    fundamentals: {
+      ...fundamentals,
+      reportedMarketCap: null,
+      reportedMarketCapDate: null,
+      reportedMarketCapCurrency: null,
+      reportedSharesOutstanding: null,
+      reportedSharesDate: null,
+      reportedValuation: undefined,
+    },
+    warning: `ADR/ADS issuer fundamentals are available, but valuation is disabled because ${valuation.reason}`,
   };
 }
