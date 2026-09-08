@@ -58,6 +58,7 @@ describe("global ticker audit KPIs", () => {
     expect(kpis.overall.completed).toBe(1);
     expect(kpis.overall.supported).toBe(1);
     expect(kpis.overall.supportCoverageRate).toBe(0.5);
+    expect(kpis.integrity.scoreRatingMismatches).toEqual([]);
   });
 
   it("also understands the canonical SLO unsupported status", () => {
@@ -68,5 +69,25 @@ describe("global ticker audit KPIs", () => {
     expect(kpis.overall.discovered).toBe(1);
     expect(kpis.overall.supported).toBe(0);
     expect(kpis.overall.supportCoverageRate).toBe(0);
+  });
+
+  it("reports every analysis engine error as a zero-tolerance integrity violation", () => {
+    const kpis = buildGlobalAuditKpis([
+      input({ query: "OK" }),
+      input({ query: "BROKEN", status: "analysis_engine_error", score: null, rating: null }),
+    ]);
+
+    expect(kpis.integrity.analysisEngineErrors).toEqual(["BROKEN"]);
+  });
+
+  it("reports canonical score and rating state mismatches", () => {
+    const kpis = buildGlobalAuditKpis([
+      input({ query: "HONEST_NO_RATING", rating: "No Rating", score: null }),
+      input({ query: "NO_RATING_WITH_SCORE", rating: "No Rating", score: 61 }),
+      input({ query: "BUY_WITHOUT_SCORE", rating: "Buy", score: null }),
+      input({ query: "HEALTHY", rating: "Hold", score: 55 }),
+    ]);
+
+    expect(kpis.integrity.scoreRatingMismatches).toEqual(["BUY_WITHOUT_SCORE", "NO_RATING_WITH_SCORE"]);
   });
 });
