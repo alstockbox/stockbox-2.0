@@ -33,6 +33,32 @@ describe("Analysis Alerts V3", () => {
     expect(first[0]?.dedupeKey).toBe(second[0]?.dedupeKey);
   });
 
+  it("alerts when the objective case weakens materially while the rating stays the same", () => {
+    const alerts = deriveAnalysisAlertsV3(
+      snapshot({ analysisId: "analysis-1", rating: "BUY", objectiveScore: 80 }),
+      snapshot({ analysisId: "analysis-2", rating: "BUY", objectiveScore: 72 }),
+    );
+    const event = alerts.find((item) => item.messageKey === "alerts.recommendationWeakened");
+
+    expect(event?.kind).toBe("RECOMMENDATION_CHANGE");
+    expect(event?.payload).toMatchObject({
+      currentRating: "BUY",
+      previousScore: 80,
+      currentScore: 72,
+      scoreDelta: -8,
+      lifecycleState: "WEAKENED",
+    });
+  });
+
+  it("alerts when the objective case strengthens materially while the rating stays the same", () => {
+    const alerts = deriveAnalysisAlertsV3(
+      snapshot({ analysisId: "analysis-1", rating: "HOLD", objectiveScore: 61 }),
+      snapshot({ analysisId: "analysis-2", rating: "HOLD", objectiveScore: 69 }),
+    );
+
+    expect(alerts.some((event) => event.messageKey === "alerts.recommendationStrengthened")).toBe(true);
+  });
+
   it("does not expose or accept a personalized user-match score", () => {
     const alerts = deriveAnalysisAlertsV3(
       snapshot({ conviction: 90 }),
