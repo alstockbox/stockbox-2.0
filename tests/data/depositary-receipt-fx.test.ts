@@ -3,6 +3,7 @@ import type { CompanyFundamentals, CompanySearchResult, MarketSnapshot } from ".
 import type { ComparisonFxContext } from "../../src/lib/data/ecb-fx";
 import {
   assessDepositaryReceiptValuationAccess,
+  buildDepositaryReceiptFxRequest,
   gateDepositaryReceiptValuationInputs,
   type DepositaryReceiptRepresentation,
 } from "../../src/lib/data/depositary-receipt";
@@ -93,6 +94,27 @@ function usdToDkkContext(overrides: Partial<ComparisonFxContext> = {}): Comparis
 }
 
 describe("depositary-receipt cross-currency FX reconciliation", () => {
+  it("builds an FX request only for a source-backed cross-currency ADR with verified ratio and market currency", () => {
+    expect(buildDepositaryReceiptFxRequest(company(), market())).toEqual({
+      id: "adr:issuer-example:example",
+      currency: "USD",
+      targetCurrency: "DKK",
+      date: "2026-09-08",
+    });
+  });
+
+  it("does not request FX for aligned, unverified, or market-currency-mismatched ADRs", () => {
+    const aligned = company();
+    aligned.depositaryReceipt = { ...aligned.depositaryReceipt!, receiptTradingCurrency: "DKK" };
+    expect(buildDepositaryReceiptFxRequest(aligned, market({ currency: "DKK" }))).toBeNull();
+
+    const unverified = company();
+    unverified.depositaryReceipt = { ...unverified.depositaryReceipt!, ratioVerified: false };
+    expect(buildDepositaryReceiptFxRequest(unverified, market())).toBeNull();
+
+    expect(buildDepositaryReceiptFxRequest(company(), market({ currency: "EUR" }))).toBeNull();
+  });
+
   it("allows cross-currency valuation only with a verified matching FX context", () => {
     const result = assessDepositaryReceiptValuationAccess(company(), usdToDkkContext());
     expect(result.allowed).toBe(true);
