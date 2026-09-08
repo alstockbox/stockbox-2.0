@@ -27,11 +27,11 @@ describe("Market benchmark policy V3", () => {
   });
 
   it("can fall back to exchange metadata", () => {
-    expect(benchmarkForCompanyV3(company({ ticker: "ABC", country: null, exchange: "NYSE" })))
+    expect(benchmarkForCompanyV3(company({ ticker: "ABC", country: undefined, exchange: "NYSE" })))
       .toEqual(expect.objectContaining({ ticker: "^GSPC", source: "exchange" }));
   });
 
   it("fails closed when the listing market cannot be identified", () => {
-    expect(benchmarkForCompanyV3(company({ ticker: "MYSTERY", country: null, exchange: null }))).toBeNull();
+    expect(benchmarkForCompanyV3(company({ ticker: "MYSTERY", country: undefined, exchange: undefined }))).toBeNull();
   });
 });
