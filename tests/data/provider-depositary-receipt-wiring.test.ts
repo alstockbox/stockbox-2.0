@@ -34,4 +34,18 @@ describe("provider depositary-receipt wiring", () => {
     expect(fxSource).toContain("provider: context.provider");
     expect(fxSource).toContain("dataAsOf: context.rateDate");
   });
+
+  it("reconciles the normalized ADR quote against its verified primary listing and fails valuation closed on material conflict", () => {
+    const source = readFileSync("src/lib/data/provider.ts", "utf8");
+
+    expect(source).toContain('from "./depositary-receipt-primary-listing"');
+    expect(source).toContain("buildDepositaryReceiptPrimaryListingCompany(");
+    expect(source).toContain("resolveConfiguredMarketData(primaryListingCompany)");
+    expect(source).toContain("reconcileDepositaryReceiptPrimaryListingPrice(");
+    expect(source).toContain('primaryListingReconciliation.status === "conflict"');
+    expect(source).toContain("disableDepositaryReceiptValuationInputs(");
+
+    expect(source).toMatch(/const\s+legacyInput\s*=\s*\{[\s\S]*?market,[\s\S]*?fundamentals,/);
+    expect(source).toMatch(/toFinancialAnalysisInput\(\{[\s\S]*?market:\s*valuationInputs\.market,[\s\S]*?fundamentals:\s*valuationInputs\.fundamentals/);
+  });
 });
