@@ -2,7 +2,7 @@ import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROVIDER_ID = "official-investment-company-key-ratios";
-const PROVIDER_VERSION = "official-investment-company-key-ratios-v2";
+const PROVIDER_VERSION = "official-investment-company-key-ratios-v3";
 const MIN_COMPLETE_YEARS = 5;
 const MAX_ANNUAL_LEVERAGE_YEAR_LAG = 1;
 const INDUSTRIVARDEN_URL = "https://www.industrivarden.se/en-gb/investors/industrivarden-in-figures/key-ratios/";
@@ -16,6 +16,9 @@ export type InvestmentCompanyKeyRatioYear = {
   netDebt?: number | null;
   navPerShare?: number | null;
   sharesOutstanding?: number | null;
+  dividendsPaid?: number | null;
+  dividendPerShare?: number | null;
+  dividendsReceived?: number | null;
 };
 
 export type ParsedOfficialInvestmentCompanyKeyRatios = {
@@ -183,6 +186,9 @@ export function parseIndustrivardenOfficialKeyRatios(
   const netDebt = findMetric(rows, years, (label, section) => section === "net debt" && label.includes("value") && !label.includes("ratio"), "sek_mn");
   const navPerShare = findMetric(rows, years, (label, section) => section === "net asset value" && label.includes("per share"), "plain");
   const sharesOutstanding = findMetric(rows, years, (label, section) => section === "number of shares outstanding" && label.includes("total") && label.includes("thousands"), "shares_thousands");
+  const dividendsPaid = findMetric(rows, years, (label, section) => section === "dividends paid" && label.includes("value") && !label.includes("per share"), "sek_mn");
+  const dividendPerShare = findMetric(rows, years, (label, section) => section === "dividends paid" && label.includes("value per share"), "plain");
+  const dividendsReceived = findMetric(rows, years, (label) => label.includes("dividends received"), "sek_mn");
 
   return {
     years: years.map((year, index) => ({
@@ -194,6 +200,9 @@ export function parseIndustrivardenOfficialKeyRatios(
       netDebt: netDebt?.[index] ?? null,
       navPerShare: navPerShare?.[index] ?? null,
       sharesOutstanding: sharesOutstanding?.[index] ?? null,
+      dividendsPaid: dividendsPaid?.[index] ?? null,
+      dividendPerShare: dividendPerShare?.[index] ?? null,
+      dividendsReceived: dividendsReceived?.[index] ?? null,
     })),
   };
 }
@@ -260,7 +269,7 @@ export async function fetchOfficialInvestmentCompanyKeyRatios(
       name: "Industrivärden official key ratios",
       url: INDUSTRIVARDEN_URL,
       accessedAt,
-      freshness: "Issuer-published annual key-ratio history. Leverage is consumed directly; capital-allocation evidence is used only when benchmark, deployment, NAV/share and share-count observations are all complete.",
+      freshness: "Issuer-published annual key-ratio history. Leverage is consumed directly; capital allocation and dividend quality are used only when each factor's required annual evidence is complete and internally reconcilable.",
       provider: PROVIDER_ID,
       version: PROVIDER_VERSION,
       capability: "specialized",
