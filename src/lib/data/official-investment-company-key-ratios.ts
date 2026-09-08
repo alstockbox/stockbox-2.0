@@ -213,7 +213,7 @@ export function selectVerifiedAnnualLeverageRatio(
 ): number | null {
   if (!Number.isInteger(marketYear)) return null;
   const candidate = [...(years ?? [])]
-    .filter((point) => Number.isInteger(point.year) && point.year <= (marketYear as number))
+    .filter((point) => Number.isInteger(point.year) && point.year < (marketYear as number))
     .sort((left, right) => right.year - left.year)[0];
   if (!candidate) return null;
   const lag = (marketYear as number) - candidate.year;
