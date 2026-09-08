@@ -206,20 +206,26 @@ function buildReitMetrics(
   observations: Map<SecReitMetricKey, SecReitObservation>,
   filing: EarningsFiling,
 ): ReitSpecializedMetrics {
-  const metric = (key: SecReitMetricKey) => {
+  const metric = (key: SecReitMetricKey, definition?: string) => {
     const observation = observations.get(key);
-    return observation ? observationMetric(observation, filing) : emptyMetric();
+    return observation ? observationMetric(observation, filing) : emptyMetric(definition);
   };
   return {
     kind: "reit",
     fundsFromOperations: emptyMetric("FFO is not inferred from generic GAAP or non-GAAP values."),
-    fundsFromOperationsPerShare: emptyMetric("FFO per share is not inferred unless explicitly period-safe."),
+    fundsFromOperationsPerShare: metric(
+      "fundsFromOperationsPerShare",
+      "FFO per share is not inferred unless explicitly period-safe.",
+    ),
     adjustedFundsFromOperations: {
       ...emptyMetric("AFFO is company-defined and is not inferred from generic cash-flow values."),
       companyDefined: true,
     },
     adjustedFundsFromOperationsPerShare: {
-      ...emptyMetric("AFFO per share is company-defined and is not inferred unless explicitly period-safe."),
+      ...metric(
+        "adjustedFundsFromOperationsPerShare",
+        "AFFO per share is company-defined and is not inferred unless explicitly period-safe.",
+      ),
       companyDefined: true,
     },
     fundsFromOperationsGrowth: emptyMetric(),
