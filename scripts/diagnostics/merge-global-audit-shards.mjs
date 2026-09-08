@@ -60,6 +60,19 @@ function uniqueSorted(values) {
   return [...new Set(values)].sort();
 }
 
+function mergeIntegrity(shards) {
+  const keys = uniqueSorted(shards.flatMap((shard) => Object.keys(shard.summary?.kpis?.integrity ?? {})));
+  return Object.fromEntries(keys.map((key) => {
+    const values = shards.flatMap((shard) => {
+      const value = shard.summary?.kpis?.integrity?.[key];
+      if (value === undefined) return [];
+      if (!Array.isArray(value)) throw new Error(`Invalid audit integrity payload for ${key}.`);
+      return value;
+    });
+    return [key, uniqueSorted(values)];
+  }));
+}
+
 function validateShard(shard, index) {
   if (!shard || typeof shard !== "object") throw new Error(`Invalid audit shard at index ${index}.`);
   if (!Number.isInteger(shard.offset) || shard.offset < 0) throw new Error(`Invalid audit shard offset at index ${index}.`);
@@ -119,8 +132,6 @@ export function mergeGlobalAuditShards(inputShards) {
     targetEligible: 0,
     meets99PercentCoverage: 0,
   };
-  const ratingBelowCoverageTarget = [];
-  const noRatingAtOrAboveCoverageTargetWithScore = [];
 
   for (const shard of shards) {
     addRateSummary(overallCounts, shard.summary.kpis.overall);
@@ -130,8 +141,6 @@ export function mergeGlobalAuditShards(inputShards) {
       if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid specialist KPI count for ${key}.`);
       specialistCounts[key] += value;
     }
-    ratingBelowCoverageTarget.push(...(shard.summary.kpis.integrity.ratingBelowCoverageTarget ?? []));
-    noRatingAtOrAboveCoverageTargetWithScore.push(...(shard.summary.kpis.integrity.noRatingAtOrAboveCoverageTargetWithScore ?? []));
   }
 
   const generatedAt = shards.map((shard) => shard.generatedAt).filter(Boolean).sort().at(-1) ?? null;
@@ -160,10 +169,7 @@ export function mergeGlobalAuditShards(inputShards) {
           ...specialistCounts,
           coverageTargetRate: rate(specialistCounts.meets99PercentCoverage, specialistCounts.targetEligible),
         },
-        integrity: {
-          ratingBelowCoverageTarget: uniqueSorted(ratingBelowCoverageTarget),
-          noRatingAtOrAboveCoverageTargetWithScore: uniqueSorted(noRatingAtOrAboveCoverageTargetWithScore),
-        },
+        integrity: mergeIntegrity(shards),
         byMarket: mergeRateSummaryMaps(shards, "byMarket"),
         bySecurityType: mergeRateSummaryMaps(shards, "bySecurityType"),
       },
