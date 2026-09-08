@@ -1,3 +1,7 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 function rate(numerator, denominator) {
   return denominator > 0 ? numerator / denominator : null;
 }
@@ -61,8 +65,12 @@ function validateShard(shard, index) {
   if (!Number.isInteger(shard.offset) || shard.offset < 0) throw new Error(`Invalid audit shard offset at index ${index}.`);
   if (!Number.isInteger(shard.totalInput) || shard.totalInput < 0) throw new Error(`Invalid audit shard totalInput at index ${index}.`);
   if (!Array.isArray(shard.results)) throw new Error(`Invalid audit shard results at index ${index}.`);
-  if (!Number.isInteger(shard.limit) || shard.limit < 0 || shard.limit !== shard.results.length) {
-    throw new Error(`Audit shard at offset ${shard.offset} has an incomplete result slice: limit and results length differ.`);
+  if (!Number.isInteger(shard.limit) || shard.limit < shard.results.length) {
+    throw new Error(`Audit shard at offset ${shard.offset} has an incomplete result slice: limit is smaller than results length.`);
+  }
+  const reachesCorpusEnd = shard.offset + shard.results.length === shard.totalInput;
+  if (shard.limit !== shard.results.length && !reachesCorpusEnd) {
+    throw new Error(`Audit shard at offset ${shard.offset} has an incomplete result slice: non-final shards must fill their requested limit.`);
   }
   if (typeof shard.source !== "string" || !shard.source) throw new Error(`Invalid audit shard source at index ${index}.`);
   if (!shard.summary?.kpis?.overall || !shard.summary?.kpis?.specialist || !shard.summary?.kpis?.integrity) {
@@ -161,4 +169,31 @@ export function mergeGlobalAuditShards(inputShards) {
       },
     },
   };
+}
+
+function runCli(argv) {
+  const args = [...argv];
+  const outputFlag = args.indexOf("--output");
+  let outputPath = null;
+  if (outputFlag >= 0) {
+    outputPath = args[outputFlag + 1] ?? null;
+    if (!outputPath) throw new Error("--output requires a path.");
+    args.splice(outputFlag, 2);
+  }
+  if (!args.length) throw new Error("Provide one or more global audit shard JSON files.");
+  const shards = args.map((path) => JSON.parse(readFileSync(path, "utf8")));
+  const merged = mergeGlobalAuditShards(shards);
+  const serialized = `${JSON.stringify(merged, null, 2)}\n`;
+  if (outputPath) writeFileSync(outputPath, serialized);
+  else process.stdout.write(serialized);
+}
+
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
+if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
+  try {
+    runCli(process.argv.slice(2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
