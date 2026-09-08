@@ -86,6 +86,8 @@ describe("global ticker audit KPIs", () => {
     expect(kpis.integrity).toEqual({
       ratingBelowCoverageTarget: ["BAD1"],
       noRatingAtOrAboveCoverageTargetWithScore: ["INV-B.ST"],
+      analysisEngineErrors: [],
+      scoreRatingMismatches: ["ETF2", "INV-B.ST"],
     });
 
     expect(kpis.bySecurityType["ETF/Fund"]).toEqual(expect.objectContaining({
@@ -108,5 +110,7 @@ describe("global ticker audit KPIs", () => {
     expect(kpis.specialist.coverageTargetRate).toBeNull();
     expect(kpis.integrity.ratingBelowCoverageTarget).toEqual([]);
     expect(kpis.integrity.noRatingAtOrAboveCoverageTargetWithScore).toEqual([]);
+    expect(kpis.integrity.analysisEngineErrors).toEqual([]);
+    expect(kpis.integrity.scoreRatingMismatches).toEqual([]);
   });
 });
