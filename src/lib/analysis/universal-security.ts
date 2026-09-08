@@ -110,6 +110,7 @@ export type InvestmentCompanyAnalysisInput = {
   cash?: number | null;
   debt?: number | null;
   otherLiabilities?: number | null;
+  holdingCompanyLeverageRatio?: number | null;
   navGrowth1y?: number | null;
   navGrowth3yCagr?: number | null;
   navGrowth5yCagr?: number | null;
@@ -247,6 +248,10 @@ export function classifyUniversalSecurity(input: {
 function normalizeFraction(value: number | null | undefined): number | null {
   if (!isFiniteNumber(value)) return null;
   return Math.abs(value) > 2 ? value / 100 : value;
+}
+
+function validHoldingCompanyLeverageRatio(value: number | null | undefined): number | null {
+  return isFiniteNumber(value) && value >= 0 && value < 1 ? value : null;
 }
 
 function percentageScore(value: number | null | undefined): number | null {
@@ -443,8 +448,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
   const relativeToHistoricalMedian = isFiniteNumber(discountPremium) && isFiniteNumber(historicalMedian) ? discountPremium - historicalMedian : null;
   const navGrowth = [input.navGrowth5yCagr, input.navGrowth3yCagr, input.navGrowth1y].find(isFiniteNumber) ?? null;
   const shareholderReturn = [input.shareholderReturn5yCagr, input.shareholderReturn3yCagr].find(isFiniteNumber) ?? null;
-  const grossAssets = isFiniteNumber(nav.total) && isFiniteNumber(input.debt) ? nav.total + input.debt : null;
-  const grossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
+  const grossLeverageToNav = validHoldingCompanyLeverageRatio(input.holdingCompanyLeverageRatio);
   const holdingsQuality = percentageScore(input.holdings?.length ? lookThrough.stockBoxQuality : null);
   const factors: WeightedSecurityFactor[] = [
     {
@@ -476,7 +480,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "leverage", label: "Holding-company leverage", weight: 0.08, value: grossLeverageToNav,
       score: scoreLowerIsBetter(grossLeverageToNav, 0.45, 0.05), status: isFiniteNumber(grossLeverageToNav) ? "available" : "missing",
-      rationale: "Holding-company leverage is measured relative to look-through asset value rather than operating EBITDA.",
+      rationale: "Holding-company leverage is scored only from an explicit verified issuer-level leverage ratio; generic consolidated debt is not substituted.",
     },
     {
       key: "governance", label: "Management / governance", weight: 0.06, value: input.managementGovernanceScore ?? null,
