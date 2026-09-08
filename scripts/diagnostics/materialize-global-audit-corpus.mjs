@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { inflateSync } from "node:zlib";
+import { inflateRawSync, inflateSync } from "node:zlib";
 
 const DEFAULT_OUTPUT = "scripts/diagnostics/data/global_etf_investment_tickers_20000.txt";
 const PART_PREFIX = "scripts/diagnostics/data/global_etf_investment_tickers_20000.zlib.b64.part";
@@ -14,6 +14,24 @@ function parseTickers(raw) {
     .split(/[\s,]+/)
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function recoverRawDeflateFromZlib(payload) {
+  if (payload.length < 6) {
+    throw new Error("zlib payload is too short to contain a valid envelope");
+  }
+
+  const cmf = payload[0];
+  const flg = payload[1];
+  const compressionMethod = cmf & 0x0f;
+  const headerChecksumValid = ((cmf << 8) + flg) % 31 === 0;
+  const presetDictionary = (flg & 0x20) !== 0;
+
+  if (compressionMethod !== 8 || !headerChecksumValid || presetDictionary) {
+    throw new Error("zlib envelope is not a supported dictionary-free DEFLATE stream");
+  }
+
+  return inflateRawSync(payload.subarray(2, -4));
 }
 
 export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
@@ -33,11 +51,20 @@ export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
     throw new Error("Global audit corpus payload is not valid base64 text");
   }
 
+  const payload = Buffer.from(encoded, "base64");
   let raw;
+  let recoveredZlibChecksum = false;
   try {
-    raw = inflateSync(Buffer.from(encoded, "base64"));
-  } catch (error) {
-    throw new Error(`Failed to inflate global audit corpus payload: ${error instanceof Error ? error.message : String(error)}`);
+    raw = inflateSync(payload);
+  } catch (inflateError) {
+    try {
+      raw = recoverRawDeflateFromZlib(payload);
+      recoveredZlibChecksum = true;
+    } catch (recoveryError) {
+      throw new Error(
+        `Failed to inflate global audit corpus payload: ${inflateError instanceof Error ? inflateError.message : String(inflateError)}; raw DEFLATE recovery also failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+      );
+    }
   }
 
   const sha256 = createHash("sha256").update(raw).digest("hex");
@@ -66,6 +93,7 @@ export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
     tickerCount: tickers.length,
     uniqueTickerCount,
     byteLength: raw.length,
+    recoveredZlibChecksum,
   };
 }
 
