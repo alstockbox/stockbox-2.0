@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-ignore Executable Node ESM module is intentionally tested from the TypeScript suite.
 import { evaluateGlobalAuditGate } from "./evaluate-global-audit-gate.mjs";
 
 const complete = (input = 100) => ({
@@ -16,7 +15,26 @@ const complete = (input = 100) => ({
   noRatingRate: 0,
 });
 
-const fixture = () => ({
+type AuditSummary = ReturnType<typeof complete>;
+
+type GateFixture = {
+  overall: AuditSummary;
+  specialist: {
+    input: number;
+    completed: number;
+    targetEligible: number;
+    meets99PercentCoverage: number;
+    coverageTargetRate: number;
+  };
+  integrity: {
+    ratingBelowCoverageTarget: string[];
+    noRatingAtOrAboveCoverageTargetWithScore: string[];
+  };
+  bySecurityType: Record<string, AuditSummary>;
+  byMarket: Record<string, AuditSummary>;
+};
+
+const fixture = (): GateFixture => ({
   overall: complete(200),
   specialist: { input: 50, completed: 50, targetEligible: 50, meets99PercentCoverage: 50, coverageTargetRate: 1 },
   integrity: { ratingBelowCoverageTarget: [], noRatingAtOrAboveCoverageTargetWithScore: [] },
