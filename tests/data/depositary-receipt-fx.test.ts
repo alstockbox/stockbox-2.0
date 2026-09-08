@@ -3,10 +3,10 @@ import type { CompanyFundamentals, CompanySearchResult, MarketSnapshot } from ".
 import type { ComparisonFxContext } from "../../src/lib/data/ecb-fx";
 import {
   assessDepositaryReceiptValuationAccess,
-  buildDepositaryReceiptFxRequest,
   gateDepositaryReceiptValuationInputs,
   type DepositaryReceiptRepresentation,
 } from "../../src/lib/data/depositary-receipt";
+import { buildDepositaryReceiptFxRequest } from "../../src/lib/data/depositary-receipt-fx";
 
 type AdrCompany = CompanySearchResult & { depositaryReceipt?: DepositaryReceiptRepresentation };
 
