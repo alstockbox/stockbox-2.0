@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { runMonitoringCycleV3 } from "@/lib/monitoring/monitoring-cycle-v3";
+import {
+  monitoringCycleHttpStatusV3,
+  runMonitoringCycleV3,
+} from "@/lib/monitoring/monitoring-cycle-v3";
 
 const watchlistOk = {
   checked: 2,
@@ -33,6 +36,7 @@ describe("Monitoring cycle V3", () => {
     expect(result.failed).toBe(0);
     expect(result.watchlist).toEqual(expect.objectContaining({ ok: true, value: watchlistOk }));
     expect(result.recommendationOutcomes).toEqual(expect.objectContaining({ ok: true, value: outcomesOk }));
+    expect(monitoringCycleHttpStatusV3(result)).toBe(200);
   });
 
   it("does not let an outcome failure erase a successful watchlist run", async () => {
@@ -45,6 +49,7 @@ describe("Monitoring cycle V3", () => {
     expect(result.failed).toBe(1);
     expect(result.watchlist.ok).toBe(true);
     expect(result.recommendationOutcomes).toEqual({ ok: false, error: "provider unavailable" });
+    expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 
   it("does not let a watchlist failure prevent outcome learning", async () => {
@@ -58,6 +63,17 @@ describe("Monitoring cycle V3", () => {
     expect(result.failed).toBe(1);
     expect(result.watchlist).toEqual({ ok: false, error: "watchlist unavailable" });
     expect(result.recommendationOutcomes.ok).toBe(true);
+    expect(monitoringCycleHttpStatusV3(result)).toBe(207);
+  });
+
+  it("returns service unavailable only when both pipelines fail before producing results", async () => {
+    const result = await runMonitoringCycleV3({
+      runWatchlist: vi.fn().mockRejectedValue(new Error("watchlist unavailable")),
+      runRecommendationOutcomes: vi.fn().mockRejectedValue(new Error("outcomes unavailable")),
+    });
+
+    expect(result.failed).toBe(2);
+    expect(monitoringCycleHttpStatusV3(result)).toBe(503);
   });
 
   it("includes internal failed counts from successful pipeline executions", async () => {
@@ -68,5 +84,6 @@ describe("Monitoring cycle V3", () => {
 
     expect(result.ok).toBe(false);
     expect(result.failed).toBe(3);
+    expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 });
