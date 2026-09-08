@@ -374,13 +374,13 @@ async function enrichInvestmentCompanyReport(
     ?? (leverageComparable && officialLeverage.ok ? officialLeverage.data.ratio : null);
   const capitalAllocation = officialKeyRatios.ok && marketYear !== undefined
     ? deriveInvestmentCompanyCapitalAllocation(
-      officialKeyRatios.data.years.filter((point) => point.year <= marketYear),
+      officialKeyRatios.data.years.filter((point) => point.year < marketYear),
     )
     : null;
   const capitalAllocationContributes = capitalAllocation?.score !== null && capitalAllocation?.score !== undefined;
   const dividendQuality = officialKeyRatios.ok && marketYear !== undefined
     ? deriveInvestmentCompanyDividendQuality(
-      officialKeyRatios.data.years.filter((point) => point.year <= marketYear),
+      officialKeyRatios.data.years.filter((point) => point.year < marketYear),
     )
     : null;
   const dividendQualityContributes = dividendQuality?.score !== null && dividendQuality?.score !== undefined;
