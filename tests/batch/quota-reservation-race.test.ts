@@ -1,0 +1,18 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+describe("batch quota reservation resilience", () => {
+  it("settles a persisted analysis reservation before checking whether the item lease was superseded", () => {
+    const durable = readFileSync(resolve(process.cwd(), "src/lib/batch/durable.ts"), "utf8");
+    const persistIndex = durable.indexOf("const persisted = await persistAnalysis");
+    const analysisIdIndex = durable.indexOf("const analysisId = persisted.id", persistIndex);
+    const completeIndex = durable.indexOf("await completeAnalysisReservation", analysisIdIndex);
+    const postPersistLeaseIndex = durable.indexOf("await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);", analysisIdIndex);
+
+    expect(persistIndex).toBeGreaterThanOrEqual(0);
+    expect(analysisIdIndex).toBeGreaterThan(persistIndex);
+    expect(completeIndex).toBeGreaterThan(analysisIdIndex);
+    expect(postPersistLeaseIndex).toBeGreaterThan(completeIndex);
+  });
+});
