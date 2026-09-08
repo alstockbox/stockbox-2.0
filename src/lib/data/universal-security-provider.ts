@@ -42,6 +42,7 @@ import {
 } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
+import { fetchOfficialInvestmentCompanyLeverage } from "./official-investment-company-leverage";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
@@ -336,15 +337,21 @@ async function enrichInvestmentCompanyReport(
   if (report.analysisArchetype !== "holding_company") return report;
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.dataAsOf ?? report.market?.date ?? null;
-  const [officialNav, longHistory, officialHoldings] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings, officialLeverage] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
     fetchOfficialInvestmentCompanyHoldings(company),
+    fetchOfficialInvestmentCompanyLeverage(company),
   ]);
   const navComparable = officialNav.ok
     && isOfficialDisclosureComparable(officialNav.data.navAsOf, marketDate);
   const holdingsComparable = officialHoldings.ok
     && isOfficialDisclosureComparable(officialHoldings.data.asOf, marketDate);
+  const leverageComparable = officialLeverage.ok
+    && isOfficialDisclosureComparable(officialLeverage.data.asOf, marketDate);
+  const verifiedLeverageRatio = leverageComparable && officialLeverage.ok
+    ? officialLeverage.data.ratio
+    : null;
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
@@ -395,7 +402,7 @@ async function enrichInvestmentCompanyReport(
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
-    holdingCompanyLeverageRatio: null,
+    holdingCompanyLeverageRatio: verifiedLeverageRatio,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -469,6 +476,40 @@ async function enrichInvestmentCompanyReport(
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       `Official investment-company holdings unavailable: ${officialHoldings.message}`,
+    ])];
+  }
+
+  if (officialLeverage.ok) {
+    const leverageSource = officialLeverage.data.source;
+    if (!report.sources.some((existing) => (
+      existing.provider === leverageSource.provider
+      && existing.url === leverageSource.url
+      && existing.version === leverageSource.version
+    ))) {
+      report.sources = [...report.sources, leverageSource];
+    }
+    const leverageDiagnostic: ProviderDiagnostic = leverageComparable
+      ? officialLeverage.data.diagnostic
+      : {
+        ...officialLeverage.data.diagnostic,
+        status: "partial",
+        reason: "official_leverage_stale_or_unverifiable_for_market_comparison",
+      };
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), leverageDiagnostic];
+    if (!leverageComparable) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Official leverage dated ${officialLeverage.data.asOf} is not comparable with market data dated ${marketDate ?? "unknown"} and was excluded from specialist coverage.`,
+      ])];
+    }
+  } else {
+    report.providerDiagnostics = [
+      ...(report.providerDiagnostics ?? []),
+      officialLeverage.diagnostic,
+    ];
+    report.score.missingData = [...new Set([
+      ...report.score.missingData,
+      `Official investment-company leverage unavailable: ${officialLeverage.message}`,
     ])];
   }
 
