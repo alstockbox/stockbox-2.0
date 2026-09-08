@@ -45,7 +45,7 @@ export type GlobalAuditKpis = {
 };
 
 const UNDISCOVERED_STATUSES = new Set(["input_invalid", "not_found", "no_exact_match"]);
-const UNSUPPORTED_STATUS = "unsupported_security_type";
+const UNSUPPORTED_STATUSES = new Set(["unsupported", "unsupported_security_type"]);
 
 function rate(numerator: number, denominator: number): number | null {
   return denominator > 0 ? numerator / denominator : null;
@@ -56,7 +56,7 @@ function isDiscovered(item: GlobalAuditKpiInput): boolean {
 }
 
 function isSupported(item: GlobalAuditKpiInput): boolean {
-  return isDiscovered(item) && item.status !== UNSUPPORTED_STATUS;
+  return isDiscovered(item) && !UNSUPPORTED_STATUSES.has(item.status);
 }
 
 function isCompleted(item: GlobalAuditKpiInput): boolean {
