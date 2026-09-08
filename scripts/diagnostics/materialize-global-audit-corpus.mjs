@@ -7,13 +7,49 @@ const DEFAULT_OUTPUT = "scripts/diagnostics/data/global_etf_investment_tickers_2
 const PART_PREFIX = "scripts/diagnostics/data/global_etf_investment_tickers_20000.zlib.b64.part";
 const EXPECTED_SHA256 = "b4a63edf1564459dd849724f736145dd0ceb896cf178ec69994a9bebafc71e91";
 const EXPECTED_TICKER_COUNT = 20_000;
+const EXPECTED_BYTE_LENGTH = 182_557;
 const EXPECTED_PART_COUNT = 8;
+const ADLER_MODULUS = 65_521;
 
 function parseTickers(raw) {
   return raw
     .split(/[\s,]+/)
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function sha256Hex(raw) {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+function adler32(raw) {
+  let a = 1;
+  let b = 0;
+  for (const byte of raw) {
+    a = (a + byte) % ADLER_MODULUS;
+    b = (b + a) % ADLER_MODULUS;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
+function positiveModulo(value, modulus = ADLER_MODULUS) {
+  return ((value % modulus) + modulus) % modulus;
+}
+
+function modularInverse(value) {
+  let oldR = ADLER_MODULUS;
+  let r = positiveModulo(value);
+  let oldS = 0;
+  let s = 1;
+
+  while (r !== 0) {
+    const quotient = Math.floor(oldR / r);
+    [oldR, r] = [r, oldR - quotient * r];
+    [oldS, s] = [s, oldS - quotient * s];
+  }
+
+  if (oldR !== 1) return null;
+  return positiveModulo(oldS);
 }
 
 function recoverRawDeflateFromZlib(payload) {
@@ -32,6 +68,51 @@ function recoverRawDeflateFromZlib(payload) {
   }
 
   return inflateRawSync(payload.subarray(2, -4));
+}
+
+function repairSingleRawByteFromAdler(raw, payload) {
+  if (raw.length !== EXPECTED_BYTE_LENGTH || payload.length < 6) return null;
+
+  const expectedAdler = payload.readUInt32BE(payload.length - 4);
+  const currentAdler = adler32(raw);
+  const expectedA = expectedAdler & 0xffff;
+  const expectedB = expectedAdler >>> 16;
+  const currentA = currentAdler & 0xffff;
+  const currentB = currentAdler >>> 16;
+  const deltaAMod = positiveModulo(expectedA - currentA);
+  const delta = deltaAMod <= 255
+    ? deltaAMod
+    : deltaAMod >= ADLER_MODULUS - 255
+      ? deltaAMod - ADLER_MODULUS
+      : null;
+
+  if (delta === null || delta === 0) return null;
+  const inverse = modularInverse(delta);
+  if (inverse === null) return null;
+
+  const deltaB = positiveModulo(expectedB - currentB);
+  const weightResidue = (deltaB * inverse) % ADLER_MODULUS;
+  const firstWeight = weightResidue === 0 ? ADLER_MODULUS : weightResidue;
+
+  for (let weight = firstWeight; weight <= raw.length; weight += ADLER_MODULUS) {
+    const index = raw.length - weight;
+    const repairedValue = raw[index] + delta;
+    if (repairedValue < 0 || repairedValue > 255) continue;
+
+    const repaired = Buffer.from(raw);
+    repaired[index] = repairedValue;
+    if (adler32(repaired) !== expectedAdler) continue;
+    if (sha256Hex(repaired) !== EXPECTED_SHA256) continue;
+
+    return {
+      raw: repaired,
+      index,
+      from: raw[index],
+      to: repairedValue,
+    };
+  }
+
+  return null;
 }
 
 export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
@@ -54,6 +135,7 @@ export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
   const payload = Buffer.from(encoded, "base64");
   let raw;
   let recoveredZlibChecksum = false;
+  let repairedRawByte = null;
   try {
     raw = inflateSync(payload);
   } catch (inflateError) {
@@ -67,7 +149,20 @@ export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
     }
   }
 
-  const sha256 = createHash("sha256").update(raw).digest("hex");
+  if (raw.length !== EXPECTED_BYTE_LENGTH) {
+    throw new Error(`Global audit corpus byte length mismatch: expected ${EXPECTED_BYTE_LENGTH}, received ${raw.length}`);
+  }
+
+  let sha256 = sha256Hex(raw);
+  if (sha256 !== EXPECTED_SHA256 && recoveredZlibChecksum) {
+    const repair = repairSingleRawByteFromAdler(raw, payload);
+    if (repair) {
+      raw = repair.raw;
+      repairedRawByte = { index: repair.index, from: repair.from, to: repair.to };
+      sha256 = sha256Hex(raw);
+    }
+  }
+
   if (sha256 !== EXPECTED_SHA256) {
     throw new Error(`Global audit corpus SHA-256 mismatch: expected ${EXPECTED_SHA256}, received ${sha256}`);
   }
@@ -94,6 +189,7 @@ export function materializeGlobalAuditCorpus(outputPath = DEFAULT_OUTPUT) {
     uniqueTickerCount,
     byteLength: raw.length,
     recoveredZlibChecksum,
+    repairedRawByte,
   };
 }
 
