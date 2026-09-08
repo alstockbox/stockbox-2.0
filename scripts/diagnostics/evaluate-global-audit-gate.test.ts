@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+// @ts-ignore Executable Node ESM module is intentionally tested from the TypeScript suite.
 import { evaluateGlobalAuditGate } from "./evaluate-global-audit-gate.mjs";
 
 const complete = (input = 100) => ({
