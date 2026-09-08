@@ -67,8 +67,7 @@ export function qaDepositaryReceiptRegistry(
       && invalidRatioSecurityIds.length === 0
       && missingSourceSecurityIds.length === 0
       && missingPrimaryListingSecurityIds.length === 0
-      && unverifiedMappingSecurityIds.length === 0
-      && unverifiedRatioSecurityIds.length === 0,
+      && unverifiedMappingSecurityIds.length === 0,
     totalEntries: entries.length,
     duplicateSecurityIds,
     invalidRatioSecurityIds,
@@ -94,7 +93,8 @@ function matchingRegistryEntry(
   );
   if (candidates.length !== 1) return null;
   const entry = candidates[0];
-  if (!entry.mappingVerified || !entry.ratioVerified || !validPositiveRatio(entry)) return null;
+  if (!entry.mappingVerified) return null;
+  if (entry.ratioVerified && !validPositiveRatio(entry)) return null;
   if (!entry.source.trim() || !entry.sourceUrl.trim() || !entry.sourceAsOf?.trim() || !entry.primaryListingTicker.trim()) return null;
   return entry;
 }
@@ -111,9 +111,9 @@ export function attachVerifiedDepositaryReceiptRepresentation(
       kind: entry.kind,
       issuerId: entry.issuerId,
       primaryListingTicker: entry.primaryListingTicker,
-      underlyingSharesPerReceipt: entry.underlyingSharesPerReceipt,
+      underlyingSharesPerReceipt: entry.ratioVerified ? entry.underlyingSharesPerReceipt : null,
       mappingVerified: true,
-      ratioVerified: true,
+      ratioVerified: entry.ratioVerified,
       source: entry.source,
       sourceAsOf: entry.sourceAsOf,
     },
