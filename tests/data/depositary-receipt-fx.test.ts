@@ -38,7 +38,7 @@ function company(): AdrCompany {
   };
 }
 
-function fundamentals(): CompanyFundamentals {
+function fundamentals(overrides: Partial<CompanyFundamentals> = {}): CompanyFundamentals {
   return {
     ticker: "EXAMPLE",
     name: "Example A/S",
@@ -50,9 +50,10 @@ function fundamentals(): CompanyFundamentals {
     reportingCurrency: "DKK",
     reportedSharesOutstanding: 2_000_000_000,
     reportedSharesDate: "2026-09-08",
-    reportedMarketCap: 200_000_000_000,
+    reportedMarketCap: 1_250_000_000_000,
     reportedMarketCapDate: "2026-09-08",
     reportedMarketCapCurrency: "DKK",
+    ...overrides,
   };
 }
 
@@ -65,7 +66,7 @@ function market(overrides: Partial<MarketSnapshot> = {}): MarketSnapshot {
     volume: 1_000_000,
     yearHigh: 60,
     yearLow: 40,
-    marketCap: 32_000_000_000,
+    marketCap: 200_000_000_000,
     marketCapAsOf: "2026-09-08",
     marketCapCurrency: "USD",
     sharesOutstanding: 4_000_000_000,
@@ -137,17 +138,33 @@ describe("depositary-receipt cross-currency FX reconciliation", () => {
     expect(gated.warning).toMatch(/receipt.*currency|market.*currency/i);
   });
 
-  it("converts current receipt quote and market cap to primary-listing currency, then reconciles share ratio", () => {
+  it("converts a consistent current receipt quote and market cap to primary-listing currency", () => {
     const gated = gateDepositaryReceiptValuationInputs(company(), market(), fundamentals(), usdToDkkContext());
 
     // 50 USD -> 312.5 DKK, then 0.5 underlying shares per receipt => 625 DKK per underlying share.
+    // 625 DKK * 2bn verified issuer shares = 1.25tn DKK market cap.
     expect(gated.market?.price).toBeCloseTo(625, 10);
     expect(gated.market?.currency).toBe("DKK");
-    expect(gated.market?.marketCap).toBeCloseTo(200_000_000_000, 2);
+    expect(gated.market?.marketCap).toBeCloseTo(1_250_000_000_000, 2);
     expect(gated.market?.marketCapCurrency).toBe("DKK");
     expect(gated.market?.sharesOutstanding).toBe(2_000_000_000);
     expect(gated.market?.performance["1Y"]).toBe(0.12);
     expect(gated.warning).toBeNull();
+  });
+
+  it("rejects contradictory converted and reported market caps instead of overriding verified price-times-shares", () => {
+    const gated = gateDepositaryReceiptValuationInputs(
+      company(),
+      market({ marketCap: 32_000_000_000 }),
+      fundamentals({ reportedMarketCap: 200_000_000_000 }),
+      usdToDkkContext(),
+    );
+
+    expect(gated.market?.price).toBeCloseTo(625, 10);
+    expect(gated.market?.sharesOutstanding).toBe(2_000_000_000);
+    expect(gated.market?.marketCap).toBeNull();
+    expect(gated.market?.marketCapCurrency).toBeNull();
+    expect(gated.warning).toMatch(/market cap|share basis/i);
   });
 
   it("does not apply one spot FX rate to historical price series or historical ranges", () => {
