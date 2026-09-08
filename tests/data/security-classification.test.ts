@@ -51,10 +51,18 @@ describe("configured fundamentals eligibility", () => {
     mapped.depositaryReceipt = {
       kind: "ADR",
       issuerId: "issuer-novo",
+      receiptTicker: "NVO",
       primaryListingTicker: "NOVO-B.CO",
+      underlyingSharesPerReceipt: null,
+      issuerReportingCurrency: "DKK",
+      primaryListingCurrency: "DKK",
+      receiptTradingCurrency: "USD",
+      ratioSource: null,
+      ratioAsOf: null,
       mappingVerified: true,
       ratioVerified: false,
       source: "issuer filing",
+      sourceAsOf: "2026-09-08",
     };
 
     expect(canAttemptConfiguredFundamentals(mapped)).toBe(true);
