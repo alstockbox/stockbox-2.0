@@ -1,0 +1,61 @@
+name: StockBox Global Analysis Coverage Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stockbox-global-analysis-coverage-gate
+  cancel-in-progress: false
+
+jobs:
+  global-analysis-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run live global ticker audit
+        env:
+          STOCKBOX_BATCH_OFFSET: "0"
+          STOCKBOX_BATCH_CONCURRENCY: "3"
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: npx vitest run scripts/diagnostics/user-large-ticker-audit.test.ts --config scripts/diagnostics/vitest.live.config.ts
+
+      - name: Locate audit artifact
+        id: audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$(find .stockbox-diagnostics -maxdepth 1 -type f -name 'user-large-ticker-audit-*.json' | sort | head -n 1)"
+          test -n "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce coverage and integrity thresholds
+        env:
+          STOCKBOX_GATE_MIN_DISCOVERY: "0.995"
+          STOCKBOX_GATE_MIN_SUPPORT: "0.99"
+          STOCKBOX_GATE_MIN_COMPLETION: "0.99"
+          STOCKBOX_GATE_MIN_SPECIALIST_COVERAGE: "0.99"
+          STOCKBOX_GATE_MIN_GROUP_SIZE: "20"
+        run: node scripts/diagnostics/evaluate-global-audit-gate.mjs "${{ steps.audit.outputs.file }}"
+
+      - name: Upload live audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockbox-global-analysis-coverage-audit
+          path: .stockbox-diagnostics/*.json
+          if-no-files-found: error
+          retention-days: 30
