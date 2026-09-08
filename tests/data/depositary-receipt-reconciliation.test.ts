@@ -65,7 +65,7 @@ function fundamentals(): CompanyFundamentals {
     reportedMarketCap: 200_000_000_000,
     reportedMarketCapDate: "2026-09-08",
     reportedMarketCapCurrency: "USD",
-    reportedSharesOutstanding: 4_000_000_000,
+    reportedSharesOutstanding: 2_000_000_000,
     reportedSharesDate: "2026-09-08",
     reportedValuation: {
       provider: "provider",
@@ -133,14 +133,19 @@ describe("depositary receipt reconciliation", () => {
     expect(gated.warning).toMatch(/valuation|share ratio/i);
   });
 
-  it("preserves valuation inputs when the mapping and ratio are both verified", () => {
+  it("normalizes a verified ADR market quote to underlying-share basis while preserving total market cap", () => {
     const gated = gateDepositaryReceiptValuationInputs(mappedAdr({
       underlyingSharesPerReceipt: 0.5,
       ratioVerified: true,
     }), market(), fundamentals());
 
+    expect(gated.market?.price).toBe(100);
+    expect(gated.market?.yearHigh).toBe(140);
+    expect(gated.market?.yearLow).toBe(80);
+    expect(gated.market?.sharesOutstanding).toBe(2_000_000_000);
     expect(gated.market?.marketCap).toBe(200_000_000_000);
-    expect(gated.market?.sharesOutstanding).toBe(4_000_000_000);
+    expect(gated.market?.performance["1Y"]).toBe(0.1);
+    expect(gated.fundamentals.reportedSharesOutstanding).toBe(2_000_000_000);
     expect(gated.fundamentals.reportedValuation?.priceEarnings).toBe(25);
     expect(gated.warning).toBeNull();
   });
