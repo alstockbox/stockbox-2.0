@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - upgrade/stockbox-2-ux-portfolio-mobile-20260905
+      - fix/etf-investment-company-coverage
   pull_request:
     paths:
       - "src/app/**"
