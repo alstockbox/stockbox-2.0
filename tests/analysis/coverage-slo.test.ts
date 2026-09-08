@@ -82,17 +82,17 @@ describe("StockBox coverage and integrity SLO", () => {
     expect(result.metrics.fabricatedCriticalInputRate).toBe(1);
   });
 
-  it("fails when discovered securities are silently unsupported", () => {
+  it("measures unsupported discovered securities instead of hiding them from completion coverage", () => {
     const records = Array.from({ length: 100 }, () => healthy());
     records[0] = healthy({ status: "unsupported_security_type", rating: null, score: null });
 
-    const result = evaluateCoverageSlo(records);
+    const atTarget = evaluateCoverageSlo(records);
 
-    expect(result.pass).toBe(false);
-    expect(result.metrics.discoveryRate).toBe(1);
-    expect(result.metrics.supportCoverageRate).toBe(0.99);
-    expect(result.metrics.analysisCompletionRate).toBe(1);
-    expect(result.violations.some((item) => item.includes("Support coverage rate"))).toBe(false);
+    expect(atTarget.pass).toBe(true);
+    expect(atTarget.metrics.discoveryRate).toBe(1);
+    expect(atTarget.metrics.supportCoverageRate).toBe(0.99);
+    expect(atTarget.metrics.analysisCompletionRate).toBe(1);
+    expect(atTarget.violations.some((item) => item.includes("Support coverage rate"))).toBe(false);
 
     records[1] = healthy({ status: "unsupported_security_type", rating: null, score: null });
     const belowTarget = evaluateCoverageSlo(records);
