@@ -158,3 +158,12 @@ jobs:
             artifacts/coverage-live/yahoo-interest-identity-reconciliation.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload REIT specialized fingerprint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reit-specialized-fingerprint
+          path: artifacts/coverage-live/reit-specialized-fingerprint.json
+          if-no-files-found: warn
+          retention-days: 7
