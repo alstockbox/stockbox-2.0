@@ -65,6 +65,7 @@ export type LookThroughHolding = {
 
 export type LookThroughMetrics = {
   coveredWeight: number;
+  qualityCoveredWeight: number;
   stockBoxQuality: number | null;
   revenueGrowth: number | null;
   epsGrowth: number | null;
@@ -198,6 +199,7 @@ const COMMODITY_PATTERN = /\b(?:commodity|gold|silver|copper|oil|crude|natural g
 const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|low volatility|multifactor|smart beta)\b/i;
 const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energy|utilities|industrials|materials|real estate|consumer|communication)\b/i;
 const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
+const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
 
 export function classifyUniversalSecurity(input: {
   company?: Pick<CompanySearchResult, "securityType" | "name" | "ticker"> | null;
@@ -308,6 +310,32 @@ function harmonicMetric(holdings: LookThroughHolding[], getter: (holding: LookTh
   return denominator > 0 ? weight / denominator : null;
 }
 
+function perHoldingQualityScore(holding: LookThroughHolding): number | null {
+  if (isFiniteNumber(holding.stockBoxScore)) return clamp(holding.stockBoxScore, 0, 100);
+  const growth = isFiniteNumber(holding.epsGrowth) ? holding.epsGrowth : holding.revenueGrowth;
+  const components = [
+    scoreHigherIsBetter(holding.roic ?? null, 0.02, 0.2),
+    scoreHigherIsBetter(growth ?? null, -0.05, 0.15),
+    scoreHigherIsBetter(holding.operatingMargin ?? null, 0.04, 0.25),
+  ].filter(isFiniteNumber);
+  if (components.length < 2) return null;
+  return components.reduce((sum, score) => sum + score, 0) / components.length;
+}
+
+function portfolioQuality(holdings: LookThroughHolding[]): { score: number | null; coveredWeight: number } {
+  const scored = holdings.flatMap((holding) => {
+    const score = perHoldingQualityScore(holding);
+    return isFiniteNumber(score) ? [{ holding, score }] : [];
+  });
+  const rawCoveredWeight = scored.reduce((sum, item) => sum + item.holding.weight, 0);
+  const coveredWeight = Math.min(1, rawCoveredWeight);
+  if (coveredWeight < LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT || rawCoveredWeight <= 0) {
+    return { score: null, coveredWeight };
+  }
+  const score = scored.reduce((sum, item) => sum + item.score * item.holding.weight, 0) / rawCoveredWeight;
+  return { score, coveredWeight };
+}
+
 function hhiFromBuckets(values: Array<string | null | undefined>, weights: number[]): number | null {
   const buckets = new Map<string, number>();
   values.forEach((value, index) => {
@@ -328,9 +356,11 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
     : validWeights;
   const coveredWeight = normalized.reduce((sum, holding) => sum + holding.weight, 0);
   const sortedWeights = normalized.map((holding) => holding.weight).sort((a, b) => b - a);
+  const quality = portfolioQuality(normalized);
   return {
     coveredWeight,
-    stockBoxQuality: weightedMetric(normalized, (holding) => holding.stockBoxScore),
+    qualityCoveredWeight: quality.coveredWeight,
+    stockBoxQuality: quality.score,
     revenueGrowth: weightedMetric(normalized, (holding) => holding.revenueGrowth),
     epsGrowth: weightedMetric(normalized, (holding) => holding.epsGrowth),
     roic: weightedMetric(normalized, (holding) => holding.roic),
@@ -426,7 +456,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "holdings_quality", label: "Underlying holdings quality", weight: 0.18, value: lookThrough.stockBoxQuality,
       score: holdingsQuality, status: isFiniteNumber(holdingsQuality) ? "available" : "missing",
-      rationale: "Look-through quality is the portfolio-weighted quality of underlying holdings.",
+      rationale: "Look-through quality requires verified quality evidence across at least 80% of portfolio weight.",
     },
     {
       key: "nav_growth", label: "NAV/share growth", weight: 0.15, value: navGrowth,
