@@ -120,10 +120,11 @@ describe("SEC REIT specialist document parser", () => {
       <table><tr><td>Normalized FFO per share</td><td>$1.23</td></tr></table>
     `, filingContext);
 
-    expect(observations.filter((item) =>
-      item.metric === "fundsFromOperationsPerShare"
-      || item.metric === "adjustedFundsFromOperationsPerShare"
-    )).toEqual([]);
+    expect(observations.filter((item) => {
+      const metric = String(item.metric);
+      return metric === "fundsFromOperationsPerShare"
+        || metric === "adjustedFundsFromOperationsPerShare";
+    })).toEqual([]);
   });
 
   it("does not promote guidance, approximate targets, generic EBITDA, or unrelated occupancy text into current specialist facts", () => {
