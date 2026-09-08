@@ -39,6 +39,8 @@ export type GlobalAuditKpis = {
   integrity: {
     ratingBelowCoverageTarget: string[];
     noRatingAtOrAboveCoverageTargetWithScore: string[];
+    analysisEngineErrors: string[];
+    scoreRatingMismatches: string[];
   };
   bySecurityType: Record<string, AuditRateSummary>;
   byMarket: Record<string, AuditRateSummary>;
@@ -121,6 +123,13 @@ function finiteScore(item: GlobalAuditKpiInput): item is GlobalAuditKpiInput & {
   return typeof item.score === "number" && Number.isFinite(item.score);
 }
 
+function scoreRatingMismatch(item: GlobalAuditKpiInput): boolean {
+  if (!isCompleted(item)) return false;
+  if (isNoRating(item)) return finiteScore(item);
+  if (isRated(item)) return !finiteScore(item);
+  return finiteScore(item) || (typeof item.rating === "string" && item.rating.trim().length > 0);
+}
+
 export function buildGlobalAuditKpis(items: GlobalAuditKpiInput[]): GlobalAuditKpis {
   const specialistItems = items.filter((item) => item.specialist);
   const specialistCompleted = specialistItems.filter(isCompleted);
@@ -140,6 +149,16 @@ export function buildGlobalAuditKpis(items: GlobalAuditKpiInput[]): GlobalAuditK
     .map((item) => item.query)
     .sort();
 
+  const analysisEngineErrors = items
+    .filter((item) => item.status === "analysis_engine_error")
+    .map((item) => item.query)
+    .sort();
+
+  const scoreRatingMismatches = items
+    .filter(scoreRatingMismatch)
+    .map((item) => item.query)
+    .sort();
+
   return {
     overall: summarize(items),
     specialist: {
@@ -152,6 +171,8 @@ export function buildGlobalAuditKpis(items: GlobalAuditKpiInput[]): GlobalAuditK
     integrity: {
       ratingBelowCoverageTarget,
       noRatingAtOrAboveCoverageTargetWithScore,
+      analysisEngineErrors,
+      scoreRatingMismatches,
     },
     bySecurityType: groupedSummary(items, (item) => item.securityType?.trim() || "unknown"),
     byMarket: groupedSummary(items, (item) => item.market?.trim() || "unknown"),
