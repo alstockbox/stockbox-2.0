@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const workflowPath = ".github/workflows/analysis-coverage-live-gate.yml";
 const corpusPath = "scripts/diagnostics/data/global_etf_investment_tickers_20000.txt";
+const materializerPath = "scripts/diagnostics/materialize-global-audit-corpus.mjs";
 const expectedSha256 = "b4a63edf1564459dd849724f736145dd0ceb896cf178ec69994a9bebafc71e91";
 
 function parseTickers(raw: string): string[] {
@@ -14,10 +16,11 @@ function parseTickers(raw: string): string[] {
 }
 
 describe("global 20k analysis coverage workflow", () => {
-  it("pins the exact 20,000-ticker audit corpus", () => {
-    expect(existsSync(corpusPath)).toBe(true);
-    if (!existsSync(corpusPath)) return;
+  it("materializes and pins the exact 20,000-ticker audit corpus", () => {
+    rmSync(corpusPath, { force: true });
+    execFileSync(process.execPath, [materializerPath, corpusPath], { stdio: "pipe" });
 
+    expect(existsSync(corpusPath)).toBe(true);
     const raw = readFileSync(corpusPath);
     const tickers = parseTickers(raw.toString("utf8"));
 
@@ -32,6 +35,7 @@ describe("global 20k analysis coverage workflow", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("matrix:");
     expect(workflow).toMatch(/max-parallel:\s*[234]/);
+    expect(workflow).toContain(`node ${materializerPath} ${corpusPath}`);
     expect(workflow).toContain(`STOCKBOX_TICKER_FILE: ${corpusPath}`);
     expect(workflow).toContain("STOCKBOX_BATCH_LIMIT:");
     expect(workflow).toContain("actions/upload-artifact@v4");
