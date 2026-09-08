@@ -23,7 +23,7 @@ import {
 
 export const metadata: Metadata = { title: "Portfolio" };
 
-type PageProps = { searchParams: Promise<{ limit?: string; error?: string }> };
+type PageProps = { searchParams: Promise<{ limit?: string; error?: string; transactions?: string }> };
 type Numeric = number | string | null;
 type PortfolioRow = { id: string; name: string; base_currency: string; created_at: string };
 type HoldingRow = { id: string; portfolio_id: string; ticker: string; quantity: Numeric; average_cost: Numeric; currency: string; acquired_at: string | null; created_at: string };
@@ -119,6 +119,7 @@ function recommendationTone(recommendation: string | null | undefined) {
 
 export default async function PortfolioPage({ searchParams }: PageProps) {
   const [params, user, locale] = await Promise.all([searchParams, getCurrentUser(), getLocale()]);
+  const showAllTransactions = params.transactions === "all";
   const copy = getP0Copy(locale).portfolio;
   const sv = locale === "sv";
   const supabase = user ? await createClient() : null;
@@ -395,7 +396,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                           <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp, försäljning, utdelning och avgift är en egen rad. Köp och försäljningar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase, sale, dividend and fee is its own row. Purchases and sales rebuild position cost basis from the complete transaction chain."}</p>
                           {transactionsAvailable && portfolioTransactions.length ? (
                             <div className="mt-3 grid gap-2">
-                              {portfolioTransactions.slice(0, 30).map((transaction) => (
+                              {portfolioTransactions.slice(0, showAllTransactions ? portfolioTransactions.length : 30).map((transaction) => (
                                 <div key={transaction.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3">
                                   {transaction.transaction_type === "buy" || transaction.transaction_type === "sell" ? (
                                     <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
@@ -425,6 +426,15 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                   )}
                                 </div>
                               ))}
+                              {portfolioTransactions.length > 30 ? (
+                                <div className="pt-1">
+                                  <ButtonLink href={showAllTransactions ? "/portfolio" : "/portfolio?transactions=all"} variant="ghost">
+                                    {showAllTransactions
+                                      ? (sv ? "Visa färre" : "Show fewer")
+                                      : (sv ? `Visa alla ${portfolioTransactions.length}` : `Show all ${portfolioTransactions.length}`)}
+                                  </ButtonLink>
+                                </div>
+                              ) : null}
                             </div>
                           ) : <p className="mt-3 text-sm text-[#7f8b9b]">{transactionsAvailable ? (sv ? "Ingen transaktionshistorik ännu." : "No transaction history yet.") : (sv ? "Historiken aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
                         </div>
