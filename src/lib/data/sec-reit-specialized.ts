@@ -1,13 +1,25 @@
 export type SecReitMetricKey =
+  | "fundsFromOperationsPerShare"
+  | "adjustedFundsFromOperationsPerShare"
   | "occupancy"
   | "sameStoreNoiGrowth"
   | "netDebtToEbitdare"
   | "fixedChargeCoverage";
 
+type SecReitRatioMetricKey = Exclude<
+  SecReitMetricKey,
+  "fundsFromOperationsPerShare" | "adjustedFundsFromOperationsPerShare"
+>;
+
+type SecReitPerShareMetricKey = Extract<
+  SecReitMetricKey,
+  "fundsFromOperationsPerShare" | "adjustedFundsFromOperationsPerShare"
+>;
+
 export type SecReitObservation = {
   metric: SecReitMetricKey;
   value: number;
-  unit: "ratio";
+  unit: "ratio" | "per_share";
   dataAsOf: string | null;
   label: string;
   sourceUrl: string;
@@ -19,12 +31,30 @@ export type SecReitDocumentContext = {
 };
 
 type ParserRule = {
-  metric: SecReitMetricKey;
+  metric: SecReitRatioMetricKey;
   pattern: RegExp;
   scale: number;
 };
 
 const GUIDANCE_LANGUAGE = /\b(guidance|outlook|forecast|expected|expects|approximately|approx\.?|target|range)\b/i;
+const THREE_MONTH_RESULTS = /\bthree\s+months?\s+ended\b/i;
+const NON_QUARTER_RESULTS = /\b(?:six|nine|twelve)\s+months?\s+ended\b|\byear\s+ended\b/i;
+const MODIFIED_FFO_ALIAS = /\b(?:core|normalized|modified|adjusted)\s+ffo\b/i;
+const MONTHS: Record<string, number> = {
+  january: 1,
+  february: 2,
+  march: 3,
+  april: 4,
+  may: 5,
+  june: 6,
+  july: 7,
+  august: 8,
+  september: 9,
+  october: 10,
+  november: 11,
+  december: 12,
+};
+const ENGLISH_DATE = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})\b/i;
 
 const RULES: ParserRule[] = [
   {
@@ -84,20 +114,147 @@ function documentLines(html: string): string[] {
     .filter(Boolean);
 }
 
-function plausibleRatio(metric: SecReitMetricKey, value: number): boolean {
+function plausibleRatio(metric: SecReitRatioMetricKey, value: number): boolean {
   if (!Number.isFinite(value) || value < 0) return false;
   if (metric === "occupancy") return value > 0 && value <= 1;
   if (metric === "sameStoreNoiGrowth") return value >= -1 && value <= 2;
   return value > 0 && value <= 100;
 }
 
+function englishDateToIso(line: string): string | null {
+  const match = line.match(ENGLISH_DATE);
+  if (!match) return null;
+  const month = MONTHS[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  if (!month || !Number.isInteger(day) || day < 1 || day > 31 || !Number.isInteger(year)) return null;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== year
+    || candidate.getUTCMonth() !== month - 1
+    || candidate.getUTCDate() !== day
+  ) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function firstPerShareNumber(line: string, label: RegExp): number | null {
+  const cleaned = line.replace(/\(\d+\)/g, " ");
+  const match = cleaned.match(label);
+  if (!match || match.index === undefined) return null;
+  const tail = cleaned.slice(match.index + match[0].length, match.index + match[0].length + 96);
+  const valueMatch = tail.match(/(?:[$€£]\s*)?([+\-]?\d{1,4}(?:\.\d+)?)/);
+  if (!valueMatch) return null;
+  const value = Number(valueMatch[1]);
+  return Number.isFinite(value) && Math.abs(value) <= 10_000 ? value : null;
+}
+
+function perShareObservation(
+  metric: SecReitPerShareMetricKey,
+  value: number,
+  dataAsOf: string,
+  line: string,
+  context: SecReitDocumentContext,
+): SecReitObservation {
+  return {
+    metric,
+    value,
+    unit: "per_share",
+    dataAsOf,
+    label: line.replace(/\s+/g, " ").trim(),
+    sourceUrl: context.sourceUrl,
+  };
+}
+
+function parsePeriodSafePerShareObservations(
+  lines: string[],
+  context: SecReitDocumentContext,
+): SecReitObservation[] {
+  const observations = new Map<SecReitPerShareMetricKey, SecReitObservation>();
+  let currentQuarterEnd: string | null = null;
+  let awaitingQuarterDate = false;
+  let sectionMetric: SecReitPerShareMetricKey | null = null;
+
+  for (const line of lines) {
+    if (GUIDANCE_LANGUAGE.test(line)) continue;
+
+    const hasQuarterHeader = THREE_MONTH_RESULTS.test(line);
+    if (hasQuarterHeader) {
+      currentQuarterEnd = englishDateToIso(line);
+      awaitingQuarterDate = currentQuarterEnd === null;
+      sectionMetric = null;
+    } else if (NON_QUARTER_RESULTS.test(line)) {
+      currentQuarterEnd = null;
+      awaitingQuarterDate = false;
+      sectionMetric = null;
+      continue;
+    } else if (awaitingQuarterDate) {
+      const periodEnd = englishDateToIso(line);
+      if (periodEnd) {
+        currentQuarterEnd = periodEnd;
+        awaitingQuarterDate = false;
+      }
+    }
+
+    if (!currentQuarterEnd) continue;
+
+    if (/^FFO\s+per\s+common\s+share\b/i.test(line) && !MODIFIED_FFO_ALIAS.test(line)) {
+      sectionMetric = "fundsFromOperationsPerShare";
+      continue;
+    }
+    if (/^AFFO\s+per\s+common\s+share\b/i.test(line)) {
+      sectionMetric = "adjustedFundsFromOperationsPerShare";
+      continue;
+    }
+
+    if (sectionMetric && /^basic\b/i.test(line)) continue;
+    if (sectionMetric && /^diluted\b/i.test(line)) {
+      const value = firstPerShareNumber(line, /^diluted\b/i);
+      if (value !== null && !observations.has(sectionMetric)) {
+        observations.set(
+          sectionMetric,
+          perShareObservation(sectionMetric, value, currentQuarterEnd, line, context),
+        );
+      }
+      sectionMetric = null;
+      continue;
+    }
+
+    if (!observations.has("fundsFromOperationsPerShare") && !MODIFIED_FFO_ALIAS.test(line)) {
+      const value = firstPerShareNumber(line, /\bdiluted\s+FFO\s+per\s+(?:common\s+)?share\b/i);
+      if (value !== null) {
+        observations.set(
+          "fundsFromOperationsPerShare",
+          perShareObservation("fundsFromOperationsPerShare", value, currentQuarterEnd, line, context),
+        );
+      }
+    }
+
+    if (!observations.has("adjustedFundsFromOperationsPerShare")) {
+      const value = firstPerShareNumber(line, /\bdiluted\s+AFFO\s+per\s+(?:common\s+)?share\b/i);
+      if (value !== null) {
+        observations.set(
+          "adjustedFundsFromOperationsPerShare",
+          perShareObservation("adjustedFundsFromOperationsPerShare", value, currentQuarterEnd, line, context),
+        );
+      }
+    }
+  }
+
+  return [...observations.values()];
+}
+
 export function parseSecReitSpecializedDocument(
   html: string,
   context: SecReitDocumentContext,
 ): SecReitObservation[] {
+  const lines = documentLines(html);
   const observations = new Map<SecReitMetricKey, SecReitObservation>();
 
-  for (const line of documentLines(html)) {
+  for (const observation of parsePeriodSafePerShareObservations(lines, context)) {
+    observations.set(observation.metric, observation);
+  }
+
+  for (const line of lines) {
     if (GUIDANCE_LANGUAGE.test(line)) continue;
     for (const rule of RULES) {
       if (observations.has(rule.metric)) continue;
