@@ -120,8 +120,6 @@ describe("depositary-receipt cross-currency FX reconciliation", () => {
 
     // 50 USD -> 312.5 DKK, then 0.5 underlying shares per receipt => 625 DKK per underlying share.
     expect(gated.market?.price).toBeCloseTo(625, 10);
-    expect(gated.market?.yearHigh).toBeCloseTo(750, 10);
-    expect(gated.market?.yearLow).toBeCloseTo(500, 10);
     expect(gated.market?.currency).toBe("DKK");
     expect(gated.market?.marketCap).toBeCloseTo(200_000_000_000, 2);
     expect(gated.market?.marketCapCurrency).toBe("DKK");
@@ -130,8 +128,10 @@ describe("depositary-receipt cross-currency FX reconciliation", () => {
     expect(gated.warning).toBeNull();
   });
 
-  it("does not apply one spot FX rate to historical price series", () => {
+  it("does not apply one spot FX rate to historical price series or historical ranges", () => {
     const gated = gateDepositaryReceiptValuationInputs(company(), market(), fundamentals(), usdToDkkContext());
     expect(gated.market?.priceHistory).toBeUndefined();
+    expect(gated.market?.yearHigh).toBeNull();
+    expect(gated.market?.yearLow).toBeNull();
   });
 });
