@@ -80,6 +80,11 @@ export type RebalanceItem = {
   deltaWeight: number;
 };
 
+export type PortfolioUpgradeCandidate = PortfolioAiCandidate & {
+  profileRank: number;
+  scoreImprovement: number;
+};
+
 export type PortfolioActionCode =
   | "negative_signal"
   | "concentration"
@@ -361,6 +366,59 @@ export function buildRebalancePlan(
       };
     })
     .sort((a, b) => Math.abs(b.deltaWeight) - Math.abs(a.deltaWeight));
+}
+
+export function findPortfolioUpgradeCandidates({
+  weakHolding,
+  currentHoldingTickers,
+  candidates,
+  risk,
+  style,
+  horizon,
+  now,
+  staleAfterDays = 45,
+  minimumScoreImprovement = 8,
+  limit = 3,
+}: {
+  weakHolding: { ticker: string; score: number | null };
+  currentHoldingTickers: string[];
+  candidates: PortfolioAiCandidate[];
+  risk: RiskPreference;
+  style: PortfolioStyle;
+  horizon: Horizon;
+  now?: string | Date;
+  staleAfterDays?: number;
+  minimumScoreImprovement?: number;
+  limit?: number;
+}): PortfolioUpgradeCandidate[] {
+  const nowDate = now instanceof Date ? now : new Date(now ?? Date.now());
+  const nowMs = Number.isFinite(nowDate.getTime()) ? nowDate.getTime() : Date.now();
+  const weakScore = typeof weakHolding.score === "number" && Number.isFinite(weakHolding.score)
+    ? weakHolding.score
+    : null;
+  if (weakScore === null) return [];
+
+  const excluded = new Set([
+    weakHolding.ticker,
+    ...currentHoldingTickers,
+  ].map((ticker) => ticker.trim().toUpperCase()).filter(Boolean));
+  const minimumImprovement = Number.isFinite(minimumScoreImprovement)
+    ? Math.max(0, minimumScoreImprovement)
+    : 8;
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 3;
+
+  return candidates
+    .filter(isQualifyingCandidate)
+    .filter((candidate) => isFreshCandidate(candidate, nowMs, staleAfterDays))
+    .filter((candidate) => !excluded.has(candidate.ticker.trim().toUpperCase()))
+    .filter((candidate) => finite(candidate.score, weakScore) - weakScore >= minimumImprovement)
+    .map((candidate) => ({
+      ...candidate,
+      profileRank: candidateRank(candidate, risk, style, horizon),
+      scoreImprovement: finite(candidate.score, weakScore) - weakScore,
+    }))
+    .sort((a, b) => b.profileRank - a.profileRank || b.scoreImprovement - a.scoreImprovement)
+    .slice(0, normalizedLimit);
 }
 
 export function buildPortfolioActionPlan({
