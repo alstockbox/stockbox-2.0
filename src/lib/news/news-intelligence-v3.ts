@@ -45,7 +45,7 @@ function classifyEvent(text: string): NewsEventTypeV3 {
   if (/\b(fda|regulator|regulatory|approval|rejected|rejection|antitrust|sanction|license)\b/.test(text)) return "regulatory";
   if (/\b(guidance|outlook|forecast|full[- ]year target|raises? guidance|cuts? guidance)\b/.test(text)) return "guidance";
   if (/\b(earnings|results|revenue|eps|quarter|profit|loss|miss(?:es|ed)?|beats?)\b/.test(text)) return "earnings";
-  if (/\b(acquir|merger|takeover|buyout|strategic combination|deal to buy)\w*/.test(text)) return "m_and_a";
+  if (/\b(acquir\w*|merger|takeover|buyout|strategic combination|deal to buy)\b/.test(text)) return "m_and_a";
   if (/\b(ceo|cfo|chairman|chairwoman|chief executive|management change|resigns?|appointed)\b/.test(text)) return "management";
   if (/\b(dividend|buyback|repurchase|capital raise|rights issue|secondary offering|debt issuance)\b/.test(text)) return "capital_allocation";
   if (/\b(contract|order win|awarded|framework agreement|customer win)\b/.test(text)) return "contract";
