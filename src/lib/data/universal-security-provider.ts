@@ -55,6 +55,7 @@ import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-
 import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import { fetchOfficialInvestmentCompanyKeyRatios } from "./official-investment-company-key-ratios";
+import { fetchOfficialInvestmentCompanyLeverage } from "./official-investment-company-leverage";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
@@ -450,12 +451,13 @@ async function enrichInvestmentCompanyReport(
 
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.market?.date ?? null;
-  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialGovernance] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialGovernance, officialLeverage] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
     fetchOfficialInvestmentCompanyHoldings(company),
     fetchOfficialInvestmentCompanyKeyRatios(company),
     fetchOfficialInvestmentCompanyGovernance(company),
+    fetchOfficialInvestmentCompanyLeverage(company),
   ]);
   const navComparable = officialNav.ok && isOfficialDisclosureComparable(
     officialNav.data.navAsOf,
@@ -463,6 +465,10 @@ async function enrichInvestmentCompanyReport(
   );
   const holdingsComparable = officialHoldings.ok && isOfficialDisclosureComparable(
     officialHoldings.data.asOf,
+    marketDate,
+  );
+  const leverageComparable = officialLeverage.ok && isOfficialDisclosureComparable(
+    officialLeverage.data.asOf,
     marketDate,
   );
   const navFreshnessMessage = officialNav.ok && !navComparable
@@ -552,11 +558,17 @@ async function enrichInvestmentCompanyReport(
     ?? latest?.currentSharesOutstanding
     ?? latest?.sharesDiluted
     ?? null;
-  const verifiedLeverageRatio = officialKeyRatios.ok
+  const verifiedAnnualLeverageRatio = officialKeyRatios.ok
     ? verifiedInvestmentCompanyLeverageRatio(
       officialKeyRatios.data.years,
       marketYear,
     )
+    : null;
+  const verifiedLeverageRatio = leverageComparable && officialLeverage.ok
+    ? officialLeverage.data.ratio
+    : verifiedAnnualLeverageRatio;
+  const leverageFreshnessMessage = officialLeverage.ok && !leverageComparable && verifiedLeverageRatio === null
+    ? `Official leverage dated ${officialLeverage.data.asOf} is stale or not comparable with market price date ${marketDate ?? "unknown"}. Leverage requires verified current issuer evidence no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
     : null;
 
   const analysis = analyzeInvestmentCompany({
@@ -631,6 +643,17 @@ async function enrichInvestmentCompanyReport(
       ))) {
         report.sources = [...report.sources, governanceSource];
       }
+    }
+  }
+
+  if (officialLeverage.ok) {
+    const leverageSource = officialLeverage.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === leverageSource.provider
+      && source.url === leverageSource.url
+      && source.version === leverageSource.version
+    ))) {
+      report.sources = [...report.sources, leverageSource];
     }
   }
 
@@ -717,6 +740,23 @@ async function enrichInvestmentCompanyReport(
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), governanceDiagnostic];
   }
 
+  const leverageDiagnostic: ProviderDiagnostic = officialLeverage.ok
+    ? leverageComparable
+      ? officialLeverage.data.diagnostic
+      : {
+        ...officialLeverage.data.diagnostic,
+        status: "partial",
+        reason: "official_leverage_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialLeverage.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === leverageDiagnostic.provider
+    && diagnostic.status === leverageDiagnostic.status
+    && diagnostic.reason === leverageDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), leverageDiagnostic];
+  }
+
   for (const qualityDiagnostic of holdingsQualityDiagnostics) {
     if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
       diagnostic.provider === qualityDiagnostic.provider
@@ -751,11 +791,12 @@ async function enrichInvestmentCompanyReport(
   report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
   const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
-  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage || governanceMessage) {
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || leverageFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage || governanceMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       ...(navFreshnessMessage ? [navFreshnessMessage] : []),
       ...(holdingsFreshnessMessage ? [holdingsFreshnessMessage] : []),
+      ...(leverageFreshnessMessage ? [leverageFreshnessMessage] : []),
       ...(holdingsQualityMessage ? [holdingsQualityMessage] : []),
       ...(capitalAllocationMessage ? [capitalAllocationMessage] : []),
       ...(dividendQualityMessage ? [dividendQualityMessage] : []),
