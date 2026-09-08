@@ -42,6 +42,10 @@ import {
 } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
+import {
+  fetchOfficialInvestmentCompanyKeyRatios,
+  selectVerifiedAnnualLeverageRatio,
+} from "./official-investment-company-key-ratios";
 import { fetchOfficialInvestmentCompanyLeverage } from "./official-investment-company-leverage";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
@@ -337,10 +341,12 @@ async function enrichInvestmentCompanyReport(
   if (report.analysisArchetype !== "holding_company") return report;
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.dataAsOf ?? report.market?.date ?? null;
-  const [officialNav, longHistory, officialHoldings, officialLeverage] = await Promise.all([
+  const marketYear = marketYearFromDate(marketDate);
+  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialLeverage] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
     fetchOfficialInvestmentCompanyHoldings(company),
+    fetchOfficialInvestmentCompanyKeyRatios(company),
     fetchOfficialInvestmentCompanyLeverage(company),
   ]);
   const navComparable = officialNav.ok
@@ -349,13 +355,15 @@ async function enrichInvestmentCompanyReport(
     && isOfficialDisclosureComparable(officialHoldings.data.asOf, marketDate);
   const leverageComparable = officialLeverage.ok
     && isOfficialDisclosureComparable(officialLeverage.data.asOf, marketDate);
-  const verifiedLeverageRatio = leverageComparable && officialLeverage.ok
-    ? officialLeverage.data.ratio
+  const annualLeverageRatio = officialKeyRatios.ok
+    ? selectVerifiedAnnualLeverageRatio(officialKeyRatios.data.years, marketYear)
     : null;
+  const annualLeverageContributes = annualLeverageRatio !== null;
+  const verifiedLeverageRatio = annualLeverageRatio
+    ?? (leverageComparable && officialLeverage.ok ? officialLeverage.data.ratio : null);
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
-  const marketYear = marketYearFromDate(marketDate);
   const annualNavGrowth = officialNav.ok && marketYear !== undefined
     ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
     : emptyInvestmentCompanyNavGrowth();
@@ -479,6 +487,31 @@ async function enrichInvestmentCompanyReport(
     ])];
   }
 
+  if (officialKeyRatios.ok) {
+    const keyRatioSource = officialKeyRatios.data.source;
+    if (!report.sources.some((existing) => (
+      existing.provider === keyRatioSource.provider
+      && existing.url === keyRatioSource.url
+      && existing.version === keyRatioSource.version
+    ))) {
+      report.sources = [...report.sources, keyRatioSource];
+    }
+    const keyRatioDiagnostic: ProviderDiagnostic = annualLeverageContributes
+      ? officialKeyRatios.data.diagnostic
+      : {
+        ...officialKeyRatios.data.diagnostic,
+        status: "partial",
+        reason: "official_annual_leverage_stale_or_unverifiable_for_market_year",
+      };
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), keyRatioDiagnostic];
+    if (!annualLeverageContributes) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Official annual leverage history does not contain a valid issuer ratio in the market year or immediately preceding year for market data dated ${marketDate ?? "unknown"}; annual leverage was excluded from specialist coverage.`,
+      ])];
+    }
+  }
+
   if (officialLeverage.ok) {
     const leverageSource = officialLeverage.data.source;
     if (!report.sources.some((existing) => (
@@ -496,13 +529,13 @@ async function enrichInvestmentCompanyReport(
         reason: "official_leverage_stale_or_unverifiable_for_market_comparison",
       };
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), leverageDiagnostic];
-    if (!leverageComparable) {
+    if (!leverageComparable && !annualLeverageContributes) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
         `Official leverage dated ${officialLeverage.data.asOf} is not comparable with market data dated ${marketDate ?? "unknown"} and was excluded from specialist coverage.`,
       ])];
     }
-  } else {
+  } else if (!annualLeverageContributes) {
     report.providerDiagnostics = [
       ...(report.providerDiagnostics ?? []),
       officialLeverage.diagnostic,
