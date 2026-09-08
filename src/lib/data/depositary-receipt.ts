@@ -242,6 +242,11 @@ function disabledValuationInputs(
   return {
     market: market ? {
       ...market,
+      price: null,
+      yearHigh: null,
+      yearLow: null,
+      priceHistory: undefined,
+      dividendEvents: undefined,
       marketCap: null,
       marketCapAsOf: null,
       marketCapCurrency: null,
