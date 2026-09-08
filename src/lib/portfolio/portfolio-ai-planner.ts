@@ -85,6 +85,16 @@ export type PortfolioUpgradeCandidate = PortfolioAiCandidate & {
   scoreImprovement: number;
 };
 
+export type PortfolioUpgradeDriverDimension = "quality" | "risk" | "growth" | "valuation" | "momentum";
+
+export type PortfolioUpgradeDriver = {
+  dimension: PortfolioUpgradeDriverDimension;
+  weakValue: number;
+  candidateValue: number;
+  improvement: number;
+  relevanceWeight: number;
+};
+
 export type PortfolioActionCode =
   | "negative_signal"
   | "concentration"
@@ -418,6 +428,69 @@ export function findPortfolioUpgradeCandidates({
       scoreImprovement: finite(candidate.score, weakScore) - weakScore,
     }))
     .sort((a, b) => b.profileRank - a.profileRank || b.scoreImprovement - a.scoreImprovement)
+    .slice(0, normalizedLimit);
+}
+
+function driverRelevance(
+  dimension: PortfolioUpgradeDriverDimension,
+  risk: RiskPreference,
+  style: PortfolioStyle,
+  horizon: Horizon,
+) {
+  let weight = 1;
+  if (dimension === "quality") {
+    if (style === "quality") weight += 1.2;
+    if (risk === "defensive") weight += 0.4;
+    if (horizon === "long") weight += 0.3;
+  }
+  if (dimension === "risk") {
+    if (risk === "defensive") weight += 1.1;
+    if (style === "quality") weight += 0.3;
+  }
+  if (dimension === "growth") {
+    if (style === "growth") weight += 1.4;
+    if (risk === "aggressive") weight += 0.4;
+    if (horizon === "long") weight += 0.3;
+  }
+  if (dimension === "valuation" && style === "value") weight += 1.5;
+  if (dimension === "momentum") {
+    if (horizon === "short") weight += 1.4;
+    if (risk === "aggressive") weight += 0.5;
+    if (style === "growth") weight += 0.5;
+  }
+  return weight;
+}
+
+export function buildPortfolioUpgradeDrivers({
+  weakCandidate,
+  upgradeCandidate,
+  risk,
+  style,
+  horizon,
+  limit = 3,
+}: {
+  weakCandidate: PortfolioAiCandidate;
+  upgradeCandidate: PortfolioAiCandidate;
+  risk: RiskPreference;
+  style: PortfolioStyle;
+  horizon: Horizon;
+  limit?: number;
+}): PortfolioUpgradeDriver[] {
+  const dimensions: PortfolioUpgradeDriverDimension[] = ["quality", "risk", "growth", "valuation", "momentum"];
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 3;
+
+  return dimensions
+    .flatMap((dimension) => {
+      const weakValue = weakCandidate[dimension];
+      const candidateValue = upgradeCandidate[dimension];
+      if (typeof weakValue !== "number" || !Number.isFinite(weakValue)) return [];
+      if (typeof candidateValue !== "number" || !Number.isFinite(candidateValue)) return [];
+      const improvement = candidateValue - weakValue;
+      if (improvement <= 0) return [];
+      const relevanceWeight = driverRelevance(dimension, risk, style, horizon);
+      return [{ dimension, weakValue, candidateValue, improvement, relevanceWeight }];
+    })
+    .sort((a, b) => (b.improvement * b.relevanceWeight) - (a.improvement * a.relevanceWeight))
     .slice(0, normalizedLimit);
 }
 
