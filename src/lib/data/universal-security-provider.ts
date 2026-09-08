@@ -371,8 +371,14 @@ async function enrichInvestmentCompanyReport(
     ? selectVerifiedAnnualLeverageRatio(officialKeyRatios.data.years, marketYear)
     : null;
   const annualLeverageContributes = annualLeverageRatio !== null;
-  const verifiedLeverageRatio = annualLeverageRatio
-    ?? (leverageComparable && officialLeverage.ok ? officialLeverage.data.ratio : null);
+  const dedicatedLeverageRatio = leverageComparable && officialLeverage.ok
+    ? officialLeverage.data.ratio
+    : null;
+  const holdingsLeverageRatio = holdingsComparable && officialHoldings.ok
+    ? officialHoldings.data.holdingCompanyLeverageRatio ?? null
+    : null;
+  const holdingsLeverageContributes = holdingsLeverageRatio !== null;
+  const verifiedLeverageRatio = annualLeverageRatio ?? dedicatedLeverageRatio ?? holdingsLeverageRatio;
   const capitalAllocation = officialKeyRatios.ok && marketYear !== undefined
     ? deriveInvestmentCompanyCapitalAllocation(
       officialKeyRatios.data.years.filter((point) => point.year < marketYear),
@@ -587,13 +593,13 @@ async function enrichInvestmentCompanyReport(
         reason: "official_leverage_stale_or_unverifiable_for_market_comparison",
       };
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), leverageDiagnostic];
-    if (!leverageComparable && !annualLeverageContributes) {
+    if (!leverageComparable && !annualLeverageContributes && !holdingsLeverageContributes) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
         `Official leverage dated ${officialLeverage.data.asOf} is not comparable with market data dated ${marketDate ?? "unknown"} and was excluded from specialist coverage.`,
       ])];
     }
-  } else if (!annualLeverageContributes) {
+  } else if (!annualLeverageContributes && !holdingsLeverageContributes) {
     report.providerDiagnostics = [
       ...(report.providerDiagnostics ?? []),
       officialLeverage.diagnostic,
