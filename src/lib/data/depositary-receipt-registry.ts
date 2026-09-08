@@ -3,7 +3,6 @@ import type { DepositaryReceiptCompany, DepositaryReceiptRepresentation } from "
 
 export type DepositaryReceiptRegistryEntry = DepositaryReceiptRepresentation & {
   securityId: string;
-  receiptTicker: string;
   sourceUrl: string;
 };
 
@@ -12,6 +11,7 @@ export type DepositaryReceiptRegistryQaReport = {
   totalEntries: number;
   duplicateSecurityIds: string[];
   invalidRatioSecurityIds: string[];
+  invalidRatioProvenanceSecurityIds: string[];
   missingSourceSecurityIds: string[];
   missingPrimaryListingSecurityIds: string[];
   unverifiedMappingSecurityIds: string[];
@@ -37,12 +37,20 @@ function validPositiveRatio(entry: DepositaryReceiptRegistryEntry): boolean {
     && entry.underlyingSharesPerReceipt > 0;
 }
 
+function validRatioProvenance(entry: DepositaryReceiptRegistryEntry): boolean {
+  return Boolean(entry.ratioSource?.trim() && entry.ratioAsOf?.trim());
+}
+
 export function qaDepositaryReceiptRegistry(
   entries: DepositaryReceiptRegistryEntry[],
 ): DepositaryReceiptRegistryQaReport {
   const duplicateSecurityIds = duplicateValues(entries.map((entry) => entry.securityId));
   const invalidRatioSecurityIds = entries
     .filter((entry) => entry.ratioVerified && !validPositiveRatio(entry))
+    .map((entry) => entry.securityId)
+    .sort();
+  const invalidRatioProvenanceSecurityIds = entries
+    .filter((entry) => entry.ratioVerified && !validRatioProvenance(entry))
     .map((entry) => entry.securityId)
     .sort();
   const missingSourceSecurityIds = entries
@@ -65,12 +73,14 @@ export function qaDepositaryReceiptRegistry(
   return {
     pass: duplicateSecurityIds.length === 0
       && invalidRatioSecurityIds.length === 0
+      && invalidRatioProvenanceSecurityIds.length === 0
       && missingSourceSecurityIds.length === 0
       && missingPrimaryListingSecurityIds.length === 0
       && unverifiedMappingSecurityIds.length === 0,
     totalEntries: entries.length,
     duplicateSecurityIds,
     invalidRatioSecurityIds,
+    invalidRatioProvenanceSecurityIds,
     missingSourceSecurityIds,
     missingPrimaryListingSecurityIds,
     unverifiedMappingSecurityIds,
@@ -94,7 +104,7 @@ function matchingRegistryEntry(
   if (candidates.length !== 1) return null;
   const entry = candidates[0];
   if (!entry.mappingVerified) return null;
-  if (entry.ratioVerified && !validPositiveRatio(entry)) return null;
+  if (entry.ratioVerified && (!validPositiveRatio(entry) || !validRatioProvenance(entry))) return null;
   if (!entry.source.trim() || !entry.sourceUrl.trim() || !entry.sourceAsOf?.trim() || !entry.primaryListingTicker.trim()) return null;
   return entry;
 }
@@ -110,8 +120,14 @@ export function attachVerifiedDepositaryReceiptRepresentation(
     depositaryReceipt: {
       kind: entry.kind,
       issuerId: entry.issuerId,
+      receiptTicker: entry.receiptTicker,
       primaryListingTicker: entry.primaryListingTicker,
       underlyingSharesPerReceipt: entry.ratioVerified ? entry.underlyingSharesPerReceipt : null,
+      issuerReportingCurrency: entry.issuerReportingCurrency,
+      primaryListingCurrency: entry.primaryListingCurrency,
+      receiptTradingCurrency: entry.receiptTradingCurrency,
+      ratioSource: entry.ratioVerified ? entry.ratioSource : null,
+      ratioAsOf: entry.ratioVerified ? entry.ratioAsOf : null,
       mappingVerified: true,
       ratioVerified: entry.ratioVerified,
       source: entry.source,
