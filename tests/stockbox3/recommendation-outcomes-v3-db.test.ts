@@ -12,12 +12,15 @@ function input(overrides: Partial<RecommendationOutcomePersistInputV3> = {}): Re
     expectedAt: "2026-10-01T12:00:00.000Z",
     evaluatedAt: "2026-10-01T12:03:00.000Z",
     lagDays: 0,
+    entryObservedAt: "2026-08-31",
     entryPrice: 100,
     observedPrice: 110,
     securityCurrency: "USD",
     securityReturn: 0.1,
     benchmarkTicker: "SPY",
+    benchmarkEntryObservedAt: "2026-08-31",
     benchmarkEntryPrice: 100,
+    benchmarkObservedAt: "2026-10-01",
     benchmarkObservedPrice: 104,
     benchmarkReturn: 0.04,
     excessReturn: 0.06,
@@ -39,12 +42,15 @@ describe("Recommendation V3 outcome persistence", () => {
       expected_at: "2026-10-01T12:00:00.000Z",
       evaluated_at: "2026-10-01T12:03:00.000Z",
       lag_days: 0,
+      entry_observed_at: "2026-08-31",
       entry_price: 100,
       observed_price: 110,
       security_currency: "USD",
       security_return: 0.1,
       benchmark_ticker: "SPY",
+      benchmark_entry_observed_at: "2026-08-31",
       benchmark_entry_price: 100,
+      benchmark_observed_at: "2026-10-01",
       benchmark_observed_price: 104,
       benchmark_return: 0.04,
       excess_return: 0.06,
@@ -64,7 +70,9 @@ describe("Recommendation V3 outcome persistence", () => {
   it("normalizes identifiers and benchmark ticker without inventing missing benchmark data", () => {
     const row = toRecommendationOutcomeV3Row(input({
       benchmarkTicker: "  spy ",
+      benchmarkEntryObservedAt: null,
       benchmarkEntryPrice: null,
+      benchmarkObservedAt: null,
       benchmarkObservedPrice: null,
       benchmarkReturn: null,
       excessReturn: null,
@@ -73,7 +81,9 @@ describe("Recommendation V3 outcome persistence", () => {
     }));
 
     expect(row.benchmark_ticker).toBe("SPY");
+    expect(row.benchmark_entry_observed_at).toBeNull();
     expect(row.benchmark_entry_price).toBeNull();
+    expect(row.benchmark_observed_at).toBeNull();
     expect(row.benchmark_observed_price).toBeNull();
     expect(row.benchmark_return).toBeNull();
     expect(row.excess_return).toBeNull();
