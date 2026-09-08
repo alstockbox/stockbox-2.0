@@ -80,6 +80,40 @@ export type RebalanceItem = {
   deltaWeight: number;
 };
 
+export type PortfolioWhatIfCurrentHolding = {
+  ticker: string;
+  weight: number;
+};
+
+export type PortfolioWhatIfMetrics = {
+  analysisCoverage: number;
+  weightedScore: number | null;
+  weightedRisk: number | null;
+  weightedQuality: number | null;
+  weightedGrowth: number | null;
+  weightedValuation: number | null;
+  weightDiversificationScore: number;
+  largestPositionWeight: number;
+};
+
+export type PortfolioWhatIfDelta = {
+  weightedScore: number | null;
+  weightedRisk: number | null;
+  weightedQuality: number | null;
+  weightedGrowth: number | null;
+  weightedValuation: number | null;
+  weightDiversificationScore: number;
+  largestPositionWeight: number;
+};
+
+export type PortfolioWhatIfSimulation = {
+  status: "good" | "insufficient";
+  minimumCoverage: number;
+  current: PortfolioWhatIfMetrics;
+  target: PortfolioWhatIfMetrics;
+  delta: PortfolioWhatIfDelta;
+};
+
 export type PortfolioUpgradeCandidate = PortfolioAiCandidate & {
   profileRank: number;
   scoreImprovement: number;
@@ -376,6 +410,127 @@ export function buildRebalancePlan(
       };
     })
     .sort((a, b) => Math.abs(b.deltaWeight) - Math.abs(a.deltaWeight));
+}
+
+type WhatIfWeightedHolding = { ticker: string; weight: number };
+type WhatIfDimension = "score" | "risk" | "quality" | "growth" | "valuation";
+
+function normalizeWhatIfHoldings(holdings: WhatIfWeightedHolding[]) {
+  return holdings
+    .map((holding) => ({
+      ticker: holding.ticker.trim().toUpperCase(),
+      weight: Number.isFinite(holding.weight) ? Math.max(0, holding.weight) : 0,
+    }))
+    .filter((holding) => holding.ticker && holding.weight > 0);
+}
+
+function whatIfSideMetrics(
+  holdings: WhatIfWeightedHolding[],
+  candidateMap: Map<string, PortfolioAiCandidate>,
+  minimumCoverage: number,
+): PortfolioWhatIfMetrics {
+  const normalized = normalizeWhatIfHoldings(holdings);
+  const investedWeight = normalized.reduce((sum, holding) => sum + holding.weight, 0);
+  const largestPositionWeight = normalized.reduce((max, holding) => Math.max(max, holding.weight), 0);
+  const normalizedWeights = investedWeight > 0
+    ? normalized.map((holding) => ({ ...holding, normalizedWeight: holding.weight / investedWeight }))
+    : [];
+  const hhi = normalizedWeights.reduce((sum, holding) => sum + holding.normalizedWeight ** 2, 0);
+  const weightDiversificationScore = clamp(100 * (1 - hhi), 0, 100);
+
+  const comparableWeight = normalized.reduce((sum, holding) => {
+    const candidate = candidateMap.get(holding.ticker);
+    return candidate
+      && typeof candidate.score === "number" && Number.isFinite(candidate.score)
+      && typeof candidate.risk === "number" && Number.isFinite(candidate.risk)
+      ? sum + holding.weight
+      : sum;
+  }, 0);
+  const analysisCoverage = investedWeight > 0 ? comparableWeight / investedWeight : 0;
+
+  const weightedDimension = (dimension: WhatIfDimension) => {
+    const covered = normalized.flatMap((holding) => {
+      const value = candidateMap.get(holding.ticker)?.[dimension];
+      return typeof value === "number" && Number.isFinite(value)
+        ? [{ weight: holding.weight, value }]
+        : [];
+    });
+    const coveredWeight = covered.reduce((sum, item) => sum + item.weight, 0);
+    if (investedWeight <= 0 || coveredWeight / investedWeight < minimumCoverage || coveredWeight <= 0) return null;
+    return covered.reduce((sum, item) => sum + (item.weight / coveredWeight) * item.value, 0);
+  };
+
+  return {
+    analysisCoverage,
+    weightedScore: weightedDimension("score"),
+    weightedRisk: weightedDimension("risk"),
+    weightedQuality: weightedDimension("quality"),
+    weightedGrowth: weightedDimension("growth"),
+    weightedValuation: weightedDimension("valuation"),
+    weightDiversificationScore,
+    largestPositionWeight,
+  };
+}
+
+function failClosedWhatIfSignals(metrics: PortfolioWhatIfMetrics): PortfolioWhatIfMetrics {
+  return {
+    ...metrics,
+    weightedScore: null,
+    weightedRisk: null,
+    weightedQuality: null,
+    weightedGrowth: null,
+    weightedValuation: null,
+  };
+}
+
+export function simulatePortfolioWhatIf({
+  current,
+  target,
+  candidates,
+  minimumCoverage = 0.8,
+}: {
+  current: PortfolioWhatIfCurrentHolding[];
+  target: RebalanceTargetHolding[];
+  candidates: PortfolioAiCandidate[];
+  minimumCoverage?: number;
+}): PortfolioWhatIfSimulation {
+  const normalizedMinimumCoverage = Number.isFinite(minimumCoverage)
+    ? clamp(minimumCoverage, 0, 1)
+    : 0.8;
+  const candidateMap = new Map(
+    candidates.map((candidate) => [candidate.ticker.trim().toUpperCase(), candidate]),
+  );
+  let currentMetrics = whatIfSideMetrics(current, candidateMap, normalizedMinimumCoverage);
+  let targetMetrics = whatIfSideMetrics(
+    target.map((holding) => ({ ticker: holding.ticker, weight: holding.targetPortfolioWeight })),
+    candidateMap,
+    normalizedMinimumCoverage,
+  );
+  const status: PortfolioWhatIfSimulation["status"] = currentMetrics.analysisCoverage >= normalizedMinimumCoverage
+    && targetMetrics.analysisCoverage >= normalizedMinimumCoverage
+    ? "good"
+    : "insufficient";
+
+  if (status === "insufficient") {
+    currentMetrics = failClosedWhatIfSignals(currentMetrics);
+    targetMetrics = failClosedWhatIfSignals(targetMetrics);
+  }
+
+  return {
+    status,
+    minimumCoverage: normalizedMinimumCoverage,
+    current: currentMetrics,
+    target: targetMetrics,
+    delta: {
+      weightedScore: delta(targetMetrics.weightedScore, currentMetrics.weightedScore),
+      weightedRisk: delta(targetMetrics.weightedRisk, currentMetrics.weightedRisk),
+      weightedQuality: delta(targetMetrics.weightedQuality, currentMetrics.weightedQuality),
+      weightedGrowth: delta(targetMetrics.weightedGrowth, currentMetrics.weightedGrowth),
+      weightedValuation: delta(targetMetrics.weightedValuation, currentMetrics.weightedValuation),
+      weightDiversificationScore: targetMetrics.weightDiversificationScore - currentMetrics.weightDiversificationScore,
+      largestPositionWeight: targetMetrics.largestPositionWeight - currentMetrics.largestPositionWeight,
+    },
+  };
 }
 
 export function findPortfolioUpgradeCandidates({
