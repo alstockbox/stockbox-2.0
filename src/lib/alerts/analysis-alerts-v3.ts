@@ -1,3 +1,7 @@
+import {
+  deriveRecommendationLifecycleV3,
+  type RecommendationLifecycleSnapshotV3,
+} from "@/lib/analysis/recommendation-lifecycle-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 
 export const ANALYSIS_ALERTS_V3_POLICY_VERSION = "stockbox-analysis-alerts-v3.0.0" as const;
@@ -41,6 +45,8 @@ export type AnalysisAlertEventV3 = {
   observedAt: string;
   messageKey:
     | "alerts.recommendationChanged"
+    | "alerts.recommendationStrengthened"
+    | "alerts.recommendationWeakened"
     | "alerts.convictionDropped"
     | "alerts.dataQualityDropped"
     | "alerts.priceCrossedAbove"
@@ -82,6 +88,21 @@ function recommendationSeverity(
   return directional.has(previous) || directional.has(current) ? "important" : "watch";
 }
 
+function lifecycleSnapshot(snapshot: AnalysisAlertSnapshotV3): RecommendationLifecycleSnapshotV3 {
+  return {
+    snapshotId: snapshot.analysisId?.trim() || snapshot.observedAt,
+    ticker: snapshot.ticker,
+    observedAt: snapshot.observedAt,
+    rating: snapshot.rating,
+    objectiveScore: snapshot.objectiveScore,
+    conviction: snapshot.conviction,
+    dataQuality: snapshot.dataQuality,
+    // Alert state predates model-uncertainty persistence. Keep this dimension
+    // neutral here rather than fabricating a historical uncertainty value.
+    modelUncertainty: 0,
+  };
+}
+
 /**
  * Pure, zero-provider-cost alert derivation over already-computed StockBox state.
  * User Match/personalized scores are intentionally absent from the contract, so
@@ -119,6 +140,43 @@ export function deriveAnalysisAlertsV3(
         currentScore: current.objectiveScore,
       },
     });
+  }
+
+  if (recommendationChanges && previous.rating === current.rating) {
+    const lifecycle = deriveRecommendationLifecycleV3(
+      lifecycleSnapshot(previous),
+      lifecycleSnapshot(current),
+    );
+    const scoreStrengthened = lifecycle.state === "STRENGTHENED"
+      && lifecycle.reasonCodes.includes("OBJECTIVE_SCORE_IMPROVED");
+    const scoreWeakened = lifecycle.state === "WEAKENED"
+      && lifecycle.reasonCodes.includes("OBJECTIVE_SCORE_WEAKENED");
+
+    if (scoreStrengthened || scoreWeakened) {
+      events.push({
+        policyVersion: ANALYSIS_ALERTS_V3_POLICY_VERSION,
+        kind: "RECOMMENDATION_CHANGE",
+        severity: lifecycle.severity,
+        ticker: current.ticker,
+        dedupeKey: eventKey(
+          current,
+          "RECOMMENDATION_CHANGE",
+          `${lifecycle.state}:${Math.round(current.objectiveScore ?? 0)}`,
+        ),
+        sourceAnalysisId: current.analysisId,
+        observedAt: current.observedAt,
+        messageKey: scoreStrengthened
+          ? "alerts.recommendationStrengthened"
+          : "alerts.recommendationWeakened",
+        payload: {
+          currentRating: current.rating,
+          previousScore: previous.objectiveScore,
+          currentScore: current.objectiveScore,
+          scoreDelta: lifecycle.scoreDelta,
+          lifecycleState: lifecycle.state,
+        },
+      });
+    }
   }
 
   const convictionDrop = previous.conviction - current.conviction;
