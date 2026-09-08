@@ -39,7 +39,9 @@ type ParserRule = {
 const GUIDANCE_LANGUAGE = /\b(guidance|outlook|forecast|expected|expects|approximately|approx\.?|target|range)\b/i;
 const THREE_MONTH_RESULTS = /\bthree\s+months?\s+ended\b/i;
 const NON_QUARTER_RESULTS = /\b(?:six|nine|twelve)\s+months?\s+ended\b|\byear\s+ended\b/i;
+const FINANCIAL_DATE_MARKER = /\b(?:as\s+of|at|three\s+months?\s+ended|quarter(?:ly)?\s+ended)\b/i;
 const MODIFIED_FFO_ALIAS = /\b(?:core|normalized|modified|adjusted)\s+ffo\b/i;
+const FIXED_CHARGE_LABEL = /\bfixed[- ]charge\s+coverage(?:\s+ratio)?\b/i;
 const MONTHS: Record<string, number> = {
   january: 1,
   february: 2,
@@ -59,12 +61,12 @@ const ENGLISH_DATE = /\b(January|February|March|April|May|June|July|August|Septe
 const RULES: ParserRule[] = [
   {
     metric: "occupancy",
-    pattern: /\b(?:period[- ]end\s+|average\s+|property[- ]level\s+)?occupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
+    pattern: /(\d{1,3}(?:\.\d+)?)\s*%\s+(?:property[- ]level\s+)?occupancy\b/i,
     scale: 0.01,
   },
   {
     metric: "occupancy",
-    pattern: /(\d{1,3}(?:\.\d+)?)\s*%\s+(?:property[- ]level\s+)?occupancy\b/i,
+    pattern: /\b(?:period[- ]end\s+|average\s+|property[- ]level\s+)?occupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
   },
   {
@@ -90,6 +92,10 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&gt;|&#62;/gi, ">")
+    .replace(/&lt;|&#60;/gi, "<")
+    .replace(/&ge;|&#8805;/gi, "≥")
+    .replace(/&le;|&#8804;/gi, "≤")
     .replace(/&ndash;|&#8211;/gi, "-")
     .replace(/&mdash;|&#8212;/gi, "-")
     .replace(/&times;/gi, "x")
@@ -135,6 +141,45 @@ function englishDateToIso(line: string): string | null {
     || candidate.getUTCDate() !== day
   ) return null;
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function isIsoDate(value: string | null | undefined): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function latestExplicitFinancialDate(lines: string[], fallback: string | null | undefined): string | null {
+  const candidates: string[] = [];
+  let awaitingQuarterDate = false;
+
+  for (const line of lines) {
+    if (GUIDANCE_LANGUAGE.test(line)) continue;
+
+    if (FINANCIAL_DATE_MARKER.test(line)) {
+      const date = englishDateToIso(line);
+      if (date) candidates.push(date);
+      awaitingQuarterDate = THREE_MONTH_RESULTS.test(line) && !date;
+      continue;
+    }
+
+    if (awaitingQuarterDate) {
+      const date = englishDateToIso(line);
+      if (date) candidates.push(date);
+      awaitingQuarterDate = false;
+    }
+  }
+
+  const bounded = isIsoDate(fallback)
+    ? candidates.filter((date) => date <= fallback)
+    : candidates;
+  return bounded.sort((left, right) => right.localeCompare(left))[0]
+    ?? (isIsoDate(fallback) ? fallback : null);
+}
+
+function fixedChargeLooksLikeThreshold(line: string): boolean {
+  const label = line.match(FIXED_CHARGE_LABEL);
+  if (!label || label.index === undefined) return false;
+  const tail = line.slice(label.index + label[0].length, label.index + label[0].length + 40);
+  return /^\s*(?:[<>]=?|[≥≤])\s*\d/i.test(tail);
 }
 
 function firstPerShareNumber(line: string, label: RegExp): number | null {
@@ -249,6 +294,7 @@ export function parseSecReitSpecializedDocument(
 ): SecReitObservation[] {
   const lines = documentLines(html);
   const observations = new Map<SecReitMetricKey, SecReitObservation>();
+  const ratioDataAsOf = latestExplicitFinancialDate(lines, context.periodEnd);
 
   for (const observation of parsePeriodSafePerShareObservations(lines, context)) {
     observations.set(observation.metric, observation);
@@ -258,6 +304,7 @@ export function parseSecReitSpecializedDocument(
     if (GUIDANCE_LANGUAGE.test(line)) continue;
     for (const rule of RULES) {
       if (observations.has(rule.metric)) continue;
+      if (rule.metric === "fixedChargeCoverage" && fixedChargeLooksLikeThreshold(line)) continue;
       const match = line.match(rule.pattern);
       if (!match) continue;
       const raw = Number(match[1]);
@@ -267,7 +314,7 @@ export function parseSecReitSpecializedDocument(
         metric: rule.metric,
         value,
         unit: "ratio",
-        dataAsOf: context.periodEnd ?? null,
+        dataAsOf: ratioDataAsOf,
         label: match[0].replace(/\s+/g, " ").trim(),
         sourceUrl: context.sourceUrl,
       });
