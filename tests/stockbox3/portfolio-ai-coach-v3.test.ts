@@ -10,6 +10,7 @@ describe("Portfolio AI coach V3 interaction surface", () => {
     expect(coach).toContain("createPortfolioPlan");
     expect(coach).toContain("buildPortfolioActionPlan");
     expect(coach).toContain("buildRebalancePlan");
+    expect(coach).toContain("findPortfolioUpgradeCandidates");
     expect(coach).not.toContain("function buildWeights(");
     expect(coach).not.toContain("const recommendationAdjustment");
   });
@@ -41,6 +42,18 @@ describe("Portfolio AI coach V3 interaction surface", () => {
     expect(coach).toContain("stale_data");
     expect(coach).toContain("Prioritet");
     expect(coach).toContain("Priority");
+  });
+
+  it("surfaces stronger fresh analyzed alternatives for a weak holding without creating an order", () => {
+    expect(coach).toContain("findPortfolioUpgradeCandidates");
+    expect(coach).toContain("upgradeCandidates");
+    expect(coach).toContain("Analyserade alternativ att jämföra");
+    expect(coach).toContain("Analyzed alternatives to compare");
+    expect(coach).toContain("scoreImprovement");
+    expect(coach).toContain("profilmatch");
+    expect(coach).toContain("profile fit");
+    expect(coach).not.toContain("sellHoldingAction");
+    expect(coach).not.toContain("addHoldingAction");
   });
 
   it("shows snapshot changes and target-vs-current rebalance deltas without creating orders", () => {
