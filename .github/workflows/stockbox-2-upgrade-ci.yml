@@ -51,7 +51,7 @@ jobs:
       - name: Vercel deployment policy test
         run: npm test -- tests/config/vercel-deployment-policy.test.ts
       - name: Portfolio 2 math tests
-        run: npm test -- tests/portfolio/portfolio-math-v2.test.ts
+        run: npm test -- tests/portfolio/portfolio-math-v2.test.ts tests/portfolio/portfolio-final-snapshot-dedupe.test.ts
       - name: Workspace Portfolio 2 regression tests
         run: npm test -- tests/workspace/actions.test.ts tests/workspace/canonical-identity.test.ts
       - name: Analytics regression tests
@@ -129,6 +129,8 @@ jobs:
           cp supabase/migrations/20260905141000_portfolio_2_transactions_snapshots.sql /tmp/stockbox-migrations/
           cp supabase/migrations/20260906141500_portfolio_sell_chain_guard.sql /tmp/stockbox-migrations/
           cp supabase/migrations/20260907110000_portfolio_cash_flow_accounting.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260907172000_portfolio_snapshot_ledger_revision.sql /tmp/stockbox-migrations/
+          cp supabase/migrations/20260908133000_portfolio_final_snapshot_dedupe.sql /tmp/stockbox-migrations/
           rm -f supabase/migrations/*.sql
           supabase init --force
       - name: Start disposable Supabase
@@ -147,6 +149,10 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260906141500_portfolio_sell_chain_guard.sql
       - name: Apply Portfolio cash-flow accounting migration
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260907110000_portfolio_cash_flow_accounting.sql
+      - name: Apply Portfolio ledger revision migration
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260907172000_portfolio_snapshot_ledger_revision.sql
+      - name: Apply final snapshot dedupe migration
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260908133000_portfolio_final_snapshot_dedupe.sql
       - name: Assert Portfolio 2 invariants
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -173,6 +179,7 @@ jobs:
             if to_regprocedure('public.record_portfolio_transaction(uuid,text,text,numeric,numeric,text,date,numeric,numeric,text,text)') is null then raise exception 'record_portfolio_transaction RPC missing'; end if;
             if to_regprocedure('public.update_portfolio_transaction(uuid,numeric,numeric,text,date,numeric)') is null then raise exception 'update_portfolio_transaction RPC missing'; end if;
             if to_regprocedure('public.delete_portfolio_transaction(uuid)') is null then raise exception 'delete_portfolio_transaction RPC missing'; end if;
+            if to_regprocedure('public.insert_portfolio_snapshot_if_current(uuid,bigint,jsonb)') is null then raise exception 'snapshot revision RPC missing'; end if;
           end
           $$;
           SQL
@@ -200,6 +207,76 @@ jobs:
             end if;
           end
           $$;
+          SQL
+      - name: Reuse repeated final snapshots without changing active snapshot behavior
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          insert into public.profiles (id, email)
+          values ('00000000-0000-4000-8000-000000000921', 'portfolio-final-dedupe@test.invalid');
+          insert into public.portfolios (id, user_id, name, base_currency)
+          values ('00000000-0000-4000-8000-000000000922', '00000000-0000-4000-8000-000000000921', 'Final dedupe', 'SEK');
+
+          set local role authenticated;
+          select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000921', true);
+
+          do $$
+          declare
+            v_first uuid;
+            v_second uuid;
+            v_active_first uuid;
+            v_active_second uuid;
+            v_closed_count integer;
+            v_active_count integer;
+            v_closed jsonb := '{"base_currency":"SEK","portfolio_value":0,"invested_capital":0,"unrealized_pl":0,"unrealized_pl_percent":null,"realized_pl":125,"dividend_income":25,"standalone_fees":5,"trading_fees":10,"total_fees":15,"total_pl":145,"holdings":[],"failures":[],"analysis_summary":{"methodology":"closed-ledger-v1"},"prices_updated_at":null,"analyses_updated_at":null}'::jsonb;
+            v_active jsonb := '{"base_currency":"SEK","portfolio_value":100,"invested_capital":90,"unrealized_pl":10,"unrealized_pl_percent":11.11,"realized_pl":0,"dividend_income":0,"standalone_fees":0,"trading_fees":0,"total_fees":0,"total_pl":10,"holdings":[{"ticker":"AAPL"}],"failures":[],"analysis_summary":{"methodology":"market-value-weighted-v1"},"prices_updated_at":null,"analyses_updated_at":null}'::jsonb;
+          begin
+            select id into v_first
+            from public.insert_portfolio_snapshot_if_current(
+              '00000000-0000-4000-8000-000000000922', 0, v_closed
+            );
+            select id into v_second
+            from public.insert_portfolio_snapshot_if_current(
+              '00000000-0000-4000-8000-000000000922', 0, v_closed
+            );
+
+            if v_first is null or v_first is distinct from v_second then
+              raise exception 'Repeated final snapshot did not reuse the existing row';
+            end if;
+
+            select count(*) into v_closed_count
+            from public.portfolio_snapshots
+            where portfolio_id = '00000000-0000-4000-8000-000000000922'
+              and ledger_revision = 0
+              and jsonb_array_length(holdings) = 0;
+            if v_closed_count <> 1 then
+              raise exception 'Expected one closed snapshot, found %', v_closed_count;
+            end if;
+
+            select id into v_active_first
+            from public.insert_portfolio_snapshot_if_current(
+              '00000000-0000-4000-8000-000000000922', 0, v_active
+            );
+            select id into v_active_second
+            from public.insert_portfolio_snapshot_if_current(
+              '00000000-0000-4000-8000-000000000922', 0, v_active
+            );
+
+            if v_active_first is null or v_active_second is null or v_active_first = v_active_second then
+              raise exception 'Active snapshot behavior was unexpectedly deduplicated';
+            end if;
+
+            select count(*) into v_active_count
+            from public.portfolio_snapshots
+            where portfolio_id = '00000000-0000-4000-8000-000000000922'
+              and ledger_revision = 0
+              and jsonb_array_length(holdings) > 0;
+            if v_active_count <> 2 then
+              raise exception 'Expected two active snapshots, found %', v_active_count;
+            end if;
+          end
+          $$;
+          rollback;
           SQL
       - name: Reject negative cash-flow amounts
         run: |
