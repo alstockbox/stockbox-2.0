@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ButtonLink } from "@/components/ui/button";
 import {
   buildPortfolioActionPlan,
+  buildPortfolioUpgradeDrivers,
   buildRebalancePlan,
   createPortfolioPlan,
   findPortfolioUpgradeCandidates,
@@ -14,6 +15,7 @@ import {
   type PortfolioBreadth,
   type PortfolioSnapshotDelta,
   type PortfolioStyle,
+  type PortfolioUpgradeDriverDimension,
   type RiskPreference,
 } from "@/lib/portfolio/portfolio-ai-planner";
 
@@ -70,6 +72,14 @@ function signedPercentPoints(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   const points = value * 100;
   return `${points > 0 ? "+" : ""}${points.toFixed(1)} pp`;
+}
+
+function driverLabel(dimension: PortfolioUpgradeDriverDimension, sv: boolean) {
+  if (dimension === "quality") return sv ? "Kvalitet" : "Quality";
+  if (dimension === "risk") return "Risk";
+  if (dimension === "growth") return sv ? "Tillväxt" : "Growth";
+  if (dimension === "valuation") return sv ? "Värdering" : "Valuation";
+  return "Momentum";
 }
 
 function actionText(action: PortfolioAction, sv: boolean) {
@@ -199,6 +209,12 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     return weakest;
   }, [selected]);
 
+  const weakAnalysis = useMemo(() => {
+    if (!weakHolding) return null;
+    const ticker = weakHolding.ticker.trim().toUpperCase();
+    return candidates.find((candidate) => candidate.ticker.trim().toUpperCase() === ticker) ?? null;
+  }, [candidates, weakHolding]);
+
   const upgradeCandidates = useMemo(() => weakHolding && selected ? findPortfolioUpgradeCandidates({
     weakHolding: { ticker: weakHolding.ticker, score: weakHolding.score },
     currentHoldingTickers: selected.holdings.map((holding) => holding.ticker),
@@ -210,6 +226,23 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     minimumScoreImprovement: 8,
     limit: 3,
   }) : [], [asOf, candidates, horizon, risk, selected, style, weakHolding]);
+
+  const upgradeDriversByTicker = useMemo(() => {
+    const result = new Map<string, ReturnType<typeof buildPortfolioUpgradeDrivers>>();
+    if (!weakAnalysis) return result;
+    for (const candidate of upgradeCandidates) {
+      const drivers = buildPortfolioUpgradeDrivers({
+        weakCandidate: weakAnalysis,
+        upgradeCandidate: candidate,
+        risk,
+        style,
+        horizon,
+        limit: 3,
+      });
+      if (drivers.length) result.set(candidate.ticker, drivers);
+    }
+    return result;
+  }, [horizon, risk, style, upgradeCandidates, weakAnalysis]);
 
   const rebalancePlan = useMemo(() => {
     if (!selected) return [];
@@ -300,21 +333,36 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                 <span className="rounded-full border border-white/10 bg-black/10 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Jämförelse, inte order" : "Comparison, not an order"}</span>
               </div>
               <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                {upgradeCandidates.map((candidate) => (
-                  <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div>
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-950/20 px-2 py-1 text-[10px] font-semibold text-emerald-200">+{candidate.scoreImprovement.toFixed(0)} score</span>
+                {upgradeCandidates.map((candidate) => {
+                  const drivers = upgradeDriversByTicker.get(candidate.ticker) ?? [];
+                  return (
+                    <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div>
+                        <span className="rounded-full border border-emerald-400/20 bg-emerald-950/20 px-2 py-1 text-[10px] font-semibold text-emerald-200">+{candidate.scoreImprovement.toFixed(0)} score</span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-[#8f9bac]">
+                        <div className="rounded bg-white/[0.035] p-2"><span>Score</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.score ?? 0)}</p></div>
+                        <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "profilmatch" : "profile fit"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.profileRank)}</p></div>
+                        <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Kvalitet" : "Quality"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.quality ?? 0)}</p></div>
+                        <div className="rounded bg-white/[0.035] p-2"><span>Risk</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.risk ?? 0)}</p></div>
+                      </div>
+                      {drivers.length ? (
+                        <div className="mt-3 border-t border-white/10 pt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8f9bac]">{sv ? "Varför bättre?" : "Why better?"}</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {drivers.map((driver) => (
+                              <span key={driver.dimension} className="rounded-full border border-emerald-400/15 bg-emerald-950/15 px-2 py-1 text-[10px] text-emerald-100">
+                                {driverLabel(driver.dimension, sv)} +{driver.improvement.toFixed(0)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      <p className="mt-2 text-[10px] leading-4 text-[#6f7b8c]">{candidate.recommendation ?? "No Rating"} · {sv ? "färsk StockBox-analys" : "fresh StockBox analysis"}</p>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-[#8f9bac]">
-                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Score" : "Score"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.score ?? 0)}</p></div>
-                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "profilmatch" : "profile fit"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.profileRank)}</p></div>
-                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Kvalitet" : "Quality"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.quality ?? 0)}</p></div>
-                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Risk" : "Risk"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.risk ?? 0)}</p></div>
-                    </div>
-                    <p className="mt-2 text-[10px] leading-4 text-[#6f7b8c]">{candidate.recommendation ?? "No Rating"} · {sv ? "färsk StockBox-analys" : "fresh StockBox analysis"}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : null}
