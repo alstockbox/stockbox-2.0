@@ -30,11 +30,13 @@ describe("Outcome market history V3", () => {
       },
     }, "MSFT");
 
-    expect(parsed?.currency).toBe("USD");
-    expect(parsed?.priceHistory).toHaveLength(3);
-    expect(parsed?.priceHistory.map((point) => point.close)).toEqual([99, 101, 103]);
-    expect(parsed?.priceHistoryBasis).toBe("adjusted_close");
-    expect(parsed?.provider).toBe("yahoo-outcome-history-v3");
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error("Expected parsed outcome history");
+    expect(parsed.currency).toBe("USD");
+    expect(parsed.priceHistory).toHaveLength(3);
+    expect(parsed.priceHistory?.map((point) => point.close)).toEqual([99, 101, 103]);
+    expect(parsed.priceHistoryBasis).toBe("adjusted_close");
+    expect(parsed.provider).toBe("yahoo-outcome-history-v3");
   });
 
   it("fails closed on malformed chart responses", () => {
