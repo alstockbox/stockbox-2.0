@@ -5,6 +5,7 @@ import JSZip from "jszip";
 const liveDescribe = process.env.RUN_LIVE_COVERAGE === "1" ? describe : describe.skip;
 
 const CVM_ITR_2026_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/ITR/DADOS/itr_cia_aberta_2026.zip";
+const CVM_DFP_2025_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/DFP/DADOS/dfp_cia_aberta_2025.zip";
 const CVM_FCA_2026_URL = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_2026.zip";
 const MELIUZ_CNPJ = "14110585000107";
 const MELIUZ_TICKER = "CASH3";
@@ -93,6 +94,8 @@ function compact(row: Record<string, string>) {
     statement: row.GRUPO_DFP ?? null,
     currency: row.MOEDA ?? null,
     scale: row.ESCALA_MOEDA ?? null,
+    exerciseOrder: row.ORDEM_EXERC ?? null,
+    periodStart: row.DT_INI_EXERC ?? null,
     periodEnd: row.DT_FIM_EXERC ?? null,
     accountCode: row.CD_CONTA ?? null,
     accountDescription: row.DS_CONTA ?? null,
@@ -103,24 +106,36 @@ function compact(row: Record<string, string>) {
 
 liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
   it("extracts current Meliuz debt/cash evidence and proves a generic FCA ticker-to-CNPJ mapping", async () => {
-    const [itrZip, fcaZip] = await Promise.all([
+    const [itrZip, dfpZip, fcaZip] = await Promise.all([
       fetchZip(CVM_ITR_2026_URL),
+      fetchZip(CVM_DFP_2025_URL),
       fetchZip(CVM_FCA_2026_URL),
     ]);
 
     const entries = Object.keys(itrZip.files).sort();
-    const [bppCon, bppInd, bpaCon, bpaInd] = await Promise.all([
+    const [bppCon, bppInd, bpaCon, bpaInd, itrDreCon, itrDreInd, dfpDreCon, dfpDreInd, dfpDfcMiCon, dfpDfcMiInd, dfpDfcMdCon, dfpDfcMdInd] = await Promise.all([
       readZipCsv(itrZip, /itr_cia_aberta_BPP_con_2026\.csv$/i),
       readZipCsv(itrZip, /itr_cia_aberta_BPP_ind_2026\.csv$/i),
       readZipCsv(itrZip, /itr_cia_aberta_BPA_con_2026\.csv$/i),
       readZipCsv(itrZip, /itr_cia_aberta_BPA_ind_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_DRE_con_2026\.csv$/i),
+      readZipCsv(itrZip, /itr_cia_aberta_DRE_ind_2026\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DRE_con_2025\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DRE_ind_2025\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DFC_MI_con_2025\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DFC_MI_ind_2025\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DFC_MD_con_2025\.csv$/i),
+      readZipCsv(dfpZip, /dfp_cia_aberta_DFC_MD_ind_2025\.csv$/i),
     ]);
 
     expect(bppCon || bppInd, "Expected at least one CVM BPP statement file").toBeTruthy();
     expect(bpaCon || bpaInd, "Expected at least one CVM BPA statement file").toBeTruthy();
+    expect(itrDreCon || itrDreInd, "Expected at least one CVM 2026 ITR DRE statement file").toBeTruthy();
+    expect(dfpDreCon || dfpDreInd, "Expected at least one CVM 2025 DFP DRE statement file").toBeTruthy();
 
     const debtPattern = /empr[eé]st|financi|arrend|lease|deb[eê]nt|d[ií]vid|oneroso/i;
     const cashPattern = /caixa|equivalente|aplica[cç][aã]o financeira|disponibilidade/i;
+    const financePattern = /juros|financeir|empr[eé]st|financi|arrend|lease|deb[eê]nt|encarg/i;
     const statementRows = [
       ["BPP_con", bppCon],
       ["BPP_ind", bppInd],
@@ -141,6 +156,30 @@ liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
       };
     });
 
+    const financeStatementRows = [
+      ["ITR_DRE_con_2026", itrDreCon],
+      ["ITR_DRE_ind_2026", itrDreInd],
+      ["DFP_DRE_con_2025", dfpDreCon],
+      ["DFP_DRE_ind_2025", dfpDreInd],
+      ["DFP_DFC_MI_con_2025", dfpDfcMiCon],
+      ["DFP_DFC_MI_ind_2025", dfpDfcMiInd],
+      ["DFP_DFC_MD_con_2025", dfpDfcMdCon],
+      ["DFP_DFC_MD_ind_2025", dfpDfcMdInd],
+    ] as const;
+    const financeFingerprint = financeStatementRows.map(([label, file]) => {
+      const latest = file ? latestIssuerRows(file.rows) : [];
+      return {
+        label,
+        file: file?.name ?? null,
+        latestReferenceDate: latest[0]?.DT_REFER ?? null,
+        latestVersion: latest[0]?.VERSAO ?? null,
+        issuerRowCount: latest.length,
+        financeRows: latest
+          .filter((row) => (row.CD_CONTA ?? "").startsWith("3.07") || financePattern.test(row.DS_CONTA ?? ""))
+          .map(compact),
+      };
+    });
+
     const fcaEntries = Object.keys(fcaZip.files).filter((entry) => entry.toLowerCase().endsWith(".csv")).sort();
     const securityMapMatches: Array<{ file: string; row: Record<string, string> }> = [];
     for (const entry of fcaEntries) {
@@ -157,12 +196,14 @@ liveDescribe("live CVM Brazil fundamentals fingerprint", () => {
 
     const result = {
       source: CVM_ITR_2026_URL,
+      annualSource: CVM_DFP_2025_URL,
       securityMapSource: CVM_FCA_2026_URL,
       cnpj: MELIUZ_CNPJ,
       ticker: MELIUZ_TICKER,
       zipEntryCount: entries.length,
-      relevantZipEntries: entries.filter((entry) => /_(BPP|BPA)_(con|ind)_2026\.csv$/i.test(entry)),
+      relevantZipEntries: entries.filter((entry) => /_(BPP|BPA|DRE)_(con|ind)_2026\.csv$/i.test(entry)),
       fingerprint,
+      financeFingerprint,
       securityMap: {
         zipEntries: fcaEntries,
         matches: securityMapMatches,
