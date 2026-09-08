@@ -23,6 +23,19 @@ type MonitoringCycleDependenciesV3 = {
   runRecommendationOutcomes?: () => Promise<DurableRecommendationOutcomeRunV3>;
 };
 
+export type MonitoringCycleV3Options = MonitoringCycleDependenciesV3 & {
+  watchlistOptions?: {
+    enqueueLimit?: number;
+    workerLimit?: number;
+    now?: Date;
+  };
+  recommendationOutcomeOptions?: {
+    enqueueLimit?: number;
+    workerLimit?: number;
+    now?: Date;
+  };
+};
+
 function errorMessage(reason: unknown): string {
   return reason instanceof Error && reason.message.trim()
     ? reason.message
@@ -33,12 +46,19 @@ function internalFailures<T extends { failed: number }>(result: MonitoringPipeli
   return result.ok ? Math.max(0, result.value.failed) : 1;
 }
 
+export function monitoringCycleHttpStatusV3(result: MonitoringCycleV3Result): 200 | 207 | 503 {
+  if (result.ok) return 200;
+  if (!result.watchlist.ok && !result.recommendationOutcomes.ok) return 503;
+  return 207;
+}
+
 export async function runMonitoringCycleV3(
-  dependencies: MonitoringCycleDependenciesV3 = {},
+  options: MonitoringCycleV3Options = {},
 ): Promise<MonitoringCycleV3Result> {
-  const runWatchlist = dependencies.runWatchlist ?? (() => runDurableWatchlistMonitoring());
-  const runRecommendationOutcomes = dependencies.runRecommendationOutcomes
-    ?? (() => runDurableRecommendationOutcomeMonitoringV3());
+  const runWatchlist = options.runWatchlist
+    ?? (() => runDurableWatchlistMonitoring(options.watchlistOptions));
+  const runRecommendationOutcomes = options.runRecommendationOutcomes
+    ?? (() => runDurableRecommendationOutcomeMonitoringV3(options.recommendationOutcomeOptions));
 
   const [watchlistSettled, outcomesSettled] = await Promise.allSettled([
     runWatchlist(),
