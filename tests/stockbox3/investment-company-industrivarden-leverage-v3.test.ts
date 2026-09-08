@@ -39,31 +39,35 @@ describe("Industrivärden official leverage V3", () => {
     expect(parsed?.years).toHaveLength(5);
   });
 
-  it("selects the latest verified annual ratio not later than the market year", () => {
-    expect(selectVerifiedAnnualLeverageRatio([
+  it("uses only a completed annual year and never the market year's full-year row", () => {
+    const history = [
       { year: 2026, debtEquitiesRatio: 0.09 },
       { year: 2025, debtEquitiesRatio: 0.082 },
       { year: 2024, debtEquitiesRatio: 0.079 },
-    ], 2025)).toBe(0.082);
+    ];
+    expect(selectVerifiedAnnualLeverageRatio(history, 2025)).toBe(0.079);
+    expect(selectVerifiedAnnualLeverageRatio(history, 2026)).toBe(0.082);
   });
 
-  it("allows at most one annual year of lag and otherwise fails closed", () => {
+  it("allows only the immediately preceding completed annual year and otherwise fails closed", () => {
     expect(selectVerifiedAnnualLeverageRatio([{ year: 2024, debtEquitiesRatio: 0.079 }], 2025)).toBe(0.079);
     expect(selectVerifiedAnnualLeverageRatio([{ year: 2023, debtEquitiesRatio: 0.075 }], 2025)).toBeNull();
   });
 
-  it("rejects invalid issuer ratios", () => {
-    expect(selectVerifiedAnnualLeverageRatio([{ year: 2025, debtEquitiesRatio: -0.01 }], 2025)).toBeNull();
-    expect(selectVerifiedAnnualLeverageRatio([{ year: 2025, debtEquitiesRatio: 1 }], 2025)).toBeNull();
-    expect(selectVerifiedAnnualLeverageRatio([{ year: 2025, debtEquitiesRatio: Number.NaN }], 2025)).toBeNull();
+  it("rejects invalid issuer ratios from the completed annual year", () => {
+    expect(selectVerifiedAnnualLeverageRatio([{ year: 2024, debtEquitiesRatio: -0.01 }], 2025)).toBeNull();
+    expect(selectVerifiedAnnualLeverageRatio([{ year: 2024, debtEquitiesRatio: 1 }], 2025)).toBeNull();
+    expect(selectVerifiedAnnualLeverageRatio([{ year: 2024, debtEquitiesRatio: Number.NaN }], 2025)).toBeNull();
   });
 
-  it("wires official key-ratio leverage before the Latour-only fallback without generic debt", () => {
+  it("wires only completed official annual evidence before the Latour fallback without generic debt", () => {
     const source = fs.readFileSync(providerPath, "utf8");
-    expect(source).toContain('fetchOfficialInvestmentCompanyKeyRatios');
-    expect(source).toContain('selectVerifiedAnnualLeverageRatio');
-    expect(source).toContain('officialKeyRatios');
-    expect(source).toContain('holdingCompanyLeverageRatio: verifiedLeverageRatio');
-    expect(source).not.toContain('holdingCompanyLeverageRatio: latest?.totalDebt');
+    expect(source).toContain("fetchOfficialInvestmentCompanyKeyRatios");
+    expect(source).toContain("selectVerifiedAnnualLeverageRatio");
+    expect(source).toContain("officialKeyRatios");
+    expect(source).toContain("point.year < marketYear");
+    expect(source).not.toContain("point.year <= marketYear");
+    expect(source).toContain("holdingCompanyLeverageRatio: verifiedLeverageRatio");
+    expect(source).not.toContain("holdingCompanyLeverageRatio: latest?.totalDebt");
   });
 });
