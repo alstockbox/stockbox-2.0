@@ -1,4 +1,5 @@
 import type { AnalysisSource, CompanySearchResult, ProviderDiagnostic } from "@/lib/analysis/types";
+import type { AnnualNavPerShareObservation } from "./investment-company-nav-history";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROVIDER_ID = "official-investment-company-key-ratios";
@@ -205,6 +206,23 @@ export function parseIndustrivardenOfficialKeyRatios(
       dividendsReceived: dividendsReceived?.[index] ?? null,
     })),
   };
+}
+
+export function annualNavPerShareHistoryFromKeyRatios(
+  years: InvestmentCompanyKeyRatioYear[] | null | undefined,
+): AnnualNavPerShareObservation[] {
+  const seen = new Set<number>();
+  const history: AnnualNavPerShareObservation[] = [];
+
+  for (const point of years ?? []) {
+    if (!Number.isInteger(point.year) || point.year < 1900 || point.year > 2200) continue;
+    if (seen.has(point.year)) return [];
+    seen.add(point.year);
+    if (!Number.isFinite(point.navPerShare) || (point.navPerShare as number) <= 0) continue;
+    history.push({ year: point.year, navPerShare: point.navPerShare as number });
+  }
+
+  return history.sort((left, right) => right.year - left.year);
 }
 
 export function selectVerifiedAnnualLeverageRatio(
