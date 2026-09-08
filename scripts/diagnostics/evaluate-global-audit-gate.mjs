@@ -32,6 +32,15 @@ function evaluateSummary(label, summary, thresholds) {
   return violations;
 }
 
+function requireEmptyIntegrityList(integrity, key, violationLabel, violations) {
+  const value = integrity?.[key];
+  if (!Array.isArray(value)) {
+    violations.push(`Global audit integrity payload is missing ${key}.`);
+  } else if (value.length > 0) {
+    violations.push(`${violationLabel}: ${value.join(", ")}.`);
+  }
+}
+
 export function evaluateGlobalAuditGate(kpis, thresholds = DEFAULT_GLOBAL_AUDIT_GATE) {
   const violations = [];
   if (!kpis || typeof kpis !== "object") {
@@ -59,22 +68,10 @@ export function evaluateGlobalAuditGate(kpis, thresholds = DEFAULT_GLOBAL_AUDIT_
   }
 
   const integrity = kpis.integrity ?? {};
-  const ratingBelowCoverageTarget = Array.isArray(integrity.ratingBelowCoverageTarget)
-    ? integrity.ratingBelowCoverageTarget
-    : null;
-  const noRatingWithScore = Array.isArray(integrity.noRatingAtOrAboveCoverageTargetWithScore)
-    ? integrity.noRatingAtOrAboveCoverageTargetWithScore
-    : null;
-  if (ratingBelowCoverageTarget === null) {
-    violations.push("Global audit integrity payload is missing ratingBelowCoverageTarget.");
-  } else if (ratingBelowCoverageTarget.length > 0) {
-    violations.push(`Ratings were emitted below specialist coverage target: ${ratingBelowCoverageTarget.join(", ")}.`);
-  }
-  if (noRatingWithScore === null) {
-    violations.push("Global audit integrity payload is missing noRatingAtOrAboveCoverageTargetWithScore.");
-  } else if (noRatingWithScore.length > 0) {
-    violations.push(`No Rating reports retained canonical scores: ${noRatingWithScore.join(", ")}.`);
-  }
+  requireEmptyIntegrityList(integrity, "ratingBelowCoverageTarget", "Ratings were emitted below specialist coverage target", violations);
+  requireEmptyIntegrityList(integrity, "noRatingAtOrAboveCoverageTargetWithScore", "No Rating reports retained canonical scores", violations);
+  requireEmptyIntegrityList(integrity, "analysisEngineErrors", "Analysis engine errors were observed", violations);
+  requireEmptyIntegrityList(integrity, "scoreRatingMismatches", "Canonical score/rating mismatches were observed", violations);
 
   for (const [dimension, groups] of [["market", kpis.byMarket], ["security type", kpis.bySecurityType]]) {
     if (!groups || typeof groups !== "object") {
