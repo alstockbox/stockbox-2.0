@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  comparePortfolioUpgradeEvidence,
-  type PortfolioAiCandidate,
-} from "../../src/lib/portfolio/portfolio-ai-planner";
+import { comparePortfolioUpgradeEvidence } from "../../src/lib/portfolio/portfolio-ai-upgrade-evidence";
+import type { PortfolioAiCandidate } from "../../src/lib/portfolio/portfolio-ai-planner";
 
 const weak: PortfolioAiCandidate = {
   ticker: "WEAK",
