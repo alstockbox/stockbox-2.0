@@ -16,17 +16,22 @@ describe("provider depositary-receipt wiring", () => {
   });
 
   it("resolves ECB FX only through the verified cross-currency ADR request gate and preserves provenance", () => {
-    const source = readFileSync("src/lib/data/provider.ts", "utf8");
+    const providerSource = readFileSync("src/lib/data/provider.ts", "utf8");
+    const fxSource = readFileSync("src/lib/data/depositary-receipt-provider-fx.ts", "utf8");
 
-    expect(source).toContain('from "./depositary-receipt-fx"');
-    expect(source).toContain('from "./ecb-fx"');
-    expect(source).toContain("buildDepositaryReceiptFxRequest(company, market)");
-    expect(source).toContain("resolveComparisonFxContexts(");
-    expect(source).toContain("request.targetCurrency");
-    expect(source).toContain("contexts.get(request.id)");
-    expect(source).toMatch(/gateDepositaryReceiptValuationInputs\([\s\S]*?depositaryReceiptFxContext[\s\S]*?\)/);
-    expect(source).toContain('depositaryReceiptFxContext.status === "normalized"');
-    expect(source).toContain("provider: depositaryReceiptFxContext.provider");
-    expect(source).toContain("dataAsOf: depositaryReceiptFxContext.rateDate");
+    expect(providerSource).toContain('from "./depositary-receipt-provider-fx"');
+    expect(providerSource).toContain("resolveDepositaryReceiptFxContext(analysisCompany, market)");
+    expect(providerSource).toContain("depositaryReceiptFxSource(depositaryReceiptFxContext, accessedAt)");
+    expect(providerSource).toMatch(/gateDepositaryReceiptValuationInputs\([\s\S]*?depositaryReceiptFxContext[\s\S]*?\)/);
+
+    expect(fxSource).toContain('from "./depositary-receipt-fx"');
+    expect(fxSource).toContain('from "./ecb-fx"');
+    expect(fxSource).toContain("buildDepositaryReceiptFxRequest(company, market)");
+    expect(fxSource).toContain("resolveComparisonFxContexts(");
+    expect(fxSource).toContain("request.targetCurrency");
+    expect(fxSource).toContain("contexts.get(request.id)");
+    expect(fxSource).toContain('context.status !== "normalized"');
+    expect(fxSource).toContain("provider: context.provider");
+    expect(fxSource).toContain("dataAsOf: context.rateDate");
   });
 });
