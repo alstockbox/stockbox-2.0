@@ -54,6 +54,11 @@ export function supportsLiveFundamentalsSecurity(company: CompanySearchResult | 
 export function canAttemptConfiguredFundamentals(company: CompanySearchResult): boolean {
   const securityType = inferSecurityType(company);
   if (securityType === "Common Stock") return true;
-  if (securityType === "ADR") return assessDepositaryReceiptFundamentalsAccess(company).allowed;
+  if (securityType === "ADR") {
+    return assessDepositaryReceiptFundamentalsAccess({
+      ...company,
+      securityType: "ADR",
+    }).allowed;
+  }
   return false;
 }
