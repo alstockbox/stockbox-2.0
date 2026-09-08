@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   fetchYahooLongHistory: vi.fn(),
   fetchOfficialInvestmentCompanyKeyRatios: vi.fn(),
   fetchOfficialInvestmentCompanyGovernance: vi.fn(),
+  fetchOfficialInvestmentCompanyLeverage: vi.fn(),
 }));
 
 vi.mock("@/lib/data/enhanced-provider", () => ({
@@ -35,6 +36,10 @@ vi.mock("@/lib/data/official-investment-company-key-ratios", () => ({
 
 vi.mock("@/lib/data/official-investment-company-governance", () => ({
   fetchOfficialInvestmentCompanyGovernance: mocks.fetchOfficialInvestmentCompanyGovernance,
+}));
+
+vi.mock("@/lib/data/official-investment-company-leverage", () => ({
+  fetchOfficialInvestmentCompanyLeverage: mocks.fetchOfficialInvestmentCompanyLeverage,
 }));
 
 import { analyzeCompany, type UniversalSecurityReport } from "../../src/lib/data/universal-security-provider";
@@ -196,6 +201,7 @@ describe("Latour quarterly NAV-growth production wiring", () => {
     mocks.fetchYahooLongHistory.mockResolvedValue(unavailableLongHistory());
     mocks.fetchOfficialInvestmentCompanyKeyRatios.mockResolvedValue(unavailable("Official investment-company key ratios"));
     mocks.fetchOfficialInvestmentCompanyGovernance.mockResolvedValue(unavailable("Official investment-company governance"));
+    mocks.fetchOfficialInvestmentCompanyLeverage.mockResolvedValue(unavailable("Official investment-company leverage"));
     mocks.searchCompanies.mockResolvedValue([]);
   });
 
