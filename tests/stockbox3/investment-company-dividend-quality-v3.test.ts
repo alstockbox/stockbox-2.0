@@ -92,10 +92,11 @@ describe("Investment-company dividend quality V3", () => {
     });
   });
 
-  it("feeds only filtered official annual evidence into the 4% specialist factor", () => {
+  it("feeds only completed official annual evidence into the 4% specialist factor", () => {
     const provider = fs.readFileSync(path.join(process.cwd(), "src/lib/data/universal-security-provider.ts"), "utf8");
     expect(provider).toContain("deriveInvestmentCompanyDividendQuality");
-    expect(provider).toContain("point.year <= marketYear");
+    expect(provider).toContain("point.year < marketYear");
+    expect(provider).not.toContain("point.year <= marketYear");
     expect(provider).toContain("dividendQualityScore: dividendQuality?.score ?? null");
     expect(provider).not.toContain("dividendQualityScore: latest");
   });
