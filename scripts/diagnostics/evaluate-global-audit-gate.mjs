@@ -41,6 +41,14 @@ function requireEmptyIntegrityList(integrity, key, violationLabel, violations) {
   }
 }
 
+function uniqueSorted(values) {
+  return [...new Set(values)].sort();
+}
+
+function sameStrings(left, right) {
+  return JSON.stringify(uniqueSorted(left)) === JSON.stringify(uniqueSorted(right));
+}
+
 export function evaluateGlobalAuditGate(kpis, thresholds = DEFAULT_GLOBAL_AUDIT_GATE) {
   const violations = [];
   if (!kpis || typeof kpis !== "object") {
@@ -87,6 +95,57 @@ export function evaluateGlobalAuditGate(kpis, thresholds = DEFAULT_GLOBAL_AUDIT_
   return { pass: violations.length === 0, violations };
 }
 
+export function evaluateGlobalAuditPayload(payload, thresholds = DEFAULT_GLOBAL_AUDIT_GATE) {
+  const base = evaluateGlobalAuditGate(payload?.summary?.kpis, thresholds);
+  const violations = [...base.violations];
+  const results = payload?.results;
+  if (!Array.isArray(results)) {
+    violations.push("Global audit raw results payload is missing.");
+    return { pass: false, violations };
+  }
+
+  const engineErrors = results
+    .filter((item) => item?.status === "analysis_engine_error")
+    .map((item) => String(item?.query ?? "unknown"));
+  const scoreRatingMismatches = [];
+  const ratedWithHighSourceConflict = [];
+
+  for (const item of results) {
+    if (item?.status !== "completed") continue;
+    const rating = item?.report?.rating;
+    const score = item?.report?.score;
+    const finiteScore = typeof score === "number" && Number.isFinite(score);
+    const rated = typeof rating === "string" && rating.trim().length > 0 && rating !== "No Rating";
+    const noRating = rating === "No Rating";
+    if ((rated && !finiteScore) || (noRating && finiteScore) || (!rated && !noRating && finiteScore)) {
+      scoreRatingMismatches.push(String(item?.query ?? "unknown"));
+    }
+    if (rated && Array.isArray(item?.report?.sourceConflicts)
+      && item.report.sourceConflicts.some((conflict) => conflict?.severity === "high")) {
+      ratedWithHighSourceConflict.push(String(item?.query ?? "unknown"));
+    }
+  }
+
+  const integrity = payload?.summary?.kpis?.integrity ?? {};
+  if (Array.isArray(integrity.analysisEngineErrors) && !sameStrings(integrity.analysisEngineErrors, engineErrors)) {
+    violations.push("Global audit engine-error KPI does not match raw audit results.");
+  }
+  if (Array.isArray(integrity.scoreRatingMismatches) && !sameStrings(integrity.scoreRatingMismatches, scoreRatingMismatches)) {
+    violations.push("Global audit score/rating mismatch KPI does not match raw audit results.");
+  }
+  if (engineErrors.length > 0) {
+    violations.push(`Raw audit contains analysis engine errors: ${uniqueSorted(engineErrors).join(", ")}.`);
+  }
+  if (scoreRatingMismatches.length > 0) {
+    violations.push(`Raw audit contains canonical score/rating mismatches: ${uniqueSorted(scoreRatingMismatches).join(", ")}.`);
+  }
+  if (ratedWithHighSourceConflict.length > 0) {
+    violations.push(`Rated reports contain unresolved high-severity source conflicts: ${uniqueSorted(ratedWithHighSourceConflict).join(", ")}.`);
+  }
+
+  return { pass: violations.length === 0, violations };
+}
+
 function numberFromEnv(name, fallback) {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -106,7 +165,7 @@ export function gateThresholdsFromEnv() {
 
 export function evaluateGlobalAuditFile(file, thresholds = gateThresholdsFromEnv()) {
   const parsed = JSON.parse(readFileSync(file, "utf8"));
-  return evaluateGlobalAuditGate(parsed?.summary?.kpis, thresholds);
+  return evaluateGlobalAuditPayload(parsed, thresholds);
 }
 
 const invokedAsScript = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
