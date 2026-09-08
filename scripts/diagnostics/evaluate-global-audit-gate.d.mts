@@ -39,10 +39,28 @@ export type GlobalAuditGateThresholds = {
   minimumGroupSize: number;
 };
 
+export type GlobalAuditPayload = {
+  summary?: { kpis?: GlobalAuditGateKpis };
+  results?: Array<{
+    query?: string;
+    status?: string;
+    report?: {
+      rating?: string | null;
+      score?: number | null;
+      sourceConflicts?: Array<{ severity?: string | null }>;
+    };
+  }>;
+};
+
 export const DEFAULT_GLOBAL_AUDIT_GATE: Readonly<GlobalAuditGateThresholds>;
 
 export function evaluateGlobalAuditGate(
   kpis: GlobalAuditGateKpis | null | undefined,
+  thresholds?: GlobalAuditGateThresholds,
+): { pass: boolean; violations: string[] };
+
+export function evaluateGlobalAuditPayload(
+  payload: GlobalAuditPayload | null | undefined,
   thresholds?: GlobalAuditGateThresholds,
 ): { pass: boolean; violations: string[] };
 
