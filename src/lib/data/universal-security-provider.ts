@@ -35,6 +35,7 @@ import {
 } from "./enhanced-provider";
 import { classifyFundStructure } from "./fund-structure-classification";
 import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
+import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import {
   deriveInvestmentCompanyAnnualNavGrowth,
@@ -42,6 +43,7 @@ import {
   type InvestmentCompanyNavGrowth,
 } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import {
   fetchOfficialInvestmentCompanyKeyRatios,
@@ -343,12 +345,13 @@ async function enrichInvestmentCompanyReport(
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.dataAsOf ?? report.market?.date ?? null;
   const marketYear = marketYearFromDate(marketDate);
-  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialLeverage] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialLeverage, officialGovernance] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
     fetchOfficialInvestmentCompanyHoldings(company),
     fetchOfficialInvestmentCompanyKeyRatios(company),
     fetchOfficialInvestmentCompanyLeverage(company),
+    fetchOfficialInvestmentCompanyGovernance(company),
   ]);
   const navComparable = officialNav.ok
     && isOfficialDisclosureComparable(officialNav.data.navAsOf, marketDate);
@@ -356,6 +359,12 @@ async function enrichInvestmentCompanyReport(
     && isOfficialDisclosureComparable(officialHoldings.data.asOf, marketDate);
   const leverageComparable = officialLeverage.ok
     && isOfficialDisclosureComparable(officialLeverage.data.asOf, marketDate);
+  const governanceComparable = officialGovernance.ok
+    && isOfficialDisclosureComparable(officialGovernance.data.asOf, marketDate);
+  const governance = officialGovernance.ok && governanceComparable
+    ? deriveInvestmentCompanyGovernance(officialGovernance.data.directors)
+    : null;
+  const governanceContributes = governance?.score !== null && governance?.score !== undefined;
   const annualLeverageRatio = officialKeyRatios.ok
     ? selectVerifiedAnnualLeverageRatio(officialKeyRatios.data.years, marketYear)
     : null;
@@ -419,6 +428,7 @@ async function enrichInvestmentCompanyReport(
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
     holdingCompanyLeverageRatio: verifiedLeverageRatio,
     capitalAllocationScore: capitalAllocation?.score ?? null,
+    managementGovernanceScore: governance?.score ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -558,6 +568,41 @@ async function enrichInvestmentCompanyReport(
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       `Official investment-company leverage unavailable: ${officialLeverage.message}`,
+    ])];
+  }
+
+  if (officialGovernance.ok) {
+    if (governanceComparable && governanceContributes) {
+      for (const source of officialGovernance.data.sources) {
+        if (!report.sources.some((existing) => (
+          existing.provider === source.provider
+          && existing.url === source.url
+          && existing.version === source.version
+        ))) {
+          report.sources = [...report.sources, source];
+        }
+      }
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), officialGovernance.data.diagnostic];
+    } else {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), {
+        ...officialGovernance.data.diagnostic,
+        status: "partial",
+        reason: governanceComparable
+          ? "official_governance_incomplete_after_derivation"
+          : "official_governance_stale_or_unverifiable_for_market_comparison",
+      }];
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        governanceComparable
+          ? `Official governance evidence is incomplete (${governance?.reason ?? "unknown"}); governance remains N/A.`
+          : `Official governance evidence dated ${officialGovernance.data.asOf} is not comparable with market data dated ${marketDate ?? "unknown"} and was excluded from specialist coverage.`,
+      ])];
+    }
+  } else {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), officialGovernance.diagnostic];
+    report.score.missingData = [...new Set([
+      ...report.score.missingData,
+      `Official investment-company governance unavailable: ${officialGovernance.message}`,
     ])];
   }
 
