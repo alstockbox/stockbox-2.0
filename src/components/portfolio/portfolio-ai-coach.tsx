@@ -7,6 +7,7 @@ import {
   buildPortfolioActionPlan,
   buildRebalancePlan,
   createPortfolioPlan,
+  findPortfolioUpgradeCandidates,
   type Horizon,
   type PortfolioAction,
   type PortfolioAiCandidate,
@@ -186,6 +187,30 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     risk,
   }) : [], [plan.dataQuality, plan.requestedMaxPositionWeight, risk, selected]);
 
+  const weakHolding = useMemo(() => {
+    if (!selected) return null;
+    const scored = selected.holdings
+      .filter((holding) => typeof holding.score === "number" && Number.isFinite(holding.score))
+      .sort((a, b) => (a.score ?? 100) - (b.score ?? 100));
+    const negative = scored.find((holding) => ["Sell", "Strong Sell"].includes(holding.recommendation ?? ""));
+    const weakest = negative ?? scored[0] ?? null;
+    if (!weakest) return null;
+    if (!["Sell", "Strong Sell"].includes(weakest.recommendation ?? "") && (weakest.score ?? 100) >= 60) return null;
+    return weakest;
+  }, [selected]);
+
+  const upgradeCandidates = useMemo(() => weakHolding && selected ? findPortfolioUpgradeCandidates({
+    weakHolding: { ticker: weakHolding.ticker, score: weakHolding.score },
+    currentHoldingTickers: selected.holdings.map((holding) => holding.ticker),
+    candidates,
+    risk,
+    style,
+    horizon,
+    now: asOf,
+    minimumScoreImprovement: 8,
+    limit: 3,
+  }) : [], [asOf, candidates, horizon, risk, selected, style, weakHolding]);
+
   const rebalancePlan = useMemo(() => {
     if (!selected) return [];
     const current = selected.holdings
@@ -265,6 +290,35 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
             </div>
           </div>
 
+          {weakHolding && upgradeCandidates.length ? (
+            <div className="rounded-xl border border-[#e1cb95]/15 bg-[#e1cb95]/[0.035] p-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Analyserade alternativ att jämföra" : "Analyzed alternatives to compare"}</p>
+                  <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? `${weakHolding.ticker} är det svagaste relevanta innehavet i denna genomgång. Nedan visas bara färska analyser som förbättrar StockBox-score med minst 8 punkter och inte redan finns i portföljen.` : `${weakHolding.ticker} is the weakest relevant holding in this review. Only fresh analyses that improve StockBox score by at least 8 points and are not already held are shown below.`}</p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-black/10 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Jämförelse, inte order" : "Comparison, not an order"}</span>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                {upgradeCandidates.map((candidate) => (
+                  <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div>
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-950/20 px-2 py-1 text-[10px] font-semibold text-emerald-200">+{candidate.scoreImprovement.toFixed(0)} score</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-[#8f9bac]">
+                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Score" : "Score"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.score ?? 0)}</p></div>
+                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "profilmatch" : "profile fit"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.profileRank)}</p></div>
+                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Kvalitet" : "Quality"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.quality ?? 0)}</p></div>
+                      <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Risk" : "Risk"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.risk ?? 0)}</p></div>
+                    </div>
+                    <p className="mt-2 text-[10px] leading-4 text-[#6f7b8c]">{candidate.recommendation ?? "No Rating"} · {sv ? "färsk StockBox-analys" : "fresh StockBox analysis"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
             <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Vad har förändrats?" : "What changed?"}</p>
             {snapshotDelta ? (
@@ -284,7 +338,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
             <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Jämför aktuell vikt mot AI-utkastets målvikt. Detta är beslutsstöd och skapar inga köp- eller säljorder." : "Compare current weights with the AI draft target weights. This is decision support and creates no buy or sell orders."}</p>
             {rebalancePlan.length ? (
               <div className="mt-3 overflow-x-auto rounded-xl border border-white/10">
-                <table className="w-full min-w-[560px] text-left text-xs"><thead className="bg-white/[0.035] text-[#8f9bac]"><tr><th className="px-3 py-2">Ticker</th><th className="px-3 py-2">{sv ? "Nuvarande" : "Current"}</th><th className="px-3 py-2">{sv ? "Målvikt" : "Target weight"}</th><th className="px-3 py-2">Delta</th></tr></thead><tbody>{rebalancePlan.slice(0, 12).map((item) => <tr key={item.ticker} className="border-t border-white/10"><td className="px-3 py-2 font-mono font-semibold text-[#e1cb95]">{item.ticker}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.currentWeight)}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.targetPortfolioWeight)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signedPercentPoints(item.deltaWeight)}</td></tr>)}</tbody></table>
+                <table className="w-full min-w-[640px] text-left text-xs"><thead className="bg-white/[0.035] text-[#8f9bac]"><tr><th className="px-3 py-2">Ticker</th><th className="px-3 py-2">{sv ? "Nuvarande" : "Current"}</th><th className="px-3 py-2">{sv ? "Målvikt" : "Target weight"}</th><th className="px-3 py-2">Delta</th><th className="px-3 py-2">{sv ? "Värdedelta" : "Value delta"}</th></tr></thead><tbody>{rebalancePlan.slice(0, 12).map((item) => { const valueDelta = typeof selected.portfolioValue === "number" && Number.isFinite(selected.portfolioValue) ? item.deltaWeight * selected.portfolioValue : null; return <tr key={item.ticker} className="border-t border-white/10"><td className="px-3 py-2 font-mono font-semibold text-[#e1cb95]">{item.ticker}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.currentWeight)}</td><td className="px-3 py-2 text-[#c9d2df]">{formatPercent(item.targetPortfolioWeight)}</td><td className="px-3 py-2 font-semibold text-[#eef2f7]">{signedPercentPoints(item.deltaWeight)}</td><td className="px-3 py-2 text-[#c9d2df]">{valueDelta === null ? "—" : `${valueDelta > 0 ? "+" : ""}${formatMoney(valueDelta, selected.baseCurrency, locale)}`}</td></tr>; })}</tbody></table>
               </div>
             ) : <p className="mt-3 rounded-lg border border-dashed border-white/10 p-3 text-xs text-[#8f9bac]">{sv ? "Kör en portföljanalys så att aktuella positionsvikter finns tillgängliga för jämförelsen." : "Run a portfolio analysis so current position weights are available for comparison."}</p>}
           </div>
