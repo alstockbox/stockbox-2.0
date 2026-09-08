@@ -29,6 +29,8 @@ type GateFixture = {
   integrity: {
     ratingBelowCoverageTarget: string[];
     noRatingAtOrAboveCoverageTargetWithScore: string[];
+    analysisEngineErrors: string[];
+    scoreRatingMismatches: string[];
   };
   bySecurityType: Record<string, AuditSummary>;
   byMarket: Record<string, AuditSummary>;
@@ -37,7 +39,12 @@ type GateFixture = {
 const fixture = (): GateFixture => ({
   overall: complete(200),
   specialist: { input: 50, completed: 50, targetEligible: 50, meets99PercentCoverage: 50, coverageTargetRate: 1 },
-  integrity: { ratingBelowCoverageTarget: [], noRatingAtOrAboveCoverageTargetWithScore: [] },
+  integrity: {
+    ratingBelowCoverageTarget: [],
+    noRatingAtOrAboveCoverageTargetWithScore: [],
+    analysisEngineErrors: [],
+    scoreRatingMismatches: [],
+  },
   bySecurityType: { "Common Stock": complete(100), "ETF/Fund": complete(50) },
   byMarket: { UNSUFFIXED: complete(100), ST: complete(50) },
 });
@@ -61,6 +68,30 @@ describe("global audit release gate", () => {
     const result = evaluateGlobalAuditGate(kpis);
     expect(result.pass).toBe(false);
     expect(result.violations.join(" ")).toContain("TEST1");
+  });
+
+  it("fails on any analysis engine error", () => {
+    const kpis = fixture();
+    kpis.integrity.analysisEngineErrors = ["BROKEN"];
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("BROKEN");
+  });
+
+  it("fails on any canonical score and rating mismatch", () => {
+    const kpis = fixture();
+    kpis.integrity.scoreRatingMismatches = ["MISMATCH"];
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("MISMATCH");
+  });
+
+  it("fails closed when zero-tolerance integrity fields are missing", () => {
+    const kpis = fixture() as GateFixture & { integrity: Record<string, string[]> };
+    delete kpis.integrity.analysisEngineErrors;
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("analysisEngineErrors");
   });
 
   it("checks large market groups independently while ignoring tiny groups", () => {
