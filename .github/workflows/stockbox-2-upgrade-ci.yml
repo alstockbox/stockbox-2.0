@@ -212,10 +212,12 @@ jobs:
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           begin;
+          set local session_replication_role = replica;
           insert into public.profiles (id, email)
           values ('00000000-0000-4000-8000-000000000921', 'portfolio-final-dedupe@test.invalid');
           insert into public.portfolios (id, user_id, name, base_currency)
           values ('00000000-0000-4000-8000-000000000922', '00000000-0000-4000-8000-000000000921', 'Final dedupe', 'SEK');
+          set local session_replication_role = origin;
 
           set local role authenticated;
           select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000921', true);
