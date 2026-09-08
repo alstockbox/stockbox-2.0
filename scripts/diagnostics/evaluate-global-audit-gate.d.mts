@@ -24,6 +24,8 @@ export type GlobalAuditGateKpis = {
   integrity?: {
     ratingBelowCoverageTarget?: string[];
     noRatingAtOrAboveCoverageTargetWithScore?: string[];
+    analysisEngineErrors?: string[];
+    scoreRatingMismatches?: string[];
   };
   byMarket?: Record<string, AuditRateSummary>;
   bySecurityType?: Record<string, AuditRateSummary>;
