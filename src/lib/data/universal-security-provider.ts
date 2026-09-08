@@ -35,6 +35,7 @@ import {
 } from "./enhanced-provider";
 import { classifyFundStructure } from "./fund-structure-classification";
 import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
+import { deriveInvestmentCompanyDividendQuality } from "./investment-company-dividend-quality";
 import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import {
@@ -377,6 +378,12 @@ async function enrichInvestmentCompanyReport(
     )
     : null;
   const capitalAllocationContributes = capitalAllocation?.score !== null && capitalAllocation?.score !== undefined;
+  const dividendQuality = officialKeyRatios.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyDividendQuality(
+      officialKeyRatios.data.years.filter((point) => point.year <= marketYear),
+    )
+    : null;
+  const dividendQualityContributes = dividendQuality?.score !== null && dividendQuality?.score !== undefined;
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
@@ -429,6 +436,7 @@ async function enrichInvestmentCompanyReport(
     holdingCompanyLeverageRatio: verifiedLeverageRatio,
     capitalAllocationScore: capitalAllocation?.score ?? null,
     managementGovernanceScore: governance?.score ?? null,
+    dividendQualityScore: dividendQuality?.score ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -514,7 +522,7 @@ async function enrichInvestmentCompanyReport(
     ))) {
       report.sources = [...report.sources, keyRatioSource];
     }
-    const keyRatiosContribute = annualLeverageContributes || capitalAllocationContributes;
+    const keyRatiosContribute = annualLeverageContributes || capitalAllocationContributes || dividendQualityContributes;
     const keyRatioDiagnostic: ProviderDiagnostic = keyRatiosContribute
       ? officialKeyRatios.data.diagnostic
       : {
@@ -533,6 +541,12 @@ async function enrichInvestmentCompanyReport(
       report.score.missingData = [...new Set([
         ...report.score.missingData,
         `Official capital-allocation evidence is incomplete or unsuitable (${capitalAllocation?.reason ?? "market_year_unavailable"}); capital allocation remains N/A.`,
+      ])];
+    }
+    if (!dividendQualityContributes) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Official dividend-quality evidence is incomplete or unsuitable (${dividendQuality?.reason ?? "market_year_unavailable"}); dividend quality remains N/A.`,
       ])];
     }
   }
