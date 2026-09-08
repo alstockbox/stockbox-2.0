@@ -16,6 +16,8 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
+import { gateDepositaryReceiptValuationInputs } from "./depositary-receipt";
+import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
@@ -822,8 +824,9 @@ export async function analyzeCompany({
   const accessedAt = new Date().toISOString();
   const sources: AnalysisSource[] = [];
   const warnings: string[] = [];
+  const analysisCompany = attachVerifiedDepositaryReceiptRepresentation(company);
 
-  if (!canAttemptConfiguredFundamentals(company)) {
+  if (!canAttemptConfiguredFundamentals(analysisCompany)) {
     return {
       ok: false,
       error: UNSUPPORTED_SECURITY_ERROR,
@@ -837,16 +840,16 @@ export async function analyzeCompany({
 
   const deepResearchRequested = analysisType === "deep" || analysisType === "research";
   const [fundamentalsResolution, marketResolution, filingsResult] = await Promise.all([
-    resolveConfiguredFundamentals(company),
-    resolveConfiguredMarketData(company),
-    deepResearchRequested && company.cik ? fetchSecSubmissionEvents(company) : Promise.resolve(null),
+    resolveConfiguredFundamentals(analysisCompany),
+    resolveConfiguredMarketData(analysisCompany),
+    deepResearchRequested && analysisCompany.cik ? fetchSecSubmissionEvents(analysisCompany) : Promise.resolve(null),
   ]);
   const providerOrchestrationMs = Date.now() - startedAt;
   const fundamentalsResult = fundamentalsResolution.result;
   const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const rawMarket = marketResult.ok ? marketResult.data : null;
-  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
+  const market = enrichMarketWithFundamentals(analysisCompany, rawMarket, fundamentals, accessedAt);
   const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
 
   if (fundamentals) {
@@ -897,8 +900,11 @@ export async function analyzeCompany({
     };
   }
 
+  const valuationInputs = gateDepositaryReceiptValuationInputs(analysisCompany, market, fundamentals);
+  if (valuationInputs.warning) warnings.push(valuationInputs.warning);
+
   const legacyInput = {
-    company,
+    company: analysisCompany,
     market,
     fundamentals,
     analysisType,
@@ -906,7 +912,11 @@ export async function analyzeCompany({
     providerDiagnostics,
     analysisDate: accessedAt,
   };
-  const canonicalInput = toFinancialAnalysisInput(legacyInput);
+  const canonicalInput = toFinancialAnalysisInput({
+    ...legacyInput,
+    market: valuationInputs.market,
+    fundamentals: valuationInputs.fundamentals,
+  });
   const engineResult = analyzeFinancials(canonicalInput);
   const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);
   report.sources = sources;
@@ -927,7 +937,7 @@ export async function analyzeCompany({
       confidence: 0,
       reason: filingsResult.message,
     } : undefined;
-    attachInstitutionalResearch(report, report.engine, canonicalInput, { market, filings });
+    attachInstitutionalResearch(report, report.engine, canonicalInput, { market: valuationInputs.market, filings });
     const failedCapabilities = new Set(
       providerDiagnostics.filter((item) => item.status === "unavailable").map((item) => item.capability),
     );
