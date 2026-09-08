@@ -272,6 +272,14 @@ function disabledValuationInputs(
   };
 }
 
+export function disableDepositaryReceiptValuationInputs(
+  market: MarketSnapshot | null,
+  fundamentals: CompanyFundamentals,
+  reason: string,
+) {
+  return disabledValuationInputs(market, fundamentals, reason);
+}
+
 function normalizedMarketCapForPrimaryCurrency(
   market: MarketSnapshot,
   primaryCurrency: string,
