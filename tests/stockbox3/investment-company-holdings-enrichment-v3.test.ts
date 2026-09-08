@@ -4,6 +4,10 @@ import type { EtfHolding } from "../../src/lib/analysis/universal-security";
 import type { CompanySearchResult } from "../../src/lib/analysis/types";
 import { enrichInvestmentCompanyHoldingsQuality } from "../../src/lib/data/investment-company-holdings-quality";
 
+type HoldingWithIssuerEligibility = EtfHolding & {
+  issuerFundamentalsEligible?: boolean;
+};
+
 function candidate(name: string, ticker: string): CompanySearchResult {
   return {
     ticker,
@@ -72,10 +76,10 @@ describe("Investment-company bounded holdings-quality enrichment V3", () => {
   });
 
   it("never searches holdings explicitly marked ineligible for issuer fundamentals and keeps their weight in the denominator", async () => {
-    const holdings = [
+    const holdings: HoldingWithIssuerEligibility[] = [
       { name: "Net receivable / cash", weight: 0.25, issuerFundamentalsEligible: false },
       { name: "Alpha", weight: 0.75, issuerFundamentalsEligible: true },
-    ] as EtfHolding[];
+    ];
     const searches: string[] = [];
 
     const result = await enrichInvestmentCompanyHoldingsQuality(holdings, {
@@ -93,11 +97,11 @@ describe("Investment-company bounded holdings-quality enrichment V3", () => {
   });
 
   it("caps issuer searches at 12 and fails closed when the quality target is still unmet", async () => {
-    const holdings = Array.from({ length: 13 }, (_, index) => ({
+    const holdings: HoldingWithIssuerEligibility[] = Array.from({ length: 13 }, (_, index) => ({
       name: `Holding ${index + 1}`,
       weight: 1 / 13,
       issuerFundamentalsEligible: true,
-    })) as EtfHolding[];
+    }));
 
     const result = await enrichInvestmentCompanyHoldingsQuality(holdings, {
       searchCompanies: async (name) => [candidate(name, `${name.replaceAll(" ", "").toUpperCase()}.ST`)],
