@@ -9,6 +9,7 @@ on:
       - "src/app/**"
       - "src/components/**"
       - "src/lib/**"
+      - "scripts/diagnostics/**"
       - "tests/**"
       - "supabase/migrations/**"
       - ".github/workflows/stockbox-2-upgrade-ci.yml"
