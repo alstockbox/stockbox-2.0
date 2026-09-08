@@ -8,12 +8,15 @@ export type RecommendationOutcomePersistInputV3 = {
   expectedAt: string;
   evaluatedAt: string;
   lagDays: number;
+  entryObservedAt: string;
   entryPrice: number;
   observedPrice: number;
   securityCurrency: string | null;
   securityReturn: number;
   benchmarkTicker: string | null;
+  benchmarkEntryObservedAt: string | null;
   benchmarkEntryPrice: number | null;
+  benchmarkObservedAt: string | null;
   benchmarkObservedPrice: number | null;
   benchmarkReturn: number | null;
   excessReturn: number | null;
@@ -29,12 +32,15 @@ export type RecommendationOutcomeRowV3 = {
   expected_at: string;
   evaluated_at: string;
   lag_days: number;
+  entry_observed_at: string;
   entry_price: number;
   observed_price: number;
   security_currency: string | null;
   security_return: number;
   benchmark_ticker: string | null;
+  benchmark_entry_observed_at: string | null;
   benchmark_entry_price: number | null;
+  benchmark_observed_at: string | null;
   benchmark_observed_price: number | null;
   benchmark_return: number | null;
   excess_return: number | null;
@@ -65,12 +71,15 @@ export function toRecommendationOutcomeV3Row(
     expected_at: input.expectedAt,
     evaluated_at: input.evaluatedAt,
     lag_days: Math.max(0, Math.trunc(input.lagDays)),
+    entry_observed_at: input.entryObservedAt,
     entry_price: input.entryPrice,
     observed_price: input.observedPrice,
     security_currency: normalizeTicker(input.securityCurrency),
     security_return: input.securityReturn,
     benchmark_ticker: normalizeTicker(input.benchmarkTicker),
+    benchmark_entry_observed_at: input.benchmarkEntryObservedAt,
     benchmark_entry_price: input.benchmarkEntryPrice,
+    benchmark_observed_at: input.benchmarkObservedAt,
     benchmark_observed_price: input.benchmarkObservedPrice,
     benchmark_return: input.benchmarkReturn,
     excess_return: input.excessReturn,
