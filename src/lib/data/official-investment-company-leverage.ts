@@ -93,7 +93,7 @@ export function parseLatourOfficialLeverageDisclosure(
     return null;
   }
 
-  const ratio = ratioPercent / 100;
+  const ratio = Number((ratioPercent / 100).toFixed(6));
   if (!Number.isFinite(ratio) || ratio < 0 || ratio >= 1) return null;
 
   return {
