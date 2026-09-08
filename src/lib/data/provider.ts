@@ -17,6 +17,7 @@ import type {
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
 import { gateDepositaryReceiptValuationInputs, verifyDepositaryReceiptFundamentalsIdentity } from "./depositary-receipt";
+import { depositaryReceiptFxSource, resolveDepositaryReceiptFxContext } from "./depositary-receipt-provider-fx";
 import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
@@ -845,7 +846,6 @@ export async function analyzeCompany({
     resolveConfiguredMarketData(analysisCompany),
     deepResearchRequested && analysisCompany.cik ? fetchSecSubmissionEvents(analysisCompany) : Promise.resolve(null),
   ]);
-  const providerOrchestrationMs = Date.now() - startedAt;
   const fundamentalsResult = fundamentalsResolution.result;
   const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
@@ -901,7 +901,17 @@ export async function analyzeCompany({
     };
   }
 
-  const valuationInputs = gateDepositaryReceiptValuationInputs(analysisCompany, market, fundamentals);
+  const depositaryReceiptFxContext = await resolveDepositaryReceiptFxContext(analysisCompany, market);
+  const fxSource = depositaryReceiptFxSource(depositaryReceiptFxContext, accessedAt);
+  if (fxSource) sources.push(fxSource);
+  const providerOrchestrationMs = Date.now() - startedAt;
+
+  const valuationInputs = gateDepositaryReceiptValuationInputs(
+    analysisCompany,
+    market,
+    fundamentals,
+    depositaryReceiptFxContext ?? undefined,
+  );
   if (valuationInputs.warning) warnings.push(valuationInputs.warning);
 
   const legacyInput = {
