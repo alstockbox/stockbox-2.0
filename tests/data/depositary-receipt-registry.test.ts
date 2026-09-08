@@ -5,6 +5,7 @@ import {
   qaDepositaryReceiptRegistry,
   type DepositaryReceiptRegistryEntry,
 } from "../../src/lib/data/depositary-receipt-registry";
+import { assessDepositaryReceiptFundamentalsAccess, assessDepositaryReceiptValuationAccess } from "../../src/lib/data/depositary-receipt";
 
 const verifiedEntry = (overrides: Partial<DepositaryReceiptRegistryEntry> = {}): DepositaryReceiptRegistryEntry => ({
   securityId: "adr:issuer-novo:nvo",
@@ -43,12 +44,24 @@ describe("depositary receipt registry", () => {
     expect(result.depositaryReceipt).toBeUndefined();
   });
 
-  it("does not attach unverified mappings or ratios as verified data", () => {
+  it("does not attach an unverified issuer mapping", () => {
     const result = attachVerifiedDepositaryReceiptRepresentation(company(), [verifiedEntry({ mappingVerified: false })]);
     expect(result.depositaryReceipt).toBeUndefined();
   });
 
-  it("reports duplicate stable identities and invalid ratios as QA failures", () => {
+  it("attaches verified issuer mapping without a verified ratio for issuer-only fundamentals", () => {
+    const result = attachVerifiedDepositaryReceiptRepresentation(company(), [verifiedEntry({
+      ratioVerified: false,
+      underlyingSharesPerReceipt: null,
+    })]);
+
+    expect(result.depositaryReceipt?.mappingVerified).toBe(true);
+    expect(result.depositaryReceipt?.ratioVerified).toBe(false);
+    expect(assessDepositaryReceiptFundamentalsAccess(result).scope).toBe("issuer_fundamentals_only");
+    expect(assessDepositaryReceiptValuationAccess(result).allowed).toBe(false);
+  });
+
+  it("reports duplicate stable identities and invalid verified ratios as QA failures", () => {
     const report = qaDepositaryReceiptRegistry([
       verifiedEntry(),
       verifiedEntry({ sourceUrl: "https://example.invalid/duplicate" }),
@@ -58,6 +71,16 @@ describe("depositary receipt registry", () => {
     expect(report.duplicateSecurityIds).toEqual(["adr:issuer-novo:nvo"]);
     expect(report.invalidRatioSecurityIds).toEqual(["adr:issuer-tsm:tsm"]);
     expect(report.pass).toBe(false);
+  });
+
+  it("tracks unverified ratios without treating issuer mapping as invalid", () => {
+    const report = qaDepositaryReceiptRegistry([
+      verifiedEntry({ ratioVerified: false, underlyingSharesPerReceipt: null }),
+    ]);
+
+    expect(report.unverifiedMappingSecurityIds).toEqual([]);
+    expect(report.unverifiedRatioSecurityIds).toEqual(["adr:issuer-novo:nvo"]);
+    expect(report.pass).toBe(true);
   });
 
   it("requires source provenance and primary-listing identity", () => {
