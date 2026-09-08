@@ -23,6 +23,11 @@ export type DepositaryReceiptFundamentalsAccess = {
   reason: string;
 };
 
+export type DepositaryReceiptFundamentalsIdentity = {
+  verified: boolean;
+  reason: string;
+};
+
 export type DepositaryReceiptValuationAccess = {
   allowed: boolean;
   underlyingSharesPerReceipt: number | null;
@@ -57,6 +62,39 @@ function verifiedIssuerMapping(
     return { ok: false, reason: "Depositary-receipt mapping lacks authoritative source provenance." };
   }
   return { ok: true, reason: "Verified issuer and primary-listing mapping is available." };
+}
+
+export function verifyDepositaryReceiptFundamentalsIdentity(
+  company: CompanySearchResult,
+  fundamentals: CompanyFundamentals,
+): DepositaryReceiptFundamentalsIdentity {
+  if (!isDepositaryReceipt(company)) {
+    return { verified: true, reason: "Security is not a depositary receipt." };
+  }
+
+  const representation = representationFor(company);
+  const mapping = verifiedIssuerMapping(company, representation);
+  if (!mapping.ok) return { verified: false, reason: mapping.reason };
+
+  const expectedIssuerId = company.issuerId?.trim();
+  const fundamentalsIssuerId = fundamentals.entityId?.trim();
+  if (!expectedIssuerId || !fundamentalsIssuerId) {
+    return {
+      verified: false,
+      reason: "Depositary-receipt issuer identity cannot be reconciled because fundamentals lack a stable issuer identity.",
+    };
+  }
+  if (fundamentalsIssuerId !== expectedIssuerId || fundamentalsIssuerId !== representation?.issuerId.trim()) {
+    return {
+      verified: false,
+      reason: "Depositary-receipt fundamentals belong to a different issuer than the verified receipt-to-primary-listing mapping.",
+    };
+  }
+
+  return {
+    verified: true,
+    reason: "Fundamentals issuer identity matches the verified depositary-receipt issuer and primary-listing mapping.",
+  };
 }
 
 export function assessDepositaryReceiptFundamentalsAccess(
