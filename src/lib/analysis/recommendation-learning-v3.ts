@@ -68,6 +68,9 @@ export type RecommendationOutcomeV3 = {
 export type RecommendationPerformanceSliceV3 = {
   horizon: RecommendationOutcomeHorizonV3;
   rating: RecommendationV3Rating;
+  analysisArchetype: string;
+  modelVersion: string;
+  recommendationPolicyVersion: string;
   count: number;
   benchmarkCount: number;
   directionalCount: number;
@@ -91,6 +94,9 @@ export type RecommendationCalibrationCandidateV3 = {
   stage: RecommendationCalibrationStageV3;
   horizon: RecommendationOutcomeHorizonV3;
   rating: RecommendationV3Rating;
+  analysisArchetype: string;
+  modelVersion: string;
+  recommendationPolicyVersion: string;
   sampleSize: number;
   benchmarkSampleSize: number;
   hitRate: number | null;
@@ -253,7 +259,13 @@ export function evaluateRecommendationPerformanceV3(
 ): RecommendationPerformanceSliceV3[] {
   const keys = new Map<string, RecommendationOutcomeV3[]>();
   for (const outcome of outcomes) {
-    const key = `${outcome.horizon}:${outcome.rating}`;
+    const key = [
+      outcome.horizon,
+      outcome.rating,
+      outcome.analysisArchetype,
+      outcome.modelVersion,
+      outcome.recommendationPolicyVersion,
+    ].join(":");
     keys.set(key, [...(keys.get(key) ?? []), outcome]);
   }
 
@@ -268,6 +280,9 @@ export function evaluateRecommendationPerformanceV3(
       return {
         horizon: first.horizon,
         rating: first.rating,
+        analysisArchetype: first.analysisArchetype,
+        modelVersion: first.modelVersion,
+        recommendationPolicyVersion: first.recommendationPolicyVersion,
         count: items.length,
         benchmarkCount: benchmarked.length,
         directionalCount: directional.length,
@@ -280,7 +295,14 @@ export function evaluateRecommendationPerformanceV3(
     .sort((left, right) => {
       const horizonDelta = RECOMMENDATION_OUTCOME_HORIZONS_V3.indexOf(left.horizon)
         - RECOMMENDATION_OUTCOME_HORIZONS_V3.indexOf(right.horizon);
-      return horizonDelta !== 0 ? horizonDelta : left.rating.localeCompare(right.rating);
+      if (horizonDelta !== 0) return horizonDelta;
+      const archetypeDelta = left.analysisArchetype.localeCompare(right.analysisArchetype);
+      if (archetypeDelta !== 0) return archetypeDelta;
+      const modelDelta = left.modelVersion.localeCompare(right.modelVersion);
+      if (modelDelta !== 0) return modelDelta;
+      const policyDelta = left.recommendationPolicyVersion.localeCompare(right.recommendationPolicyVersion);
+      if (policyDelta !== 0) return policyDelta;
+      return left.rating.localeCompare(right.rating);
     });
 }
 
@@ -310,6 +332,9 @@ export function proposeRecommendationCalibrationV3(
   return {
     policyVersion: RECOMMENDATION_CALIBRATION_POLICY_VERSION,
     candidateId: [
+      performance.analysisArchetype,
+      performance.modelVersion,
+      performance.recommendationPolicyVersion,
       performance.horizon,
       performance.rating,
       performance.benchmarkCount,
@@ -319,6 +344,9 @@ export function proposeRecommendationCalibrationV3(
     stage: "CANDIDATE",
     horizon: performance.horizon,
     rating: performance.rating,
+    analysisArchetype: performance.analysisArchetype,
+    modelVersion: performance.modelVersion,
+    recommendationPolicyVersion: performance.recommendationPolicyVersion,
     sampleSize: performance.count,
     benchmarkSampleSize: performance.benchmarkCount,
     hitRate: performance.hitRate,
