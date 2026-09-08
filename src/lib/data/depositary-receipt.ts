@@ -1,10 +1,12 @@
+import {
+  depositaryReceiptCurrencyState,
+  verifyDepositaryReceiptShareBasis,
+  type DepositaryReceiptRepresentation as AnalysisDepositaryReceiptRepresentation,
+} from "@/lib/analysis/depositary-receipt";
 import type { CompanyFundamentals, CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
 
-export type DepositaryReceiptRepresentation = {
+export type DepositaryReceiptRepresentation = AnalysisDepositaryReceiptRepresentation & {
   kind: "ADR" | "ADS";
-  issuerId: string;
-  primaryListingTicker: string;
-  underlyingSharesPerReceipt?: number | null;
   mappingVerified: boolean;
   ratioVerified: boolean;
   source: string;
@@ -51,8 +53,8 @@ function verifiedIssuerMapping(
   if (!representation.primaryListingTicker.trim()) {
     return { ok: false, reason: "Depositary-receipt primary listing is unavailable." };
   }
-  if (!representation.source.trim()) {
-    return { ok: false, reason: "Depositary-receipt mapping lacks an authoritative source." };
+  if (!representation.source.trim() || !representation.sourceAsOf?.trim()) {
+    return { ok: false, reason: "Depositary-receipt mapping lacks authoritative source provenance." };
   }
   return { ok: true, reason: "Verified issuer and primary-listing mapping is available." };
 }
@@ -77,12 +79,12 @@ export function assessDepositaryReceiptFundamentalsAccess(
     ? {
         allowed: true,
         scope: "issuer_and_valuation",
-        reason: "Verified issuer mapping and verified depositary-receipt share ratio are available.",
+        reason: "Verified issuer mapping, share ratio and same-currency share basis are available.",
       }
     : {
         allowed: true,
         scope: "issuer_fundamentals_only",
-        reason: "Verified issuer mapping is available, but per-share valuation remains disabled until the depositary-receipt share ratio is verified.",
+        reason: `Verified issuer mapping is available, but per-share valuation remains disabled: ${valuation.reason}`,
       };
 }
 
@@ -93,7 +95,7 @@ export function assessDepositaryReceiptValuationAccess(
     return {
       allowed: true,
       underlyingSharesPerReceipt: 1,
-      reason: "Security is not a depositary receipt and does not require ADR/ADS ratio reconciliation.",
+      reason: "Security is not a depositary receipt and does not require ADR/ADS reconciliation.",
     };
   }
 
@@ -109,18 +111,32 @@ export function assessDepositaryReceiptValuationAccess(
       reason: "Depositary-receipt share ratio is not verified; per-share valuation share basis is unresolved.",
     };
   }
-  const ratio = representation.underlyingSharesPerReceipt;
-  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio <= 0) {
+
+  const basis = verifyDepositaryReceiptShareBasis(representation);
+  if (!basis.verified || basis.underlyingSharesPerReceipt === null) {
+    return { allowed: false, underlyingSharesPerReceipt: null, reason: basis.reason };
+  }
+
+  const currencyState = depositaryReceiptCurrencyState(representation);
+  if (currencyState === "unknown") {
     return {
       allowed: false,
       underlyingSharesPerReceipt: null,
-      reason: "Depositary-receipt share ratio is invalid; per-share valuation share basis is unresolved.",
+      reason: "Depositary-receipt and primary-listing currency identity is unresolved.",
     };
   }
+  if (currencyState === "fx_required") {
+    return {
+      allowed: false,
+      underlyingSharesPerReceipt: null,
+      reason: "Depositary-receipt valuation requires verified FX normalization before receipt and primary-listing prices are comparable.",
+    };
+  }
+
   return {
     allowed: true,
-    underlyingSharesPerReceipt: ratio,
-    reason: "Verified depositary-receipt share ratio reconciles receipt and underlying share basis.",
+    underlyingSharesPerReceipt: basis.underlyingSharesPerReceipt,
+    reason: "Verified depositary-receipt share ratio reconciles receipt and underlying share basis in the same currency.",
   };
 }
 
