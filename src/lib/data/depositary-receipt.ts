@@ -36,6 +36,7 @@ export type DepositaryReceiptValuationAccess = {
 };
 
 const MAX_ADR_MARKET_CAP_SHARE_BASIS_DIFFERENCE = 0.05;
+const PRIMARY_LISTING_PRICE_CONFLICT_REASON_PREFIX = "Primary listing price conflicts materially";
 
 function isDepositaryReceipt(company: CompanySearchResult): boolean {
   return company.securityType === "ADR";
@@ -277,7 +278,28 @@ export function disableDepositaryReceiptValuationInputs(
   fundamentals: CompanyFundamentals,
   reason: string,
 ) {
-  return disabledValuationInputs(market, fundamentals, reason);
+  const disabled = disabledValuationInputs(market, fundamentals, reason);
+  if (!reason.startsWith(PRIMARY_LISTING_PRICE_CONFLICT_REASON_PREFIX)) return disabled;
+
+  return {
+    ...disabled,
+    fundamentals: {
+      ...disabled.fundamentals,
+      sourceConflicts: [
+        ...(disabled.fundamentals.sourceConflicts ?? []),
+        {
+          metric: "marketPrice",
+          periodEnd: market?.date?.slice(0, 10) ?? null,
+          primaryProvider: market?.provider ?? "depositary-receipt-market",
+          secondaryProvider: "primary-listing-market",
+          severity: "high" as const,
+          kind: "share_basis_mismatch" as const,
+          resolved: false,
+          reason,
+        },
+      ],
+    },
+  };
 }
 
 function normalizedMarketCapForPrimaryCurrency(
