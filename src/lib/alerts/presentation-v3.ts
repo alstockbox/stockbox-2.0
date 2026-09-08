@@ -40,14 +40,14 @@ const ratingLabels: Record<AlertLocale, Record<string, string>> = {
 
 const kindLabels: Record<AlertLocale, Record<AnalysisAlertKindV3, string>> = {
   sv: {
-    RECOMMENDATION_CHANGE: "Ratingändring",
+    RECOMMENDATION_CHANGE: "Rekommendationsförändring",
     CONVICTION_DROP: "Lägre övertygelse",
     DATA_QUALITY_DROP: "Datakvalitet",
     PRICE_ABOVE: "Prisgräns uppåt",
     PRICE_BELOW: "Prisgräns nedåt",
   },
   en: {
-    RECOMMENDATION_CHANGE: "Rating change",
+    RECOMMENDATION_CHANGE: "Recommendation change",
     CONVICTION_DROP: "Lower conviction",
     DATA_QUALITY_DROP: "Data quality",
     PRICE_ABOVE: "Price threshold above",
@@ -89,6 +89,37 @@ export function presentAnalysisAlertEventV3(
     return language === "sv"
       ? { kindLabel, title: `${ticker}: StockBox-ratingen ändrades`, body: `Den objektiva ratingen ändrades från ${from} till ${to}.` }
       : { kindLabel, title: `${ticker}: StockBox rating changed`, body: `The objective rating changed from ${from} to ${to}.` };
+  }
+
+  if (event.message_key === "alerts.recommendationStrengthened" || event.message_key === "alerts.recommendationWeakened") {
+    const strengthened = event.message_key === "alerts.recommendationStrengthened";
+    const rating = ratingLabel(payload.currentRating, language);
+    const previousScore = numberLabel(payload.previousScore, language);
+    const currentScore = numberLabel(payload.currentScore, language);
+    if (language === "sv") {
+      return strengthened
+        ? {
+            kindLabel,
+            title: `${ticker}: rekommendationen stärktes`,
+            body: `Ratingen är kvar på ${rating}, men det objektiva underlaget stärktes. StockBox Score gick från ${previousScore} till ${currentScore}.`,
+          }
+        : {
+            kindLabel,
+            title: `${ticker}: rekommendationen försvagades`,
+            body: `Ratingen är kvar på ${rating}, men det objektiva underlaget försvagades. StockBox Score gick från ${previousScore} till ${currentScore}. Överväg att läsa vad som ändrats.`,
+          };
+    }
+    return strengthened
+      ? {
+          kindLabel,
+          title: `${ticker}: recommendation strengthened`,
+          body: `The rating remains ${rating}, but the objective evidence strengthened. StockBox Score moved from ${previousScore} to ${currentScore}.`,
+        }
+      : {
+          kindLabel,
+          title: `${ticker}: recommendation weakened`,
+          body: `The rating remains ${rating}, but the objective evidence weakened. StockBox Score moved from ${previousScore} to ${currentScore}. Consider reviewing what changed.`,
+        };
   }
 
   if (event.message_key === "alerts.convictionDropped") {
