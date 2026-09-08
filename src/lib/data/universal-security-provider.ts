@@ -34,6 +34,7 @@ import {
   searchCompanies,
 } from "./enhanced-provider";
 import { classifyFundStructure } from "./fund-structure-classification";
+import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
 import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
 import {
   deriveInvestmentCompanyAnnualNavGrowth,
@@ -361,6 +362,12 @@ async function enrichInvestmentCompanyReport(
   const annualLeverageContributes = annualLeverageRatio !== null;
   const verifiedLeverageRatio = annualLeverageRatio
     ?? (leverageComparable && officialLeverage.ok ? officialLeverage.data.ratio : null);
+  const capitalAllocation = officialKeyRatios.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyCapitalAllocation(
+      officialKeyRatios.data.years.filter((point) => point.year <= marketYear),
+    )
+    : null;
+  const capitalAllocationContributes = capitalAllocation?.score !== null && capitalAllocation?.score !== undefined;
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
@@ -411,6 +418,7 @@ async function enrichInvestmentCompanyReport(
     sharePrice: report.market?.price ?? null,
     dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
     holdingCompanyLeverageRatio: verifiedLeverageRatio,
+    capitalAllocationScore: capitalAllocation?.score ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -496,18 +504,25 @@ async function enrichInvestmentCompanyReport(
     ))) {
       report.sources = [...report.sources, keyRatioSource];
     }
-    const keyRatioDiagnostic: ProviderDiagnostic = annualLeverageContributes
+    const keyRatiosContribute = annualLeverageContributes || capitalAllocationContributes;
+    const keyRatioDiagnostic: ProviderDiagnostic = keyRatiosContribute
       ? officialKeyRatios.data.diagnostic
       : {
         ...officialKeyRatios.data.diagnostic,
         status: "partial",
-        reason: "official_annual_leverage_stale_or_unverifiable_for_market_year",
+        reason: "official_key_ratios_not_usable_for_specialist_factors",
       };
     report.providerDiagnostics = [...(report.providerDiagnostics ?? []), keyRatioDiagnostic];
     if (!annualLeverageContributes) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
         `Official annual leverage history does not contain a valid issuer ratio in the market year or immediately preceding year for market data dated ${marketDate ?? "unknown"}; annual leverage was excluded from specialist coverage.`,
+      ])];
+    }
+    if (!capitalAllocationContributes) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Official capital-allocation evidence is incomplete or unsuitable (${capitalAllocation?.reason ?? "market_year_unavailable"}); capital allocation remains N/A.`,
       ])];
     }
   }
