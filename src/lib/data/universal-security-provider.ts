@@ -39,6 +39,7 @@ import {
   type InvestmentCompanyNavGrowth,
 } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
 import { fetchYahooEtfData } from "./yahoo-etf";
@@ -332,12 +333,15 @@ async function enrichInvestmentCompanyReport(
   if (report.analysisArchetype !== "holding_company") return report;
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const marketDate = report.dataAsOf ?? report.market?.date ?? null;
-  const [officialNav, longHistory] = await Promise.all([
+  const [officialNav, longHistory, officialHoldings] = await Promise.all([
     fetchOfficialInvestmentCompanyNav(company),
     marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
+    fetchOfficialInvestmentCompanyHoldings(company),
   ]);
   const navComparable = officialNav.ok
     && isOfficialDisclosureComparable(officialNav.data.navAsOf, marketDate);
+  const holdingsComparable = officialHoldings.ok
+    && isOfficialDisclosureComparable(officialHoldings.data.asOf, marketDate);
   const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
     ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
     : emptyInvestmentCompanyNavGrowth();
@@ -355,6 +359,13 @@ async function enrichInvestmentCompanyReport(
     : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
   const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
     || shareholderReturns.shareholderReturn5yCagr !== null;
+  const investmentHoldings = holdingsComparable
+    ? officialHoldings.data.holdings.map((holding) => ({
+      name: holding.name,
+      weight: holding.weight,
+      issuerFundamentalsEligible: holding.issuerFundamentalsEligible,
+    }))
+    : undefined;
 
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -365,6 +376,7 @@ async function enrichInvestmentCompanyReport(
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
     ...shareholderReturns,
+    holdings: investmentHoldings,
   });
 
   if (officialNav.ok) {
@@ -399,6 +411,40 @@ async function enrichInvestmentCompanyReport(
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       `Official investment-company NAV unavailable: ${officialNav.message}`,
+    ])];
+  }
+
+  if (officialHoldings.ok) {
+    const holdingsSource = officialHoldings.data.source;
+    if (!report.sources.some((existing) => (
+      existing.provider === holdingsSource.provider
+      && existing.url === holdingsSource.url
+      && existing.version === holdingsSource.version
+    ))) {
+      report.sources = [...report.sources, holdingsSource];
+    }
+    const holdingsDiagnostic: ProviderDiagnostic = holdingsComparable
+      ? officialHoldings.data.diagnostic
+      : {
+        ...officialHoldings.data.diagnostic,
+        status: "partial",
+        reason: "official_holdings_stale_or_unverifiable_for_market_comparison",
+      };
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), holdingsDiagnostic];
+    if (!holdingsComparable) {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        `Official holdings dated ${officialHoldings.data.asOf} are not comparable with market data dated ${marketDate ?? "unknown"} and were excluded from specialist coverage.`,
+      ])];
+    }
+  } else {
+    report.providerDiagnostics = [
+      ...(report.providerDiagnostics ?? []),
+      officialHoldings.diagnostic,
+    ];
+    report.score.missingData = [...new Set([
+      ...report.score.missingData,
+      `Official investment-company holdings unavailable: ${officialHoldings.message}`,
     ])];
   }
 
