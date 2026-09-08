@@ -76,6 +76,20 @@ describe("StockBox 3 investment-company official NAV/share growth", () => {
     });
   });
 
+  it("never uses the market year's full-year NAV row without a verified publication date", () => {
+    const growth = deriveInvestmentCompanyAnnualNavGrowth([
+      { year: 2025, navPerShare: 120 },
+      { year: 2024, navPerShare: 100 },
+      { year: 2023, navPerShare: 80 },
+      { year: 2021, navPerShare: 64 },
+      { year: 2019, navPerShare: 50 },
+    ], 2025);
+
+    expect(growth.navGrowth1y).toBeCloseTo((100 / 80) - 1, 10);
+    expect(growth.navGrowth3yCagr).toBeCloseTo((100 / 64) ** (1 / 3) - 1, 10);
+    expect(growth.navGrowth5yCagr).toBeCloseTo((100 / 50) ** (1 / 5) - 1, 10);
+  });
+
   it("routes only issuer-official NAV histories into the specialist growth factors", () => {
     expect(officialNav).toContain("navPerShareHistory");
     expect(officialNav).toContain("annualNavPerShareHistory");
