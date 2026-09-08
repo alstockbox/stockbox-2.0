@@ -8,12 +8,15 @@ create table if not exists public.analysis_recommendation_v3_outcomes (
   expected_at timestamptz not null,
   evaluated_at timestamptz not null,
   lag_days integer not null default 0 check (lag_days >= 0),
+  entry_observed_at date not null,
   entry_price numeric not null check (entry_price > 0),
   observed_price numeric not null check (observed_price > 0),
   security_currency text,
   security_return numeric not null,
   benchmark_ticker text,
+  benchmark_entry_observed_at date,
   benchmark_entry_price numeric check (benchmark_entry_price is null or benchmark_entry_price > 0),
+  benchmark_observed_at date,
   benchmark_observed_price numeric check (benchmark_observed_price is null or benchmark_observed_price > 0),
   benchmark_return numeric,
   excess_return numeric,
@@ -23,10 +26,19 @@ create table if not exists public.analysis_recommendation_v3_outcomes (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint analysis_recommendation_v3_outcomes_benchmark_consistency check (
-    (benchmark_return is null and excess_return is null)
+    (
+      benchmark_entry_observed_at is null
+      and benchmark_entry_price is null
+      and benchmark_observed_at is null
+      and benchmark_observed_price is null
+      and benchmark_return is null
+      and excess_return is null
+    )
     or (
       benchmark_ticker is not null
+      and benchmark_entry_observed_at is not null
       and benchmark_entry_price is not null
+      and benchmark_observed_at is not null
       and benchmark_observed_price is not null
       and benchmark_return is not null
       and excess_return is not null
@@ -58,6 +70,6 @@ revoke all on table public.analysis_recommendation_v3_outcomes from authenticate
 grant select, insert, update, delete on table public.analysis_recommendation_v3_outcomes to service_role;
 
 comment on table public.analysis_recommendation_v3_outcomes is
-  'Private StockBox 3.0 objective recommendation outcome telemetry. Links to the privacy-minimized recommendation audit and stores only market/benchmark outcome data.';
+  'Private StockBox 3.0 objective recommendation outcome telemetry. Links to the privacy-minimized recommendation audit and stores only reproducible market/benchmark outcome data.';
 
 commit;
