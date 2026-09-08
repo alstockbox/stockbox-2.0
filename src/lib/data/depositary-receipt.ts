@@ -4,6 +4,7 @@ import {
   type DepositaryReceiptRepresentation as AnalysisDepositaryReceiptRepresentation,
 } from "@/lib/analysis/depositary-receipt";
 import type { CompanyFundamentals, CompanySearchResult, MarketSnapshot } from "@/lib/analysis/types";
+import { convertWithComparisonFxContext, type ComparisonFxContext } from "./ecb-fx";
 
 export type DepositaryReceiptRepresentation = AnalysisDepositaryReceiptRepresentation & {
   kind: "ADR" | "ADS";
@@ -42,6 +43,15 @@ function representationFor(company: CompanySearchResult): DepositaryReceiptRepre
   return (company as DepositaryReceiptCompany).depositaryReceipt ?? null;
 }
 
+function normalizedCurrency(value: string | null | undefined): string | null {
+  const currency = value?.trim().toUpperCase();
+  return currency && /^[A-Z]{3}$/.test(currency) ? currency : null;
+}
+
+function positiveFinite(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 function verifiedIssuerMapping(
   company: CompanySearchResult,
   representation: DepositaryReceiptRepresentation | null,
@@ -62,6 +72,42 @@ function verifiedIssuerMapping(
     return { ok: false, reason: "Depositary-receipt mapping lacks authoritative source provenance." };
   }
   return { ok: true, reason: "Verified issuer and primary-listing mapping is available." };
+}
+
+function verifiedFxContext(
+  representation: DepositaryReceiptRepresentation,
+  fxContext: ComparisonFxContext | undefined,
+): { ok: boolean; reason: string } {
+  const receiptCurrency = normalizedCurrency(representation.receiptTradingCurrency);
+  const primaryCurrency = normalizedCurrency(representation.primaryListingCurrency);
+  if (!receiptCurrency || !primaryCurrency) {
+    return { ok: false, reason: "Depositary-receipt FX currencies are unresolved." };
+  }
+  if (!fxContext || fxContext.status !== "normalized") {
+    return { ok: false, reason: "A normalized verified FX context is unavailable." };
+  }
+  if (normalizedCurrency(fxContext.sourceCurrency) !== receiptCurrency) {
+    return { ok: false, reason: "FX source currency does not match the verified depositary-receipt trading currency." };
+  }
+  if (normalizedCurrency(fxContext.targetCurrency) !== primaryCurrency) {
+    return { ok: false, reason: "FX target currency does not match the verified primary-listing currency." };
+  }
+  if (!fxContext.rateDate?.trim() || !positiveFinite(fxContext.sourceRatePerEuro) || !positiveFinite(fxContext.targetRatePerEuro)) {
+    return { ok: false, reason: "FX rate provenance or positive reference rates are incomplete." };
+  }
+  const oneUnit = convertWithComparisonFxContext(1, fxContext);
+  if (!positiveFinite(oneUnit)) {
+    return { ok: false, reason: "FX context cannot produce a valid receipt-to-primary currency conversion." };
+  }
+  return { ok: true, reason: "Verified FX context reconciles receipt and primary-listing currencies." };
+}
+
+function fxContextMatchesMarketDate(fxContext: ComparisonFxContext, marketDate: string | null): boolean {
+  if (!marketDate || !fxContext.rateDate) return false;
+  const marketDay = Date.parse(`${marketDate.slice(0, 10)}T00:00:00Z`);
+  const rateDay = Date.parse(`${fxContext.rateDate.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(marketDay) || !Number.isFinite(rateDay) || rateDay > marketDay) return false;
+  return Math.floor((marketDay - rateDay) / 86_400_000) <= 7;
 }
 
 export function verifyDepositaryReceiptFundamentalsIdentity(
@@ -128,6 +174,7 @@ export function assessDepositaryReceiptFundamentalsAccess(
 
 export function assessDepositaryReceiptValuationAccess(
   company: CompanySearchResult,
+  fxContext?: ComparisonFxContext,
 ): DepositaryReceiptValuationAccess {
   if (!isDepositaryReceipt(company)) {
     return {
@@ -164,17 +211,22 @@ export function assessDepositaryReceiptValuationAccess(
     };
   }
   if (currencyState === "fx_required") {
-    return {
-      allowed: false,
-      underlyingSharesPerReceipt: null,
-      reason: "Depositary-receipt valuation requires verified FX normalization before receipt and primary-listing prices are comparable.",
-    };
+    const fx = verifiedFxContext(representation, fxContext);
+    if (!fx.ok) {
+      return {
+        allowed: false,
+        underlyingSharesPerReceipt: null,
+        reason: `Depositary-receipt valuation requires verified FX normalization: ${fx.reason}`,
+      };
+    }
   }
 
   return {
     allowed: true,
     underlyingSharesPerReceipt: basis.underlyingSharesPerReceipt,
-    reason: "Verified depositary-receipt share ratio reconciles receipt and underlying share basis in the same currency.",
+    reason: currencyState === "aligned"
+      ? "Verified depositary-receipt share ratio reconciles receipt and underlying share basis in the same currency."
+      : "Verified depositary-receipt share ratio and FX context reconcile receipt and primary-listing valuation basis.",
   };
 }
 
@@ -182,10 +234,60 @@ function scaleFinite(value: number | null | undefined, scale: number): number | 
   return typeof value === "number" && Number.isFinite(value) ? value * scale : value;
 }
 
+function disabledValuationInputs(
+  market: MarketSnapshot | null,
+  fundamentals: CompanyFundamentals,
+  reason: string,
+) {
+  return {
+    market: market ? {
+      ...market,
+      marketCap: null,
+      marketCapAsOf: null,
+      marketCapCurrency: null,
+      sharesOutstanding: null,
+      sharesOutstandingAsOf: null,
+    } : null,
+    fundamentals: {
+      ...fundamentals,
+      reportedMarketCap: null,
+      reportedMarketCapDate: null,
+      reportedMarketCapCurrency: null,
+      reportedSharesOutstanding: null,
+      reportedSharesDate: null,
+      reportedValuation: undefined,
+    },
+    warning: `ADR/ADS issuer fundamentals are available, but valuation is disabled because ${reason}`,
+  };
+}
+
+function normalizedMarketCapForPrimaryCurrency(
+  market: MarketSnapshot,
+  primaryCurrency: string,
+  receiptCurrency: string,
+  fxContext: ComparisonFxContext,
+): { value: number | null; currency: string | null; asOf: string | null } {
+  if (!positiveFinite(market.marketCap)) return { value: null, currency: null, asOf: null };
+  const marketCapCurrency = normalizedCurrency(market.marketCapCurrency);
+  if (marketCapCurrency === primaryCurrency) {
+    return { value: market.marketCap, currency: primaryCurrency, asOf: market.marketCapAsOf ?? market.date };
+  }
+  if (marketCapCurrency !== receiptCurrency) return { value: null, currency: null, asOf: null };
+  const marketCapDate = market.marketCapAsOf ?? market.date;
+  if (!marketCapDate || !market.date || marketCapDate.slice(0, 10) !== market.date.slice(0, 10)) {
+    return { value: null, currency: null, asOf: null };
+  }
+  const converted = convertWithComparisonFxContext(market.marketCap, fxContext);
+  return positiveFinite(converted)
+    ? { value: converted, currency: primaryCurrency, asOf: marketCapDate }
+    : { value: null, currency: null, asOf: null };
+}
+
 export function gateDepositaryReceiptValuationInputs(
   company: CompanySearchResult,
   market: MarketSnapshot | null,
   fundamentals: CompanyFundamentals,
+  fxContext?: ComparisonFxContext,
 ): {
   market: MarketSnapshot | null;
   fundamentals: CompanyFundamentals;
@@ -193,40 +295,90 @@ export function gateDepositaryReceiptValuationInputs(
 } {
   if (!isDepositaryReceipt(company)) return { market, fundamentals, warning: null };
 
-  const valuation = assessDepositaryReceiptValuationAccess(company);
+  const identity = verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals);
+  if (!identity.verified) return disabledValuationInputs(market, fundamentals, identity.reason);
+
+  const representation = representationFor(company);
+  if (!representation) return disabledValuationInputs(market, fundamentals, "depositary-receipt representation is unavailable.");
+
+  const receiptCurrency = normalizedCurrency(representation.receiptTradingCurrency);
+  const primaryCurrency = normalizedCurrency(representation.primaryListingCurrency);
+  const marketCurrency = normalizedCurrency(market?.currency);
+  if (market && (!receiptCurrency || marketCurrency !== receiptCurrency)) {
+    return disabledValuationInputs(
+      market,
+      fundamentals,
+      "market quote currency does not match the verified depositary-receipt trading currency.",
+    );
+  }
+
+  const valuation = assessDepositaryReceiptValuationAccess(company, fxContext);
   if (!valuation.allowed || valuation.underlyingSharesPerReceipt === null) {
-    return {
-      market: market ? {
-        ...market,
-        marketCap: null,
-        marketCapAsOf: null,
-        marketCapCurrency: null,
-        sharesOutstanding: null,
-        sharesOutstandingAsOf: null,
-      } : null,
-      fundamentals: {
-        ...fundamentals,
-        reportedMarketCap: null,
-        reportedMarketCapDate: null,
-        reportedMarketCapCurrency: null,
-        reportedSharesOutstanding: null,
-        reportedSharesDate: null,
-        reportedValuation: undefined,
-      },
-      warning: `ADR/ADS issuer fundamentals are available, but valuation is disabled because ${valuation.reason}`,
-    };
+    return disabledValuationInputs(market, fundamentals, valuation.reason);
   }
 
   const ratio = valuation.underlyingSharesPerReceipt;
+  const issuerShares = positiveFinite(fundamentals.reportedSharesOutstanding)
+    ? fundamentals.reportedSharesOutstanding
+    : null;
+  const currencyState = depositaryReceiptCurrencyState(representation);
+
+  if (currencyState === "aligned") {
+    return {
+      market: market ? {
+        ...market,
+        price: scaleFinite(market.price, 1 / ratio) ?? null,
+        yearHigh: scaleFinite(market.yearHigh, 1 / ratio) ?? null,
+        yearLow: scaleFinite(market.yearLow, 1 / ratio) ?? null,
+        sharesOutstanding: issuerShares,
+        sharesOutstandingAsOf: issuerShares !== null ? fundamentals.reportedSharesDate ?? null : null,
+      } : null,
+      fundamentals,
+      warning: null,
+    };
+  }
+
+  if (!fxContext || !primaryCurrency || !receiptCurrency || !market || !fxContextMatchesMarketDate(fxContext, market.date)) {
+    return disabledValuationInputs(
+      market,
+      fundamentals,
+      "verified FX context is missing, stale, future-dated, or lacks a current market date.",
+    );
+  }
+
+  const convertedPrice = market.price === null ? null : convertWithComparisonFxContext(market.price, fxContext);
+  if (market.price !== null && !positiveFinite(convertedPrice)) {
+    return disabledValuationInputs(market, fundamentals, "current depositary-receipt price could not be normalized through verified FX.");
+  }
+
+  const marketCap = normalizedMarketCapForPrimaryCurrency(market, primaryCurrency, receiptCurrency, fxContext);
+  const normalizedFundamentalsMarketCap = normalizedCurrency(fundamentals.reportedMarketCapCurrency) === primaryCurrency
+    ? fundamentals.reportedMarketCap ?? null
+    : null;
+
   return {
-    market: market ? {
+    market: {
       ...market,
-      price: scaleFinite(market.price, 1 / ratio) ?? null,
-      yearHigh: scaleFinite(market.yearHigh, 1 / ratio) ?? null,
-      yearLow: scaleFinite(market.yearLow, 1 / ratio) ?? null,
-      sharesOutstanding: scaleFinite(market.sharesOutstanding, ratio) ?? null,
-    } : null,
-    fundamentals,
+      price: convertedPrice === null ? null : convertedPrice / ratio,
+      currency: primaryCurrency,
+      yearHigh: null,
+      yearLow: null,
+      marketCap: marketCap.value ?? normalizedFundamentalsMarketCap,
+      marketCapAsOf: marketCap.value !== null
+        ? marketCap.asOf
+        : normalizedFundamentalsMarketCap !== null
+          ? fundamentals.reportedMarketCapDate ?? null
+          : null,
+      marketCapCurrency: marketCap.value !== null || normalizedFundamentalsMarketCap !== null ? primaryCurrency : null,
+      sharesOutstanding: issuerShares,
+      sharesOutstandingAsOf: issuerShares !== null ? fundamentals.reportedSharesDate ?? null : null,
+      priceHistory: undefined,
+      dividendEvents: undefined,
+    },
+    fundamentals: {
+      ...fundamentals,
+      reportedValuation: undefined,
+    },
     warning: null,
   };
 }
