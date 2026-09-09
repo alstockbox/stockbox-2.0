@@ -63,7 +63,8 @@ jobs:
           git add tests/analysis/archetypes.test.ts
           git diff --cached --check
           git diff --cached --name-only
-          test "$(git diff --cached --name-only)" = "tests/analysis/archetypes.test.ts"
+          expected="$(printf '%s\n' '.github/workflows/tmp-archetype-determinism.yml' 'tests/analysis/archetypes.test.ts')"
+          test "$(git diff --cached --name-only)" = "$expected"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "test: make archetype valuation diagnostics deterministic"
