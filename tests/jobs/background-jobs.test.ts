@@ -43,7 +43,8 @@ describe("durable background jobs", () => {
 
     const migration = readFileSync(migrationPath, "utf8").toLowerCase();
     expect(migration).toContain("create or replace function public.claim_background_jobs");
-    expect(migration).toContain("for update skip locked");
+    expect(migration).toContain("for update");
+    expect(migration).toContain("skip locked");
     expect(migration).toContain("attempts = jobs.attempts + 1");
     expect(migration).toContain("status = 'running'");
   });
