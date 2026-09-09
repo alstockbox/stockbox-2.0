@@ -51,6 +51,11 @@ function normalizedCurrency(value: string | null | undefined): string | null {
   return currency && /^[A-Z]{3}$/.test(currency) ? currency : null;
 }
 
+function normalizedTicker(value: string | null | undefined): string | null {
+  const ticker = value?.trim().toUpperCase();
+  return ticker || null;
+}
+
 function positiveFinite(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -151,6 +156,16 @@ export function verifyDepositaryReceiptFundamentalsIdentity(
     return {
       verified: false,
       reason: "Depositary-receipt fundamentals belong to a different issuer than the verified receipt-to-primary-listing mapping.",
+    };
+  }
+
+  const fundamentalsTicker = normalizedTicker(fundamentals.ticker);
+  const receiptTicker = normalizedTicker(representation?.receiptTicker);
+  const primaryListingTicker = normalizedTicker(representation?.primaryListingTicker);
+  if (!fundamentalsTicker || (fundamentalsTicker !== receiptTicker && fundamentalsTicker !== primaryListingTicker)) {
+    return {
+      verified: false,
+      reason: "Depositary-receipt fundamentals ticker does not match the verified receipt or primary-listing identity.",
     };
   }
 
