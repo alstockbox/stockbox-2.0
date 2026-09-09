@@ -15,6 +15,23 @@ describe("provider depositary-receipt wiring", () => {
     expect(source).toContain("if (valuationInputs.warning) warnings.push(valuationInputs.warning)");
   });
 
+  it("matches ADR fundamentals through the verified issuer/listing identity before generic ticker and entity rules", () => {
+    const source = readFileSync("src/lib/data/provider.ts", "utf8");
+    const matcher = source.match(
+      /function\s+fundamentalsMatchCompany\([\s\S]*?\n\}\n\nfunction\s+periodKey/,
+    )?.[0];
+
+    expect(matcher).toBeTruthy();
+    const adrIdentityIndex = matcher!.indexOf("verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals)");
+    const genericTickerIndex = matcher!.indexOf("normalizedProviderTicker(fundamentals.ticker)");
+
+    expect(adrIdentityIndex).toBeGreaterThanOrEqual(0);
+    expect(genericTickerIndex).toBeGreaterThanOrEqual(0);
+    expect(adrIdentityIndex).toBeLessThan(genericTickerIndex);
+    expect(matcher).toContain('if (company.securityType === "ADR") return true;');
+    expect(matcher).toContain("fundamentals.sourceCiks");
+  });
+
   it("resolves ECB FX only through the verified cross-currency ADR request gate and preserves provenance", () => {
     const providerSource = readFileSync("src/lib/data/provider.ts", "utf8");
     const fxSource = readFileSync("src/lib/data/depositary-receipt-provider-fx.ts", "utf8");
