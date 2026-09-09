@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RecommendationV3ShadowEvent } from "@/lib/analysis/recommendation-v3-shadow";
 import {
   advanceRecommendationCalibrationV3,
+  canPromoteRecommendationCalibrationV3,
   createRecommendationSnapshotV3,
   evaluateRecommendationOutcomeV3,
   evaluateRecommendationPerformanceV3,
@@ -217,7 +218,32 @@ describe("Recommendation learning V3", () => {
     expect(proposeRecommendationCalibrationV3(weakPerformance({ benchmarkCount: 10, directionalCount: 10 }))).toBeNull();
   });
 
-  it("enforces candidate -> backtest -> shadow -> approval -> production with explicit approval", () => {
+  it("keeps pure promotion previews fail-closed until cumulative evidence is present", () => {
+    expect(canPromoteRecommendationCalibrationV3("CANDIDATE", {})).toBe("CANDIDATE");
+    expect(canPromoteRecommendationCalibrationV3("CANDIDATE", { backtestImproved: true })).toBe("BACKTESTED");
+    expect(canPromoteRecommendationCalibrationV3("BACKTESTED", { shadowImproved: true })).toBe("BACKTESTED");
+    expect(canPromoteRecommendationCalibrationV3("BACKTESTED", {
+      backtestImproved: true,
+      shadowImproved: true,
+    })).toBe("SHADOW_VALIDATED");
+    expect(canPromoteRecommendationCalibrationV3("SHADOW_VALIDATED", {
+      backtestImproved: true,
+      shadowImproved: true,
+    })).toBe("SHADOW_VALIDATED");
+    expect(canPromoteRecommendationCalibrationV3("SHADOW_VALIDATED", {
+      backtestImproved: true,
+      shadowImproved: true,
+      explicitApproval: true,
+    })).toBe("APPROVED");
+    expect(canPromoteRecommendationCalibrationV3("APPROVED", {})).toBe("APPROVED");
+    expect(canPromoteRecommendationCalibrationV3("APPROVED", {
+      backtestImproved: true,
+      shadowImproved: true,
+      explicitApproval: true,
+    })).toBe("PRODUCTION");
+  });
+
+  it("enforces candidate -> backtest -> shadow -> approval -> production with cumulative evidence", () => {
     const candidate = proposeRecommendationCalibrationV3(weakPerformance(), {
       createdAt: "2026-09-08T12:00:00.000Z",
     });
@@ -225,13 +251,30 @@ describe("Recommendation learning V3", () => {
 
     expect(() => advanceRecommendationCalibrationV3(candidate, "PRODUCTION", { explicitApproval: true }))
       .toThrow("INVALID_CALIBRATION_STAGE_TRANSITION");
-
-    const backtested = advanceRecommendationCalibrationV3(candidate, "BACKTESTED");
-    expect(() => advanceRecommendationCalibrationV3(backtested, "SHADOW_VALIDATED"))
+    expect(() => advanceRecommendationCalibrationV3(candidate, "BACKTESTED"))
       .toThrow("CALIBRATION_BACKTEST_IMPROVEMENT_REQUIRED");
-    const shadow = advanceRecommendationCalibrationV3(backtested, "SHADOW_VALIDATED", { backtestImproved: true });
-    const approved = advanceRecommendationCalibrationV3(shadow, "APPROVED", { shadowImproved: true });
 
+    const backtested = advanceRecommendationCalibrationV3(candidate, "BACKTESTED", {
+      backtestImproved: true,
+    });
+    expect(() => advanceRecommendationCalibrationV3(backtested, "SHADOW_VALIDATED", {
+      backtestImproved: true,
+    })).toThrow("CALIBRATION_SHADOW_IMPROVEMENT_REQUIRED");
+
+    const shadow = advanceRecommendationCalibrationV3(backtested, "SHADOW_VALIDATED", {
+      backtestImproved: true,
+      shadowImproved: true,
+    });
+    expect(() => advanceRecommendationCalibrationV3(shadow, "APPROVED", {
+      backtestImproved: true,
+      shadowImproved: true,
+    })).toThrow("CALIBRATION_EXPLICIT_APPROVAL_REQUIRED");
+
+    const approved = advanceRecommendationCalibrationV3(shadow, "APPROVED", {
+      backtestImproved: true,
+      shadowImproved: true,
+      explicitApproval: true,
+    });
     expect(() => advanceRecommendationCalibrationV3(approved, "PRODUCTION", {
       backtestImproved: true,
       shadowImproved: true,
