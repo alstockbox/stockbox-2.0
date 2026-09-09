@@ -153,6 +153,16 @@ describe("depositary receipt registry", () => {
     expect(report.pass).toBe(true);
   });
 
+  it("rejects surrounding whitespace in opaque issuer identities instead of silently normalizing registry data", () => {
+    const dirtyEntry = verifiedEntry({ issuerId: " issuer-novo " });
+    const report = qaDepositaryReceiptRegistry([dirtyEntry]);
+    const result = attachVerifiedDepositaryReceiptRepresentation(company(), [dirtyEntry]);
+
+    expect(report.nonCanonicalIssuerIdentitySecurityIds).toEqual(["adr:issuer-novo:nvo"]);
+    expect(report.pass).toBe(false);
+    expect(result.depositaryReceipt).toBeUndefined();
+  });
+
   it("tracks unverified ratios without treating issuer mapping as invalid", () => {
     const report = qaDepositaryReceiptRegistry([
       verifiedEntry({ ratioVerified: false, underlyingSharesPerReceipt: null, ratioSource: null, ratioAsOf: null }),
