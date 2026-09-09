@@ -1,0 +1,111 @@
+name: One-shot ADR primary-listing gate patch
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply exact fail-closed provider patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/provider.ts")
+          source = path.read_text()
+          old = '''  if (primaryListingCompany && valuationInputs.market?.price !== null) {
+            const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
+            providerDiagnostics.push(...primaryListingResolution.diagnostics);
+            if (primaryListingResolution.result.ok) {
+              const primaryListingMarket = primaryListingResolution.result.data;
+              if (primaryListingResolution.source) {
+                sources.push({
+                  ...primaryListingResolution.source,
+                  accessedAt,
+                  provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
+                  capability: "market_data",
+                  dataAsOf: primaryListingMarket.date,
+                  version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
+                });
+              }
+              const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
+                analysisCompany,
+                valuationInputs.market,
+                primaryListingMarket,
+              );
+              if (primaryListingReconciliation.status === "conflict") {
+                valuationInputs = disableDepositaryReceiptValuationInputs(
+                  market,
+                  fundamentals,
+                  primaryListingReconciliation.reason,
+                );
+                warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
+              } else if (primaryListingReconciliation.status === "unavailable") {
+                warnings.push(`ADR/ADS primary-listing reconciliation was unavailable: ${primaryListingReconciliation.reason}`);
+              }
+            }
+          }
+          '''
+          new = '''  if (primaryListingCompany && valuationInputs.market?.price !== null) {
+            const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
+            providerDiagnostics.push(...primaryListingResolution.diagnostics);
+            const primaryListingMarket = primaryListingResolution.result.ok ? primaryListingResolution.result.data : null;
+            if (primaryListingMarket && primaryListingResolution.source) {
+              sources.push({
+                ...primaryListingResolution.source,
+                accessedAt,
+                provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
+                capability: "market_data",
+                dataAsOf: primaryListingMarket.date,
+                version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
+              });
+            }
+            const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
+              analysisCompany,
+              valuationInputs.market,
+              primaryListingMarket,
+            );
+            if (primaryListingReconciliation.status !== "aligned") {
+              valuationInputs = disableDepositaryReceiptValuationInputs(
+                market,
+                fundamentals,
+                primaryListingReconciliation.reason,
+              );
+              warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
+            }
+          }
+          '''
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one provider block match, found {count}")
+          path.write_text(source.replace(old, new, 1))
+          PY
+      - run: npm ci
+      - name: Prove targeted RED test is now GREEN
+        run: npm test -- tests/data/provider-depositary-receipt-wiring.test.ts
+      - name: Commit only the provider fix and remove this workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-adr-primary-listing-gate.yml
+          git add src/lib/data/provider.ts
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/workflows/one-shot-adr-primary-listing-gate.yml src/lib/data/provider.ts "
+          git commit -m "fix: require aligned ADR primary-listing quote"
+          git push origin HEAD:fix/etf-investment-company-coverage
