@@ -12,6 +12,7 @@ const INVESTOR_INDEPENDENCE_AS_OF = "2026-05-07";
 const LATOUR_BOARD_URL = "https://www.latour.se/en/corporate-governance/the-board-of-directors";
 const LATOUR_INDEPENDENCE_STATEMENT_URL = "https://www.latour.se/~/media/Files/L/latour/documents/mtn-program/prospectus/Latour%20-%20Base%20Prospectus%2013%20February%202026%20FINAL%20locked.pdf";
 const LATOUR_INDEPENDENCE_AS_OF = "2026-02-13";
+const SVOLDER_BOARD_URL = "https://svolder.se/bolagsstyrning/styrelse/";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -48,6 +49,15 @@ const LATOUR_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Johan Hjertonsson", independentFromCompanyManagement: false, independentFromMajorShareholders: true },
   { name: "Lena Olving", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Hélène Barnekow", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+];
+
+const SVOLDER_CURRENT_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
+  { name: "Fredrik Carlsson", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Johan Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Anna-Maria Lundström Törnblom", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Clas-Göran Lyrhem", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Magnus Malm", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Pernilla Ramslöv", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
 ];
 
 export type OfficialInvestmentCompanyGovernanceData = {
@@ -206,6 +216,30 @@ export function parseLatourOfficialBoardRoster(html: string): string[] | null {
   return names.length === LATOUR_2026_DIRECTORS.length ? names : null;
 }
 
+export function parseSvolderOfficialBoardRoster(html: string): string[] | null {
+  const text = htmlToText(html);
+  if (!/\bstyrelsens ledamöter är samtliga oberoende i förhållande till bolaget och bolagsledningen\b/i.test(text)) return null;
+  if (!/anna-maria lundström törnblom (?:är )?beroende i förhållande till svolders största aktieägare\b/i.test(text)) return null;
+
+  const headingPattern = /<h2\b[^>]*>([\s\S]*?)<\/h2>/gi;
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(html)) !== null) {
+    const heading = htmlToText(match[1]);
+    const director = SVOLDER_CURRENT_DIRECTORS.find(
+      (candidate) => normalizeDirectorName(candidate.name) === normalizeDirectorName(heading),
+    );
+    if (!director) continue;
+    const normalized = normalizeDirectorName(director.name);
+    if (seen.has(normalized)) return null;
+    seen.add(normalized);
+    names.push(director.name);
+  }
+
+  return names.length === SVOLDER_CURRENT_DIRECTORS.length ? names : null;
+}
+
 function rosterMatchesVerifiedEvidence(
   currentRoster: string[],
   verifiedDirectors: InvestmentCompanyDirectorGovernanceEvidence[],
@@ -259,6 +293,17 @@ function issuerConfig(company: CompanySearchResult): GovernanceIssuerConfig | nu
     };
   }
 
+  const isSvolder = /\bsvol(?:-[ab])?\.st\b/.test(identity) || identity.includes("svolder");
+  if (isSvolder) {
+    return {
+      issuerName: "Svolder",
+      boardUrl: SVOLDER_BOARD_URL,
+      evidenceUrl: SVOLDER_BOARD_URL,
+      directors: SVOLDER_CURRENT_DIRECTORS,
+      parseRoster: parseSvolderOfficialBoardRoster,
+    };
+  }
+
   return null;
 }
 
@@ -292,33 +337,36 @@ export async function fetchOfficialInvestmentCompanyGovernance(
     if (!roster || !rosterMatchesVerifiedEvidence(roster, config.directors)) {
       return failure(
         "official_governance_roster_changed",
-        `The current official ${config.issuerName} board roster no longer matches the versioned independence evidence; governance remains N/A until the evidence is reverified.`,
+        `The current official ${config.issuerName} board roster no longer matches the verified independence evidence; governance remains N/A until the evidence is reverified.`,
       );
     }
 
     const accessedAt = new Date().toISOString();
     const asOf = accessedAt.slice(0, 10);
+    const sameLiveEvidencePage = config.evidenceUrl === config.boardUrl;
     const sources: AnalysisSource[] = [
       {
         name: `${config.issuerName} current Board of Directors`,
         url: config.boardUrl,
         accessedAt,
-        freshness: "Live official board roster revalidated at analysis time with cache disabled.",
+        freshness: sameLiveEvidencePage
+          ? "Live official board roster and complete two-axis independence evidence revalidated at analysis time with cache disabled."
+          : "Live official board roster revalidated at analysis time with cache disabled.",
         provider: PROVIDER_ID,
         version: PROVIDER_VERSION,
         capability: "specialized",
         dataAsOf: asOf,
       },
-      {
+      ...(!sameLiveEvidencePage ? [{
         name: `${config.issuerName} 2026 independence statement`,
         url: config.evidenceUrl,
         accessedAt,
         freshness: "Versioned 2026 issuer governance independence evidence; usable only while the live board roster still matches exactly.",
         provider: PROVIDER_ID,
         version: PROVIDER_VERSION,
-        capability: "specialized",
+        capability: "specialized" as const,
         dataAsOf: config.evidenceAsOf ?? asOf,
-      },
+      }] : []),
     ];
 
     return {
