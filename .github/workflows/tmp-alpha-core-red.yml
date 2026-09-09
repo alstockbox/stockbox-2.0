@@ -1,4 +1,4 @@
-name: Temporary Alpha Core Verification
+name: Temporary Alpha Core Full Verification
 
 on:
   push:
@@ -9,44 +9,28 @@ permissions:
   contents: read
 
 jobs:
-  alpha-core-verification:
+  alpha-core-full-verification:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Run Alpha pure-core contracts
-        run: >-
-          npx vitest run
-          tests/analysis/alpha-breakout-intelligence.test.ts
-          tests/analysis/alpha-market-cap-policy.test.ts
-          tests/analysis/alpha-outcomes.test.ts
-          tests/analysis/alpha-prediction-snapshot.test.ts
-          tests/analysis/alpha-report-adapter.test.ts
-          tests/analysis/alpha-weight-profiles.test.ts
-          tests/analysis/hidden-gems-ranking.test.ts
-      - name: Lint Alpha pure-core files
-        run: >-
-          npx eslint
-          src/lib/alpha/types.ts
-          src/lib/alpha/market-cap.ts
-          src/lib/alpha/weights.ts
-          src/lib/alpha/engine.ts
-          src/lib/alpha/hidden-gems.ts
-          src/lib/alpha/outcomes.ts
-          src/lib/alpha/report-adapter.ts
-          src/lib/alpha/prediction-snapshot.ts
-          src/lib/alpha/index.ts
-          tests/analysis/alpha-breakout-intelligence.test.ts
-          tests/analysis/alpha-market-cap-policy.test.ts
-          tests/analysis/alpha-outcomes.test.ts
-          tests/analysis/alpha-prediction-snapshot.test.ts
-          tests/analysis/alpha-report-adapter.test.ts
-          tests/analysis/alpha-weight-profiles.test.ts
-          tests/analysis/hidden-gems-ranking.test.ts
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit full dependency tree
+        run: npm audit --audit-level=high
+      - name: Audit production dependency tree
+        run: npm audit --omit=dev --audit-level=high
+      - name: Lint
+        run: npm run lint
       - name: Typecheck
         run: npm run typecheck
+      - name: Full unit suite excluding archetype file
+        run: npm test -- --exclude tests/analysis/archetypes.test.ts
+      - name: Archetype suite
+        run: npm test -- tests/analysis/archetypes.test.ts
+      - name: Production build
+        run: npm run build
