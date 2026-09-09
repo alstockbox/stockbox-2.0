@@ -1,7 +1,11 @@
-import type { RecommendationOutcomeHorizonV3 } from "@/lib/analysis/recommendation-learning-v3";
+import {
+  RECOMMENDATION_OUTCOME_POLICY_VERSION,
+  type RecommendationOutcomeHorizonV3,
+} from "@/lib/analysis/recommendation-learning-v3";
 import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const DAY_MS = 86_400_000;
 const RETURN_RELATIVE_TOLERANCE = 1e-9;
 
 export type RecommendationOutcomePersistInputV3 = {
@@ -78,6 +82,13 @@ function returnMatches(stored: number, computed: number): boolean {
   return Math.abs(stored - computed) <= RETURN_RELATIVE_TOLERANCE * scale;
 }
 
+function lagDaysFromTimeline(expectedAt: string, evaluatedAt: string): number | null {
+  const expectedMs = Date.parse(expectedAt);
+  const evaluatedMs = Date.parse(evaluatedAt);
+  if (!Number.isFinite(expectedMs) || !Number.isFinite(evaluatedMs) || evaluatedMs < expectedMs) return null;
+  return Math.max(0, Math.round((evaluatedMs - expectedMs) / DAY_MS));
+}
+
 function hasAnyBenchmarkEvidence(input: RecommendationOutcomePersistInputV3): boolean {
   return [
     input.benchmarkTicker,
@@ -95,19 +106,30 @@ function hasAnyBenchmarkEvidence(input: RecommendationOutcomePersistInputV3): bo
 /**
  * Explicit allowlist mapper for objective recommendation outcomes.
  * No user identity, personalized score, portfolio state, provider payload or AI
- * output is accepted by this persistence contract. Benchmark-policy lineage is
- * stamped server-side so callers cannot accidentally persist current evidence
- * under an arbitrary or stale benchmark policy version.
+ * output is accepted by this persistence contract. Outcome and benchmark policy
+ * lineage are bound to canonical server constants rather than caller authority.
  *
- * Evidence is validated rather than repaired: returns must reproduce from the
- * persisted prices, and benchmark evidence must be either complete or absent.
+ * Evidence is validated rather than repaired: timeline/lag, returns and benchmark
+ * evidence must reproduce from the persisted inputs or the write is rejected.
  */
 export function toRecommendationOutcomeV3Row(
   input: RecommendationOutcomePersistInputV3,
   updatedAt = input.evaluatedAt,
 ): RecommendationOutcomeRowV3 {
+  if (input.policyVersion !== RECOMMENDATION_OUTCOME_POLICY_VERSION) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_POLICY_VERSION");
+  }
+
   if (!Number.isFinite(input.lagDays) || !Number.isInteger(input.lagDays) || input.lagDays < 0) {
     throw new Error("INVALID_RECOMMENDATION_OUTCOME_LAG_DAYS");
+  }
+
+  const canonicalLagDays = lagDaysFromTimeline(input.expectedAt, input.evaluatedAt);
+  if (canonicalLagDays === null) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_TIMELINE");
+  }
+  if (canonicalLagDays !== input.lagDays) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_LAG_EVIDENCE");
   }
 
   if (!finitePositive(input.entryPrice) || !finitePositive(input.observedPrice)) {
@@ -172,7 +194,7 @@ export function toRecommendationOutcomeV3Row(
 
   return {
     recommendation_audit_id: input.recommendationAuditId.trim(),
-    policy_version: input.policyVersion,
+    policy_version: RECOMMENDATION_OUTCOME_POLICY_VERSION,
     benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
     horizon: input.horizon,
     expected_at: input.expectedAt,
