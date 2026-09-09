@@ -60,34 +60,29 @@ export async function enqueueBackgroundJob(input: {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Supabase admin client is unavailable." };
 
-  const now = new Date().toISOString();
-  const insert = await admin.from("background_jobs").insert({
-    kind: input.kind,
-    status: "queued",
-    payload: input.payload,
-    dedupe_key: input.dedupeKey ?? null,
-    max_attempts: Math.max(1, Math.min(input.maxAttempts ?? 5, 10)),
-    available_at: input.availableAt ?? now,
-    updated_at: now,
-  }).select("id").single();
+  const result = await admin.rpc("enqueue_background_job", {
+    p_kind: input.kind,
+    p_payload: input.payload,
+    p_dedupe_key: input.dedupeKey ?? null,
+    p_max_attempts: Math.max(1, Math.min(input.maxAttempts ?? 5, 10)),
+    p_available_at: input.availableAt ?? new Date().toISOString(),
+  });
 
-  if (!insert.error && insert.data) {
-    return { ok: true, id: String(insert.data.id), deduplicated: false };
+  const row = Array.isArray(result.data)
+    ? result.data[0] as Record<string, unknown> | undefined
+    : result.data as Record<string, unknown> | null;
+
+  if (!result.error && row?.id) {
+    return {
+      ok: true,
+      id: String(row.id),
+      deduplicated: row.deduplicated === true,
+    };
   }
-  if (insert.error?.code === "23505" && input.dedupeKey) {
-    const existing = await admin.from("background_jobs")
-      .select("id")
-      .eq("kind", input.kind)
-      .eq("dedupe_key", input.dedupeKey)
-      .in("status", ["queued", "running"])
-      .maybeSingle();
-    if (existing.data) {
-      return { ok: true, id: String(existing.data.id), deduplicated: true };
-    }
-  }
+
   return {
     ok: false,
-    error: sanitizeDiagnosticMessage(insert.error?.message, "Unable to enqueue background job."),
+    error: sanitizeDiagnosticMessage(result.error?.message, "Unable to enqueue background job."),
   };
 }
 
