@@ -1,5 +1,6 @@
 import type { CompanySearchResult } from "@/lib/analysis/types";
 import { commonCompanies } from "./common-companies";
+import { reconcileDepositaryReceiptSearchIdentities } from "./depositary-receipt-search-identity";
 import { entityIdentityFor } from "./entity-identities";
 import { fetchSecTickerUniverse } from "./sec";
 import { providerDiagnostic, type AdapterResult, type CompanySearchProvider, type ProviderCapabilities } from "./providers";
@@ -540,7 +541,8 @@ export async function searchCompanyCatalog(
       merged.set(key, mergeCompany(merged.get(key), enriched));
     }
   }
-  return [...merged.values()]
+  const reconciled = reconcileDepositaryReceiptSearchIdentities([...merged.values()]);
+  return reconciled
     .flatMap((company) => {
       const match = scoreSearchMatch(company, normalizedQuery);
       return match ? [{ company, match }] : [];
