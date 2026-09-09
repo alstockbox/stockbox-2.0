@@ -9,6 +9,7 @@ import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analys
 import { evaluateRecommendationPerformanceRollupsV3 } from "@/lib/analysis/recommendation-performance-rollup-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 import { persistRecommendationCalibrationCandidateV3 } from "@/lib/db/recommendation-calibration-v3";
+import { persistRecommendationPerformanceRollupsV3 } from "@/lib/db/recommendation-performance-rollups-v3";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recommendationOutcomeTrackingGateV3 } from "./recommendation-outcome-jobs-v3";
 
@@ -234,6 +235,8 @@ export type RecommendationCalibrationEvaluationResultV3 = {
   outcomes: number;
   performanceSlices: number;
   performanceRollups: number;
+  performanceRollupsPersisted: number;
+  performanceRollupPersistenceFailed: number;
   basePerformanceRollups: number;
   dimensionPerformanceRollups: number;
   driftSlices: number;
@@ -255,6 +258,8 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
       outcomes: 0,
       performanceSlices: 0,
       performanceRollups: 0,
+      performanceRollupsPersisted: 0,
+      performanceRollupPersistenceFailed: 0,
       basePerformanceRollups: 0,
       dimensionPerformanceRollups: 0,
       driftSlices: 0,
@@ -265,26 +270,36 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
     };
   }
 
-  const outcomes = await loadRecommendationOutcomesForCalibrationV3({ limit: options.limit });
+  const sourceLimit = Math.max(30, Math.min(options.limit ?? 5_000, 20_000));
+  const dimensionSampleGate = Math.max(20, options.minimumBenchmarkSample ?? 30);
+  const outcomes = await loadRecommendationOutcomesForCalibrationV3({ limit: sourceLimit });
   const performance = evaluateRecommendationPerformanceV3(outcomes);
   const performanceRollups = evaluateRecommendationPerformanceRollupsV3(outcomes, {
-    minimumDimensionBenchmarkSample: options.minimumBenchmarkSample,
+    minimumDimensionBenchmarkSample: dimensionSampleGate,
   });
   const basePerformanceRollups = performanceRollups.filter((rollup) => rollup.scope === "BASE").length;
   const dimensionPerformanceRollups = performanceRollups.length - basePerformanceRollups;
   const createdAt = (options.now ?? new Date()).toISOString();
   const candidates = performance.flatMap((slice) => {
     const candidate = proposeRecommendationCalibrationV3(slice, {
-      minimumBenchmarkSample: options.minimumBenchmarkSample,
+      minimumBenchmarkSample: dimensionSampleGate,
       createdAt,
     });
     return candidate ? [candidate] : [];
   });
 
+  const rollupPersistence = await persistRecommendationPerformanceRollupsV3(performanceRollups, {
+    sourceLimit,
+    dimensionSampleGate,
+    evaluatedAt: createdAt,
+  });
+  const performanceRollupsPersisted = rollupPersistence.ok ? rollupPersistence.persisted : 0;
+  const performanceRollupPersistenceFailed = rollupPersistence.ok ? 0 : 1;
+
   let created = 0;
   let refreshed = 0;
   let deduplicated = 0;
-  let failed = 0;
+  let failed = performanceRollupPersistenceFailed;
   for (const candidate of candidates) {
     const persisted = await persistRecommendationCalibrationCandidateV3(candidate);
     if (!persisted.ok) {
@@ -302,6 +317,8 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
     outcomes: outcomes.length,
     performanceSlices: performance.length,
     performanceRollups: performanceRollups.length,
+    performanceRollupsPersisted,
+    performanceRollupPersistenceFailed,
     basePerformanceRollups,
     dimensionPerformanceRollups,
     driftSlices: candidates.length,
