@@ -1,0 +1,23 @@
+name: Temporary Yahoo corporate actions TDD
+
+on:
+  push:
+    branches:
+      - fix/yahoo-max-corporate-actions-20260909
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run Yahoo corporate-action regression
+        run: npx vitest run tests/data/yahoo-corporate-actions-history.test.ts
