@@ -86,6 +86,58 @@ describe("Recommendation specialist live audit V3", () => {
     expect(persistAudit).toHaveBeenCalledWith(result.event);
   });
 
+  it("reports specialist audit unavailability instead of masking a classified specialist as not_specialist", async () => {
+    const persistAudit = vi.fn();
+    const missingAnalysis = {
+      ...etfReport(),
+      securityAnalysis: undefined,
+    } as unknown as UniversalSecurityReport;
+
+    expect(await persistSpecialistRecommendationLiveAuditV3(missingAnalysis, {
+      recommendationEnabled: true,
+      recommendationKilled: false,
+      dependencies: { persistAudit },
+    })).toEqual({
+      status: "unavailable",
+      error: "SPECIALIST_RECOMMENDATION_V3_AUDIT_UNAVAILABLE",
+    });
+    expect(persistAudit).not.toHaveBeenCalled();
+  });
+
+  it("reports specialist audit unavailability when specialist identity is missing", async () => {
+    const persistAudit = vi.fn();
+    const missingTicker = {
+      ...etfReport(),
+      ticker: "   ",
+    } as unknown as UniversalSecurityReport;
+
+    expect(await persistSpecialistRecommendationLiveAuditV3(missingTicker, {
+      recommendationEnabled: true,
+      recommendationKilled: false,
+      dependencies: { persistAudit },
+    })).toEqual({
+      status: "unavailable",
+      error: "SPECIALIST_RECOMMENDATION_V3_AUDIT_UNAVAILABLE",
+    });
+    expect(persistAudit).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary operating-company reports classified as not_specialist", async () => {
+    const persistAudit = vi.fn();
+    const ordinary = {
+      ...etfReport(),
+      securityClassification: undefined,
+      securityAnalysis: undefined,
+    } as unknown as UniversalSecurityReport;
+
+    expect(await persistSpecialistRecommendationLiveAuditV3(ordinary, {
+      recommendationEnabled: true,
+      recommendationKilled: false,
+      dependencies: { persistAudit },
+    })).toEqual({ status: "not_specialist" });
+    expect(persistAudit).not.toHaveBeenCalled();
+  });
+
   it("fails open when audit storage fails or throws", async () => {
     const unavailable = await persistSpecialistRecommendationLiveAuditV3(etfReport(), {
       recommendationEnabled: true,
