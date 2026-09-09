@@ -15,6 +15,9 @@ export type BackgroundJob = {
 
 export type BackgroundJobHandler = (job: BackgroundJob) => Promise<void>;
 
+const BACKGROUND_JOB_CLAIM_UNAVAILABLE = "Background job claim is temporarily unavailable.";
+const BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE = "Background job lease update is temporarily unavailable.";
+
 export function retryScheduleForJob(
   job: Pick<BackgroundJob, "attempts" | "maxAttempts">,
   now = new Date(),
@@ -116,16 +119,16 @@ async function recoverStaleBackgroundJobs(input: {
   now: Date;
 }): Promise<void> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
   const stale = await admin.from("background_jobs")
     .select("id,attempts,max_attempts,locked_at")
     .eq("status", "running")
     .lt("locked_at", input.staleCutoff)
     .in("kind", input.kinds)
     .limit(250);
-  if (stale.error) return;
+  if (stale.error) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
 
-  await Promise.all((stale.data ?? []).map(async (row) => {
+  const recoveryResults = await Promise.all((stale.data ?? []).map(async (row) => {
     const attempts = Number(row.attempts ?? 0);
     const schedule = staleJobRecoverySchedule({
       attempts,
@@ -144,8 +147,11 @@ async function recoverStaleBackgroundJobs(input: {
       .eq("status", "running")
       .eq("attempts", attempts);
     if (typeof row.locked_at === "string") update = update.eq("locked_at", row.locked_at);
-    await update;
+    return update;
   }));
+  if (recoveryResults.some((result) => result.error)) {
+    throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
+  }
 }
 
 export async function claimBackgroundJobs(input: {
@@ -153,8 +159,9 @@ export async function claimBackgroundJobs(input: {
   limit?: number;
   staleAfterMinutes?: number;
 }): Promise<BackgroundJob[]> {
+  if (!input.kinds.length) return [];
   const admin = createAdminClient();
-  if (!admin || !input.kinds.length) return [];
+  if (!admin) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
   const now = new Date();
   const staleCutoff = new Date(
     now.getTime() - Math.max(5, input.staleAfterMinutes ?? 15) * 60_000,
@@ -166,14 +173,14 @@ export async function claimBackgroundJobs(input: {
     p_kinds: input.kinds,
     p_limit: Math.max(1, Math.min(input.limit ?? 10, 50)),
   });
-  if (claim.error) return [];
+  if (claim.error) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
 
   return (claim.data ?? []).map((row: unknown) => mapJob(row as Record<string, unknown>));
 }
 
 export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return false;
+  if (!admin) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   const now = new Date().toISOString();
   let update = admin.from("background_jobs").update({
     status: "completed",
@@ -186,12 +193,13 @@ export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean
     .eq("attempts", job.attempts);
   update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
   const result = await update.select("id").maybeSingle();
+  if (result.error) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   return Boolean(result.data);
 }
 
 export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return false;
+  if (!admin) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   const now = new Date();
   const schedule = retryScheduleForJob(job, now);
   let update = admin.from("background_jobs").update({
@@ -206,6 +214,7 @@ export async function failBackgroundJob(job: BackgroundJob, error: unknown): Pro
     .eq("attempts", job.attempts);
   update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
   const result = await update.select("id").maybeSingle();
+  if (result.error) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   return Boolean(result.data);
 }
 
@@ -228,14 +237,16 @@ export async function runBackgroundJobs(input: {
       const applied = await failBackgroundJob(job, new Error(`No handler registered for ${job.kind}.`));
       return applied ? "failed" as const : "superseded" as const;
     }
+
     try {
       await handler(job);
-      const applied = await completeBackgroundJob(job);
-      return applied ? "completed" as const : "superseded" as const;
     } catch (error) {
       const applied = await failBackgroundJob(job, error);
       return applied ? "failed" as const : "superseded" as const;
     }
+
+    const applied = await completeBackgroundJob(job);
+    return applied ? "completed" as const : "superseded" as const;
   }));
 
   return {
