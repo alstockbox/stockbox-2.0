@@ -106,6 +106,35 @@ describe("Twelve Data analyst estimates adapter", () => {
     expect(result.data.epsRevisions).toEqual([]);
   });
 
+  it("rejects data from an endpoint that reports a different security symbol", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json({
+        meta: { symbol: "MSFT", currency: "USD" },
+        earnings_estimate: [
+          { date: "2026-12-31", period: "current_year", avg_estimate: 5 },
+          { date: "2027-12-31", period: "next_year", avg_estimate: 6 },
+        ],
+        status: "ok",
+      }))
+      .mockResolvedValueOnce(json({
+        meta: { symbol: "AAPL", currency: "USD" },
+        revenue_estimate: [
+          { date: "2026-12-31", period: "current_year", avg_estimate: 100 },
+          { date: "2027-12-31", period: "next_year", avg_estimate: 110 },
+        ],
+        status: "ok",
+      }))
+      .mockResolvedValueOnce(json({ meta: { symbol: "AAPL", currency: "USD" }, eps_revision: [], status: "ok" }));
+
+    const result = await fetchTwelveDataEstimateSnapshot(company, "key");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.diagnostic.status).toBe("partial");
+    expect(result.data.coverage).toBeCloseTo(2 / 3, 10);
+    expect(result.data.forwardEstimates.nextYearEpsGrowth).toBeNull();
+    expect(result.data.forwardEstimates.nextYearRevenueGrowth).toBeCloseTo(0.1, 10);
+  });
+
   it("stays unavailable when no API key is configured", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const result = await fetchTwelveDataEstimateSnapshot(company, "");
