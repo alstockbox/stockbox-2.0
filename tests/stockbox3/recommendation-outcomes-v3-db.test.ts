@@ -121,4 +121,10 @@ describe("Recommendation outcome V3 persistence boundary", () => {
       lagDays: 0,
     }))).toThrow("INVALID_RECOMMENDATION_OUTCOME_LAG_EVIDENCE");
   });
+
+  it("rejects blank security price-source evidence instead of persisting an unauditable outcome", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ securityPriceSource: "   " }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_SECURITY_PRICE_SOURCE",
+    );
+  });
 });
