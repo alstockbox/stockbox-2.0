@@ -1,0 +1,62 @@
+name: One-shot format SEC ADR issuer guard
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Normalize exact SEC guard block
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/data/sec.ts")
+          source = path.read_text()
+          start_anchor = "  const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));\n"
+          end_anchor = "  const classification = classifyCompany("
+          start = source.index(start_anchor)
+          end = source.index(end_anchor, start)
+          replacement = '''  const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));
+            const mismatchedSourceCik = availableFactSets
+              .map((factSet) => padCik(factSet.cik))
+              .find((sourceCik) => !allowedSourceCiks.has(sourceCik));
+            if (mismatchedSourceCik) {
+              return {
+                ok: false,
+                reason: "invalid_row",
+                message: "SEC Companyfacts issuer identity does not match the requested canonical issuer CIK.",
+                diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "invalid_row"),
+              };
+            }
+            const facts = mergeSecCompanyFacts(availableFactSets);
+            '''
+          path.write_text(source[:start] + replacement + source[end:])
+          PY
+      - run: npm ci
+      - run: npm test -- tests/data/depositary-receipt-sec-issuer-identity.test.ts
+      - name: Commit normalized SEC guard and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-format-sec-adr-issuer.yml
+          git add src/lib/data/sec.ts
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/workflows/one-shot-format-sec-adr-issuer.yml src/lib/data/sec.ts "
+          git commit -m "style: normalize SEC ADR issuer guard"
+          git push origin HEAD:fix/etf-investment-company-coverage
