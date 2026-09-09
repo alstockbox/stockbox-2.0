@@ -893,7 +893,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
     };
   }
   const facts = mergeSecCompanyFacts(availableFactSets);
-    const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: identity ? company.name : facts.entityName || company.name });
+  const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: identity ? company.name : facts.entityName || company.name });
   const { annualPeriods, trailingTwelveMonths, priorTrailingTwelveMonths } = resolveSecFinancialPeriods(
     facts,
     classification.analysisArchetype,
