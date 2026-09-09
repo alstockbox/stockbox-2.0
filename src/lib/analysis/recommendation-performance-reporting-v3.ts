@@ -1,4 +1,7 @@
-import type { RecommendationOutcomeHorizonV3 } from "@/lib/analysis/recommendation-learning-v3";
+import {
+  RECOMMENDATION_OUTCOME_HORIZONS_V3,
+  type RecommendationOutcomeHorizonV3,
+} from "@/lib/analysis/recommendation-learning-v3";
 import type { RecommendationPerformanceRollupScopeV3 } from "@/lib/analysis/recommendation-performance-rollup-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 import type {
@@ -49,6 +52,17 @@ export type RecommendationPerformanceReportSelectionV3 =
       reason: "INVALID_QUERY" | "NOT_FOUND";
     };
 
+const PERFORMANCE_REPORT_HORIZONS_V3 = new Set<RecommendationOutcomeHorizonV3>(RECOMMENDATION_OUTCOME_HORIZONS_V3);
+const PERFORMANCE_REPORT_RATINGS_V3 = new Set<RecommendationV3Rating>([
+  "STRONG_BUY",
+  "BUY",
+  "WAIT",
+  "HOLD",
+  "REDUCE",
+  "SELL",
+  "UNAVAILABLE",
+]);
+
 function normalizedRequiredDimension(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -69,23 +83,37 @@ function hasForbiddenDimensions(
   return false;
 }
 
-function normalizedQueryDimensions(
+function normalizedQuery(
   query: RecommendationPerformanceReportQueryV3,
 ):
   | {
       scope: RecommendationPerformanceRollupScopeV3;
+      horizon: RecommendationOutcomeHorizonV3;
+      rating: RecommendationV3Rating;
       sector: string | null;
       analysisArchetype: string | null;
       modelVersion: string | null;
       recommendationPolicyVersion: string | null;
     }
   | null {
-  const raw = query as unknown as Record<string, unknown>;
+  const value = query as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
 
-  if (query.scope === "BASE") {
+  if (typeof raw.horizon !== "string"
+      || !PERFORMANCE_REPORT_HORIZONS_V3.has(raw.horizon as RecommendationOutcomeHorizonV3)) return null;
+  if (typeof raw.rating !== "string"
+      || !PERFORMANCE_REPORT_RATINGS_V3.has(raw.rating as RecommendationV3Rating)) return null;
+
+  const horizon = raw.horizon as RecommendationOutcomeHorizonV3;
+  const rating = raw.rating as RecommendationV3Rating;
+
+  if (raw.scope === "BASE") {
     if (hasForbiddenDimensions(raw, new Set())) return null;
     return {
       scope: "BASE",
+      horizon,
+      rating,
       sector: null,
       analysisArchetype: null,
       modelVersion: null,
@@ -93,12 +121,14 @@ function normalizedQueryDimensions(
     };
   }
 
-  if (query.scope === "SECTOR") {
+  if (raw.scope === "SECTOR") {
     if (hasForbiddenDimensions(raw, new Set(["sector"]))) return null;
     const sector = normalizedRequiredDimension(raw.sector);
     if (sector === null) return null;
     return {
       scope: "SECTOR",
+      horizon,
+      rating,
       sector,
       analysisArchetype: null,
       modelVersion: null,
@@ -106,12 +136,14 @@ function normalizedQueryDimensions(
     };
   }
 
-  if (query.scope === "ANALYSIS_ARCHETYPE") {
+  if (raw.scope === "ANALYSIS_ARCHETYPE") {
     if (hasForbiddenDimensions(raw, new Set(["analysisArchetype"]))) return null;
     const analysisArchetype = normalizedRequiredDimension(raw.analysisArchetype);
     if (analysisArchetype === null) return null;
     return {
       scope: "ANALYSIS_ARCHETYPE",
+      horizon,
+      rating,
       sector: null,
       analysisArchetype,
       modelVersion: null,
@@ -119,7 +151,7 @@ function normalizedQueryDimensions(
     };
   }
 
-  if (query.scope !== "MODEL_LINEAGE") return null;
+  if (raw.scope !== "MODEL_LINEAGE") return null;
   if (hasForbiddenDimensions(raw, new Set(["analysisArchetype", "modelVersion", "recommendationPolicyVersion"]))) return null;
   const analysisArchetype = normalizedRequiredDimension(raw.analysisArchetype);
   const modelVersion = normalizedRequiredDimension(raw.modelVersion);
@@ -127,6 +159,8 @@ function normalizedQueryDimensions(
   if (analysisArchetype === null || modelVersion === null || recommendationPolicyVersion === null) return null;
   return {
     scope: "MODEL_LINEAGE",
+    horizon,
+    rating,
     sector: null,
     analysisArchetype,
     modelVersion,
@@ -148,24 +182,25 @@ function lineageOf(
 
 /**
  * Selects one exact reporting slice from one already-validated snapshot.
- * There is deliberately no fallback from a requested gated dimension to BASE:
- * absence means the requested evidence slice is unavailable at this snapshot.
+ * Runtime query validation is strict so malformed horizon/rating/scope input is
+ * never misreported as an evidence miss. There is deliberately no fallback
+ * from a requested gated dimension to BASE.
  */
 export function selectRecommendationPerformanceRollupV3(
   snapshot: RecommendationPerformanceRollupSnapshotV3,
   query: RecommendationPerformanceReportQueryV3,
 ): RecommendationPerformanceReportSelectionV3 {
-  const dimensions = normalizedQueryDimensions(query);
-  if (dimensions === null) return { ok: false, reason: "INVALID_QUERY" };
+  const normalized = normalizedQuery(query);
+  if (normalized === null) return { ok: false, reason: "INVALID_QUERY" };
 
   const rollup = snapshot.rollups.find((candidate) =>
-    candidate.scope === dimensions.scope
-    && candidate.horizon === query.horizon
-    && candidate.rating === query.rating
-    && candidate.sector === dimensions.sector
-    && candidate.analysisArchetype === dimensions.analysisArchetype
-    && candidate.modelVersion === dimensions.modelVersion
-    && candidate.recommendationPolicyVersion === dimensions.recommendationPolicyVersion);
+    candidate.scope === normalized.scope
+    && candidate.horizon === normalized.horizon
+    && candidate.rating === normalized.rating
+    && candidate.sector === normalized.sector
+    && candidate.analysisArchetype === normalized.analysisArchetype
+    && candidate.modelVersion === normalized.modelVersion
+    && candidate.recommendationPolicyVersion === normalized.recommendationPolicyVersion);
 
   if (!rollup) return { ok: false, reason: "NOT_FOUND" };
   return { ok: true, lineage: lineageOf(snapshot), rollup };

@@ -112,6 +112,31 @@ describe("Recommendation performance reporting selection V3", () => {
     expect(result).toEqual({ ok: false, reason: "INVALID_QUERY" });
   });
 
+  it("rejects unknown horizons instead of treating malformed input as missing evidence", () => {
+    const result = selectRecommendationPerformanceRollupV3(snapshot([row()]), {
+      scope: "BASE",
+      horizon: "45d",
+      rating: "BUY",
+    } as never);
+
+    expect(result).toEqual({ ok: false, reason: "INVALID_QUERY" });
+  });
+
+  it("rejects unknown ratings instead of treating malformed input as missing evidence", () => {
+    const result = selectRecommendationPerformanceRollupV3(snapshot([row()]), {
+      scope: "BASE",
+      horizon: "30d",
+      rating: "ACCUMULATE",
+    } as never);
+
+    expect(result).toEqual({ ok: false, reason: "INVALID_QUERY" });
+  });
+
+  it("rejects non-object runtime input without throwing", () => {
+    const result = selectRecommendationPerformanceRollupV3(snapshot([row()]), null as never);
+    expect(result).toEqual({ ok: false, reason: "INVALID_QUERY" });
+  });
+
   it("preserves null metrics as missing evidence", () => {
     const base = row({ hitRate: null, meanSecurityReturn: null, meanExcessReturn: null, medianExcessReturn: null });
     const result = selectRecommendationPerformanceRollupV3(snapshot([base]), {
