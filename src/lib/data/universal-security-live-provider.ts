@@ -7,6 +7,7 @@ import {
   type UniversalSecurityReport,
 } from "./universal-security-provider";
 import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
+import { persistSpecialistRecommendationLiveAuditV3 } from "./recommendation-specialist-live-audit-v3";
 
 export { searchCompanies, supportsUniversalSecurityAnalysis };
 
@@ -96,22 +97,27 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
   const result = await analyzeUniversalCompany(args);
   if (!result.ok) return result;
 
-  const report = result.data as UniversalSecurityReport;
-  if (report.analysisArchetype !== "holding_company") return result;
-
-  try {
-    const enriched = await enrichWithOfficialInvestmentCompanyNav(report, args);
-    return {
-      ...result,
-      data: enriched,
-      sources: enriched.sources,
-      warnings: result.warnings,
-    };
-  } catch {
-    report.score.missingData = [...new Set([
-      ...report.score.missingData,
-      "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
-    ])];
-    return { ...result, data: report };
+  let report = result.data as UniversalSecurityReport;
+  if (report.analysisArchetype === "holding_company") {
+    try {
+      report = await enrichWithOfficialInvestmentCompanyNav(report, args);
+    } catch {
+      report.score.missingData = [...new Set([
+        ...report.score.missingData,
+        "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
+      ])];
+    }
   }
+
+  // The audit side channel is deliberately fail-open and response-independent.
+  // Standard operating-company reports are a no-op here because the canonical
+  // provider already handles their V3 shadow/audit path.
+  await persistSpecialistRecommendationLiveAuditV3(report);
+
+  return {
+    ...result,
+    data: report,
+    sources: report.sources,
+    warnings: result.warnings,
+  };
 }
