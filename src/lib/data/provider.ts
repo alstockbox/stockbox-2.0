@@ -130,14 +130,15 @@ function normalizedProviderTicker(value: string | null | undefined): string | nu
 }
 
 function fundamentalsMatchCompany(company: CompanySearchResult, fundamentals: CompanyFundamentals): boolean {
-  if (normalizedProviderTicker(fundamentals.ticker) !== normalizedProviderTicker(company.ticker)) return false;
+  if (company.securityType === "ADR" && !verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals).verified) return false;
+  if (company.securityType !== "ADR" && normalizedProviderTicker(fundamentals.ticker) !== normalizedProviderTicker(company.ticker)) return false;
   if (fundamentals.cik && company.cik) {
     const expected = company.cik.replace(/\D/g, "").padStart(10, "0");
     const actual = fundamentals.cik.replace(/\D/g, "").padStart(10, "0");
     const sourceCiks = (fundamentals.sourceCiks ?? []).map((cik) => cik.replace(/\D/g, "").padStart(10, "0"));
     if (expected !== actual && !sourceCiks.includes(expected)) return false;
   }
-  if (company.securityType === "ADR" && !verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals).verified) return false;
+  if (company.securityType === "ADR") return true;
   return !company.entityId || !fundamentals.entityId || company.entityId === fundamentals.entityId;
 }
 
