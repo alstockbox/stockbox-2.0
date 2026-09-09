@@ -42,7 +42,10 @@ describe("Recommendation outcome V3 persistence boundary", () => {
   });
 
   it("preserves a valid integer lag exactly", () => {
-    expect(toRecommendationOutcomeV3Row(input({ lagDays: 2 })).lag_days).toBe(2);
+    expect(toRecommendationOutcomeV3Row(input({
+      evaluatedAt: "2026-10-11T12:00:00.000Z",
+      lagDays: 2,
+    })).lag_days).toBe(2);
   });
 
   it("rejects an absolute return that cannot be reproduced from the persisted prices", () => {
