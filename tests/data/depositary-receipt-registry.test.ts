@@ -134,9 +134,23 @@ describe("depositary receipt registry", () => {
       }),
     ]);
 
-    expect(report.ambiguousIssuerReceiptKeys).toEqual(["ISSUER-NOVO|NVO"]);
+    expect(report.ambiguousIssuerReceiptKeys).toEqual(["issuer-novo|NVO"]);
     expect(report.duplicateSecurityIds).toEqual([]);
     expect(report.pass).toBe(false);
+  });
+
+  it("does not collapse case-distinct opaque issuer identities in registry QA", () => {
+    const report = qaDepositaryReceiptRegistry([
+      verifiedEntry(),
+      verifiedEntry({
+        securityId: "adr:ISSUER-NOVO:nvo",
+        issuerId: "ISSUER-NOVO",
+        sourceUrl: "https://example.invalid/case-distinct-issuer",
+      }),
+    ]);
+
+    expect(report.ambiguousIssuerReceiptKeys).toEqual([]);
+    expect(report.pass).toBe(true);
   });
 
   it("tracks unverified ratios without treating issuer mapping as invalid", () => {
