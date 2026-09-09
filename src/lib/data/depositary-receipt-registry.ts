@@ -33,7 +33,7 @@ function duplicateValues(values: string[]): string[] {
 }
 
 function issuerReceiptKey(entry: DepositaryReceiptRegistryEntry): string | null {
-  const issuerId = normalized(entry.issuerId);
+  const issuerId = entry.issuerId.trim();
   const receiptTicker = normalized(entry.receiptTicker);
   return issuerId && receiptTicker ? `${issuerId}|${receiptTicker}` : null;
 }
