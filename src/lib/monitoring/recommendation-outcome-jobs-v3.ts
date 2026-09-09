@@ -116,14 +116,26 @@ function finiteScore100(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
+function normalizedText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 export function parseRecommendationOutcomeAuditRowV3(value: unknown): RecommendationAuditForOutcomeV3 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (!validAuditId(row.id) || !validDate(row.observed_at) || typeof row.ticker !== "string") return null;
+  if (!validAuditId(row.id) || !validDate(row.observed_at)) return null;
   if (!DIRECTIONAL_RATINGS.includes(row.v3_rating as RecommendationV3Rating)) return null;
-  if (typeof row.analysis_archetype !== "string"
-      || typeof row.model_version !== "string"
-      || typeof row.recommendation_policy_version !== "string") return null;
+
+  const ticker = normalizedText(row.ticker);
+  const analysisArchetype = normalizedText(row.analysis_archetype);
+  const modelVersion = normalizedText(row.model_version);
+  const recommendationPolicyVersion = normalizedText(row.recommendation_policy_version);
+  if (ticker === null
+      || analysisArchetype === null
+      || modelVersion === null
+      || recommendationPolicyVersion === null) return null;
   if (!finiteScore100(row.conviction)
       || !finiteScore100(row.data_quality)
       || !finiteScore100(row.model_uncertainty)) return null;
@@ -131,11 +143,11 @@ export function parseRecommendationOutcomeAuditRowV3(value: unknown): Recommenda
   return {
     id: row.id.trim(),
     observed_at: new Date(row.observed_at).toISOString(),
-    ticker: row.ticker.trim().toUpperCase(),
-    analysis_fingerprint: typeof row.analysis_fingerprint === "string" ? row.analysis_fingerprint : null,
-    analysis_archetype: row.analysis_archetype,
-    model_version: row.model_version,
-    recommendation_policy_version: row.recommendation_policy_version,
+    ticker: ticker.toUpperCase(),
+    analysis_fingerprint: normalizedText(row.analysis_fingerprint),
+    analysis_archetype: analysisArchetype,
+    model_version: modelVersion,
+    recommendation_policy_version: recommendationPolicyVersion,
     v3_rating: row.v3_rating as RecommendationV3Rating,
     objective_score: finiteOrNull(row.objective_score),
     conviction: row.conviction,
