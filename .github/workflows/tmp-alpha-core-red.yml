@@ -1,7 +1,9 @@
 name: Temporary Alpha Core RED
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - feat/alpha-core-forward-port-20260910
 
 permissions:
   contents: read
