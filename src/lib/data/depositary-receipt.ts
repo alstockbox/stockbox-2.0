@@ -363,6 +363,7 @@ export function gateDepositaryReceiptValuationInputs(
       "market quote currency does not match the verified depositary-receipt trading currency.",
     );
   }
+
   const valuation = assessDepositaryReceiptValuationAccess(company, fxContext);
   if (!valuation.allowed || valuation.underlyingSharesPerReceipt === null) {
     return disabledValuationInputs(market, fundamentals, valuation.reason);
