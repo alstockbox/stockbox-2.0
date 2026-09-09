@@ -12,9 +12,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const RECOVERY_SCAN_LIMIT = 250;
 const QUEUED_ORPHAN_AFTER_MS = 60_000;
 const BATCH_RUN_RECONCILE_AFTER_MS = 60_000;
+const BATCH_RECOVERY_UNAVAILABLE = "Batch recovery is temporarily unavailable.";
 
 type BatchItemStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
 type NonterminalBatchRunStatus = "queued" | "processing";
+
+function throwIfStrictRecoveryUnavailable(strict?: boolean): void {
+  if (strict) throw new Error(BATCH_RECOVERY_UNAVAILABLE);
+}
 
 export function deriveRecoveredBatchRunState(statuses: BatchItemStatus[]) {
   const total = statuses.length;
@@ -113,9 +118,13 @@ async function recoverOrphanedQueuedBatchItems(input: {
   userId?: string;
   now: Date;
   affectedBatches: Set<string>;
+  strict?: boolean;
 }): Promise<{ scanned: number; requeued: number; failed: number }> {
   const admin = createAdminClient();
-  if (!admin) return { scanned: 0, requeued: 0, failed: 0 };
+  if (!admin) {
+    throwIfStrictRecoveryUnavailable(input.strict);
+    return { scanned: 0, requeued: 0, failed: 0 };
+  }
 
   const cutoff = new Date(input.now.getTime() - QUEUED_ORPHAN_AFTER_MS).toISOString();
   let query = admin.from("batch_items")
@@ -128,7 +137,10 @@ async function recoverOrphanedQueuedBatchItems(input: {
   if (input.userId) query = query.eq("user_id", input.userId);
 
   const result = await query;
-  if (result.error) return { scanned: 0, requeued: 0, failed: 0 };
+  if (result.error) {
+    throwIfStrictRecoveryUnavailable(input.strict);
+    return { scanned: 0, requeued: 0, failed: 0 };
+  }
 
   let requeued = 0;
   let failed = 0;
@@ -147,6 +159,10 @@ async function recoverOrphanedQueuedBatchItems(input: {
       }).eq("id", itemId).eq("status", "queued").eq("attempts", attempts);
       if (originalUpdatedAt) update = update.eq("updated_at", originalUpdatedAt);
       const changed = await update.select("id").maybeSingle();
+      if (changed.error) {
+        throwIfStrictRecoveryUnavailable(input.strict);
+        return;
+      }
       if (changed.data) {
         failed += 1;
         input.affectedBatches.add(batchId);
@@ -162,7 +178,11 @@ async function recoverOrphanedQueuedBatchItems(input: {
       payload: { batchItemId: itemId, attemptOffset: attempts },
       availableAt: input.now.toISOString(),
     });
-    if (!queued.ok || queued.deduplicated) return;
+    if (!queued.ok) {
+      throwIfStrictRecoveryUnavailable(input.strict);
+      return;
+    }
+    if (queued.deduplicated) return;
 
     requeued += 1;
     input.affectedBatches.add(batchId);
@@ -181,9 +201,13 @@ export async function recoverStaleBatchItems(input: {
   batchId?: string;
   userId?: string;
   now?: Date;
+  strict?: boolean;
 } = {}): Promise<{ scanned: number; requeued: number; failed: number }> {
   const admin = createAdminClient();
-  if (!admin) return { scanned: 0, requeued: 0, failed: 0 };
+  if (!admin) {
+    throwIfStrictRecoveryUnavailable(input.strict);
+    return { scanned: 0, requeued: 0, failed: 0 };
+  }
 
   const now = input.now ?? new Date();
   const cutoff = new Date(now.getTime() - BATCH_ITEM_STALE_AFTER_MS).toISOString();
@@ -197,7 +221,10 @@ export async function recoverStaleBatchItems(input: {
   if (input.userId) query = query.eq("user_id", input.userId);
 
   const result = await query;
-  if (result.error) return { scanned: 0, requeued: 0, failed: 0 };
+  if (result.error) {
+    throwIfStrictRecoveryUnavailable(input.strict);
+    return { scanned: 0, requeued: 0, failed: 0 };
+  }
 
   let requeued = 0;
   let failed = 0;
@@ -226,6 +253,10 @@ export async function recoverStaleBatchItems(input: {
       }).eq("id", itemId).eq("status", "processing").eq("attempts", attempts);
       if (updatedAt) update = update.eq("updated_at", updatedAt);
       const changed = await update.select("id").maybeSingle();
+      if (changed.error) {
+        throwIfStrictRecoveryUnavailable(input.strict);
+        return;
+      }
       if (changed.data) {
         failed += 1;
         affectedBatches.add(batchId);
@@ -241,6 +272,10 @@ export async function recoverStaleBatchItems(input: {
     }).eq("id", itemId).eq("status", "processing").eq("attempts", attempts);
     if (updatedAt) update = update.eq("updated_at", updatedAt);
     const changed = await update.select("id").maybeSingle();
+    if (changed.error) {
+      throwIfStrictRecoveryUnavailable(input.strict);
+      return;
+    }
     if (!changed.data) return;
 
     const queued = await enqueueBackgroundJob({
@@ -264,6 +299,7 @@ export async function recoverStaleBatchItems(input: {
       .eq("attempts", attempts)
       .eq("updated_at", timestamp);
     affectedBatches.add(batchId);
+    throwIfStrictRecoveryUnavailable(input.strict);
   });
 
   const orphaned = await recoverOrphanedQueuedBatchItems({
@@ -271,6 +307,7 @@ export async function recoverStaleBatchItems(input: {
     userId: input.userId,
     now,
     affectedBatches,
+    strict: input.strict,
   });
   requeued += orphaned.requeued;
   failed += orphaned.failed;
