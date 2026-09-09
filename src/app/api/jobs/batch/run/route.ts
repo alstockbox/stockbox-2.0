@@ -1,12 +1,9 @@
 import { after } from "next/server";
 import { isPayoutCronAuthorized } from "@/lib/affiliate/payouts";
-import {
-  BATCH_ORCHESTRATION_CONCURRENCY,
-  nextDurableBatchWorkerDelayMs,
-  runDurableBatchJobs,
-} from "@/lib/batch/durable";
+import { nextDurableBatchWorkerDelayMs } from "@/lib/batch/durable";
 import { recoverStaleBatchItems } from "@/lib/batch/stale-recovery";
 import { triggerDurableBatchWorker } from "@/lib/batch/worker-trigger";
+import { runDurableBatchWorkerWave } from "@/lib/batch/worker-wave";
 import { getServerEnv } from "@/lib/env/server";
 
 export const runtime = "nodejs";
@@ -19,7 +16,7 @@ async function run(request: Request) {
   }
   try {
     const recovery = await recoverStaleBatchItems();
-    const result = await runDurableBatchJobs(BATCH_ORCHESTRATION_CONCURRENCY);
+    const result = await runDurableBatchWorkerWave();
     const nextDelayMs = await nextDurableBatchWorkerDelayMs();
     if (nextDelayMs !== null) {
       const baseUrl = new URL(request.url).origin;
