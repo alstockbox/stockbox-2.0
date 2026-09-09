@@ -74,9 +74,14 @@ function validDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
-function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
+function persistenceRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
+  const row = persistenceRecord(value);
+  if (!row) return null;
   if (typeof row.id !== "string" || typeof row.ticker !== "string") return null;
   if (typeof row.analysis_archetype !== "string"
       || typeof row.model_version !== "string"
@@ -99,8 +104,8 @@ export function recommendationOutcomeFromPersistenceV3(
   value: unknown,
   lineage: AuditLineageRowV3,
 ): RecommendationOutcomeV3 | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
+  const row = persistenceRecord(value);
+  if (!row) return null;
   if (row.policy_version !== RECOMMENDATION_OUTCOME_POLICY_VERSION) return null;
   if (typeof row.horizon !== "string" || !OUTCOME_HORIZONS.has(row.horizon as RecommendationOutcomeHorizonV3)) return null;
   if (!validDate(row.expected_at) || !validDate(row.evaluated_at)) return null;
@@ -180,14 +185,21 @@ export async function loadRecommendationOutcomesForCalibrationV3(options: {
     .limit(limit);
   if (error) throw new Error(`Unable to load recommendation outcomes for calibration: ${error.message}`);
 
-  const rows = data ?? [];
-  const auditIds = rows.flatMap((row) => typeof row.recommendation_audit_id === "string"
-    ? [row.recommendation_audit_id]
-    : []);
+  // The migration can be ahead of generated Supabase table typings on a feature branch.
+  // Treat persistence rows as unknown at this boundary and validate every field before use.
+  const rows: unknown[] = data ?? [];
+  const auditIds = rows.flatMap((value) => {
+    const row = persistenceRecord(value);
+    return row && typeof row.recommendation_audit_id === "string"
+      ? [row.recommendation_audit_id]
+      : [];
+  });
   if (auditIds.length === 0) return [];
   const lineage = await loadAuditLineageV3(auditIds);
 
-  return rows.flatMap((row) => {
+  return rows.flatMap((value) => {
+    const row = persistenceRecord(value);
+    if (!row) return [];
     const id = typeof row.recommendation_audit_id === "string" ? row.recommendation_audit_id : "";
     const audit = lineage.get(id);
     if (!audit) return [];
