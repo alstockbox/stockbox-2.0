@@ -188,54 +188,51 @@ export type RecommendationCalibrationPersistResultV3 =
   | { ok: false; configured: false; error: "SUPABASE_ADMIN_NOT_CONFIGURED" }
   | { ok: false; configured: true; error: string };
 
+const CALIBRATION_STAGES_V3 = new Set<RecommendationCalibrationStageV3>([
+  "CANDIDATE",
+  "BACKTESTED",
+  "SHADOW_VALIDATED",
+  "APPROVED",
+  "PRODUCTION",
+]);
+
+function persistedCalibrationStageV3(value: unknown): RecommendationCalibrationStageV3 | null {
+  return typeof value === "string" && CALIBRATION_STAGES_V3.has(value as RecommendationCalibrationStageV3)
+    ? (value as RecommendationCalibrationStageV3)
+    : null;
+}
+
 export async function persistRecommendationCalibrationCandidateV3(
   candidate: RecommendationCalibrationCandidateV3,
 ): Promise<RecommendationCalibrationPersistResultV3> {
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, configured: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
 
-  const row = toRecommendationCalibrationCandidateRowV3(candidate, new Date().toISOString());
+  const row = toRecommendationCalibrationCandidateRowV3(candidate, candidate.createdAt);
   try {
-    const { data: existing, error: readError } = await supabase
-      .from("analysis_recommendation_v3_calibration_candidates")
-      .select("stage")
-      .eq("candidate_key", row.candidate_key)
-      .maybeSingle();
-    if (readError) return { ok: false, configured: true, error: readError.message };
+    const { data, error } = await supabase.rpc("persist_recommendation_v3_calibration_candidate", {
+      p_row: row,
+      p_evaluated_at: candidate.createdAt,
+    });
+    if (error) return { ok: false, configured: true, error: error.message };
 
-    const currentStage = existing?.stage as RecommendationCalibrationStageV3 | undefined;
-    if (currentStage) {
-      if (currentStage !== "CANDIDATE") {
-        return { ok: true, configured: true, created: false, refreshed: false, stage: currentStage };
-      }
-
-      const { error: updateError } = await supabase
-        .from("analysis_recommendation_v3_calibration_candidates")
-        .update({
-          sample_size: row.sample_size,
-          benchmark_sample_size: row.benchmark_sample_size,
-          hit_rate: row.hit_rate,
-          mean_excess_return: row.mean_excess_return,
-          median_excess_return: row.median_excess_return,
-          reasons: row.reasons,
-          updated_at: row.updated_at,
-        })
-        .eq("candidate_key", row.candidate_key)
-        .eq("stage", "CANDIDATE");
-      if (updateError) return { ok: false, configured: true, error: updateError.message };
-      return { ok: true, configured: true, created: false, refreshed: true, stage: "CANDIDATE" };
+    const returned = Array.isArray(data) ? data[0] : data;
+    if (!returned || typeof returned !== "object") {
+      return { ok: false, configured: true, error: "CALIBRATION_CANDIDATE_PERSIST_RESULT_MISSING" };
+    }
+    const record = returned as Record<string, unknown>;
+    const stage = persistedCalibrationStageV3(record.stage);
+    if (!stage || typeof record.created !== "boolean" || typeof record.refreshed !== "boolean") {
+      return { ok: false, configured: true, error: "CALIBRATION_CANDIDATE_PERSIST_RESULT_INVALID" };
     }
 
-    const { error: insertError } = await supabase
-      .from("analysis_recommendation_v3_calibration_candidates")
-      .insert(row);
-    if (insertError) {
-      if (insertError.code === "23505") {
-        return { ok: true, configured: true, created: false, refreshed: false, stage: "CANDIDATE" };
-      }
-      return { ok: false, configured: true, error: insertError.message };
-    }
-    return { ok: true, configured: true, created: true, refreshed: false, stage: "CANDIDATE" };
+    return {
+      ok: true,
+      configured: true,
+      created: record.created,
+      refreshed: record.refreshed,
+      stage,
+    };
   } catch (error) {
     return {
       ok: false,
