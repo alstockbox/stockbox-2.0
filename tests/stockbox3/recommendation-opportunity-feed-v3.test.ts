@@ -41,6 +41,34 @@ describe("Recommendation opportunity feed V3", () => {
     expect(feed.strongBuy.map((item) => item.ticker)).toEqual(["AAPL"]);
   });
 
+  it("never markets REDUCE/SELL or weak-data rows as opportunities", () => {
+    const feed = buildRecommendationOpportunityFeedV3([
+      audit({ id: "buy", ticker: "BUYME", rating: "BUY", objectiveScore: 75 }),
+      audit({ id: "sell", ticker: "SELLME", rating: "SELL", objectiveScore: 99, analysisArchetype: "etf", reasonCodes: ["QUALITY_STRONG"] }),
+      audit({ id: "reduce", ticker: "REDUCE", rating: "REDUCE", objectiveScore: 96, reasonCodes: ["VALUATION_SUPPORTIVE"] }),
+      audit({ id: "weak-quality", ticker: "WEAKQ", rating: "STRONG_BUY", objectiveScore: 98, dataQuality: 49 }),
+      audit({ id: "weak-integrity", ticker: "WEAKI", rating: "STRONG_BUY", objectiveScore: 98, dataIntegrityScore: 54 }),
+      audit({ id: "weak-coverage", ticker: "WEAKC", rating: "STRONG_BUY", objectiveScore: 98, verifiedCoverage: 0.49 }),
+    ]);
+
+    expect(feed.top.map((item) => item.ticker)).toEqual(["BUYME"]);
+    expect(feed.etf.some((item) => item.ticker === "SELLME")).toBe(false);
+    expect(feed.quality.some((item) => item.ticker === "SELLME")).toBe(false);
+    expect(feed.valuation.some((item) => item.ticker === "REDUCE")).toBe(false);
+    expect(feed.top.some((item) => item.ticker.startsWith("WEAK"))).toBe(false);
+  });
+
+  it("keeps HOLD/WAIT in Watch but not in Top Opportunities", () => {
+    const feed = buildRecommendationOpportunityFeedV3([
+      audit({ id: "hold", ticker: "HOLDME", rating: "HOLD", objectiveScore: 88 }),
+      audit({ id: "wait", ticker: "WAITME", rating: "WAIT", objectiveScore: 87 }),
+      audit({ id: "buy", ticker: "BUYME", rating: "BUY", objectiveScore: 72 }),
+    ]);
+
+    expect(feed.watch.map((item) => item.ticker).sort()).toEqual(["HOLDME", "WAITME"]);
+    expect(feed.top.map((item) => item.ticker)).toEqual(["BUYME"]);
+  });
+
   it("builds specialist/category sections from auditable archetype and reason codes", () => {
     const feed = buildRecommendationOpportunityFeedV3([
       audit({ id: "spy", ticker: "SPY", analysisArchetype: "etf", rating: "BUY", reasonCodes: ["MOMENTUM_SUPPORTIVE"] }),
