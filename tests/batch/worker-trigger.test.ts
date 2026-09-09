@@ -3,9 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BATCH_ITEM_EXECUTION_TIMEOUT_MS } from "@/lib/batch/durable";
 import {
+  BATCH_WORKER_RECOVERY_RETRY_DELAYS_MS,
   boundedDurableWorkerDelayMs,
   DURABLE_WORKER_TRIGGER_TIMEOUT_MS,
   MAX_DURABLE_WORKER_DELAY_MS,
+  nextDurableWorkerRecoveryDelayMs,
 } from "@/lib/batch/worker-trigger";
 
 describe("durable batch worker chaining", () => {
@@ -16,6 +18,16 @@ describe("durable batch worker chaining", () => {
     expect(boundedDurableWorkerDelayMs("2026-09-01T19:59:00.000Z", now)).toBe(0);
     expect(MAX_DURABLE_WORKER_DELAY_MS).toBeLessThanOrEqual(30_000);
     expect(BATCH_ITEM_EXECUTION_TIMEOUT_MS + MAX_DURABLE_WORKER_DELAY_MS).toBeLessThan(DURABLE_WORKER_TRIGGER_TIMEOUT_MS + 30_000);
+  });
+
+  it("bounds transient coordination recovery attempts", () => {
+    expect(BATCH_WORKER_RECOVERY_RETRY_DELAYS_MS).toEqual([5_000, 15_000, 30_000]);
+    expect(nextDurableWorkerRecoveryDelayMs(-1)).toBe(5_000);
+    expect(nextDurableWorkerRecoveryDelayMs(0)).toBe(5_000);
+    expect(nextDurableWorkerRecoveryDelayMs(1)).toBe(15_000);
+    expect(nextDurableWorkerRecoveryDelayMs(2)).toBe(30_000);
+    expect(nextDurableWorkerRecoveryDelayMs(3)).toBeNull();
+    expect(nextDurableWorkerRecoveryDelayMs(99)).toBeNull();
   });
 
   it("allows a chained worker request to outlive normal analysis latency", () => {
