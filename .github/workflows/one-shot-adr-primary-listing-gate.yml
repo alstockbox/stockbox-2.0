@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply exact fail-closed provider patch
+      - name: Apply fail-closed provider splice
         shell: bash
         run: |
           python - <<'PY'
@@ -29,43 +29,14 @@ jobs:
 
           path = Path("src/lib/data/provider.ts")
           source = path.read_text()
-          old = '''  if (primaryListingCompany && valuationInputs.market?.price !== null) {
-            const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
-            providerDiagnostics.push(...primaryListingResolution.diagnostics);
-            if (primaryListingResolution.result.ok) {
-              const primaryListingMarket = primaryListingResolution.result.data;
-              if (primaryListingResolution.source) {
-                sources.push({
-                  ...primaryListingResolution.source,
-                  accessedAt,
-                  provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
-                  capability: "market_data",
-                  dataAsOf: primaryListingMarket.date,
-                  version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
-                });
-              }
-              const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
-                analysisCompany,
-                valuationInputs.market,
-                primaryListingMarket,
-              );
-              if (primaryListingReconciliation.status === "conflict") {
-                valuationInputs = disableDepositaryReceiptValuationInputs(
-                  market,
-                  fundamentals,
-                  primaryListingReconciliation.reason,
-                );
-                warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
-              } else if (primaryListingReconciliation.status === "unavailable") {
-                warnings.push(`ADR/ADS primary-listing reconciliation was unavailable: ${primaryListingReconciliation.reason}`);
-              }
-            }
-          }
-          '''
-          new = '''  if (primaryListingCompany && valuationInputs.market?.price !== null) {
-            const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
-            providerDiagnostics.push(...primaryListingResolution.diagnostics);
-            const primaryListingMarket = primaryListingResolution.result.ok ? primaryListingResolution.result.data : null;
+          anchor = source.index("  const primaryListingCompany = buildDepositaryReceiptPrimaryListingCompany(")
+          start_marker = "    if (primaryListingResolution.result.ok) {\n"
+          end_marker = "  }\n\n  const providerOrchestrationMs = Date.now() - startedAt;"
+          start = source.index(start_marker, anchor)
+          end = source.index(end_marker, start)
+          if not (anchor < start < end):
+              raise SystemExit("ADR primary-listing provider markers are not ordered as expected")
+          replacement = '''    const primaryListingMarket = primaryListingResolution.result.ok ? primaryListingResolution.result.data : null;
             if (primaryListingMarket && primaryListingResolution.source) {
               sources.push({
                 ...primaryListingResolution.source,
@@ -89,12 +60,11 @@ jobs:
               );
               warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
             }
-          }
           '''
-          count = source.count(old)
-          if count != 1:
-              raise SystemExit(f"Expected exactly one provider block match, found {count}")
-          path.write_text(source.replace(old, new, 1))
+          updated = source[:start] + replacement + source[end:]
+          if updated == source:
+              raise SystemExit("Provider splice produced no change")
+          path.write_text(updated)
           PY
       - run: npm ci
       - name: Prove targeted RED test is now GREEN
