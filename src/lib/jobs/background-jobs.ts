@@ -167,44 +167,13 @@ export async function claimBackgroundJobs(input: {
 
   await recoverStaleBackgroundJobs({ kinds: input.kinds, staleCutoff, now });
 
-  const candidates = await admin.from("background_jobs")
-    .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
-    .eq("status", "queued")
-    .in("kind", input.kinds)
-    .lte("available_at", now.toISOString())
-    .order("available_at", { ascending: true })
-    .limit(Math.max(1, Math.min(input.limit ?? 10, 50)));
-  if (candidates.error) return [];
+  const claim = await admin.rpc("claim_background_jobs", {
+    p_kinds: input.kinds,
+    p_limit: Math.max(1, Math.min(input.limit ?? 10, 50)),
+  });
+  if (claim.error) return [];
 
-  const claimed: BackgroundJob[] = [];
-  for (const candidate of candidates.data ?? []) {
-    const attempts = Number(candidate.attempts ?? 0);
-    const maxAttempts = Number(candidate.max_attempts ?? 5);
-    if (attempts >= maxAttempts) {
-      await admin.from("background_jobs").update({
-        status: "failed",
-        completed_at: now.toISOString(),
-        locked_at: null,
-        last_error: "Background job retry budget exhausted before claim.",
-        updated_at: now.toISOString(),
-      }).eq("id", candidate.id)
-        .eq("status", "queued")
-        .eq("attempts", attempts);
-      continue;
-    }
-    const claim = await admin.from("background_jobs").update({
-      status: "running",
-      attempts: attempts + 1,
-      locked_at: now.toISOString(),
-      updated_at: now.toISOString(),
-    }).eq("id", candidate.id)
-      .eq("status", "queued")
-      .eq("attempts", attempts)
-      .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
-      .maybeSingle();
-    if (claim.data) claimed.push(mapJob(claim.data as Record<string, unknown>));
-  }
-  return claimed;
+  return (claim.data ?? []).map((row) => mapJob(row as Record<string, unknown>));
 }
 
 export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean> {
