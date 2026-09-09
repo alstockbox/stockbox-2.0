@@ -3,7 +3,11 @@
 import { ArrowRight, Bot, CheckCircle2, CircleDollarSign, Lightbulb, RefreshCw, ShieldAlert, Sparkles, Target } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ButtonLink } from "@/components/ui/button";
-import { comparePortfolioUpgradeEvidence } from "@/lib/portfolio/portfolio-ai-upgrade-evidence";
+import {
+  classifyPortfolioUpgradeNetCase,
+  comparePortfolioUpgradeEvidence,
+  type PortfolioUpgradeNetCaseLabel,
+} from "@/lib/portfolio/portfolio-ai-upgrade-evidence";
 import {
   buildPortfolioActionPlan,
   buildPortfolioUpgradeDrivers,
@@ -82,6 +86,13 @@ function driverLabel(dimension: PortfolioUpgradeDriverDimension, sv: boolean) {
   if (dimension === "growth") return sv ? "Tillväxt" : "Growth";
   if (dimension === "valuation") return sv ? "Värdering" : "Valuation";
   return "Momentum";
+}
+
+function netCaseLabel(label: PortfolioUpgradeNetCaseLabel, sv: boolean) {
+  if (label === "strong_improvement") return sv ? "Stark förbättring" : "Strong improvement";
+  if (label === "mixed") return sv ? "Blandad" : "Mixed";
+  if (label === "marginal") return sv ? "Marginell" : "Marginal";
+  return sv ? "Otillräckligt underlag" : "Insufficient evidence";
 }
 
 function actionText(action: PortfolioAction, sv: boolean) {
@@ -261,6 +272,14 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     return result;
   }, [horizon, risk, style, upgradeCandidates, weakAnalysis]);
 
+  const upgradeNetCaseByTicker = useMemo(() => {
+    const result = new Map<string, ReturnType<typeof classifyPortfolioUpgradeNetCase>>();
+    for (const [ticker, evidence] of upgradeEvidenceByTicker.entries()) {
+      result.set(ticker, classifyPortfolioUpgradeNetCase(evidence));
+    }
+    return result;
+  }, [upgradeEvidenceByTicker]);
+
   const rebalancePlan = useMemo(() => {
     if (!selected) return [];
     const current = selected.holdings
@@ -360,6 +379,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                 <div>
                   <p className="text-sm font-semibold text-[#f4efe5]">{sv ? "Analyserade alternativ att jämföra" : "Analyzed alternatives to compare"}</p>
                   <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? `${weakHolding.ticker} är det svagaste relevanta innehavet i denna genomgång. Nedan visas bara färska analyser som förbättrar StockBox-score med minst 8 punkter och inte redan finns i portföljen.` : `${weakHolding.ticker} is the weakest relevant holding in this review. Only fresh analyses that improve StockBox score by at least 8 points and are not already held are shown below.`}</p>
+                  <p className="mt-1 text-[10px] leading-4 text-[#6f7b8c]">{sv ? "Netto-caset är en evidensbalans mellan verifierade styrkor och trade-offs, inte en prognos för framtida avkastning." : "The net case is an evidence balance between verified strengths and trade-offs, not a forecast of future returns."}</p>
                 </div>
                 <span className="rounded-full border border-white/10 bg-black/10 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Jämförelse, inte order" : "Comparison, not an order"}</span>
               </div>
@@ -367,6 +387,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                 {upgradeCandidates.map((candidate) => {
                   const drivers = upgradeDriversByTicker.get(candidate.ticker) ?? [];
                   const evidence = upgradeEvidenceByTicker.get(candidate.ticker);
+                  const netCase = upgradeNetCaseByTicker.get(candidate.ticker);
                   return (
                     <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
                       <div className="flex items-start justify-between gap-3">
@@ -379,6 +400,11 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                         <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Kvalitet" : "Quality"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.quality ?? 0)}</p></div>
                         <div className="rounded bg-white/[0.035] p-2"><span>Risk</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.risk ?? 0)}</p></div>
                       </div>
+                      {netCase ? (
+                        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.025] px-2.5 py-2 text-[10px] text-[#8f9bac]">
+                          <span>{sv ? "Netto-case" : "Net case"}: </span><span className="font-semibold text-[#eef2f7]">{netCaseLabel(netCase.label, sv)}</span>
+                        </div>
+                      ) : null}
                       {drivers.length ? (
                         <div className="mt-3 border-t border-white/10 pt-3">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8f9bac]">{sv ? "Varför bättre?" : "Why better?"}</p>
