@@ -1,0 +1,62 @@
+name: Temporary archetype determinism fix
+
+on:
+  push:
+    branches:
+      - fix/archetype-diagnostic-time-determinism-20260909
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply deterministic analysis date to the two valuation diagnostics tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/analysis/archetypes.test.ts')
+          text = path.read_text()
+          anchor = '''    const result = asArchetype("standard", {
+              annualPeriods,
+              company: { reportingCurrency: "USD", tradingCurrency: "USD" },
+          '''
+          replacement = '''    const result = asArchetype("standard", {
+              annualPeriods,
+              analysisDate: "2026-08-25T00:00:00.000Z",
+              company: { reportingCurrency: "USD", tradingCurrency: "USD" },
+          '''
+          count = text.count(anchor)
+          if count != 2:
+              raise SystemExit(f'expected exactly 2 target blocks, found {count}')
+          path.write_text(text.replace(anchor, replacement))
+          PY
+          git diff --check
+          git diff -- tests/analysis/archetypes.test.ts
+      - name: Install dependencies
+        run: npm ci
+      - name: Archetype diagnostics must fully resolve
+        run: npm test -- tests/analysis/archetypes.test.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Commit clean test-only fix
+        shell: bash
+        run: |
+          git rm .github/workflows/tmp-archetype-determinism.yml
+          git add tests/analysis/archetypes.test.ts
+          git diff --cached --check
+          git diff --cached --name-only
+          test "$(git diff --cached --name-only)" = "tests/analysis/archetypes.test.ts"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test: make archetype valuation diagnostics deterministic"
+          git push origin HEAD:fix/archetype-diagnostic-time-determinism-20260909
