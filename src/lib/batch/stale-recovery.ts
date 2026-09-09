@@ -257,12 +257,12 @@ export async function recoverStaleBatchItems(input: {
     }
 
     await admin.from("batch_items").update({
-      status: "failed",
-      last_error: "Recovered stale attempt but could not restore its worker job.",
-      completed_at: timestamp,
+      last_error: "Recovered stale attempt but worker enqueue is temporarily unavailable.",
       updated_at: timestamp,
-    }).eq("id", itemId).eq("status", "queued").eq("attempts", attempts);
-    failed += 1;
+    }).eq("id", itemId)
+      .eq("status", "queued")
+      .eq("attempts", attempts)
+      .eq("updated_at", timestamp);
     affectedBatches.add(batchId);
   });
 
