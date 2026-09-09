@@ -2,6 +2,8 @@ import type { RecommendationOutcomeHorizonV3 } from "@/lib/analysis/recommendati
 import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const RETURN_RELATIVE_TOLERANCE = 1e-9;
+
 export type RecommendationOutcomePersistInputV3 = {
   recommendationAuditId: string;
   policyVersion: string;
@@ -57,12 +59,48 @@ function normalizeTicker(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizedText(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function finitePositive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+function returnFromPrices(entryPrice: number, observedPrice: number): number {
+  return observedPrice / entryPrice - 1;
+}
+
+function returnMatches(stored: number, computed: number): boolean {
+  if (!Number.isFinite(stored) || !Number.isFinite(computed)) return false;
+  const scale = Math.max(1, Math.abs(stored), Math.abs(computed));
+  return Math.abs(stored - computed) <= RETURN_RELATIVE_TOLERANCE * scale;
+}
+
+function hasAnyBenchmarkEvidence(input: RecommendationOutcomePersistInputV3): boolean {
+  return [
+    input.benchmarkTicker,
+    input.benchmarkEntryObservedAt,
+    input.benchmarkEntryPrice,
+    input.benchmarkObservedAt,
+    input.benchmarkObservedPrice,
+    input.benchmarkReturn,
+    input.excessReturn,
+    input.directionalHit,
+    input.benchmarkPriceSource,
+  ].some((value) => value !== null);
+}
+
 /**
  * Explicit allowlist mapper for objective recommendation outcomes.
  * No user identity, personalized score, portfolio state, provider payload or AI
  * output is accepted by this persistence contract. Benchmark-policy lineage is
  * stamped server-side so callers cannot accidentally persist current evidence
  * under an arbitrary or stale benchmark policy version.
+ *
+ * Evidence is validated rather than repaired: returns must reproduce from the
+ * persisted prices, and benchmark evidence must be either complete or absent.
  */
 export function toRecommendationOutcomeV3Row(
   input: RecommendationOutcomePersistInputV3,
@@ -70,6 +108,61 @@ export function toRecommendationOutcomeV3Row(
 ): RecommendationOutcomeRowV3 {
   if (!Number.isFinite(input.lagDays) || !Number.isInteger(input.lagDays) || input.lagDays < 0) {
     throw new Error("INVALID_RECOMMENDATION_OUTCOME_LAG_DAYS");
+  }
+
+  if (!finitePositive(input.entryPrice) || !finitePositive(input.observedPrice)) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_SECURITY_PRICES");
+  }
+  if (!returnMatches(input.securityReturn, returnFromPrices(input.entryPrice, input.observedPrice))) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_SECURITY_RETURN");
+  }
+
+  const benchmarkEvidencePresent = hasAnyBenchmarkEvidence(input);
+  let benchmarkTicker: string | null = null;
+  let benchmarkEntryObservedAt: string | null = null;
+  let benchmarkEntryPrice: number | null = null;
+  let benchmarkObservedAt: string | null = null;
+  let benchmarkObservedPrice: number | null = null;
+  let benchmarkReturn: number | null = null;
+  let excessReturn: number | null = null;
+  let benchmarkPriceSource: string | null = null;
+
+  if (benchmarkEvidencePresent) {
+    benchmarkTicker = normalizeTicker(input.benchmarkTicker);
+    benchmarkEntryObservedAt = normalizedText(input.benchmarkEntryObservedAt);
+    benchmarkObservedAt = normalizedText(input.benchmarkObservedAt);
+    benchmarkPriceSource = normalizedText(input.benchmarkPriceSource);
+
+    const benchmarkShapeComplete = benchmarkTicker !== null
+      && benchmarkEntryObservedAt !== null
+      && input.benchmarkEntryPrice !== null
+      && finitePositive(input.benchmarkEntryPrice)
+      && benchmarkObservedAt !== null
+      && input.benchmarkObservedPrice !== null
+      && finitePositive(input.benchmarkObservedPrice)
+      && input.benchmarkReturn !== null
+      && Number.isFinite(input.benchmarkReturn)
+      && input.excessReturn !== null
+      && Number.isFinite(input.excessReturn)
+      && benchmarkPriceSource !== null;
+
+    if (!benchmarkShapeComplete) {
+      throw new Error("INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_EVIDENCE");
+    }
+
+    benchmarkEntryPrice = input.benchmarkEntryPrice;
+    benchmarkObservedPrice = input.benchmarkObservedPrice;
+    benchmarkReturn = input.benchmarkReturn;
+    excessReturn = input.excessReturn;
+
+    if (!returnMatches(benchmarkReturn, returnFromPrices(benchmarkEntryPrice, benchmarkObservedPrice))) {
+      throw new Error("INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_RETURN");
+    }
+    if (!returnMatches(excessReturn, input.securityReturn - benchmarkReturn)) {
+      throw new Error("INVALID_RECOMMENDATION_OUTCOME_EXCESS_RETURN");
+    }
+  } else if (input.directionalHit !== null) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_EVIDENCE");
   }
 
   return {
@@ -85,16 +178,16 @@ export function toRecommendationOutcomeV3Row(
     observed_price: input.observedPrice,
     security_currency: normalizeTicker(input.securityCurrency),
     security_return: input.securityReturn,
-    benchmark_ticker: normalizeTicker(input.benchmarkTicker),
-    benchmark_entry_observed_at: input.benchmarkEntryObservedAt,
-    benchmark_entry_price: input.benchmarkEntryPrice,
-    benchmark_observed_at: input.benchmarkObservedAt,
-    benchmark_observed_price: input.benchmarkObservedPrice,
-    benchmark_return: input.benchmarkReturn,
-    excess_return: input.excessReturn,
-    directional_hit: input.directionalHit,
+    benchmark_ticker: benchmarkTicker,
+    benchmark_entry_observed_at: benchmarkEntryObservedAt,
+    benchmark_entry_price: benchmarkEntryPrice,
+    benchmark_observed_at: benchmarkObservedAt,
+    benchmark_observed_price: benchmarkObservedPrice,
+    benchmark_return: benchmarkReturn,
+    excess_return: excessReturn,
+    directional_hit: benchmarkEvidencePresent ? input.directionalHit : null,
     security_price_source: input.securityPriceSource.trim(),
-    benchmark_price_source: input.benchmarkPriceSource?.trim() || null,
+    benchmark_price_source: benchmarkPriceSource,
     updated_at: updatedAt,
   };
 }
