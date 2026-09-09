@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
+import { RECOMMENDATION_OUTCOME_POLICY_VERSION } from "@/lib/analysis/recommendation-learning-v3";
 
 const mocks = vi.hoisted(() => ({
   outcomeRows: [] as Record<string, unknown>[],
@@ -47,8 +49,8 @@ const EVALUATED_AT = "2026-09-09T13:35:00.000Z";
 function outcomeRow() {
   return {
     recommendation_audit_id: AUDIT_ID,
-    policy_version: "stockbox-recommendation-outcomes-v3.0.0",
-    benchmark_policy_version: "stockbox-recommendation-benchmark-policy-v3.0.0",
+    policy_version: RECOMMENDATION_OUTCOME_POLICY_VERSION,
+    benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
     horizon: "30d",
     expected_at: "2026-09-09T12:00:00.000Z",
     evaluated_at: "2026-09-09T12:00:00.000Z",
