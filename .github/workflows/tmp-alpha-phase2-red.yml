@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  alpha-phase2-red:
+  alpha-phase2-quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,3 +26,153 @@ jobs:
         run: npx eslint src/lib/alpha/repository.ts src/lib/alpha/universe.ts src/lib/alpha/universe-repository.ts src/lib/alpha/scan-policy.ts src/lib/alpha/scanner.ts src/lib/alpha/outcome-collector.ts tests/analysis/alpha-scan-policy.test.ts tests/analysis/alpha-universe.test.ts tests/analysis/alpha-scanner-boundary.test.ts tests/db/alpha-persistence-migrations.test.ts
       - name: Typecheck
         run: npm run typecheck
+
+  alpha-migration-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start disposable local Supabase
+        run: supabase start -x vector,edge-runtime,logflare
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Apply full migration catalog in natural order
+        run: supabase db reset --local
+      - name: Assert Alpha schema, RLS, origin and uniqueness invariants
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_table_count integer;
+            v_rls_count integer;
+            v_public_grants integer;
+            v_origin_checks integer;
+            v_security uuid;
+            v_prediction uuid;
+            v_asof timestamptz := '2026-09-10T00:00:00Z'::timestamptz;
+          begin
+            select count(*) into v_table_count
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_name in (
+                'alpha_predictions',
+                'alpha_prediction_outcomes',
+                'alpha_universe_securities',
+                'alpha_universe_memberships',
+                'alpha_scan_runs'
+              );
+            if v_table_count <> 5 then
+              raise exception 'Expected 5 Alpha tables, found %', v_table_count;
+            end if;
+
+            select count(*) into v_rls_count
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relname in (
+                'alpha_predictions',
+                'alpha_prediction_outcomes',
+                'alpha_universe_securities',
+                'alpha_universe_memberships',
+                'alpha_scan_runs'
+              )
+              and c.relrowsecurity = true;
+            if v_rls_count <> 5 then
+              raise exception 'Expected RLS on all 5 Alpha tables, found %', v_rls_count;
+            end if;
+
+            select count(*) into v_public_grants
+            from information_schema.role_table_grants
+            where grantee in ('anon', 'authenticated')
+              and table_schema = 'public'
+              and table_name in (
+                'alpha_predictions',
+                'alpha_prediction_outcomes',
+                'alpha_universe_securities',
+                'alpha_universe_memberships',
+                'alpha_scan_runs'
+              );
+            if v_public_grants <> 0 then
+              raise exception 'Expected no anon/authenticated Alpha table grants, found %', v_public_grants;
+            end if;
+
+            select count(*) into v_origin_checks
+            from pg_constraint con
+            join pg_class rel on rel.oid = con.conrelid
+            join pg_namespace n on n.oid = rel.relnamespace
+            where n.nspname = 'public'
+              and rel.relname = 'alpha_predictions'
+              and con.conname = 'alpha_predictions_origin_check'
+              and con.contype = 'c';
+            if v_origin_checks <> 1 then
+              raise exception 'Alpha prediction origin constraint is missing';
+            end if;
+
+            insert into public.alpha_universe_securities(
+              source, source_key, ticker, company_name, exchange, country, currency,
+              security_type, eligible, first_seen_at, last_seen_at
+            ) values (
+              'ci', 'ci:TEST', 'TEST', 'CI Test Company', 'NASDAQ', 'US', 'USD',
+              'common_stock', true, v_asof, v_asof
+            ) returning id into v_security;
+
+            insert into public.alpha_predictions(
+              origin_type, analysis_id, universe_security_id, ticker, company_name,
+              market_cap_band, alpha_score, breakout_score, classification, confidence,
+              scores, risk, probabilities, model_version, prediction_as_of
+            ) values (
+              'universe', null, v_security, 'TEST', 'CI Test Company',
+              'small', 75, 70, 'high_potential', 0.8,
+              '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 'ci-model', v_asof
+            ) returning id into v_prediction;
+
+            begin
+              insert into public.alpha_predictions(
+                origin_type, ticker, company_name, market_cap_band, alpha_score,
+                breakout_score, classification, confidence, scores, risk,
+                probabilities, model_version, prediction_as_of
+              ) values (
+                'universe', 'BAD', 'Invalid Origin', 'small', 50,
+                50, 'watchlist', 0.5, '{}'::jsonb, '{}'::jsonb,
+                '{}'::jsonb, 'ci-model', v_asof
+              );
+              raise exception 'Origin constraint accepted an invalid universe prediction';
+            exception when check_violation then
+              null;
+            end;
+
+            begin
+              insert into public.alpha_predictions(
+                origin_type, analysis_id, universe_security_id, ticker, company_name,
+                market_cap_band, alpha_score, breakout_score, classification, confidence,
+                scores, risk, probabilities, model_version, prediction_as_of
+              ) values (
+                'universe', null, v_security, 'TEST', 'CI Test Company',
+                'small', 75, 70, 'high_potential', 0.8,
+                '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 'ci-model', v_asof
+              );
+              raise exception 'Universe/model/as-of uniqueness accepted a duplicate prediction';
+            exception when unique_violation then
+              null;
+            end;
+
+            insert into public.alpha_prediction_outcomes(
+              prediction_id, horizon_days, price_start, price_end, observed_return,
+              market_data_as_of
+            ) values (
+              v_prediction, 30, 100, 110, 0.10, v_asof + interval '30 days'
+            );
+          end
+          $$;
+          SQL
+      - name: Stop disposable local Supabase
+        if: always()
+        run: supabase stop --no-backup
