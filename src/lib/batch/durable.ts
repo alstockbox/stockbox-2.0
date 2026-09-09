@@ -242,11 +242,13 @@ export async function createDurableBatch(input: {
       });
       if (outcome.ok) return true;
 
+      const enqueueUnavailableAt = new Date().toISOString();
       await admin.from("batch_items").update({
-        status: "failed",
-        last_error: "Unable to enqueue batch analysis.",
-        completed_at: new Date().toISOString(),
-      }).eq("id", itemId).eq("status", "queued");
+        last_error: "Batch worker enqueue is temporarily unavailable.",
+        updated_at: enqueueUnavailableAt,
+      }).eq("id", itemId)
+        .eq("status", "queued")
+        .eq("attempts", 0);
       return false;
     },
   );
@@ -609,13 +611,14 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
     BATCH_ORCHESTRATION_CONCURRENCY,
     async (row) => {
       const itemId = String(row.id);
+      const resetAt = new Date().toISOString();
       const reset = await admin.from("batch_items").update({
         status: "queued",
         attempts: 0,
         started_at: null,
         last_error: null,
         completed_at: null,
-        updated_at: new Date().toISOString(),
+        updated_at: resetAt,
       }).eq("id", itemId).eq("user_id", input.userId).eq("status", "failed");
       if (reset.error) return false;
 
@@ -628,11 +631,13 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
       if (outcome.ok) return true;
 
       await admin.from("batch_items").update({
-        status: "failed",
-        last_error: "Unable to enqueue batch analysis retry.",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("id", itemId).eq("user_id", input.userId).eq("status", "queued");
+        last_error: "Batch retry worker enqueue is temporarily unavailable.",
+        updated_at: resetAt,
+      }).eq("id", itemId)
+        .eq("user_id", input.userId)
+        .eq("status", "queued")
+        .eq("attempts", 0)
+        .eq("updated_at", resetAt);
       return false;
     },
   );
