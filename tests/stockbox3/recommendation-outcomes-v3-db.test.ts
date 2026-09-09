@@ -44,4 +44,51 @@ describe("Recommendation outcome V3 persistence boundary", () => {
   it("preserves a valid integer lag exactly", () => {
     expect(toRecommendationOutcomeV3Row(input({ lagDays: 2 })).lag_days).toBe(2);
   });
+
+  it("rejects an absolute return that cannot be reproduced from the persisted prices", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ securityReturn: 0.09 }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_SECURITY_RETURN",
+    );
+  });
+
+  it("rejects partial benchmark evidence instead of manufacturing a coherent row shape", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ benchmarkTicker: null }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_EVIDENCE",
+    );
+  });
+
+  it("rejects benchmark and excess returns that cannot be reproduced from prices", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ benchmarkReturn: 0.04 }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_RETURN",
+    );
+    expect(() => toRecommendationOutcomeV3Row(input({ excessReturn: 0.08 }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_EXCESS_RETURN",
+    );
+  });
+
+  it("allows fully unbenchmarked evidence without inventing relative performance", () => {
+    const row = toRecommendationOutcomeV3Row(input({
+      benchmarkTicker: null,
+      benchmarkEntryObservedAt: null,
+      benchmarkEntryPrice: null,
+      benchmarkObservedAt: null,
+      benchmarkObservedPrice: null,
+      benchmarkReturn: null,
+      excessReturn: null,
+      directionalHit: null,
+      benchmarkPriceSource: null,
+    }));
+
+    expect(row).toMatchObject({
+      benchmark_ticker: null,
+      benchmark_entry_observed_at: null,
+      benchmark_entry_price: null,
+      benchmark_observed_at: null,
+      benchmark_observed_price: null,
+      benchmark_return: null,
+      excess_return: null,
+      directional_hit: null,
+      benchmark_price_source: null,
+    });
+  });
 });
