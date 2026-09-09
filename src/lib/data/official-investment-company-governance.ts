@@ -6,6 +6,9 @@ const PROVIDER_ID = "official-investment-company-governance";
 const PROVIDER_VERSION = "official-investment-company-governance-v1";
 const INDUSTRIVARDEN_BOARD_URL = "https://www.industrivarden.se/en-gb/corporate-governance/board-of-directors/board-of-directors/";
 const INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL = "https://www.industrivarden.se/globalassets/arsstamma/2026/engelska/05b_nominating-committees-proposals-report-and-statement.pdf";
+const INVESTOR_BOARD_URL = "https://www.investorab.com/about-investor/board-management/board-of-directors";
+const INVESTOR_INDEPENDENCE_STATEMENT_URL = "https://www.investorab.com/media/e3hbxzb5/information-about-proposed-board-of-directors-2026.pdf";
+const INVESTOR_INDEPENDENCE_AS_OF = "2026-05-07";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -19,6 +22,20 @@ const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence
   { name: "Helena Stjernholm", independentFromCompanyManagement: false, independentFromMajorShareholders: true },
 ];
 
+const INVESTOR_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
+  { name: "Jacob Wallenberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Marcus Wallenberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Christian Cederholm", independentFromCompanyManagement: false, independentFromMajorShareholders: true },
+  { name: "Katarina Berg", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Magdalena Gerger", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Sven Nyman", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Mats Rahmström", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
+  { name: "Grace Reksten Skaugen", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Hans Stråberg", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Fred Wallenberg", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
+  { name: "Sara Öhrvall", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+];
+
 export type OfficialInvestmentCompanyGovernanceData = {
   directors: InvestmentCompanyDirectorGovernanceEvidence[];
   asOf: string;
@@ -29,6 +46,15 @@ export type OfficialInvestmentCompanyGovernanceData = {
 export type OfficialInvestmentCompanyGovernanceResult =
   | { ok: true; data: OfficialInvestmentCompanyGovernanceData }
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
+
+type GovernanceIssuerConfig = {
+  issuerName: string;
+  boardUrl: string;
+  evidenceUrl: string;
+  evidenceAsOf?: string;
+  directors: InvestmentCompanyDirectorGovernanceEvidence[];
+  parseRoster: (html: string) => string[] | null;
+};
 
 function diagnostic(status: ProviderDiagnostic["status"], reason?: string): ProviderDiagnostic {
   return {
@@ -97,10 +123,35 @@ export function parseIndustrivardenOfficialBoardRoster(html: string): string[] |
   return names.length ? names : null;
 }
 
-function rosterMatchesVerifiedEvidence(currentRoster: string[]): boolean {
-  if (currentRoster.length !== INDUSTRIVARDEN_2026_DIRECTORS.length) return false;
+export function parseInvestorOfficialBoardRoster(html: string): string[] | null {
+  const text = htmlToText(html);
+  if (!/\bboard of directors\b/i.test(text)) return null;
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const anchorPattern = /<a\b[^>]*href=["'][^"']*\/about-investor\/board-management\/board-of-directors\/[^"'/?#]+\/?["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = anchorPattern.exec(html)) !== null) {
+    const raw = htmlToText(match[1]);
+    const name = raw.replace(/^Read More About\s+/i, "").trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    const normalized = normalizeDirectorName(name);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      names.push(name);
+    }
+  }
+
+  return names.length === INVESTOR_2026_DIRECTORS.length ? names : null;
+}
+
+function rosterMatchesVerifiedEvidence(
+  currentRoster: string[],
+  verifiedDirectors: InvestmentCompanyDirectorGovernanceEvidence[],
+): boolean {
+  if (currentRoster.length !== verifiedDirectors.length) return false;
   const current = new Set(currentRoster.map(normalizeDirectorName));
-  const verified = new Set(INDUSTRIVARDEN_2026_DIRECTORS.map((director) => normalizeDirectorName(director.name)));
+  const verified = new Set(verifiedDirectors.map((director) => normalizeDirectorName(director.name)));
   return current.size === verified.size && [...current].every((name) => verified.has(name));
 }
 
@@ -108,14 +159,41 @@ function failure(reason: string, message: string): OfficialInvestmentCompanyGove
   return { ok: false, reason, message, diagnostic: diagnostic("unavailable", reason) };
 }
 
-export async function fetchOfficialInvestmentCompanyGovernance(
-  company: CompanySearchResult,
-): Promise<OfficialInvestmentCompanyGovernanceResult> {
+function issuerConfig(company: CompanySearchResult): GovernanceIssuerConfig | null {
   const identity = normalizeIdentity(company);
   const isIndustrivarden = /\bindu(?:-[ac])?\.st\b/.test(identity)
     || identity.includes("industrivärden")
     || identity.includes("industrivarden");
-  if (!isIndustrivarden) {
+  if (isIndustrivarden) {
+    return {
+      issuerName: "Industrivärden",
+      boardUrl: INDUSTRIVARDEN_BOARD_URL,
+      evidenceUrl: INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL,
+      directors: INDUSTRIVARDEN_2026_DIRECTORS,
+      parseRoster: parseIndustrivardenOfficialBoardRoster,
+    };
+  }
+
+  const isInvestor = /\binve(?:-[ab])?\.st\b/.test(identity) || identity.includes("investor ab");
+  if (isInvestor) {
+    return {
+      issuerName: "Investor",
+      boardUrl: INVESTOR_BOARD_URL,
+      evidenceUrl: INVESTOR_INDEPENDENCE_STATEMENT_URL,
+      evidenceAsOf: INVESTOR_INDEPENDENCE_AS_OF,
+      directors: INVESTOR_2026_DIRECTORS,
+      parseRoster: parseInvestorOfficialBoardRoster,
+    };
+  }
+
+  return null;
+}
+
+export async function fetchOfficialInvestmentCompanyGovernance(
+  company: CompanySearchResult,
+): Promise<OfficialInvestmentCompanyGovernanceResult> {
+  const config = issuerConfig(company);
+  if (!config) {
     return failure(
       "official_governance_adapter_not_configured",
       "No verified official governance adapter is configured for this investment company.",
@@ -125,7 +203,7 @@ export async function fetchOfficialInvestmentCompanyGovernance(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(INDUSTRIVARDEN_BOARD_URL, {
+    const response = await fetch(config.boardUrl, {
       cache: "no-store",
       headers: { accept: "text/html,application/xhtml+xml" },
       signal: controller.signal,
@@ -133,15 +211,15 @@ export async function fetchOfficialInvestmentCompanyGovernance(
     if (!response.ok) {
       return failure(
         response.status === 429 ? "rate_limited" : `http_${response.status}`,
-        "The current official Industrivärden board page could not be fetched for governance revalidation.",
+        `The current official ${config.issuerName} board page could not be fetched for governance revalidation.`,
       );
     }
 
-    const roster = parseIndustrivardenOfficialBoardRoster(await response.text());
-    if (!roster || !rosterMatchesVerifiedEvidence(roster)) {
+    const roster = config.parseRoster(await response.text());
+    if (!roster || !rosterMatchesVerifiedEvidence(roster, config.directors)) {
       return failure(
         "official_governance_roster_changed",
-        "The current official Industrivärden board roster no longer matches the versioned independence evidence; governance remains N/A until the evidence is reverified.",
+        `The current official ${config.issuerName} board roster no longer matches the versioned independence evidence; governance remains N/A until the evidence is reverified.`,
       );
     }
 
@@ -149,8 +227,8 @@ export async function fetchOfficialInvestmentCompanyGovernance(
     const asOf = accessedAt.slice(0, 10);
     const sources: AnalysisSource[] = [
       {
-        name: "Industrivärden current Board of Directors",
-        url: INDUSTRIVARDEN_BOARD_URL,
+        name: `${config.issuerName} current Board of Directors`,
+        url: config.boardUrl,
         accessedAt,
         freshness: "Live official board roster revalidated at analysis time with cache disabled.",
         provider: PROVIDER_ID,
@@ -159,21 +237,21 @@ export async function fetchOfficialInvestmentCompanyGovernance(
         dataAsOf: asOf,
       },
       {
-        name: "Industrivärden 2026 Nominating Committee independence statement",
-        url: INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL,
+        name: `${config.issuerName} 2026 independence statement`,
+        url: config.evidenceUrl,
         accessedAt,
-        freshness: "Versioned 2026 issuer nomination-committee independence evidence; usable only while the live board roster still matches exactly.",
+        freshness: "Versioned 2026 issuer governance independence evidence; usable only while the live board roster still matches exactly.",
         provider: PROVIDER_ID,
         version: PROVIDER_VERSION,
         capability: "specialized",
-        dataAsOf: asOf,
+        dataAsOf: config.evidenceAsOf ?? asOf,
       },
     ];
 
     return {
       ok: true,
       data: {
-        directors: INDUSTRIVARDEN_2026_DIRECTORS.map((director) => ({ ...director })),
+        directors: config.directors.map((director) => ({ ...director })),
         asOf,
         sources,
         diagnostic: diagnostic("available"),
@@ -182,7 +260,7 @@ export async function fetchOfficialInvestmentCompanyGovernance(
   } catch (error) {
     return failure(
       error instanceof Error && error.name === "AbortError" ? "timeout" : "upstream_error",
-      "Official Industrivärden governance verification failed before complete board evidence could be established.",
+      `Official ${config.issuerName} governance verification failed before complete board evidence could be established.`,
     );
   } finally {
     clearTimeout(timeout);
