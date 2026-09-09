@@ -5,6 +5,7 @@ import {
   type RecommendationOutcomeHorizonV3,
   type RecommendationOutcomeV3,
 } from "@/lib/analysis/recommendation-learning-v3";
+import { evaluateRecommendationPerformanceRollupsV3 } from "@/lib/analysis/recommendation-performance-rollup-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 import { persistRecommendationCalibrationCandidateV3 } from "@/lib/db/recommendation-calibration-v3";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -212,6 +213,9 @@ export type RecommendationCalibrationEvaluationResultV3 = {
   pausedReason?: "recommendation_v3_disabled" | "recommendation_engine_killed" | "background_jobs_killed";
   outcomes: number;
   performanceSlices: number;
+  performanceRollups: number;
+  basePerformanceRollups: number;
+  dimensionPerformanceRollups: number;
   driftSlices: number;
   created: number;
   refreshed: number;
@@ -230,6 +234,9 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
       pausedReason: gate.reason,
       outcomes: 0,
       performanceSlices: 0,
+      performanceRollups: 0,
+      basePerformanceRollups: 0,
+      dimensionPerformanceRollups: 0,
       driftSlices: 0,
       created: 0,
       refreshed: 0,
@@ -240,6 +247,11 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
 
   const outcomes = await loadRecommendationOutcomesForCalibrationV3({ limit: options.limit });
   const performance = evaluateRecommendationPerformanceV3(outcomes);
+  const performanceRollups = evaluateRecommendationPerformanceRollupsV3(outcomes, {
+    minimumDimensionBenchmarkSample: options.minimumBenchmarkSample,
+  });
+  const basePerformanceRollups = performanceRollups.filter((rollup) => rollup.scope === "BASE").length;
+  const dimensionPerformanceRollups = performanceRollups.length - basePerformanceRollups;
   const createdAt = (options.now ?? new Date()).toISOString();
   const candidates = performance.flatMap((slice) => {
     const candidate = proposeRecommendationCalibrationV3(slice, {
@@ -269,6 +281,9 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
   return {
     outcomes: outcomes.length,
     performanceSlices: performance.length,
+    performanceRollups: performanceRollups.length,
+    basePerformanceRollups,
+    dimensionPerformanceRollups,
     driftSlices: candidates.length,
     created,
     refreshed,
