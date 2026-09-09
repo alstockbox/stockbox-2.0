@@ -269,6 +269,7 @@ function attemptOffsetFromJob(job: BackgroundJob): number {
 
 const BATCH_LEASE_VERIFICATION_UNAVAILABLE = "Batch lease verification is temporarily unavailable.";
 const BATCH_LEASE_UPDATE_UNAVAILABLE = "Batch lease update is temporarily unavailable.";
+const BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE = "Batch worker queue inspection is temporarily unavailable.";
 
 function throwIfExecutionExpired(signal?: AbortSignal): void {
   if (signal?.aborted) throw new BatchItemLeaseLostError();
@@ -545,7 +546,7 @@ export async function runDurableBatchJobs(limit = 2) {
 
 export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<number | null> {
   const admin = createAdminClient();
-  if (!admin) return null;
+  if (!admin) throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
   const next = await admin.from("background_jobs")
     .select("available_at")
     .eq("kind", BATCH_ANALYSIS_JOB_KIND)
@@ -553,7 +554,11 @@ export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<n
     .order("available_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  if (next.error || !next.data || typeof next.data.available_at !== "string") return null;
+  if (next.error) throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
+  if (!next.data) return null;
+  if (typeof next.data.available_at !== "string") {
+    throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
+  }
   return boundedDurableWorkerDelayMs(next.data.available_at, now.getTime());
 }
 
