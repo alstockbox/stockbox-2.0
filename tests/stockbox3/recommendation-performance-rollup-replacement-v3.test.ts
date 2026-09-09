@@ -94,4 +94,20 @@ describe("Recommendation performance rollup snapshot replacement V3", () => {
     expect(migrationText).toContain("grant execute on function public.replace_recommendation_v3_performance_rollups");
     expect(migrationText).toContain("to service_role");
   });
+
+  it("keeps a durable monotonic watermark so an older run cannot revive a newer empty snapshot", () => {
+    const migrationText = readdirSync("supabase/migrations")
+      .filter((name) => name.includes("recommendation_v3_performance_rollup"))
+      .sort()
+      .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
+      .join("\n")
+      .toLowerCase();
+
+    expect(migrationText).toContain("analysis_recommendation_v3_performance_rollup_watermarks");
+    expect(migrationText).toContain("latest_evaluated_at");
+    expect(migrationText).toContain("for update");
+    expect(migrationText).toContain("v_latest_evaluated_at > p_evaluated_at");
+    expect(migrationText).toContain("enable row level security");
+    expect(migrationText).toContain("to service_role");
+  });
 });
