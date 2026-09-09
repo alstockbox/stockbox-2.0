@@ -112,7 +112,11 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function auditRow(value: unknown): RecommendationAuditForOutcomeV3 | null {
+function finiteScore100(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+export function parseRecommendationOutcomeAuditRowV3(value: unknown): RecommendationAuditForOutcomeV3 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (!validAuditId(row.id) || !validDate(row.observed_at) || typeof row.ticker !== "string") return null;
@@ -120,6 +124,9 @@ function auditRow(value: unknown): RecommendationAuditForOutcomeV3 | null {
   if (typeof row.analysis_archetype !== "string"
       || typeof row.model_version !== "string"
       || typeof row.recommendation_policy_version !== "string") return null;
+  if (!finiteScore100(row.conviction)
+      || !finiteScore100(row.data_quality)
+      || !finiteScore100(row.model_uncertainty)) return null;
 
   return {
     id: row.id.trim(),
@@ -131,9 +138,9 @@ function auditRow(value: unknown): RecommendationAuditForOutcomeV3 | null {
     recommendation_policy_version: row.recommendation_policy_version,
     v3_rating: row.v3_rating as RecommendationV3Rating,
     objective_score: finiteOrNull(row.objective_score),
-    conviction: finiteOrNull(row.conviction) ?? 0,
-    data_quality: finiteOrNull(row.data_quality) ?? 0,
-    model_uncertainty: finiteOrNull(row.model_uncertainty) ?? 100,
+    conviction: row.conviction,
+    data_quality: row.data_quality,
+    model_uncertainty: row.model_uncertainty,
     reason_codes: Array.isArray(row.reason_codes)
       ? row.reason_codes.filter((item): item is string => typeof item === "string")
       : [],
@@ -167,7 +174,7 @@ async function loadOutcomeAuditV3(id: string): Promise<RecommendationAuditForOut
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(`Unable to load recommendation audit: ${error.message}`);
-  return auditRow(data);
+  return parseRecommendationOutcomeAuditRowV3(data);
 }
 
 export async function loadDueRecommendationOutcomeWorkV3(options: {
@@ -190,7 +197,7 @@ export async function loadDueRecommendationOutcomeWorkV3(options: {
   if (auditError) throw new Error(`Unable to load due recommendation audits: ${auditError.message}`);
 
   const audits = (auditData ?? []).flatMap((row) => {
-    const parsed = auditRow(row);
+    const parsed = parseRecommendationOutcomeAuditRowV3(row);
     return parsed ? [parsed] : [];
   });
   if (audits.length === 0) return [];
