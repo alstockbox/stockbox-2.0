@@ -91,6 +91,20 @@ describe("Recommendation V3 audit mapper", () => {
     expect(keys).not.toContain("providerPayload");
   });
 
+  it("rejects blank durable audit identity instead of persisting ambiguous dedupe lineage", () => {
+    for (const field of ["ticker", "analysisArchetype", "modelVersion", "recommendationPolicyVersion"] as const) {
+      const event = eventFixture();
+      (event as unknown as Record<string, unknown>)[field] = "   ";
+      expect(() => toRecommendationV3AuditRow(event)).toThrow("INVALID_RECOMMENDATION_V3_AUDIT_IDENTITY");
+    }
+  });
+
+  it("keeps a blank analysis fingerprint missing instead of creating a false identity", () => {
+    const event = eventFixture();
+    event.analysisFingerprint = "   ";
+    expect(toRecommendationV3AuditRow(event).analysis_fingerprint).toBeNull();
+  });
+
   it("keeps missing sector missing instead of inferring or backfilling it", () => {
     const event = eventFixture();
     delete event.sector;
