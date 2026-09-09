@@ -110,7 +110,7 @@ create or replace function public.prevent_recommendation_v3_calibration_evidence
 returns trigger
 language plpgsql
 set search_path = ''
-as $$;
+as $$
 begin
   raise exception 'Recommendation calibration evidence is append-only';
 end;
