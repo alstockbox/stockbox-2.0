@@ -5,10 +5,12 @@ const PROVIDER_ID = "official-investment-company-leverage";
 const PROVIDER_VERSION = "official-investment-company-leverage-v1";
 const LATOUR_AS_OF = "2026-06-30";
 const LATOUR_H1_2026_URL = "https://news.cision.com/investment-ab-latour/r/interim-report-january---june-2026%2Cc4384935";
+const INVESTOR_Q2_2026_AS_OF = "2026-06-30";
+const INVESTOR_Q2_2026_URL = "https://www.investorab.com/investors-media/reports-presentations/2026";
 
 export type ParsedOfficialInvestmentCompanyLeverage = {
   ratio: number;
-  netDebtExcludingIfrs16: number;
+  netDebtExcludingIfrs16?: number;
 };
 
 export type OfficialInvestmentCompanyLeverageData = ParsedOfficialInvestmentCompanyLeverage & {
@@ -22,9 +24,11 @@ export type OfficialInvestmentCompanyLeverageResult =
   | { ok: false; reason: string; message: string; diagnostic: ProviderDiagnostic };
 
 type OfficialLeverageRegistryEntry = {
-  id: "latour";
+  id: "latour" | "investor";
   url: string;
   asOf: string;
+  sourceName: string;
+  freshness: string;
   matches: (company: CompanySearchResult) => boolean;
   parse: (html: string) => ParsedOfficialInvestmentCompanyLeverage | null;
 };
@@ -102,17 +106,47 @@ export function parseLatourOfficialLeverageDisclosure(
   };
 }
 
+export function parseInvestorOfficialLeverageDisclosure(
+  html: string,
+): ParsedOfficialInvestmentCompanyLeverage | null {
+  const text = htmlToText(html);
+  const pattern = /leverage was\s+(\d+(?:\.\d+)?)\s+percent as of June 30,\s*2026\s*\([^)]*December 31,\s*2025[^)]*\)/gi;
+  const matches = [...text.matchAll(pattern)];
+  if (matches.length !== 1) return null;
+
+  const ratioPercent = Number(matches[0][1]);
+  if (!Number.isFinite(ratioPercent) || ratioPercent < 0 || ratioPercent >= 100) return null;
+
+  const ratio = Number((ratioPercent / 100).toFixed(6));
+  return Number.isFinite(ratio) && ratio >= 0 && ratio < 1 ? { ratio } : null;
+}
+
 const REGISTRY: OfficialLeverageRegistryEntry[] = [
   {
     id: "latour",
     url: LATOUR_H1_2026_URL,
     asOf: LATOUR_AS_OF,
+    sourceName: "Latour H1 2026 issuer leverage disclosure",
+    freshness: "Issuer-published leverage ratio for net debt excluding IFRS 16 relative to the market value of total assets; the published ratio is consumed directly without debt/NAV algebra.",
     matches: (company) => {
       const identity = normalizeIdentity(company);
       return /\blato(?:-[ab])?\.st\b/.test(identity)
         || identity.includes("investment ab latour");
     },
     parse: parseLatourOfficialLeverageDisclosure,
+  },
+  {
+    id: "investor",
+    url: INVESTOR_Q2_2026_URL,
+    asOf: INVESTOR_Q2_2026_AS_OF,
+    sourceName: "Investor Q2 2026 issuer leverage disclosure",
+    freshness: "Issuer-published leverage ratio as of June 30, 2026; the published ratio is consumed directly without consolidated-debt or NAV algebra.",
+    matches: (company) => {
+      const identity = normalizeIdentity(company);
+      return /\binve(?:-[ab])?\.st\b/.test(identity)
+        || identity.includes("investor ab");
+    },
+    parse: parseInvestorOfficialLeverageDisclosure,
   },
 ];
 
@@ -155,16 +189,16 @@ export async function fetchOfficialInvestmentCompanyLeverage(
     if (!parsed) {
       return failure(
         "official_leverage_incomplete_or_unparseable",
-        "Official leverage disclosure did not contain one unambiguous issuer-defined current ratio for net debt excluding IFRS 16 relative to the market value of total assets.",
+        "Official leverage disclosure did not contain one unambiguous issuer-defined current leverage ratio in the expected versioned disclosure.",
       );
     }
 
     const accessedAt = new Date().toISOString();
     const source: AnalysisSource = {
-      name: "Latour H1 2026 issuer leverage disclosure",
+      name: entry.sourceName,
       url: entry.url,
       accessedAt,
-      freshness: "Issuer-published leverage ratio for net debt excluding IFRS 16 relative to the market value of total assets; the published ratio is consumed directly without debt/NAV algebra.",
+      freshness: entry.freshness,
       provider: PROVIDER_ID,
       version: PROVIDER_VERSION,
       capability: "specialized",
