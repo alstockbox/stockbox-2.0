@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CompanyFundamentals, CompanySearchResult } from "../../src/lib/analysis/types";
 import {
+  assessDepositaryReceiptFundamentalsAccess,
   verifyDepositaryReceiptFundamentalsIdentity,
   type DepositaryReceiptRepresentation,
 } from "../../src/lib/data/depositary-receipt";
@@ -63,5 +64,19 @@ describe("depositary-receipt issuer identity", () => {
     const result = verifyDepositaryReceiptFundamentalsIdentity(company(), fundamentals("issuer-other"));
     expect(result.verified).toBe(false);
     expect(result.reason).toMatch(/issuer/i);
+  });
+
+  it("fails closed when both sides of the verified issuer mapping carry the same noncanonical opaque identity", () => {
+    const dirty = company();
+    dirty.issuerId = " issuer-novo ";
+    dirty.depositaryReceipt!.issuerId = " issuer-novo ";
+
+    const identity = verifyDepositaryReceiptFundamentalsIdentity(dirty, fundamentals("issuer-novo"));
+    const access = assessDepositaryReceiptFundamentalsAccess(dirty);
+
+    expect(identity.verified).toBe(false);
+    expect(identity.reason).toMatch(/issuer|canonical|identity/i);
+    expect(access.allowed).toBe(false);
+    expect(access.scope).toBe("none");
   });
 });
