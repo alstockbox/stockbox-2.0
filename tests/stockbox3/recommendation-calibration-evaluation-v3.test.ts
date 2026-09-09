@@ -6,6 +6,7 @@ const lineage = {
   id: "00000000-0000-4000-8000-000000000001",
   ticker: "MSFT",
   analysisArchetype: "standard",
+  sector: "technology",
   modelVersion: "stockbox-analysis-v3-test",
   recommendationPolicyVersion: "stockbox-recommendation-policy-v3.0.0",
   rating: "BUY" as const,
@@ -41,6 +42,7 @@ describe("Recommendation calibration evaluation V3", () => {
 
     expect(result).not.toBeNull();
     expect(result?.analysisArchetype).toBe("standard");
+    expect(result?.sector).toBe("technology");
     expect(result?.modelVersion).toBe("stockbox-analysis-v3-test");
     expect(result?.recommendationPolicyVersion).toBe("stockbox-recommendation-policy-v3.0.0");
     expect(result?.rating).toBe("BUY");
@@ -48,6 +50,11 @@ describe("Recommendation calibration evaluation V3", () => {
     expect(result?.benchmarkTicker).toBe("^GSPC");
     expect(result?.excessReturn).toBeCloseTo(0.07, 8);
     expect(result?.directionalHit).toBe(true);
+  });
+
+  it("keeps missing sector lineage missing", () => {
+    const result = recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, sector: null });
+    expect(result?.sector).toBeNull();
   });
 
   it("accepts current-policy unbenchmarked outcomes without inventing benchmark performance", () => {

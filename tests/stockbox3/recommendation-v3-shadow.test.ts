@@ -171,6 +171,7 @@ describe("Recommendation V3 shadow mode", () => {
     expect(shadow.decision.rating).toBe("STRONG_BUY");
     expect(shadow.event.normalizedLegacyRating).toBe("STRONG_BUY");
     expect(shadow.event.changed).toBe(false);
+    expect(shadow.event.sector).toBe("technology");
     expect(shadow.event.hadPersonalizedScore).toBe(true);
     expect(shadow.event).not.toHaveProperty("userMatchScore");
     expect(JSON.stringify(shadow.event)).not.toContain("97");

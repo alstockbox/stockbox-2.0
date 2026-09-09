@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { toRecommendationV3AuditRow } from "@/lib/db/recommendation-v3-audit";
 import type { RecommendationV3ShadowEvent } from "@/lib/analysis/recommendation-v3-shadow";
@@ -9,6 +10,7 @@ function eventFixture(): RecommendationV3ShadowEvent {
     ticker: "TEST",
     analysisFingerprint: "fingerprint-123",
     analysisArchetype: "standard",
+    sector: "technology",
     legacyRating: "Strong Buy",
     normalizedLegacyRating: "STRONG_BUY",
     v3Rating: "WAIT",
@@ -49,6 +51,7 @@ describe("Recommendation V3 audit mapper", () => {
       ticker: "TEST",
       analysis_fingerprint: "fingerprint-123",
       analysis_archetype: "standard",
+      sector: "technology",
       model_version: "stockbox-analysis-v2.7-test",
       legacy_rating: "Strong Buy",
       normalized_legacy_rating: "STRONG_BUY",
@@ -86,6 +89,20 @@ describe("Recommendation V3 audit mapper", () => {
     expect(keys).not.toContain("userMatchScore");
     expect(keys).not.toContain("rawFinancials");
     expect(keys).not.toContain("providerPayload");
+  });
+
+  it("keeps missing sector missing instead of inferring or backfilling it", () => {
+    const event = eventFixture();
+    delete event.sector;
+    expect(toRecommendationV3AuditRow(event).sector).toBeNull();
+
+    const migration = readFileSync(
+      "supabase/migrations/20260909121000_recommendation_v3_audit_sector_lineage.sql",
+      "utf8",
+    );
+    expect(migration).toContain("add column if not exists sector text");
+    expect(migration).toContain("check (sector is null or btrim(sector) <> '') not valid");
+    expect(migration.toLowerCase()).not.toContain("update public.analysis_recommendation_v3_audit");
   });
 
   it("copies arrays so later event mutation cannot mutate the prepared audit row", () => {

@@ -28,6 +28,8 @@ export type RecommendationV3ShadowEvent = {
   ticker: string;
   analysisFingerprint: string | null;
   analysisArchetype: string;
+  /** Objective analysis sector when the canonical input/report provides one. Never inferred from ticker. */
+  sector?: string | null;
   legacyRating: string;
   normalizedLegacyRating: RecommendationV3Rating;
   v3Rating: RecommendationV3Rating;
@@ -162,6 +164,7 @@ export function evaluateRecommendationV3Shadow(
       ticker: shadowTicker(input),
       analysisFingerprint: result.canonicalInputFingerprint ?? null,
       analysisArchetype: result.analysisArchetype,
+      sector: input.company.sector ?? null,
       legacyRating,
       normalizedLegacyRating: normalizedLegacy,
       v3Rating: decision.rating,

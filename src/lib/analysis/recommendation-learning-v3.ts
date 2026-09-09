@@ -24,6 +24,8 @@ export type RecommendationSnapshotV3 = {
   ticker: string;
   analysisFingerprint: string | null;
   analysisArchetype: string;
+  /** Optional objective sector lineage. Missing/legacy values remain null. */
+  sector?: string | null;
   modelVersion: string;
   recommendationPolicyVersion: string;
   rating: RecommendationV3Rating;
@@ -46,6 +48,8 @@ export type RecommendationOutcomeV3 = {
   ticker: string;
   rating: RecommendationV3Rating;
   analysisArchetype: string;
+  /** Optional objective sector lineage. It is reporting-only, never inferred. */
+  sector?: string | null;
   modelVersion: string;
   recommendationPolicyVersion: string;
   horizon: RecommendationOutcomeHorizonV3;
@@ -120,6 +124,11 @@ function normalizedTicker(value: string): string {
   return value.trim().toUpperCase();
 }
 
+function normalizedDimension(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 function mean(values: number[]): number | null {
   return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -174,6 +183,7 @@ export function createRecommendationSnapshotV3(event: RecommendationV3ShadowEven
     ticker: normalizedTicker(event.ticker),
     analysisFingerprint: event.analysisFingerprint,
     analysisArchetype: event.analysisArchetype,
+    sector: normalizedDimension(event.sector),
     modelVersion: event.modelVersion,
     recommendationPolicyVersion: event.recommendationPolicyVersion,
     rating: event.v3Rating,
@@ -236,6 +246,7 @@ export function evaluateRecommendationOutcomeV3(input: {
     ticker: snapshot.ticker,
     rating: snapshot.rating,
     analysisArchetype: snapshot.analysisArchetype,
+    sector: normalizedDimension(snapshot.sector),
     modelVersion: snapshot.modelVersion,
     recommendationPolicyVersion: snapshot.recommendationPolicyVersion,
     horizon,
@@ -328,20 +339,36 @@ export function proposeRecommendationCalibrationV3(
       && performance.hitRate < 0.45) {
     reasons.push("DIRECTIONAL_HIT_RATE_BELOW_45_PERCENT");
   }
+  if (performance.benchmarkCount >= 50
+      && performance.hitRate !== null
+      && performance.hitRate < 0.50
+      && performance.meanExcessReturn !== null
+      && performance.meanExcessReturn < 0) {
+    reasons.push("MODEL_DRIFT_REVIEW_REQUIRED");
+  }
+  if (performance.benchmarkCount >= 80
+      && performance.hitRate !== null
+      && performance.hitRate < 0.40
+      && performance.meanExcessReturn !== null
+      && performance.meanExcessReturn < -0.03) {
+    reasons.push("SEVERE_MODEL_DRIFT");
+  }
+
   if (reasons.length === 0) return null;
 
   const createdAt = options.createdAt ?? new Date().toISOString();
+  const candidateId = [
+    performance.horizon,
+    performance.rating,
+    performance.analysisArchetype,
+    performance.modelVersion,
+    performance.recommendationPolicyVersion,
+    reasons.join("+"),
+  ].join(":");
+
   return {
     policyVersion: RECOMMENDATION_CALIBRATION_POLICY_VERSION,
-    candidateId: [
-      performance.analysisArchetype,
-      performance.modelVersion,
-      performance.recommendationPolicyVersion,
-      performance.horizon,
-      performance.rating,
-      performance.benchmarkCount,
-      createdAt,
-    ].join(":"),
+    candidateId,
     createdAt,
     stage: "CANDIDATE",
     horizon: performance.horizon,
@@ -358,39 +385,13 @@ export function proposeRecommendationCalibrationV3(
   };
 }
 
-const NEXT_CALIBRATION_STAGE: Record<RecommendationCalibrationStageV3, RecommendationCalibrationStageV3 | null> = {
-  CANDIDATE: "BACKTESTED",
-  BACKTESTED: "SHADOW_VALIDATED",
-  SHADOW_VALIDATED: "APPROVED",
-  APPROVED: "PRODUCTION",
-  PRODUCTION: null,
-};
-
-/**
- * Enforces candidate -> backtest -> shadow -> approval -> production.
- * Production promotion additionally requires explicit human approval and positive backtest/shadow evidence.
- */
-export function advanceRecommendationCalibrationV3(
-  candidate: RecommendationCalibrationCandidateV3,
-  nextStage: RecommendationCalibrationStageV3,
-  evidence: CalibrationPromotionEvidenceV3 = {},
-): RecommendationCalibrationCandidateV3 {
-  const allowed = NEXT_CALIBRATION_STAGE[candidate.stage];
-  if (allowed !== nextStage) throw new Error("INVALID_CALIBRATION_STAGE_TRANSITION");
-
-  if (nextStage === "SHADOW_VALIDATED" && evidence.backtestImproved !== true) {
-    throw new Error("CALIBRATION_BACKTEST_IMPROVEMENT_REQUIRED");
-  }
-  if (nextStage === "APPROVED" && evidence.shadowImproved !== true) {
-    throw new Error("CALIBRATION_SHADOW_IMPROVEMENT_REQUIRED");
-  }
-  if (nextStage === "PRODUCTION" && (
-    evidence.explicitApproval !== true
-    || evidence.backtestImproved !== true
-    || evidence.shadowImproved !== true
-  )) {
-    throw new Error("CALIBRATION_EXPLICIT_APPROVAL_AND_EVIDENCE_REQUIRED");
-  }
-
-  return { ...candidate, stage: nextStage };
+export function canPromoteRecommendationCalibrationV3(
+  stage: RecommendationCalibrationStageV3,
+  evidence: CalibrationPromotionEvidenceV3,
+): RecommendationCalibrationStageV3 {
+  if (stage === "CANDIDATE") return evidence.backtestImproved ? "BACKTESTED" : "CANDIDATE";
+  if (stage === "BACKTESTED") return evidence.shadowImproved ? "SHADOW_VALIDATED" : "BACKTESTED";
+  if (stage === "SHADOW_VALIDATED") return evidence.explicitApproval ? "APPROVED" : "SHADOW_VALIDATED";
+  if (stage === "APPROVED") return "PRODUCTION";
+  return "PRODUCTION";
 }

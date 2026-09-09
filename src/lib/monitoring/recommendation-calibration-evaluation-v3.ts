@@ -46,6 +46,7 @@ const AUDIT_PROJECTION = [
   "id",
   "ticker",
   "analysis_archetype",
+  "sector",
   "model_version",
   "recommendation_policy_version",
   "v3_rating",
@@ -57,6 +58,7 @@ type AuditLineageRowV3 = {
   id: string;
   ticker: string;
   analysisArchetype: string;
+  sector?: string | null;
   modelVersion: string;
   recommendationPolicyVersion: string;
   rating: RecommendationV3Rating;
@@ -82,6 +84,12 @@ function persistenceRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizedDimension(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
   const row = persistenceRecord(value);
   if (!row) return null;
@@ -95,6 +103,7 @@ function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
     id: row.id,
     ticker: row.ticker.trim().toUpperCase(),
     analysisArchetype: row.analysis_archetype,
+    sector: normalizedDimension(row.sector),
     modelVersion: row.model_version,
     recommendationPolicyVersion: row.recommendation_policy_version,
     rating: row.v3_rating as RecommendationV3Rating,
@@ -138,6 +147,7 @@ export function recommendationOutcomeFromPersistenceV3(
     ticker: lineage.ticker,
     rating: lineage.rating,
     analysisArchetype: lineage.analysisArchetype,
+    sector: normalizedDimension(lineage.sector),
     modelVersion: lineage.modelVersion,
     recommendationPolicyVersion: lineage.recommendationPolicyVersion,
     horizon: row.horizon as RecommendationOutcomeHorizonV3,

@@ -186,6 +186,7 @@ export function createSpecialistRecommendationV3ShadowEvent(
     ticker: report.ticker.trim().toUpperCase(),
     analysisFingerprint: analysisFingerprint(report, kind),
     analysisArchetype: specialistAnalysisArchetype(report, kind),
+    sector: report.engine?.scores?.sector ?? null,
     legacyRating: String(report.recommendation),
     normalizedLegacyRating: normalizedLegacy,
     v3Rating: rating,

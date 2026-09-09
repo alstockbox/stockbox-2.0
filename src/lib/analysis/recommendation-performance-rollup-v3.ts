@@ -4,12 +4,13 @@ import type {
 } from "./recommendation-learning-v3";
 import type { RecommendationV3Rating } from "./recommendation-v3";
 
-export type RecommendationPerformanceRollupScopeV3 = "BASE" | "ANALYSIS_ARCHETYPE" | "MODEL_LINEAGE";
+export type RecommendationPerformanceRollupScopeV3 = "BASE" | "SECTOR" | "ANALYSIS_ARCHETYPE" | "MODEL_LINEAGE";
 
 export type RecommendationPerformanceRollupV3 = {
   scope: RecommendationPerformanceRollupScopeV3;
   horizon: RecommendationOutcomeHorizonV3;
   rating: RecommendationV3Rating;
+  sector: string | null;
   analysisArchetype: string | null;
   modelVersion: string | null;
   recommendationPolicyVersion: string | null;
@@ -44,6 +45,11 @@ function groupKey(parts: string[]): string {
   return JSON.stringify(parts);
 }
 
+function normalizedDimension(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 function aggregate(
   scope: RecommendationPerformanceRollupScopeV3,
   outcomes: RecommendationOutcomeV3[],
@@ -59,7 +65,10 @@ function aggregate(
     scope,
     horizon: first.horizon,
     rating: first.rating,
-    analysisArchetype: scope === "BASE" ? null : first.analysisArchetype,
+    sector: scope === "SECTOR" ? normalizedDimension(first.sector) : null,
+    analysisArchetype: scope === "ANALYSIS_ARCHETYPE" || scope === "MODEL_LINEAGE"
+      ? first.analysisArchetype
+      : null,
     modelVersion: scope === "MODEL_LINEAGE" ? first.modelVersion : null,
     recommendationPolicyVersion: scope === "MODEL_LINEAGE" ? first.recommendationPolicyVersion : null,
     count: outcomes.length,
@@ -88,8 +97,9 @@ function collectGroups(
 
 /**
  * General performance reporting uses rating + horizon as the always-available
- * base slice. More specific dimensions are emitted only when they have enough
- * benchmark-relative evidence to avoid misleading small-sample fragmentation.
+ * base slice. Verified dimensions are emitted independently only after their
+ * benchmark-relative sample gate is met. Missing sector remains missing rather
+ * than being inferred from ticker, exchange or archetype.
  *
  * Calibration intentionally does not consume these rollups: calibration keeps
  * exact model lineage isolation in `evaluateRecommendationPerformanceV3`.
@@ -103,6 +113,12 @@ export function evaluateRecommendationPerformanceRollupsV3(
   const baseGroups = collectGroups(outcomes, (outcome) => groupKey([
     outcome.horizon,
     outcome.rating,
+  ]));
+  const sectorOutcomes = outcomes.filter((outcome) => normalizedDimension(outcome.sector) !== null);
+  const sectorGroups = collectGroups(sectorOutcomes, (outcome) => groupKey([
+    outcome.horizon,
+    outcome.rating,
+    normalizedDimension(outcome.sector) ?? "",
   ]));
   const archetypeGroups = collectGroups(outcomes, (outcome) => groupKey([
     outcome.horizon,
@@ -118,6 +134,9 @@ export function evaluateRecommendationPerformanceRollupsV3(
   ]));
 
   const base = baseGroups.map((group) => aggregate("BASE", group));
+  const sector = sectorGroups
+    .map((group) => aggregate("SECTOR", group))
+    .filter((rollup) => rollup.benchmarkCount >= minimumDimensionBenchmarkSample);
   const archetype = archetypeGroups
     .map((group) => aggregate("ANALYSIS_ARCHETYPE", group))
     .filter((rollup) => rollup.benchmarkCount >= minimumDimensionBenchmarkSample);
@@ -125,11 +144,12 @@ export function evaluateRecommendationPerformanceRollupsV3(
     .map((group) => aggregate("MODEL_LINEAGE", group))
     .filter((rollup) => rollup.benchmarkCount >= minimumDimensionBenchmarkSample);
 
-  return [...base, ...archetype, ...lineage].sort((left, right) => {
+  return [...base, ...sector, ...archetype, ...lineage].sort((left, right) => {
     const scopeOrder: Record<RecommendationPerformanceRollupScopeV3, number> = {
       BASE: 0,
-      ANALYSIS_ARCHETYPE: 1,
-      MODEL_LINEAGE: 2,
+      SECTOR: 1,
+      ANALYSIS_ARCHETYPE: 2,
+      MODEL_LINEAGE: 3,
     };
     const scopeDelta = scopeOrder[left.scope] - scopeOrder[right.scope];
     if (scopeDelta !== 0) return scopeDelta;
@@ -137,6 +157,8 @@ export function evaluateRecommendationPerformanceRollupsV3(
     if (horizonDelta !== 0) return horizonDelta;
     const ratingDelta = left.rating.localeCompare(right.rating);
     if (ratingDelta !== 0) return ratingDelta;
+    const sectorDelta = (left.sector ?? "").localeCompare(right.sector ?? "");
+    if (sectorDelta !== 0) return sectorDelta;
     const archetypeDelta = (left.analysisArchetype ?? "").localeCompare(right.analysisArchetype ?? "");
     if (archetypeDelta !== 0) return archetypeDelta;
     const modelDelta = (left.modelVersion ?? "").localeCompare(right.modelVersion ?? "");

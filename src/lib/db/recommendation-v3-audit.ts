@@ -6,6 +6,7 @@ export type RecommendationV3AuditRow = {
   ticker: string;
   analysis_fingerprint: string | null;
   analysis_archetype: string;
+  sector: string | null;
   model_version: string;
   legacy_rating: string;
   normalized_legacy_rating: string;
@@ -36,6 +37,11 @@ export type RecommendationV3AuditRow = {
   updated_at: string;
 };
 
+function normalizeDimension(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 /**
  * Explicit allowlist mapper for the private V3 audit store.
  * Do not spread the shadow event here: adding a future event field must never
@@ -51,6 +57,7 @@ export function toRecommendationV3AuditRow(
     ticker: event.ticker,
     analysis_fingerprint: event.analysisFingerprint,
     analysis_archetype: event.analysisArchetype,
+    sector: normalizeDimension(event.sector),
     model_version: event.modelVersion,
     legacy_rating: event.legacyRating,
     normalized_legacy_rating: event.normalizedLegacyRating,

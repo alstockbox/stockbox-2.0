@@ -12,6 +12,7 @@ function outcome(index: number, overrides: Partial<RecommendationOutcomeV3> = {}
     ticker: `TEST${index}`,
     rating: "BUY",
     analysisArchetype: "standard",
+    sector: null,
     modelVersion: "model-v3-a",
     recommendationPolicyVersion: "policy-v3",
     horizon: "30d",
@@ -47,6 +48,7 @@ describe("Recommendation performance rollups V3", () => {
       scope: "BASE",
       horizon: "30d",
       rating: "BUY",
+      sector: null,
       analysisArchetype: null,
       modelVersion: null,
       recommendationPolicyVersion: null,
@@ -59,10 +61,10 @@ describe("Recommendation performance rollups V3", () => {
     expect(base?.medianExcessReturn).toBeCloseTo(0.01, 8);
   });
 
-  it("does not expose under-sampled archetype or model-lineage slices", () => {
+  it("does not expose under-sampled sector, archetype or model-lineage slices", () => {
     const outcomes = [
-      ...Array.from({ length: 12 }, (_, index) => outcome(index, { analysisArchetype: "standard", modelVersion: "model-v3-a" })),
-      ...Array.from({ length: 12 }, (_, index) => outcome(index + 12, { analysisArchetype: "software_growth", modelVersion: "model-v3-b" })),
+      ...Array.from({ length: 12 }, (_, index) => outcome(index, { sector: "technology", analysisArchetype: "standard", modelVersion: "model-v3-a" })),
+      ...Array.from({ length: 12 }, (_, index) => outcome(index + 12, { sector: "industrials", analysisArchetype: "software_growth", modelVersion: "model-v3-b" })),
     ];
 
     const rollups = evaluateRecommendationPerformanceRollupsV3(outcomes, {
@@ -70,12 +72,14 @@ describe("Recommendation performance rollups V3", () => {
     });
 
     expect(rollups.filter((rollup) => rollup.scope === "BASE")).toHaveLength(1);
+    expect(rollups.filter((rollup) => rollup.scope === "SECTOR")).toHaveLength(0);
     expect(rollups.filter((rollup) => rollup.scope === "ANALYSIS_ARCHETYPE")).toHaveLength(0);
     expect(rollups.filter((rollup) => rollup.scope === "MODEL_LINEAGE")).toHaveLength(0);
   });
 
   it("emits richer verified dimensions after their benchmark sample gate is met", () => {
     const outcomes = Array.from({ length: 20 }, (_, index) => outcome(index, {
+      sector: "technology",
       analysisArchetype: "software_growth",
       modelVersion: "model-v3-growth",
       recommendationPolicyVersion: "policy-v3-growth",
@@ -85,12 +89,20 @@ describe("Recommendation performance rollups V3", () => {
       minimumDimensionBenchmarkSample: 20,
     });
 
+    expect(rollups.find((rollup) => rollup.scope === "SECTOR")).toMatchObject({
+      sector: "technology",
+      analysisArchetype: null,
+      count: 20,
+      benchmarkCount: 20,
+    });
     expect(rollups.find((rollup) => rollup.scope === "ANALYSIS_ARCHETYPE")).toMatchObject({
+      sector: null,
       analysisArchetype: "software_growth",
       count: 20,
       benchmarkCount: 20,
     });
     expect(rollups.find((rollup) => rollup.scope === "MODEL_LINEAGE")).toMatchObject({
+      sector: null,
       analysisArchetype: "software_growth",
       modelVersion: "model-v3-growth",
       recommendationPolicyVersion: "policy-v3-growth",
@@ -99,8 +111,17 @@ describe("Recommendation performance rollups V3", () => {
     });
   });
 
+  it("never emits a sector slice when sector lineage is missing even with a large sample", () => {
+    const outcomes = Array.from({ length: 40 }, (_, index) => outcome(index, { sector: null }));
+    const rollups = evaluateRecommendationPerformanceRollupsV3(outcomes, {
+      minimumDimensionBenchmarkSample: 20,
+    });
+    expect(rollups.filter((rollup) => rollup.scope === "SECTOR")).toHaveLength(0);
+  });
+
   it("keeps missing benchmark data missing and excludes it from dimensional evidence gates", () => {
     const outcomes = Array.from({ length: 30 }, (_, index) => outcome(index, {
+      sector: "technology",
       benchmarkTicker: null,
       benchmarkEntryPrice: null,
       benchmarkObservedPrice: null,
