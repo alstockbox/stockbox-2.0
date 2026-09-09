@@ -35,9 +35,9 @@ function company(): AdrCompany {
   };
 }
 
-function fundamentals(entityId?: string): CompanyFundamentals {
+function fundamentals(entityId?: string, ticker = "NVO"): CompanyFundamentals {
   return {
-    ticker: "NVO",
+    ticker,
     name: "Novo Nordisk A/S",
     entityId,
     sector: "healthcare",
@@ -52,6 +52,25 @@ describe("depositary-receipt issuer identity", () => {
   it("accepts issuer fundamentals only when the stable issuer identity matches the verified mapping", () => {
     const result = verifyDepositaryReceiptFundamentalsIdentity(company(), fundamentals("issuer-novo"));
     expect(result.verified).toBe(true);
+  });
+
+  it("accepts the source-backed primary-listing ticker for the same verified issuer", () => {
+    const result = verifyDepositaryReceiptFundamentalsIdentity(
+      company(),
+      fundamentals("issuer-novo", "NOVO-B.CO"),
+    );
+
+    expect(result.verified).toBe(true);
+  });
+
+  it("fails closed when the fundamentals ticker is unrelated to both verified receipt and primary listings", () => {
+    const result = verifyDepositaryReceiptFundamentalsIdentity(
+      company(),
+      fundamentals("issuer-novo", "OTHER"),
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/ticker|listing|receipt|identity/i);
   });
 
   it("fails closed when ADR fundamentals have no stable issuer identity", () => {
