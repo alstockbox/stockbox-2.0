@@ -38,7 +38,7 @@ async function run(request: Request) {
   const recoveryAttempt = workerRecoveryAttempt(request);
   const baseUrl = new URL(request.url).origin;
   try {
-    const recovery = await recoverStaleBatchItems();
+    const recovery = await recoverStaleBatchItems({ strict: true });
     const result = await runDurableBatchJobs(3);
     const nextDelayMs = await nextDurableBatchWorkerDelayMs();
     if (nextDelayMs !== null) {
