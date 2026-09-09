@@ -20,6 +20,16 @@ export type PortfolioUpgradeEvidenceComparison = {
   tradeoffs: PortfolioUpgradeEvidenceItem[];
 };
 
+export type PortfolioUpgradeNetCaseLabel = "strong_improvement" | "mixed" | "marginal" | "insufficient";
+
+export type PortfolioUpgradeNetCase = {
+  label: PortfolioUpgradeNetCaseLabel;
+  positiveEvidence: number;
+  negativeEvidence: number;
+  netEvidence: number | null;
+  comparableDimensions: number;
+};
+
 function relevanceWeight(
   dimension: PortfolioUpgradeDriverDimension,
   risk: RiskPreference,
@@ -109,5 +119,46 @@ export function comparePortfolioUpgradeEvidence({
     comparableDimensions: comparable.length,
     strengths,
     tradeoffs,
+  };
+}
+
+export function classifyPortfolioUpgradeNetCase(
+  comparison: PortfolioUpgradeEvidenceComparison,
+): PortfolioUpgradeNetCase {
+  const positiveEvidence = comparison.strengths.reduce(
+    (sum, item) => sum + Math.max(0, item.delta) * item.relevanceWeight,
+    0,
+  );
+  const negativeEvidence = comparison.tradeoffs.reduce(
+    (sum, item) => sum + Math.abs(Math.min(0, item.delta)) * item.relevanceWeight,
+    0,
+  );
+
+  if (comparison.comparableDimensions < 2) {
+    return {
+      label: "insufficient",
+      positiveEvidence,
+      negativeEvidence,
+      netEvidence: null,
+      comparableDimensions: comparison.comparableDimensions,
+    };
+  }
+
+  const netEvidence = positiveEvidence - negativeEvidence;
+  const totalEvidence = positiveEvidence + negativeEvidence;
+  let label: PortfolioUpgradeNetCaseLabel = "marginal";
+
+  if (positiveEvidence >= 20 && netEvidence >= 15 && positiveEvidence >= negativeEvidence * 2) {
+    label = "strong_improvement";
+  } else if (totalEvidence >= 15 && positiveEvidence > 0 && negativeEvidence > 0) {
+    label = "mixed";
+  }
+
+  return {
+    label,
+    positiveEvidence,
+    negativeEvidence,
+    netEvidence,
+    comparableDimensions: comparison.comparableDimensions,
   };
 }
