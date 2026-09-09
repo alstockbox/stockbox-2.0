@@ -1,4 +1,6 @@
 import type { CompanySearchResult } from "@/lib/analysis/types";
+import { assessDepositaryReceiptFundamentalsAccess } from "./depositary-receipt";
+import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 
 const SEC_IDENTITY_PROVIDERS = new Set(["sec-ticker-universe", "sec-companyfacts"]);
 
@@ -46,6 +48,32 @@ function uniqueSecCiksByExactTicker(companies: CompanySearchResult[]): Map<strin
   );
 }
 
+function attachVerifiedDepositaryReceiptSearchCapability(company: CompanySearchResult): CompanySearchResult {
+  if (company.securityType !== "ADR") return company;
+
+  const attached = attachVerifiedDepositaryReceiptRepresentation(company);
+  const access = assessDepositaryReceiptFundamentalsAccess(attached);
+  if (!access.allowed) return attached;
+
+  const providerIds = new Set(attached.providerCapabilities?.providerIds ?? []);
+  if (attached.cik) providerIds.add("sec-companyfacts");
+  const marketData = Boolean(attached.providerCapabilities?.marketData);
+
+  return {
+    ...attached,
+    providerCapabilities: {
+      fundamentals: true,
+      marketData,
+      providerIds: [...providerIds].sort(),
+    },
+    analysisCapability: {
+      fundamentals: access.scope === "issuer_and_valuation" ? "full" : "partial",
+      marketData: marketData ? "available" : "unavailable",
+      reason: access.reason,
+    },
+  };
+}
+
 export function reconcileDepositaryReceiptSearchIdentities(
   companies: CompanySearchResult[],
 ): CompanySearchResult[] {
@@ -84,10 +112,12 @@ export function reconcileDepositaryReceiptSearchIdentities(
     };
   });
 
-  return reconciled.filter((company) => {
-    if (!isPureSecIdentityRepresentation(company)) return true;
-    const cik = normalizedCik(company.cik);
-    if (!cik) return true;
-    return !reconciledAdrKeys.has(`${exactTicker(company)}|${cik}`);
-  });
+  return reconciled
+    .filter((company) => {
+      if (!isPureSecIdentityRepresentation(company)) return true;
+      const cik = normalizedCik(company.cik);
+      if (!cik) return true;
+      return !reconciledAdrKeys.has(`${exactTicker(company)}|${cik}`);
+    })
+    .map(attachVerifiedDepositaryReceiptSearchCapability);
 }
