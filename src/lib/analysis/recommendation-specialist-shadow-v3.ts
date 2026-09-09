@@ -59,9 +59,18 @@ function specialistScore(report: UniversalSecurityReport, kind: SpecialistKind) 
     : report.securityAnalysis?.investmentCompany?.score ?? null;
 }
 
-function analysisFingerprint(report: UniversalSecurityReport, kind: SpecialistKind): string {
+function specialistTicker(report: UniversalSecurityReport): string | null {
+  const ticker = report.ticker.trim().toUpperCase();
+  return ticker.length > 0 ? ticker : null;
+}
+
+function analysisFingerprint(
+  report: UniversalSecurityReport,
+  kind: SpecialistKind,
+  ticker: string,
+): string {
   const payload = JSON.stringify({
-    ticker: report.ticker.trim().toUpperCase(),
+    ticker,
     kind,
     dataAsOf: report.dataAsOf ?? null,
     recommendation: report.recommendation,
@@ -133,6 +142,9 @@ export function createSpecialistRecommendationV3ShadowEvent(
   report: UniversalSecurityReport,
   observedAt = new Date().toISOString(),
 ): RecommendationV3ShadowEvent | null {
+  const ticker = specialistTicker(report);
+  if (ticker === null) return null;
+
   const kind = specialistKind(report);
   if (!kind) return null;
   const score = specialistScore(report, kind);
@@ -183,8 +195,8 @@ export function createSpecialistRecommendationV3ShadowEvent(
   return {
     event: "stockbox.recommendation_v3_shadow",
     observedAt,
-    ticker: report.ticker.trim().toUpperCase(),
-    analysisFingerprint: analysisFingerprint(report, kind),
+    ticker,
+    analysisFingerprint: analysisFingerprint(report, kind, ticker),
     analysisArchetype: specialistAnalysisArchetype(report, kind),
     sector: report.engine?.scores?.sector ?? null,
     legacyRating: String(report.recommendation),
