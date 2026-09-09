@@ -15,7 +15,10 @@ import {
 } from "@/lib/db/recommendation-review-requests-v3";
 import { persistRecommendationV3ShadowAudit } from "@/lib/db/recommendation-v3-audit";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
-import { createSpecialistRecommendationV3ShadowEvent } from "./recommendation-specialist-shadow-v3";
+import {
+  createSpecialistRecommendationV3ShadowEvent,
+  requiresSpecialistRecommendationAuditV3,
+} from "./recommendation-specialist-shadow-v3";
 
 export type RecommendationReviewWorkerPauseReasonV3 =
   | "recommendation_v3_disabled"
@@ -44,13 +47,6 @@ export type ObjectiveRecommendationReanalysisV3 =
   | { status: "ready"; event: RecommendationV3ShadowEvent }
   | { status: "retryable_failure"; error: string }
   | { status: "permanent_failure"; error: string };
-
-function requiresSpecialistRecommendationAuditV3(report: UniversalSecurityReport): boolean {
-  if (report.securityAnalysis?.etf || report.securityAnalysis?.investmentCompany) return true;
-  const kind = report.securityClassification?.kind;
-  return kind === "investment_company"
-    || (typeof kind === "string" && kind.endsWith("_etf"));
-}
 
 export function recommendationReviewEventFromAnalysisV3(input: {
   data: UniversalSecurityReport;

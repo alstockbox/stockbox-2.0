@@ -47,6 +47,13 @@ function directional(rating: RecommendationV3Rating): boolean {
 
 type SpecialistKind = "ETF" | "INVESTMENT_COMPANY";
 
+export function requiresSpecialistRecommendationAuditV3(report: UniversalSecurityReport): boolean {
+  if (report.securityAnalysis?.etf || report.securityAnalysis?.investmentCompany) return true;
+  const kind = report.securityClassification?.kind;
+  return kind === "investment_company"
+    || (typeof kind === "string" && kind.endsWith("_etf"));
+}
+
 function specialistKind(report: UniversalSecurityReport): SpecialistKind | null {
   if (report.securityAnalysis?.etf) return "ETF";
   if (report.securityAnalysis?.investmentCompany) return "INVESTMENT_COMPANY";

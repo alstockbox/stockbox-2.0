@@ -1,5 +1,8 @@
 import type { RecommendationV3ShadowEvent } from "@/lib/analysis/recommendation-v3-shadow";
-import { createSpecialistRecommendationV3ShadowEvent } from "@/lib/analysis/recommendation-specialist-shadow-v3";
+import {
+  createSpecialistRecommendationV3ShadowEvent,
+  requiresSpecialistRecommendationAuditV3,
+} from "@/lib/analysis/recommendation-specialist-shadow-v3";
 import { persistRecommendationV3ShadowAudit } from "@/lib/db/recommendation-v3-audit";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
 import type { UniversalSecurityReport } from "./universal-security-provider";
@@ -8,6 +11,7 @@ export type SpecialistLiveAuditResultV3 =
   | { status: "disabled" }
   | { status: "killed" }
   | { status: "not_specialist" }
+  | { status: "unavailable"; error: "SPECIALIST_RECOMMENDATION_V3_AUDIT_UNAVAILABLE" }
   | { status: "evaluated"; event: RecommendationV3ShadowEvent; persisted: boolean; error?: string };
 
 type SpecialistLiveAuditDependenciesV3 = {
@@ -39,7 +43,11 @@ export async function persistSpecialistRecommendationLiveAuditV3(
   if (killed) return { status: "killed" };
 
   const event = createSpecialistRecommendationV3ShadowEvent(report, options.observedAt);
-  if (!event) return { status: "not_specialist" };
+  if (!event) {
+    return requiresSpecialistRecommendationAuditV3(report)
+      ? { status: "unavailable", error: "SPECIALIST_RECOMMENDATION_V3_AUDIT_UNAVAILABLE" }
+      : { status: "not_specialist" };
+  }
   const dependencies = { ...defaultDependencies, ...options.dependencies };
   try {
     const persisted = await dependencies.persistAudit(event);
