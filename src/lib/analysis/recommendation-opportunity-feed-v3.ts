@@ -6,6 +6,10 @@ import type { RecommendationV3Rating } from "./recommendation-v3";
 
 export const RECOMMENDATION_OPPORTUNITY_FEED_POLICY_VERSION = "stockbox-recommendation-opportunity-feed-v3.0.0" as const;
 
+export const RECOMMENDATION_OPPORTUNITY_MIN_DATA_QUALITY_V3 = 50;
+export const RECOMMENDATION_OPPORTUNITY_MIN_INTEGRITY_V3 = 55;
+export const RECOMMENDATION_OPPORTUNITY_MIN_VERIFIED_COVERAGE_V3 = 0.5;
+
 export type RecommendationOpportunityAuditV3 = {
   id: string;
   observedAt: string;
@@ -97,6 +101,9 @@ const RATING_BONUS: Record<RecommendationV3Rating, number> = {
   UNAVAILABLE: -25,
 };
 
+const OPPORTUNITY_RATINGS = new Set<RecommendationV3Rating>(["STRONG_BUY", "BUY", "HOLD", "WAIT"]);
+const TOP_OPPORTUNITY_RATINGS = new Set<RecommendationV3Rating>(["STRONG_BUY", "BUY"]);
+
 function clamp(value: number, min = 0, max = 100): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
@@ -121,9 +128,15 @@ function eligible(snapshot: RecommendationOpportunityAuditV3): snapshot is Recom
     && snapshot.recommendationIntegrityEligible
     && snapshot.confidenceGatePassed
     && !snapshot.confidenceGateHardBlocked
-    && snapshot.rating !== "UNAVAILABLE"
+    && OPPORTUNITY_RATINGS.has(snapshot.rating)
     && typeof snapshot.objectiveScore === "number"
-    && Number.isFinite(snapshot.objectiveScore);
+    && Number.isFinite(snapshot.objectiveScore)
+    && Number.isFinite(snapshot.dataQuality)
+    && snapshot.dataQuality >= RECOMMENDATION_OPPORTUNITY_MIN_DATA_QUALITY_V3
+    && Number.isFinite(snapshot.dataIntegrityScore)
+    && snapshot.dataIntegrityScore >= RECOMMENDATION_OPPORTUNITY_MIN_INTEGRITY_V3
+    && Number.isFinite(snapshot.verifiedCoverage)
+    && snapshot.verifiedCoverage >= RECOMMENDATION_OPPORTUNITY_MIN_VERIFIED_COVERAGE_V3;
 }
 
 function opportunityScore(snapshot: RecommendationOpportunityAuditV3 & { objectiveScore: number }): number {
@@ -281,7 +294,7 @@ export function buildRecommendationOpportunityFeedV3(
 
   return {
     policyVersion: RECOMMENDATION_OPPORTUNITY_FEED_POLICY_VERSION,
-    top: cards.slice(0, topLimit),
+    top: cards.filter((card) => TOP_OPPORTUNITY_RATINGS.has(card.rating)).slice(0, topLimit),
     strongBuy: section(cards, "STRONG_BUY", sectionLimit),
     buy: section(cards, "BUY", sectionLimit),
     watch: section(cards, "WATCH", sectionLimit),
