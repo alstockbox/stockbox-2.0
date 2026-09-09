@@ -23,135 +23,26 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply minimal modern corporate-action patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('src/lib/data/yahoo-market.ts')
-          text = path.read_text()
-
-          old = 'const YAHOO_REQUEST_TIMEOUT_MS = 10_000;\n'
-          new = 'const YAHOO_REQUEST_TIMEOUT_MS = 10_000;\nconst CORPORATE_ACTIONS_REVALIDATE_SECONDS = 60 * 60 * 6;\n'
-          assert text.count(old) == 1, text.count(old)
-          text = text.replace(old, new, 1)
-
-          helper = r'''
-type CorporateActions = {
-  dividendEvents: MarketDividendEvent[];
-  splitEvents: MarketSplitEvent[];
-};
-
-async function fetchMaximumCorporateActions(
-  symbol: string,
-  currency: string | null,
-): Promise<CorporateActions | null> {
-  const url = new URL(`${BASE_URL}/${encodeURIComponent(symbol)}`);
-  url.searchParams.set("range", "max");
-  url.searchParams.set("interval", "1mo");
-  url.searchParams.set("events", "div,splits");
-  url.searchParams.set("includeAdjustedClose", "false");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), YAHOO_REQUEST_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, {
-      headers: { accept: "application/json" },
-      signal: controller.signal,
-      next: { revalidate: CORPORATE_ACTIONS_REVALIDATE_SECONDS },
-    });
-    if (!response.ok) return null;
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!contentType.includes("json")) return null;
-    const payload = object(await response.json());
-    if (!payload || yahooError(payload)) return null;
-    const result = firstChartResult(payload);
-    if (!result) return null;
-    const observedSymbol = stringValue(object(result.meta)?.symbol);
-    if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) return null;
-    return {
-      dividendEvents: parseDividendEvents(result, currency),
-      splitEvents: parseSplitEvents(result),
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function mergeDividendEvents(
-  baseEvents: MarketDividendEvent[] = [],
-  extendedEvents: MarketDividendEvent[] = [],
-): MarketDividendEvent[] {
-  const deduped = new Map<string, MarketDividendEvent>();
-  for (const event of [...baseEvents, ...extendedEvents]) {
-    deduped.set(`${event.date}:${event.amount}`, event);
-  }
-  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
-}
-
-function mergeSplitEvents(
-  baseEvents: MarketSplitEvent[] = [],
-  extendedEvents: MarketSplitEvent[] = [],
-): MarketSplitEvent[] {
-  const deduped = new Map<string, MarketSplitEvent>();
-  for (const event of [...baseEvents, ...extendedEvents]) {
-    deduped.set(
-      `${event.date}:${event.numerator ?? ""}:${event.denominator ?? ""}:${event.splitRatio ?? ""}`,
-      event,
-    );
-  }
-  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
-}
-'''
-          anchor = '\nfunction performance(rows: PriceRow[]): MarketSnapshot["performance"] {'
-          assert text.count(anchor) == 1, text.count(anchor)
-          text = text.replace(anchor, '\n' + helper + anchor, 1)
-
-          old_events = '''    const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
-    const dividendEvents = parseDividendEvents(result, marketCurrency);
-    const splitEvents = parseSplitEvents(result);
-'''
-          new_events = '''    const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
-    const baseDividendEvents = parseDividendEvents(result, marketCurrency);
-    const baseSplitEvents = parseSplitEvents(result);
-    const maximumCorporateActions = await fetchMaximumCorporateActions(symbol, marketCurrency);
-    const dividendEvents = maximumCorporateActions
-      ? mergeDividendEvents(baseDividendEvents, maximumCorporateActions.dividendEvents)
-      : baseDividendEvents;
-    const splitEvents = maximumCorporateActions
-      ? mergeSplitEvents(baseSplitEvents, maximumCorporateActions.splitEvents)
-      : baseSplitEvents;
-'''
-          assert text.count(old_events) == 1, text.count(old_events)
-          text = text.replace(old_events, new_events, 1)
-
-          path.write_text(text)
-          PY
-          git diff --check
+        run: python3 .github/tmp_patch_yahoo_corporate_actions.py
+      - name: Validate patch whitespace
+        run: git diff --check
       - name: Run focused Yahoo regressions
-        run: >-
-          npx vitest run
-          tests/data/yahoo-corporate-actions-history.test.ts
-          tests/data/yahoo-market-symbol-identity.test.ts
-          tests/data/yahoo-market-benchmark-symbol-identity.test.ts
-          tests/data/yahoo-long-history-symbol-identity.test.ts
-          tests/data/market-history-currency-p0.test.ts
+        run: npx vitest run tests/data/yahoo-corporate-actions-history.test.ts tests/data/yahoo-market-symbol-identity.test.ts tests/data/yahoo-market-benchmark-symbol-identity.test.ts tests/data/yahoo-long-history-symbol-identity.test.ts tests/data/market-history-currency-p0.test.ts
       - name: Typecheck
         run: npm run typecheck
       - name: Lint changed source and test
         run: npx eslint src/lib/data/yahoo-market.ts tests/data/yahoo-corporate-actions-history.test.ts
-      - name: Finalize clean commit and remove temporary workflow
+      - name: Finalize clean commit and remove temporary harness
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/tmp-yahoo-corporate-actions-red.yml
+          git rm .github/workflows/tmp-yahoo-corporate-actions-red.yml .github/tmp_patch_yahoo_corporate_actions.py
           git add src/lib/data/yahoo-market.ts
           git diff --cached --check
-          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/workflows/tmp-yahoo-corporate-actions-red.yml src/lib/data/yahoo-market.ts "
+          actual="$(git diff --cached --name-only | sort | tr '\n' ' ')"
+          expected=".github/tmp_patch_yahoo_corporate_actions.py .github/workflows/tmp-yahoo-corporate-actions-red.yml src/lib/data/yahoo-market.ts "
+          test "$actual" = "$expected"
           git commit -m "fix: extend Yahoo corporate-action history"
           git push origin HEAD:fix/yahoo-max-corporate-actions-20260909
