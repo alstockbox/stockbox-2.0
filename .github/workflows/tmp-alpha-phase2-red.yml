@@ -38,14 +38,27 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+      - name: Isolate Alpha migrations from unrelated historical migration drift
+        run: |
+          mkdir -p /tmp/stockbox-migrations
+          mv supabase/migrations/*.sql /tmp/stockbox-migrations/
       - name: Start disposable local Supabase
         run: supabase start -x vector,edge-runtime,logflare
       - name: Install PostgreSQL client
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client
-      - name: Apply full migration catalog in natural order
-        run: supabase db reset --local
+      - name: Bootstrap Alpha prerequisite
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create table public.analyses (
+            id uuid primary key default gen_random_uuid()
+          );
+          SQL
+      - name: Apply Alpha migrations in order
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260910013000_alpha_breakout_intelligence.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-migrations/20260910014000_alpha_universe_scanner.sql
       - name: Assert Alpha schema, RLS, origin and uniqueness invariants
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
