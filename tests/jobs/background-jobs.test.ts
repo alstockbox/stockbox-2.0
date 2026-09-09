@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { retryScheduleForJob } from "@/lib/jobs/background-jobs";
@@ -28,5 +28,23 @@ describe("durable background jobs", () => {
     );
     expect(migration).toContain("background_jobs_active_dedupe_idx");
     expect(migration).toContain("where dedupe_key is not null and status in ('queued', 'running')");
+  });
+
+  it("claims queued jobs through one database-atomic skip-locked primitive", () => {
+    const jobs = readFileSync(resolve(process.cwd(), "src/lib/jobs/background-jobs.ts"), "utf8");
+    const migrationPath = resolve(
+      process.cwd(),
+      "supabase/migrations/20260910001500_background_job_atomic_claim.sql",
+    );
+
+    expect(jobs).toContain('.rpc("claim_background_jobs"');
+    expect(existsSync(migrationPath)).toBe(true);
+    if (!existsSync(migrationPath)) return;
+
+    const migration = readFileSync(migrationPath, "utf8").toLowerCase();
+    expect(migration).toContain("create or replace function public.claim_background_jobs");
+    expect(migration).toContain("for update skip locked");
+    expect(migration).toContain("attempts = jobs.attempts + 1");
+    expect(migration).toContain("status = 'running'");
   });
 });
