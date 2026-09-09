@@ -62,7 +62,7 @@ export type RecommendationV3ShadowEvent = {
 export type RecommendationV3ShadowFailureEvent = {
   event: "stockbox.recommendation_v3_shadow_failure";
   observedAt: string;
-  ticker: string;
+  ticker: string | null;
   analysisFingerprint: string | null;
   errorName: string;
 };
@@ -105,8 +105,9 @@ function normalizedLegacyRating(rating: string): RecommendationV3Rating {
   }
 }
 
-function shadowTicker(input: FinancialAnalysisInput): string {
-  return input.company.canonicalTicker?.trim() || input.company.ticker?.trim() || "UNKNOWN";
+function shadowTickerOrNull(input: FinancialAnalysisInput): string | null {
+  const ticker = input.company.canonicalTicker?.trim() || input.company.ticker?.trim() || "";
+  return ticker.length > 0 ? ticker : null;
 }
 
 function defaultEmitter(event: RecommendationV3ShadowEvent | RecommendationV3ShadowFailureEvent) {
@@ -140,6 +141,9 @@ export function evaluateRecommendationV3Shadow(
   coverage: CoverageAssessment;
   integrity: DataAnomalyAssessmentV3;
 } {
+  const ticker = shadowTickerOrNull(input);
+  if (ticker === null) throw new Error("INVALID_RECOMMENDATION_SHADOW_TICKER");
+
   const coverage = assessCoverageV3(input, result);
   const integrity = assessDataAnomaliesV3(input, result);
   const decision = deriveRecommendationV3WithIntegrity(result.scores, coverage, integrity, {
@@ -161,7 +165,7 @@ export function evaluateRecommendationV3Shadow(
     event: {
       event: "stockbox.recommendation_v3_shadow",
       observedAt,
-      ticker: shadowTicker(input),
+      ticker,
       analysisFingerprint: result.canonicalInputFingerprint ?? null,
       analysisArchetype: result.analysisArchetype,
       sector: input.company.sector ?? null,
@@ -221,7 +225,7 @@ export function runRecommendationV3Shadow(
     const failureEvent: RecommendationV3ShadowFailureEvent = {
       event: "stockbox.recommendation_v3_shadow_failure",
       observedAt,
-      ticker: shadowTicker(input),
+      ticker: shadowTickerOrNull(input),
       analysisFingerprint: result.canonicalInputFingerprint ?? null,
       errorName: error instanceof Error && error.name ? error.name : "UnknownError",
     };
