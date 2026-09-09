@@ -66,6 +66,16 @@ describe("depositary-receipt issuer identity", () => {
     expect(result.reason).toMatch(/issuer/i);
   });
 
+  it("fails closed instead of trimming a noncanonical fundamentals issuer identity", () => {
+    const result = verifyDepositaryReceiptFundamentalsIdentity(
+      company(),
+      fundamentals(" issuer-novo "),
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.reason).toMatch(/issuer|identity|canonical/i);
+  });
+
   it("fails closed when both sides of the verified issuer mapping carry the same noncanonical opaque identity", () => {
     const dirty = company();
     dirty.issuerId = " issuer-novo ";
