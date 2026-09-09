@@ -91,4 +91,31 @@ describe("Recommendation outcome V3 persistence boundary", () => {
       benchmark_price_source: null,
     });
   });
+
+  it("rejects caller-supplied outcome policy lineage that is not the canonical policy", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ policyVersion: "stale-outcome-policy" }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_POLICY_VERSION",
+    );
+  });
+
+  it("rejects malformed or pre-horizon evaluation timestamps", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({ evaluatedAt: "not-a-date" }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_TIMELINE",
+    );
+    expect(() => toRecommendationOutcomeV3Row(input({ expectedAt: "not-a-date" }))).toThrow(
+      "INVALID_RECOMMENDATION_OUTCOME_TIMELINE",
+    );
+    expect(() => toRecommendationOutcomeV3Row(input({
+      expectedAt: "2026-10-09T12:00:00.000Z",
+      evaluatedAt: "2026-10-08T12:00:00.000Z",
+    }))).toThrow("INVALID_RECOMMENDATION_OUTCOME_TIMELINE");
+  });
+
+  it("rejects lag evidence that disagrees with the persisted outcome timeline", () => {
+    expect(() => toRecommendationOutcomeV3Row(input({
+      expectedAt: "2026-10-09T12:00:00.000Z",
+      evaluatedAt: "2026-10-11T12:00:00.000Z",
+      lagDays: 0,
+    }))).toThrow("INVALID_RECOMMENDATION_OUTCOME_LAG_EVIDENCE");
+  });
 });
