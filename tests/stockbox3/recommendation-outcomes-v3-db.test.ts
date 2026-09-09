@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import {
   toRecommendationOutcomeV3Row,
   type RecommendationOutcomePersistInputV3,
@@ -32,12 +33,13 @@ function input(overrides: Partial<RecommendationOutcomePersistInputV3> = {}): Re
 }
 
 describe("Recommendation V3 outcome persistence", () => {
-  it("maps only objective market outcome fields", () => {
+  it("maps only objective market outcome fields with durable benchmark-policy lineage", () => {
     const row = toRecommendationOutcomeV3Row(input(), "2026-10-01T12:04:00.000Z");
 
     expect(row).toEqual({
       recommendation_audit_id: "00000000-0000-4000-8000-000000000001",
       policy_version: "stockbox-recommendation-outcomes-v3.0.0",
+      benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
       horizon: "30d",
       expected_at: "2026-10-01T12:00:00.000Z",
       evaluated_at: "2026-10-01T12:03:00.000Z",
@@ -65,6 +67,26 @@ describe("Recommendation V3 outcome persistence", () => {
     expect(keys).not.toContain("personalized_score");
     expect(keys).not.toContain("user_match");
     expect(keys).not.toContain("ai_output");
+  });
+
+  it("stamps the current benchmark policy even when the policy deliberately chooses no benchmark", () => {
+    const row = toRecommendationOutcomeV3Row(input({
+      benchmarkTicker: null,
+      benchmarkEntryObservedAt: null,
+      benchmarkEntryPrice: null,
+      benchmarkObservedAt: null,
+      benchmarkObservedPrice: null,
+      benchmarkReturn: null,
+      excessReturn: null,
+      directionalHit: null,
+      benchmarkPriceSource: null,
+    }));
+
+    expect(row.benchmark_policy_version).toBe(RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3);
+    expect(row.benchmark_ticker).toBeNull();
+    expect(row.benchmark_return).toBeNull();
+    expect(row.excess_return).toBeNull();
+    expect(row.directional_hit).toBeNull();
   });
 
   it("normalizes identifiers and benchmark ticker without inventing missing benchmark data", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import { recommendationOutcomeFromPersistenceV3 } from "@/lib/monitoring/recommendation-calibration-evaluation-v3";
 
 const lineage = {
@@ -16,6 +17,7 @@ function persisted(overrides: Record<string, unknown> = {}) {
   return {
     recommendation_audit_id: lineage.id,
     policy_version: "stockbox-recommendation-outcomes-v3.0.0",
+    benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
     horizon: "30d",
     expected_at: "2026-10-01T12:00:00.000Z",
     evaluated_at: "2026-10-01T12:00:00.000Z",
@@ -34,7 +36,7 @@ function persisted(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Recommendation calibration evaluation V3", () => {
-  it("reconstructs benchmarked outcomes with their exact model lineage", () => {
+  it("reconstructs benchmarked outcomes only with their current benchmark and model lineage", () => {
     const result = recommendationOutcomeFromPersistenceV3(persisted(), lineage);
 
     expect(result).not.toBeNull();
@@ -43,11 +45,12 @@ describe("Recommendation calibration evaluation V3", () => {
     expect(result?.recommendationPolicyVersion).toBe("stockbox-recommendation-policy-v3.0.0");
     expect(result?.rating).toBe("BUY");
     expect(result?.securityReturn).toBeCloseTo(0.1, 8);
+    expect(result?.benchmarkTicker).toBe("^GSPC");
     expect(result?.excessReturn).toBeCloseTo(0.07, 8);
     expect(result?.directionalHit).toBe(true);
   });
 
-  it("accepts unbenchmarked outcomes without inventing benchmark performance", () => {
+  it("accepts current-policy unbenchmarked outcomes without inventing benchmark performance", () => {
     const result = recommendationOutcomeFromPersistenceV3(persisted({
       benchmark_ticker: null,
       benchmark_entry_price: null,
@@ -63,7 +66,24 @@ describe("Recommendation calibration evaluation V3", () => {
     expect(result?.directionalHit).toBeNull();
   });
 
-  it("fails closed for stale policy versions or malformed price evidence", () => {
+  it("preserves absolute legacy outcomes but strips stale or unknown benchmark evidence", () => {
+    for (const benchmarkPolicyVersion of ["stockbox-old-benchmark-policy", null]) {
+      const result = recommendationOutcomeFromPersistenceV3(persisted({
+        benchmark_policy_version: benchmarkPolicyVersion,
+      }), lineage);
+
+      expect(result).not.toBeNull();
+      expect(result?.securityReturn).toBeCloseTo(0.1, 8);
+      expect(result?.benchmarkTicker).toBeNull();
+      expect(result?.benchmarkEntryPrice).toBeNull();
+      expect(result?.benchmarkObservedPrice).toBeNull();
+      expect(result?.benchmarkReturn).toBeNull();
+      expect(result?.excessReturn).toBeNull();
+      expect(result?.directionalHit).toBeNull();
+    }
+  });
+
+  it("fails closed for stale outcome policy versions or malformed price evidence", () => {
     expect(recommendationOutcomeFromPersistenceV3(persisted({ policy_version: "old-policy" }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ entry_price: "not-a-number" }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ observed_price: 0 }), lineage)).toBeNull();

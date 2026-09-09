@@ -1,4 +1,5 @@
 import type { RecommendationOutcomeHorizonV3 } from "@/lib/analysis/recommendation-learning-v3";
+import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type RecommendationOutcomePersistInputV3 = {
@@ -28,6 +29,7 @@ export type RecommendationOutcomePersistInputV3 = {
 export type RecommendationOutcomeRowV3 = {
   recommendation_audit_id: string;
   policy_version: string;
+  benchmark_policy_version: string;
   horizon: RecommendationOutcomeHorizonV3;
   expected_at: string;
   evaluated_at: string;
@@ -58,7 +60,9 @@ function normalizeTicker(value: string | null): string | null {
 /**
  * Explicit allowlist mapper for objective recommendation outcomes.
  * No user identity, personalized score, portfolio state, provider payload or AI
- * output is accepted by this persistence contract.
+ * output is accepted by this persistence contract. Benchmark-policy lineage is
+ * stamped server-side so callers cannot accidentally persist current evidence
+ * under an arbitrary or stale benchmark policy version.
  */
 export function toRecommendationOutcomeV3Row(
   input: RecommendationOutcomePersistInputV3,
@@ -67,6 +71,7 @@ export function toRecommendationOutcomeV3Row(
   return {
     recommendation_audit_id: input.recommendationAuditId.trim(),
     policy_version: input.policyVersion,
+    benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
     horizon: input.horizon,
     expected_at: input.expectedAt,
     evaluated_at: input.evaluatedAt,

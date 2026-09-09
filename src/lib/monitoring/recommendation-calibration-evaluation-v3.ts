@@ -5,6 +5,7 @@ import {
   type RecommendationOutcomeHorizonV3,
   type RecommendationOutcomeV3,
 } from "@/lib/analysis/recommendation-learning-v3";
+import { RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3 } from "@/lib/analysis/recommendation-outcome-benchmark-policy-v3";
 import { evaluateRecommendationPerformanceRollupsV3 } from "@/lib/analysis/recommendation-performance-rollup-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 import { persistRecommendationCalibrationCandidateV3 } from "@/lib/db/recommendation-calibration-v3";
@@ -25,6 +26,7 @@ const RATINGS = new Set<RecommendationV3Rating>([
 const OUTCOME_PROJECTION = [
   "recommendation_audit_id",
   "policy_version",
+  "benchmark_policy_version",
   "horizon",
   "expected_at",
   "evaluated_at",
@@ -116,11 +118,19 @@ export function recommendationOutcomeFromPersistenceV3(
   const securityReturn = finiteNumber(row.security_return);
   if (entryPrice === null || entryPrice <= 0 || observedPrice === null || observedPrice <= 0 || securityReturn === null) return null;
 
-  const benchmarkEntryPrice = finiteNumber(row.benchmark_entry_price);
-  const benchmarkObservedPrice = finiteNumber(row.benchmark_observed_price);
-  const benchmarkReturn = finiteNumber(row.benchmark_return);
-  const excessReturn = finiteNumber(row.excess_return);
-  const directionalHit = typeof row.directional_hit === "boolean" ? row.directional_hit : null;
+  // Benchmark-relative evidence is accepted only when the row proves which
+  // current assignment policy produced it. Legacy/stale benchmark evidence is
+  // not deleted and the absolute security outcome remains usable, but all
+  // relative fields are downgraded to missing so calibration cannot mix policy
+  // generations or infer a benchmark that StockBox cannot reproduce.
+  const benchmarkLineageCurrent = row.benchmark_policy_version === RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3;
+  const benchmarkEntryPrice = benchmarkLineageCurrent ? finiteNumber(row.benchmark_entry_price) : null;
+  const benchmarkObservedPrice = benchmarkLineageCurrent ? finiteNumber(row.benchmark_observed_price) : null;
+  const benchmarkReturn = benchmarkLineageCurrent ? finiteNumber(row.benchmark_return) : null;
+  const excessReturn = benchmarkLineageCurrent ? finiteNumber(row.excess_return) : null;
+  const directionalHit = benchmarkLineageCurrent && typeof row.directional_hit === "boolean"
+    ? row.directional_hit
+    : null;
 
   return {
     policyVersion: RECOMMENDATION_OUTCOME_POLICY_VERSION,
@@ -137,7 +147,7 @@ export function recommendationOutcomeFromPersistenceV3(
     entryPrice,
     observedPrice,
     securityReturn,
-    benchmarkTicker: typeof row.benchmark_ticker === "string" && row.benchmark_ticker.trim()
+    benchmarkTicker: benchmarkLineageCurrent && typeof row.benchmark_ticker === "string" && row.benchmark_ticker.trim()
       ? row.benchmark_ticker.trim().toUpperCase()
       : null,
     benchmarkEntryPrice,
