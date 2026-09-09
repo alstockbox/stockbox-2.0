@@ -197,6 +197,28 @@ describe("Recommendation V3 shadow mode", () => {
     expect(JSON.stringify(result)).toBe(before);
   });
 
+  it("fails open without inventing UNKNOWN when the security ticker identity is missing", () => {
+    const { input, result } = fixture();
+    input.company.ticker = "   ";
+    input.company.canonicalTicker = "   ";
+    const emit = vi.fn();
+
+    const shadow = runRecommendationV3Shadow(input, result, {
+      enabled: true,
+      killed: false,
+      now: () => "2026-09-05T13:00:00.000Z",
+      emit,
+    });
+
+    expect(shadow.status).toBe("failed");
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      event: "stockbox.recommendation_v3_shadow_failure",
+      ticker: null,
+    });
+    expect(JSON.stringify(emit.mock.calls[0]?.[0])).not.toContain("UNKNOWN");
+  });
+
   it("fails open when V3 evaluation itself encounters an invalid shadow-only shape", () => {
     const { input, result } = fixture();
     const invalid = { ...result, scores: undefined } as unknown as FinancialAnalysisResult;
