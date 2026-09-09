@@ -725,6 +725,7 @@ describe("archetype coverage fairness", () => {
     } : period);
     const result = asArchetype("standard", {
       annualPeriods,
+      analysisDate: "2026-08-25T00:00:00.000Z",
       company: { reportingCurrency: "USD", tradingCurrency: "USD" },
       market: {
         ...durableCompounderInput.market,
@@ -798,6 +799,7 @@ describe("archetype coverage fairness", () => {
     } : period);
     const result = asArchetype("standard", {
       annualPeriods,
+      analysisDate: "2026-08-25T00:00:00.000Z",
       company: { reportingCurrency: "USD", tradingCurrency: "USD" },
       market: {
         ...durableCompounderInput.market,
