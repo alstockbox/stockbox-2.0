@@ -5,6 +5,7 @@ import { RECOMMENDATION_OUTCOME_POLICY_VERSION } from "@/lib/analysis/recommenda
 const mocks = vi.hoisted(() => ({
   outcomeRows: [] as Record<string, unknown>[],
   auditRows: [] as Record<string, unknown>[],
+  outcomeLimit: vi.fn(),
   persistRollups: vi.fn(),
   persistCandidate: vi.fn(),
 }));
@@ -17,7 +18,10 @@ vi.mock("@/lib/supabase/admin", () => ({
           select() { return builder; },
           eq() { return builder; },
           order() { return builder; },
-          async limit() { return { data: mocks.outcomeRows, error: null }; },
+          async limit(value: number) {
+            mocks.outcomeLimit(value);
+            return { data: mocks.outcomeRows, error: null };
+          },
         };
         return builder;
       }
@@ -122,8 +126,29 @@ describe("Recommendation calibration rollup persistence V3", () => {
       },
     );
     expect(mocks.persistCandidate).toHaveBeenCalledTimes(1);
-    expect((result as unknown as { performanceRollupsPersisted?: number }).performanceRollupsPersisted).toBe(4);
+    expect(result.performanceRollupsPersisted).toBe(4);
     expect(result.failed).toBe(0);
+  });
+
+  it("normalizes fractional evaluation configuration once before loading, gating and persistence", async () => {
+    const result = await runRecommendationCalibrationEvaluationV3({
+      limit: 100.9,
+      minimumBenchmarkSample: 30.9,
+      now: new Date(EVALUATED_AT),
+    });
+
+    expect(mocks.outcomeLimit).toHaveBeenCalledWith(100);
+    expect(result.performanceRollups).toBe(4);
+    expect(result.driftSlices).toBe(1);
+    expect(mocks.persistCandidate).toHaveBeenCalledTimes(1);
+    expect(mocks.persistRollups).toHaveBeenCalledWith(
+      expect.any(Array),
+      {
+        sourceLimit: 100,
+        dimensionSampleGate: 30,
+        evaluatedAt: EVALUATED_AT,
+      },
+    );
   });
 
   it("keeps candidate persistence alive while surfacing rollup storage failure", async () => {
@@ -143,6 +168,6 @@ describe("Recommendation calibration rollup persistence V3", () => {
     expect(mocks.persistCandidate).toHaveBeenCalledTimes(1);
     expect(result.created).toBe(1);
     expect(result.failed).toBe(1);
-    expect((result as unknown as { performanceRollupPersistenceFailed?: number }).performanceRollupPersistenceFailed).toBe(1);
+    expect(result.performanceRollupPersistenceFailed).toBe(1);
   });
 });
