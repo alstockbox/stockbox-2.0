@@ -20,4 +20,4 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run licensed estimates contracts
-        run: npx vitest run tests/data/twelve-data-estimates.test.ts tests/data/estimate-report-augment.test.ts
+        run: npx vitest run tests/data/twelve-data-estimates.test.ts tests/data/estimate-report-augment.test.ts tests/env/estimates-provider.test.ts
