@@ -10,6 +10,8 @@ on:
       - "src/components/**"
       - "src/lib/**"
       - "tests/**"
+      - "package.json"
+      - "package-lock.json"
       - "supabase/migrations/**"
       - "vercel.json"
       - ".github/workflows/stockbox-2-upgrade-ci.yml"
