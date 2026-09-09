@@ -173,7 +173,7 @@ export async function claimBackgroundJobs(input: {
   });
   if (claim.error) return [];
 
-  return (claim.data ?? []).map((row) => mapJob(row as Record<string, unknown>));
+  return (claim.data ?? []).map((row: unknown) => mapJob(row as Record<string, unknown>));
 }
 
 export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean> {
