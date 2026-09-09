@@ -125,6 +125,20 @@ describe("depositary receipt registry", () => {
     expect(report.pass).toBe(false);
   });
 
+  it("rejects ambiguous issuer and receipt-ticker keys even when security ids differ", () => {
+    const report = qaDepositaryReceiptRegistry([
+      verifiedEntry(),
+      verifiedEntry({
+        securityId: "adr:issuer-novo:nvo-alt",
+        sourceUrl: "https://example.invalid/alternate",
+      }),
+    ]);
+
+    expect(report.ambiguousIssuerReceiptKeys).toEqual(["ISSUER-NOVO|NVO"]);
+    expect(report.duplicateSecurityIds).toEqual([]);
+    expect(report.pass).toBe(false);
+  });
+
   it("tracks unverified ratios without treating issuer mapping as invalid", () => {
     const report = qaDepositaryReceiptRegistry([
       verifiedEntry({ ratioVerified: false, underlyingSharesPerReceipt: null, ratioSource: null, ratioAsOf: null }),
