@@ -135,15 +135,19 @@ export function verifyDepositaryReceiptFundamentalsIdentity(
   const mapping = verifiedIssuerMapping(company, representation);
   if (!mapping.ok) return { verified: false, reason: mapping.reason };
 
-  const expectedIssuerId = company.issuerId?.trim();
-  const fundamentalsIssuerId = fundamentals.entityId?.trim();
-  if (!expectedIssuerId || !fundamentalsIssuerId) {
+  const expectedIssuerId = company.issuerId;
+  const fundamentalsIssuerId = fundamentals.entityId;
+  if (
+    !expectedIssuerId
+    || !fundamentalsIssuerId
+    || fundamentalsIssuerId !== fundamentalsIssuerId.trim()
+  ) {
     return {
       verified: false,
-      reason: "Depositary-receipt issuer identity cannot be reconciled because fundamentals lack a stable issuer identity.",
+      reason: "Depositary-receipt issuer identity cannot be reconciled because fundamentals lack a canonical stable issuer identity.",
     };
   }
-  if (fundamentalsIssuerId !== expectedIssuerId || fundamentalsIssuerId !== representation?.issuerId.trim()) {
+  if (fundamentalsIssuerId !== expectedIssuerId || fundamentalsIssuerId !== representation?.issuerId) {
     return {
       verified: false,
       reason: "Depositary-receipt fundamentals belong to a different issuer than the verified receipt-to-primary-listing mapping.",
