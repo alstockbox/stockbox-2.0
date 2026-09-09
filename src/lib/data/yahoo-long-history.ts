@@ -50,6 +50,14 @@ function yahooSymbol(company: CompanySearchResult): string {
   return symbol;
 }
 
+function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+  const expected = requested.trim().toUpperCase();
+  const actual = returned.trim().toUpperCase();
+  if (expected === actual) return true;
+  if (!/^[A-Z]{1,6}[.-][A-Z]$/.test(expected) || !/^[A-Z]{1,6}[.-][A-Z]$/.test(actual)) return false;
+  return expected.replace(".", "-") === actual.replace(".", "-");
+}
+
 function failure(reason: string): YahooLongHistoryResult {
   return {
     ok: false,
@@ -128,7 +136,10 @@ export async function fetchYahooLongHistory(company: CompanySearchResult): Promi
     const result = object(results[0]);
     const error = object(chart?.error);
     if (!result) return failure(stringValue(error?.description) ?? "empty_response");
-    const currency = stringValue(object(result.meta)?.currency);
+    const meta = object(result.meta);
+    const observedSymbol = stringValue(meta?.symbol);
+    if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) return failure("symbol_identity_mismatch");
+    const currency = stringValue(meta?.currency);
     if (!currency) return failure("currency_unknown");
     const priceHistory = parsePriceHistory(result, currency);
     const adjustedPriceHistory = parseAdjustedPriceHistory(result, currency);
