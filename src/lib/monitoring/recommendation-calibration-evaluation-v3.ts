@@ -197,7 +197,7 @@ export async function loadRecommendationOutcomesForCalibrationV3(options: {
 } = {}): Promise<RecommendationOutcomeV3[]> {
   const admin = createAdminClient();
   if (!admin) throw new Error("Supabase admin client is unavailable.");
-  const limit = Math.max(30, Math.min(options.limit ?? 5_000, 20_000));
+  const limit = Math.max(30, Math.min(Math.trunc(options.limit ?? 5_000), 20_000));
 
   const { data, error } = await admin
     .from("analysis_recommendation_v3_outcomes")
@@ -270,8 +270,8 @@ export async function runRecommendationCalibrationEvaluationV3(options: {
     };
   }
 
-  const sourceLimit = Math.max(30, Math.min(options.limit ?? 5_000, 20_000));
-  const dimensionSampleGate = Math.max(20, options.minimumBenchmarkSample ?? 30);
+  const sourceLimit = Math.max(30, Math.min(Math.trunc(options.limit ?? 5_000), 20_000));
+  const dimensionSampleGate = Math.max(20, Math.trunc(options.minimumBenchmarkSample ?? 30));
   const outcomes = await loadRecommendationOutcomesForCalibrationV3({ limit: sourceLimit });
   const performance = evaluateRecommendationPerformanceV3(outcomes);
   const performanceRollups = evaluateRecommendationPerformanceRollupsV3(outcomes, {
