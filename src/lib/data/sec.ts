@@ -908,7 +908,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
       name: identity ? company.name : facts.entityName || company.name,
       cik,
       sourceCiks: availableFactSets.map((factSet) => padCik(factSet.cik)),
-      entityId: identity?.canonicalId ?? company.entityId,
+      entityId: identity?.canonicalId ?? `sec:${cik}`,
       sector: classification.sector,
       industry: classification.industry,
       sic: submissions?.sic,
