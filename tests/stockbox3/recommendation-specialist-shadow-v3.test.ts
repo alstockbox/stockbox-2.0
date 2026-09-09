@@ -116,6 +116,10 @@ describe("Recommendation specialist shadow V3", () => {
     expect(event?.modelVersion).toBe(ETF_SPECIALIST_MODEL_VERSION);
   });
 
+  it("keeps missing specialist security identity missing instead of creating a blank audit lineage", () => {
+    expect(createSpecialistRecommendationV3ShadowEvent(report({ ticker: "   " }))).toBeNull();
+  });
+
   it("hard-blocks directional output when specialist factor coverage is below the verified minimum", () => {
     const lowCoverage = report({
       securityAnalysis: {
