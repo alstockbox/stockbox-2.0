@@ -1,0 +1,60 @@
+name: Temporary release candidate integration
+
+on:
+  push:
+    branches:
+      - integration/release-candidate-20260909
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Merge independently verified release branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/growth-v3-nonuuid-attribution-main-20260909 fix/etf-investment-company-coverage
+          git merge --no-ff --no-edit origin/fix/growth-v3-nonuuid-attribution-main-20260909
+          git merge --no-ff --no-edit origin/fix/etf-investment-company-coverage
+          git diff --check 74f97d1137a264f6b92d45b6d9729c33eb53bdf0...HEAD
+          echo "MERGED_HEAD=$(git rev-parse HEAD)"
+      - name: Install exact integrated dependency tree
+        run: npm ci
+      - name: Production dependency audit
+        run: npm audit --omit=dev
+      - name: Global lint
+        run: npm run lint
+      - name: Typecheck integrated tree
+        run: npm run typecheck
+      - name: Cross-workstream regression set
+        run: >-
+          npm test --
+          tests/growth-v3-orchestration.test.ts
+          tests/analysis/archetypes.test.ts
+          tests/analysis/specialist-coverage.test.ts
+          tests/data/universal-security-provider-investment-company-rating-gate.test.ts
+          tests/data/yahoo-fundamentals-provider-identity.test.ts
+          tests/data/yahoo-market-symbol-identity.test.ts
+      - name: Remove temporary integration workflow and commit final tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-release-candidate-integration.yml
+          git diff --cached --check
+          git commit -m "chore: finalize release candidate integration"
+          final_head="$(git rev-parse HEAD)"
+          echo "FINAL_HEAD=$final_head"
+          git status --short
+          git push origin HEAD:integration/release-candidate-20260909
