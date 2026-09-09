@@ -1,0 +1,142 @@
+name: Temporary global verification lint fix v2
+
+on:
+  push:
+    branches:
+      - fix/global-verification-lint-20260909
+    paths:
+      - ".github/workflows/tmp-global-lint-fix-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply corrected minimal lint fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          admin = Path('src/lib/growth/admin-growth-data.ts')
+          text = admin.read_text()
+
+          import_anchor = 'import { classifyGrowthRun, type GrowthDiagnosticState } from "@/lib/growth/growth-diagnostics";\n'
+          import_replacement = import_anchor + 'import type { SupabaseClient } from "@supabase/supabase-js";\n\n' + '''type GrowthAdminRow = Record<string, unknown> & {
+            metric_date?: string;
+            supporting_metrics?: Record<string, unknown> | null;
+            workflow?: string | null;
+            status?: string | null;
+            detail?: Record<string, unknown> | null;
+            source?: string | null;
+            error_type?: string | null;
+            message?: string | null;
+          };
+          '''.replace('          ', '') + 'type GrowthAdminClient = SupabaseClient;\n'
+          if text.count(import_anchor) != 1:
+              raise SystemExit(f'admin import anchor count={text.count(import_anchor)}')
+          text = text.replace(import_anchor, import_replacement, 1)
+
+          if text.count('Promise<any[]>') != 10:
+              raise SystemExit(f'Promise<any[]> count={text.count("Promise<any[]>")}')
+          text = text.replace('Promise<any[]>', 'Promise<GrowthAdminRow[]>')
+
+          replacements = [
+              ('function packageView(row: any): GrowthPlatformPackage {', 'function packageView(row: GrowthAdminRow): GrowthPlatformPackage {'),
+              ('function isReadyPrivateAsset(row: any) {', 'function isReadyPrivateAsset(row: GrowthAdminRow) {'),
+              ('function relatedErrorsForRun(run: any, errors: any[]) {', 'function relatedErrorsForRun(run: GrowthAdminRow, errors: GrowthAdminRow[]) {'),
+              ('new Map<string, any[]>()', 'new Map<string, GrowthAdminRow[]>()'),
+              ('export function createSupabaseGrowthAdminDataSource(client: any, now = new Date()): GrowthAdminDataSource {', 'export function createSupabaseGrowthAdminDataSource(client: GrowthAdminClient, now = new Date()): GrowthAdminDataSource {'),
+          ]
+          expected_counts = [1, 1, 1, 3, 1]
+          for (old, new), expected in zip(replacements, expected_counts):
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'admin anchor count={count}, expected={expected}: {old!r}')
+              text = text.replace(old, new)
+
+          filter_old = '.filter((row) => row.metric_date >= previousStart && row.metric_date <= previousEnd)'
+          filter_new = '.filter((row) => typeof row.metric_date === "string" && row.metric_date >= previousStart && row.metric_date <= previousEnd)'
+          if text.count(filter_old) != 1:
+              raise SystemExit(f'metric filter anchor count={text.count(filter_old)}')
+          text = text.replace(filter_old, filter_new, 1)
+          admin.write_text(text)
+
+          video = Path('src/video/GrowthVideo.tsx')
+          text = video.read_text()
+          old_video = '''import type { GrowthCompositionProps } from "./render-adapter";
+          import { selectGrowthTemplate } from "./templates/select-template";
+
+          export function GrowthVideo(props: GrowthCompositionProps) {
+            const Template = selectGrowthTemplate(props.spec.template);
+            return <Template {...props} />;
+          }
+
+          GrowthVideo.displayName = "GrowthVideo";
+          '''.replace('          ', '')
+          new_video = '''import type { GrowthCompositionProps } from "./render-adapter";
+          import { CompanyComparison } from "./templates/CompanyComparison";
+          import { EducationalChecklist } from "./templates/EducationalChecklist";
+          import { InvestorWarning } from "./templates/InvestorWarning";
+          import { StockAnalysis } from "./templates/StockAnalysis";
+          import { StockBoxDemo } from "./templates/StockBoxDemo";
+
+          export function GrowthVideo(props: GrowthCompositionProps) {
+            switch (props.spec.template) {
+              case "educational_checklist":
+                return <EducationalChecklist {...props} />;
+              case "stock_analysis":
+                return <StockAnalysis {...props} />;
+              case "investor_warning":
+                return <InvestorWarning {...props} />;
+              case "stockbox_demo":
+                return <StockBoxDemo {...props} />;
+              case "company_comparison":
+                return <CompanyComparison {...props} />;
+              default: {
+                const exhaustiveTemplate: never = props.spec.template;
+                return exhaustiveTemplate;
+              }
+            }
+          }
+
+          GrowthVideo.displayName = "GrowthVideo";
+          '''.replace('          ', '')
+          if text != old_video:
+              raise SystemExit('GrowthVideo baseline changed unexpectedly')
+          video.write_text(new_video)
+
+          test = Path('tests/growth-v3-provider-budget.test.ts')
+          text = test.read_text()
+          old = '    const calls: any[] = [];'
+          new = '    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];'
+          if text.count(old) != 1:
+              raise SystemExit(f'provider budget any anchor count={text.count(old)}')
+          test.write_text(text.replace(old, new, 1))
+          PY
+      - name: Global lint gate
+        run: npm run lint
+      - name: Targeted growth and video regressions
+        run: npm test -- tests/growth-admin-data.test.ts tests/growth-v3-provider-budget.test.ts tests/growth-video-template-selection.test.ts tests/growth-video-package-parity.test.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Commit clean lint fix
+        shell: bash
+        run: |
+          git rm .github/workflows/tmp-global-lint-fix.yml .github/workflows/tmp-global-lint-fix-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/growth/admin-growth-data.ts src/video/GrowthVideo.tsx tests/growth-v3-provider-budget.test.ts
+          git diff --cached --check
+          git commit -m "fix: clear global verification lint errors"
+          git push origin HEAD:fix/global-verification-lint-20260909
