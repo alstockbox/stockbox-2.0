@@ -11,6 +11,7 @@ export type DepositaryReceiptRegistryQaReport = {
   totalEntries: number;
   duplicateSecurityIds: string[];
   ambiguousIssuerReceiptKeys: string[];
+  nonCanonicalIssuerIdentitySecurityIds: string[];
   invalidRatioSecurityIds: string[];
   invalidRatioProvenanceSecurityIds: string[];
   missingSourceSecurityIds: string[];
@@ -57,6 +58,10 @@ export function qaDepositaryReceiptRegistry(
       .map(issuerReceiptKey)
       .filter((key): key is string => key !== null),
   );
+  const nonCanonicalIssuerIdentitySecurityIds = entries
+    .filter((entry) => entry.issuerId !== entry.issuerId.trim())
+    .map((entry) => entry.securityId)
+    .sort();
   const invalidRatioSecurityIds = entries
     .filter((entry) => entry.ratioVerified && !validPositiveRatio(entry))
     .map((entry) => entry.securityId)
@@ -85,6 +90,7 @@ export function qaDepositaryReceiptRegistry(
   return {
     pass: duplicateSecurityIds.length === 0
       && ambiguousIssuerReceiptKeys.length === 0
+      && nonCanonicalIssuerIdentitySecurityIds.length === 0
       && invalidRatioSecurityIds.length === 0
       && invalidRatioProvenanceSecurityIds.length === 0
       && missingSourceSecurityIds.length === 0
@@ -93,6 +99,7 @@ export function qaDepositaryReceiptRegistry(
     totalEntries: entries.length,
     duplicateSecurityIds,
     ambiguousIssuerReceiptKeys,
+    nonCanonicalIssuerIdentitySecurityIds,
     invalidRatioSecurityIds,
     invalidRatioProvenanceSecurityIds,
     missingSourceSecurityIds,
