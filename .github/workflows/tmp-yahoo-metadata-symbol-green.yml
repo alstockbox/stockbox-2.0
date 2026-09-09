@@ -1,0 +1,48 @@
+name: Temporary Yahoo metadata symbol GREEN
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply Yahoo metadata symbol equivalence fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/lib/data/yahoo-fundamentals.ts')
+          text = path.read_text()
+          old = '  const quote = quotes.map(object).find((item) => stringValue(item?.symbol)?.toUpperCase() === symbol.toUpperCase()) ?? null;\n'
+          new = '  const quote = quotes.map(object).find((item) => {\n    const returnedSymbol = stringValue(item?.symbol);\n    return returnedSymbol ? yahooSymbolsEquivalent(symbol, returnedSymbol) : false;\n  }) ?? null;\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one metadata symbol comparison, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Targeted Yahoo metadata identity regression
+        run: npm test -- tests/data/yahoo-fundamentals-metadata-symbol-equivalence.test.ts tests/data/yahoo-fundamentals.test.ts tests/data/yahoo-fundamentals-provider-identity.test.ts
+      - name: Typecheck metadata symbol fix
+        run: npm run typecheck
+      - name: Commit source fix and self-remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-fundamentals.ts
+          git rm .github/workflows/tmp-yahoo-metadata-symbol-green.yml
+          git commit -m "fix: match equivalent Yahoo metadata symbols"
+          git push origin HEAD:fix/etf-investment-company-coverage
