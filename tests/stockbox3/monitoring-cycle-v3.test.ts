@@ -25,6 +25,13 @@ const outcomesOk = {
   workerFailed: 0,
 };
 
+const reviewsOk = {
+  claimed: 2,
+  completed: 2,
+  retried: 0,
+  failed: 0,
+};
+
 const calibrationOk = {
   outcomes: 40,
   performanceSlices: 4,
@@ -35,88 +42,88 @@ const calibrationOk = {
   failed: 0,
 };
 
+function successfulRunners() {
+  return {
+    runWatchlist: vi.fn().mockResolvedValue(watchlistOk),
+    runRecommendationOutcomes: vi.fn().mockResolvedValue(outcomesOk),
+    runRecommendationReviews: vi.fn().mockResolvedValue(reviewsOk),
+    runCalibration: vi.fn().mockResolvedValue(calibrationOk),
+  };
+}
+
 describe("Monitoring cycle V3", () => {
-  it("runs watchlist, outcome and calibration pipelines in one cycle", async () => {
-    const result = await runMonitoringCycleV3({
-      runWatchlist: vi.fn().mockResolvedValue(watchlistOk),
-      runRecommendationOutcomes: vi.fn().mockResolvedValue(outcomesOk),
-      runCalibration: vi.fn().mockResolvedValue(calibrationOk),
-    });
+  it("runs watchlist, outcome, review and calibration pipelines in one cycle", async () => {
+    const result = await runMonitoringCycleV3(successfulRunners());
 
     expect(result.ok).toBe(true);
     expect(result.failed).toBe(0);
     expect(result.watchlist).toEqual(expect.objectContaining({ ok: true, value: watchlistOk }));
     expect(result.recommendationOutcomes).toEqual(expect.objectContaining({ ok: true, value: outcomesOk }));
+    expect(result.recommendationReviews).toEqual(expect.objectContaining({ ok: true, value: reviewsOk }));
     expect(result.calibration).toEqual(expect.objectContaining({ ok: true, value: calibrationOk }));
     expect(monitoringCycleHttpStatusV3(result)).toBe(200);
   });
 
-  it("does not let an outcome failure erase successful watchlist or calibration work", async () => {
-    const result = await runMonitoringCycleV3({
-      runWatchlist: vi.fn().mockResolvedValue(watchlistOk),
-      runRecommendationOutcomes: vi.fn().mockRejectedValue(new Error("provider unavailable")),
-      runCalibration: vi.fn().mockResolvedValue(calibrationOk),
-    });
+  it("isolates a review failure from watchlist, outcomes and calibration", async () => {
+    const runners = successfulRunners();
+    runners.runRecommendationReviews.mockRejectedValue(new Error("review provider unavailable"));
+    const result = await runMonitoringCycleV3(runners);
 
     expect(result.ok).toBe(false);
     expect(result.failed).toBe(1);
     expect(result.watchlist.ok).toBe(true);
-    expect(result.recommendationOutcomes).toEqual({ ok: false, error: "provider unavailable" });
+    expect(result.recommendationOutcomes.ok).toBe(true);
+    expect(result.recommendationReviews).toEqual({ ok: false, error: "review provider unavailable" });
     expect(result.calibration.ok).toBe(true);
     expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 
-  it("does not let a watchlist failure prevent recommendation learning", async () => {
-    const outcomeRunner = vi.fn().mockResolvedValue(outcomesOk);
-    const calibrationRunner = vi.fn().mockResolvedValue(calibrationOk);
-    const result = await runMonitoringCycleV3({
-      runWatchlist: vi.fn().mockRejectedValue(new Error("watchlist unavailable")),
-      runRecommendationOutcomes: outcomeRunner,
-      runCalibration: calibrationRunner,
-    });
+  it("does not let an outcome failure erase successful watchlist, review or calibration work", async () => {
+    const runners = successfulRunners();
+    runners.runRecommendationOutcomes.mockRejectedValue(new Error("provider unavailable"));
+    const result = await runMonitoringCycleV3(runners);
 
-    expect(outcomeRunner).toHaveBeenCalledOnce();
-    expect(calibrationRunner).toHaveBeenCalledOnce();
     expect(result.failed).toBe(1);
-    expect(result.watchlist).toEqual({ ok: false, error: "watchlist unavailable" });
-    expect(result.recommendationOutcomes.ok).toBe(true);
+    expect(result.watchlist.ok).toBe(true);
+    expect(result.recommendationReviews.ok).toBe(true);
     expect(result.calibration.ok).toBe(true);
     expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 
-  it("does not let calibration failure erase collected outcomes", async () => {
-    const result = await runMonitoringCycleV3({
-      runWatchlist: vi.fn().mockResolvedValue(watchlistOk),
-      runRecommendationOutcomes: vi.fn().mockResolvedValue(outcomesOk),
-      runCalibration: vi.fn().mockRejectedValue(new Error("calibration unavailable")),
-    });
+  it("does not let calibration failure erase collected outcomes or processed reviews", async () => {
+    const runners = successfulRunners();
+    runners.runCalibration.mockRejectedValue(new Error("calibration unavailable"));
+    const result = await runMonitoringCycleV3(runners);
 
     expect(result.failed).toBe(1);
     expect(result.recommendationOutcomes.ok).toBe(true);
+    expect(result.recommendationReviews.ok).toBe(true);
     expect(result.calibration).toEqual({ ok: false, error: "calibration unavailable" });
     expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 
-  it("returns service unavailable only when every pipeline fails before producing results", async () => {
+  it("uses 207 for pipeline failures and reserves 503 for coordinator exceptions in the route", async () => {
     const result = await runMonitoringCycleV3({
       runWatchlist: vi.fn().mockRejectedValue(new Error("watchlist unavailable")),
       runRecommendationOutcomes: vi.fn().mockRejectedValue(new Error("outcomes unavailable")),
+      runRecommendationReviews: vi.fn().mockRejectedValue(new Error("reviews unavailable")),
       runCalibration: vi.fn().mockRejectedValue(new Error("calibration unavailable")),
     });
 
-    expect(result.failed).toBe(3);
-    expect(monitoringCycleHttpStatusV3(result)).toBe(503);
+    expect(result.failed).toBe(4);
+    expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 
   it("includes internal failed counts from successful pipeline executions", async () => {
     const result = await runMonitoringCycleV3({
       runWatchlist: vi.fn().mockResolvedValue({ ...watchlistOk, failed: 2 }),
       runRecommendationOutcomes: vi.fn().mockResolvedValue({ ...outcomesOk, failed: 1 }),
+      runRecommendationReviews: vi.fn().mockResolvedValue({ ...reviewsOk, failed: 1 }),
       runCalibration: vi.fn().mockResolvedValue({ ...calibrationOk, failed: 1 }),
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failed).toBe(4);
+    expect(result.failed).toBe(5);
     expect(monitoringCycleHttpStatusV3(result)).toBe(207);
   });
 });

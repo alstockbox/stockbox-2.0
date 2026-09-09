@@ -19,6 +19,25 @@ export type RecommendationReviewRequestRowV3 = {
   status: "PENDING";
 };
 
+export type ClaimedRecommendationReviewRequestV3 = {
+  id: string;
+  requestId: string;
+  dedupeKey: string;
+  policyVersion: string;
+  ticker: string;
+  requestedAt: string;
+  trigger: RecommendationReviewRequestV3["trigger"];
+  priority: RecommendationReviewRequestV3["priority"];
+  requestedAction: RecommendationReviewRequestV3["requestedAction"];
+  sourceId: string;
+  sourceObservedAt: string;
+  materiality: number | null;
+  evidenceIds: string[];
+  reasonCodes: string[];
+  attempts: number;
+  claimedAt: string;
+};
+
 function clean(value: string): string {
   return value.trim();
 }
@@ -115,4 +134,103 @@ export async function persistRecommendationReviewRequestV3(
       error: error instanceof Error ? error.message : "UNKNOWN_RECOMMENDATION_REVIEW_PERSISTENCE_ERROR",
     };
   }
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function claimedRow(value: unknown): ClaimedRecommendationReviewRequestV3 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || typeof row.ticker !== "string" || typeof row.claimed_at !== "string") return null;
+  if (row.requested_action !== "RECOMPUTE_OBJECTIVE_RECOMMENDATION") return null;
+  if (row.status !== "PROCESSING") return null;
+  if (row.trigger !== "MATERIAL_NEWS" && row.trigger !== "LIFECYCLE_RECONSIDER") return null;
+  if (row.priority !== "normal" && row.priority !== "high" && row.priority !== "urgent") return null;
+  if (typeof row.attempts !== "number" || !Number.isInteger(row.attempts) || row.attempts < 1) return null;
+
+  return {
+    id: row.id,
+    requestId: typeof row.request_id === "string" ? row.request_id : "",
+    dedupeKey: typeof row.dedupe_key === "string" ? row.dedupe_key : "",
+    policyVersion: typeof row.policy_version === "string" ? row.policy_version : "",
+    ticker: row.ticker.trim().toUpperCase(),
+    requestedAt: typeof row.requested_at === "string" ? row.requested_at : "",
+    trigger: row.trigger,
+    priority: row.priority,
+    requestedAction: row.requested_action,
+    sourceId: typeof row.source_id === "string" ? row.source_id : "",
+    sourceObservedAt: typeof row.source_observed_at === "string" ? row.source_observed_at : "",
+    materiality: typeof row.materiality === "number" && Number.isFinite(row.materiality) ? row.materiality : null,
+    evidenceIds: stringArray(row.evidence_ids),
+    reasonCodes: stringArray(row.reason_codes),
+    attempts: row.attempts,
+    claimedAt: row.claimed_at,
+  };
+}
+
+function adminOrThrow() {
+  const admin = createAdminClient();
+  if (!admin) throw new Error("Supabase admin client is unavailable for recommendation reviews.");
+  return admin;
+}
+
+export async function claimRecommendationReviewRequestsV3(options: {
+  limit?: number;
+  now?: Date;
+  leaseSeconds?: number;
+} = {}): Promise<ClaimedRecommendationReviewRequestV3[]> {
+  const admin = adminOrThrow();
+  const limit = Math.max(1, Math.min(options.limit ?? 10, 100));
+  const leaseSeconds = Math.max(60, Math.min(options.leaseSeconds ?? 900, 86_400));
+  const { data, error } = await admin.rpc("claim_recommendation_v3_review_requests", {
+    p_limit: limit,
+    p_now: (options.now ?? new Date()).toISOString(),
+    p_lease_seconds: leaseSeconds,
+  });
+  if (error) throw new Error(`Unable to claim recommendation review requests: ${error.message}`);
+  return (Array.isArray(data) ? data : []).flatMap((row) => {
+    const parsed = claimedRow(row);
+    return parsed ? [parsed] : [];
+  });
+}
+
+async function transitionRecommendationReviewRequestV3(
+  functionName: "complete_recommendation_v3_review_request" | "retry_recommendation_v3_review_request" | "fail_recommendation_v3_review_request",
+  args: Record<string, unknown>,
+): Promise<void> {
+  const admin = adminOrThrow();
+  const { data, error } = await admin.rpc(functionName, args);
+  if (error) throw new Error(`Recommendation review transition failed: ${error.message}`);
+  if (data !== true) throw new Error("Recommendation review transition rejected because the request is no longer PROCESSING.");
+}
+
+export async function completeRecommendationReviewRequestV3(id: string, now = new Date()): Promise<void> {
+  await transitionRecommendationReviewRequestV3("complete_recommendation_v3_review_request", {
+    p_id: id,
+    p_now: now.toISOString(),
+  });
+}
+
+export async function retryRecommendationReviewRequestV3(
+  id: string,
+  error: string,
+  nextAttemptAt: Date,
+  now = new Date(),
+): Promise<void> {
+  await transitionRecommendationReviewRequestV3("retry_recommendation_v3_review_request", {
+    p_id: id,
+    p_error: error,
+    p_next_attempt_at: nextAttemptAt.toISOString(),
+    p_now: now.toISOString(),
+  });
+}
+
+export async function failRecommendationReviewRequestV3(id: string, error: string, now = new Date()): Promise<void> {
+  await transitionRecommendationReviewRequestV3("fail_recommendation_v3_review_request", {
+    p_id: id,
+    p_error: error,
+    p_now: now.toISOString(),
+  });
 }

@@ -10,6 +10,10 @@ import {
   runDurableRecommendationOutcomeMonitoringV3,
   type DurableRecommendationOutcomeRunV3,
 } from "./recommendation-outcome-jobs-v3";
+import {
+  runRecommendationReviewWorkerV3,
+  type RecommendationReviewWorkerResultV3,
+} from "./recommendation-review-worker-v3";
 
 export type MonitoringPipelineResultV3<T> =
   | { ok: true; value: T }
@@ -20,12 +24,14 @@ export type MonitoringCycleV3Result = {
   failed: number;
   watchlist: MonitoringPipelineResultV3<DurableWatchlistMonitoringResult>;
   recommendationOutcomes: MonitoringPipelineResultV3<DurableRecommendationOutcomeRunV3>;
+  recommendationReviews: MonitoringPipelineResultV3<RecommendationReviewWorkerResultV3>;
   calibration: MonitoringPipelineResultV3<RecommendationCalibrationEvaluationResultV3>;
 };
 
 type MonitoringCycleDependenciesV3 = {
   runWatchlist?: () => Promise<DurableWatchlistMonitoringResult>;
   runRecommendationOutcomes?: () => Promise<DurableRecommendationOutcomeRunV3>;
+  runRecommendationReviews?: () => Promise<RecommendationReviewWorkerResultV3>;
   runCalibration?: () => Promise<RecommendationCalibrationEvaluationResultV3>;
 };
 
@@ -38,6 +44,12 @@ export type MonitoringCycleV3Options = MonitoringCycleDependenciesV3 & {
   recommendationOutcomeOptions?: {
     enqueueLimit?: number;
     workerLimit?: number;
+    now?: Date;
+  };
+  recommendationReviewOptions?: {
+    limit?: number;
+    leaseSeconds?: number;
+    maxAttempts?: number;
     now?: Date;
   };
   calibrationOptions?: {
@@ -57,10 +69,8 @@ function internalFailures<T extends { failed: number }>(result: MonitoringPipeli
   return result.ok ? Math.max(0, result.value.failed) : 1;
 }
 
-export function monitoringCycleHttpStatusV3(result: MonitoringCycleV3Result): 200 | 207 | 503 {
-  if (result.ok) return 200;
-  if (!result.watchlist.ok && !result.recommendationOutcomes.ok && !result.calibration.ok) return 503;
-  return 207;
+export function monitoringCycleHttpStatusV3(result: MonitoringCycleV3Result): 200 | 207 {
+  return result.ok ? 200 : 207;
 }
 
 export async function runMonitoringCycleV3(
@@ -70,17 +80,20 @@ export async function runMonitoringCycleV3(
     ?? (() => runDurableWatchlistMonitoring(options.watchlistOptions));
   const runRecommendationOutcomes = options.runRecommendationOutcomes
     ?? (() => runDurableRecommendationOutcomeMonitoringV3(options.recommendationOutcomeOptions));
+  const runRecommendationReviews = options.runRecommendationReviews
+    ?? (() => runRecommendationReviewWorkerV3(options.recommendationReviewOptions));
   const runCalibration = options.runCalibration
     ?? (() => runRecommendationCalibrationEvaluationV3(options.calibrationOptions));
 
-  const [watchlistSettled, outcomesSettled] = await Promise.allSettled([
+  const [watchlistSettled, outcomesSettled, reviewsSettled] = await Promise.allSettled([
     runWatchlist(),
     runRecommendationOutcomes(),
+    runRecommendationReviews(),
   ]);
 
-  // Evaluate after the outcome worker settles so newly persisted outcomes are
+  // Evaluate after outcome processing settles so newly persisted outcomes are
   // immediately eligible for drift detection. Calibration remains isolated:
-  // its failure cannot erase successful watchlist or outcome work.
+  // its failure cannot erase successful work from any first-wave pipeline.
   const calibrationSettled = await Promise.allSettled([runCalibration()]);
 
   const watchlist: MonitoringCycleV3Result["watchlist"] = watchlistSettled.status === "fulfilled"
@@ -89,6 +102,9 @@ export async function runMonitoringCycleV3(
   const recommendationOutcomes: MonitoringCycleV3Result["recommendationOutcomes"] = outcomesSettled.status === "fulfilled"
     ? { ok: true, value: outcomesSettled.value }
     : { ok: false, error: errorMessage(outcomesSettled.reason) };
+  const recommendationReviews: MonitoringCycleV3Result["recommendationReviews"] = reviewsSettled.status === "fulfilled"
+    ? { ok: true, value: reviewsSettled.value }
+    : { ok: false, error: errorMessage(reviewsSettled.reason) };
   const calibrationResult = calibrationSettled[0];
   if (!calibrationResult) throw new Error("CALIBRATION_PIPELINE_RESULT_MISSING");
   const calibration: MonitoringCycleV3Result["calibration"] = calibrationResult.status === "fulfilled"
@@ -97,12 +113,14 @@ export async function runMonitoringCycleV3(
 
   const failed = internalFailures(watchlist)
     + internalFailures(recommendationOutcomes)
+    + internalFailures(recommendationReviews)
     + internalFailures(calibration);
   return {
     ok: failed === 0,
     failed,
     watchlist,
     recommendationOutcomes,
+    recommendationReviews,
     calibration,
   };
 }
