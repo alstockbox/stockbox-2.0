@@ -28,6 +28,6 @@ describe("Background job lease fencing", () => {
   it("fences terminal mutations to the exact current lease owner", () => {
     const ownerFilters = queueSource.match(/\.eq\("locked_by", [^)]+\)/g) ?? [];
     expect(ownerFilters.length).toBeGreaterThanOrEqual(2);
-    expect(queueSource).toMatch(/completeBackgroundJob\(job:/);
+    expect(queueSource).toContain("completeBackgroundJob(job)");
   });
 });
