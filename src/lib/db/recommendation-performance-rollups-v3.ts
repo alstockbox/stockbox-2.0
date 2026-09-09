@@ -91,43 +91,44 @@ export type RecommendationPerformanceRollupPersistResultV3 =
   | { ok: false; configured: true; persisted: 0; error: string };
 
 /**
- * Materializes one complete rollup evaluation atomically. A failed batch writes
- * no partial read-model from this call, while raw outcomes remain untouched.
+ * Atomically replaces the complete materialized snapshot for one exact
+ * policy/window/sample-gate lineage. The RPC deletes stale members and inserts
+ * the new set inside one PostgreSQL transaction; an empty set therefore clears
+ * the prior snapshot instead of silently preserving obsolete dimensions.
+ * Immutable raw outcomes remain the source of truth.
  */
 export async function persistRecommendationPerformanceRollupsV3(
   rollups: RecommendationPerformanceRollupV3[],
   options: RecommendationPerformanceRollupPersistenceOptionsV3,
 ): Promise<RecommendationPerformanceRollupPersistResultV3> {
-  if (rollups.length === 0) return { ok: true, configured: true, persisted: 0 };
-
   const supabase = createAdminClient();
   if (!supabase) {
     return { ok: false, configured: false, persisted: 0, error: "SUPABASE_ADMIN_NOT_CONFIGURED" };
   }
 
   try {
-    const rows = rollups.map((rollup) => toRecommendationPerformanceRollupRowV3(rollup, options));
-    const { error } = await supabase
-      .from("analysis_recommendation_v3_performance_rollups")
-      .upsert(rows, {
-        onConflict: [
-          "scope",
-          "horizon",
-          "rating",
-          "sector",
-          "analysis_archetype",
-          "model_version",
-          "recommendation_policy_version",
-          "outcome_policy_version",
-          "benchmark_policy_version",
-          "source_limit",
-          "dimension_sample_gate",
-        ].join(","),
-        ignoreDuplicates: false,
-      });
+    const sourceLimit = normalizedSourceLimit(options.sourceLimit);
+    const dimensionSampleGate = normalizedDimensionSampleGate(options.dimensionSampleGate);
+    const normalizedOptions = {
+      ...options,
+      sourceLimit,
+      dimensionSampleGate,
+    };
+    const rows = rollups.map((rollup) => toRecommendationPerformanceRollupRowV3(rollup, normalizedOptions));
+    const { data, error } = await supabase.rpc("replace_recommendation_v3_performance_rollups", {
+      p_rows: rows,
+      p_outcome_policy_version: RECOMMENDATION_OUTCOME_POLICY_VERSION,
+      p_benchmark_policy_version: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
+      p_source_limit: sourceLimit,
+      p_dimension_sample_gate: dimensionSampleGate,
+      p_evaluated_at: options.evaluatedAt,
+    });
 
     if (error) return { ok: false, configured: true, persisted: 0, error: error.message };
-    return { ok: true, configured: true, persisted: rows.length };
+    const persisted = typeof data === "number" && Number.isFinite(data)
+      ? Math.max(0, Math.trunc(data))
+      : rows.length;
+    return { ok: true, configured: true, persisted };
   } catch (error) {
     return {
       ok: false,
