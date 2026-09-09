@@ -17,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify RED parent
-        run: test "$(git rev-parse HEAD^)" = "61b955a708361953e0182873f33ddd39b9982b5b"
+      - name: Verify RED source baseline
+        run: git diff --exit-code 61b955a708361953e0182873f33ddd39b9982b5b -- src/lib/data/yahoo-market.ts
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -31,17 +31,21 @@ jobs:
 
           path = Path("src/lib/data/yahoo-market.ts")
           text = path.read_text()
-          old = '''    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
-    const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
-    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;'''
-          new = '''    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
-    const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
-    const benchmarkObservedSymbol = benchmarkResult ? stringValue(object(benchmarkResult.meta)?.symbol) : null;
-    const verifiedBenchmarkResult = benchmarkResult
-      && (!benchmarkObservedSymbol || (benchmarkSymbol && yahooSymbolsEquivalent(benchmarkSymbol, benchmarkObservedSymbol)))
-      ? benchmarkResult
-      : null;
-    const betaEstimate = verifiedBenchmarkResult ? historicalWeeklyBeta(history, parseRows(verifiedBenchmarkResult)) : null;'''
+          old = "\n".join([
+              "    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;",
+              "    const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;",
+              "    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;",
+          ])
+          new = "\n".join([
+              "    const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;",
+              "    const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;",
+              "    const benchmarkObservedSymbol = benchmarkResult ? stringValue(object(benchmarkResult.meta)?.symbol) : null;",
+              "    const verifiedBenchmarkResult = benchmarkResult",
+              "      && (!benchmarkObservedSymbol || (benchmarkSymbol && yahooSymbolsEquivalent(benchmarkSymbol, benchmarkObservedSymbol)))",
+              "      ? benchmarkResult",
+              "      : null;",
+              "    const betaEstimate = verifiedBenchmarkResult ? historicalWeeklyBeta(history, parseRows(verifiedBenchmarkResult)) : null;",
+          ])
           if text.count(old) != 1:
               raise SystemExit(f"benchmark patch anchor count={text.count(old)}")
           path.write_text(text.replace(old, new, 1))
