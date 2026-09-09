@@ -95,4 +95,24 @@ describe("Recommendation calibration evaluation V3", () => {
     expect(recommendationOutcomeFromPersistenceV3(persisted({ entry_price: "not-a-number" }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ observed_price: 0 }), lineage)).toBeNull();
   });
+
+  it("fails closed for missing, fractional or negative lag evidence instead of inventing zero days", () => {
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: null }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: 1.5 }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: -1 }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: "not-a-number" }), lineage)).toBeNull();
+  });
+
+  it("fails closed for malformed audit quality evidence instead of substituting zero", () => {
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, conviction: Number.NaN })).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, conviction: -1 })).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, dataQuality: 101 })).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, dataQuality: Number.NaN })).toBeNull();
+  });
+
+  it("fails closed for blank required audit lineage instead of creating anonymous calibration evidence", () => {
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, ticker: "   " })).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, modelVersion: "" })).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted(), { ...lineage, recommendationPolicyVersion: " " })).toBeNull();
+  });
 });

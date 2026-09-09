@@ -76,6 +76,11 @@ function finiteNumber(value: unknown): number | null {
   return null;
 }
 
+function boundedScore(value: unknown): number | null {
+  const parsed = finiteNumber(value);
+  return parsed !== null && parsed >= 0 && parsed <= 100 ? parsed : null;
+}
+
 function validDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -91,25 +96,58 @@ function normalizedDimension(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizedRequiredText(value: unknown): string | null {
+  return normalizedDimension(value);
+}
+
 function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
   const row = persistenceRecord(value);
   if (!row) return null;
-  if (typeof row.id !== "string" || typeof row.ticker !== "string") return null;
-  if (typeof row.analysis_archetype !== "string"
-      || typeof row.model_version !== "string"
-      || typeof row.recommendation_policy_version !== "string") return null;
+  const id = normalizedRequiredText(row.id);
+  const ticker = normalizedRequiredText(row.ticker);
+  const analysisArchetype = normalizedRequiredText(row.analysis_archetype);
+  const modelVersion = normalizedRequiredText(row.model_version);
+  const recommendationPolicyVersion = normalizedRequiredText(row.recommendation_policy_version);
+  if (id === null || ticker === null || analysisArchetype === null || modelVersion === null || recommendationPolicyVersion === null) return null;
   if (typeof row.v3_rating !== "string" || !RATINGS.has(row.v3_rating as RecommendationV3Rating)) return null;
+  const conviction = boundedScore(row.conviction);
+  const dataQuality = boundedScore(row.data_quality);
+  if (conviction === null || dataQuality === null) return null;
 
   return {
-    id: row.id,
-    ticker: row.ticker.trim().toUpperCase(),
-    analysisArchetype: row.analysis_archetype,
+    id,
+    ticker: ticker.toUpperCase(),
+    analysisArchetype,
     sector: normalizedDimension(row.sector),
-    modelVersion: row.model_version,
-    recommendationPolicyVersion: row.recommendation_policy_version,
+    modelVersion,
+    recommendationPolicyVersion,
     rating: row.v3_rating as RecommendationV3Rating,
-    conviction: finiteNumber(row.conviction) ?? 0,
-    dataQuality: finiteNumber(row.data_quality) ?? 0,
+    conviction,
+    dataQuality,
+  };
+}
+
+function validAuditLineageForOutcomeV3(lineage: AuditLineageRowV3): AuditLineageRowV3 | null {
+  const id = normalizedRequiredText(lineage.id);
+  const ticker = normalizedRequiredText(lineage.ticker);
+  const analysisArchetype = normalizedRequiredText(lineage.analysisArchetype);
+  const modelVersion = normalizedRequiredText(lineage.modelVersion);
+  const recommendationPolicyVersion = normalizedRequiredText(lineage.recommendationPolicyVersion);
+  if (id === null || ticker === null || analysisArchetype === null || modelVersion === null || recommendationPolicyVersion === null) return null;
+  if (!RATINGS.has(lineage.rating)) return null;
+  const conviction = boundedScore(lineage.conviction);
+  const dataQuality = boundedScore(lineage.dataQuality);
+  if (conviction === null || dataQuality === null) return null;
+  return {
+    ...lineage,
+    id,
+    ticker: ticker.toUpperCase(),
+    analysisArchetype,
+    sector: normalizedDimension(lineage.sector),
+    modelVersion,
+    recommendationPolicyVersion,
+    conviction,
+    dataQuality,
   };
 }
 
@@ -119,10 +157,14 @@ export function recommendationOutcomeFromPersistenceV3(
 ): RecommendationOutcomeV3 | null {
   const row = persistenceRecord(value);
   if (!row) return null;
+  const validatedLineage = validAuditLineageForOutcomeV3(lineage);
+  if (!validatedLineage) return null;
   if (row.policy_version !== RECOMMENDATION_OUTCOME_POLICY_VERSION) return null;
   if (typeof row.horizon !== "string" || !OUTCOME_HORIZONS.has(row.horizon as RecommendationOutcomeHorizonV3)) return null;
   if (!validDate(row.expected_at) || !validDate(row.evaluated_at)) return null;
 
+  const lagDays = finiteNumber(row.lag_days);
+  if (lagDays === null || !Number.isInteger(lagDays) || lagDays < 0) return null;
   const entryPrice = finiteNumber(row.entry_price);
   const observedPrice = finiteNumber(row.observed_price);
   const securityReturn = finiteNumber(row.security_return);
@@ -144,17 +186,17 @@ export function recommendationOutcomeFromPersistenceV3(
 
   return {
     policyVersion: RECOMMENDATION_OUTCOME_POLICY_VERSION,
-    snapshotId: lineage.id,
-    ticker: lineage.ticker,
-    rating: lineage.rating,
-    analysisArchetype: lineage.analysisArchetype,
-    sector: normalizedDimension(lineage.sector),
-    modelVersion: lineage.modelVersion,
-    recommendationPolicyVersion: lineage.recommendationPolicyVersion,
+    snapshotId: validatedLineage.id,
+    ticker: validatedLineage.ticker,
+    rating: validatedLineage.rating,
+    analysisArchetype: validatedLineage.analysisArchetype,
+    sector: validatedLineage.sector ?? null,
+    modelVersion: validatedLineage.modelVersion,
+    recommendationPolicyVersion: validatedLineage.recommendationPolicyVersion,
     horizon: row.horizon as RecommendationOutcomeHorizonV3,
     expectedAt: row.expected_at,
     evaluatedAt: row.evaluated_at,
-    lagDays: Math.max(0, Math.trunc(finiteNumber(row.lag_days) ?? 0)),
+    lagDays,
     entryPrice,
     observedPrice,
     securityReturn,
@@ -166,8 +208,8 @@ export function recommendationOutcomeFromPersistenceV3(
     benchmarkReturn,
     excessReturn,
     directionalHit,
-    conviction: lineage.conviction,
-    dataQuality: lineage.dataQuality,
+    conviction: validatedLineage.conviction,
+    dataQuality: validatedLineage.dataQuality,
   };
 }
 
