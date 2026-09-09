@@ -30,6 +30,20 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+  const requestedSymbol = requested.trim().toUpperCase();
+  const returnedSymbol = returned.trim().toUpperCase();
+  if (requestedSymbol === returnedSymbol) return true;
+
+  const requestedClass = requestedSymbol.match(/^([A-Z0-9]{1,8})[.-]([A-Z])$/);
+  const returnedClass = returnedSymbol.match(/^([A-Z0-9]{1,8})[.-]([A-Z])$/);
+  return Boolean(
+    requestedClass
+    && returnedClass
+    && requestedClass[1] === returnedClass[1]
+    && requestedClass[2] === returnedClass[2],
+  );
+}
 function numberValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const raw = object(value)?.raw;
@@ -205,7 +219,11 @@ export async function fetchYahooEtfData(company: CompanySearchResult): Promise<Y
   const quotePath = `/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
   const [summaryPayload, quotePayload] = await Promise.all([getYahooJson(summaryPath), getYahooJson(quotePath)]);
   const summary = quoteSummaryResult(summaryPayload);
-  const quote = quoteResult(quotePayload);
+  const rawQuote = quoteResult(quotePayload);
+  const observedQuoteSymbol = stringValue(rawQuote?.symbol);
+  const quote = rawQuote && (!observedQuoteSymbol || yahooSymbolsEquivalent(symbol, observedQuoteSymbol))
+    ? rawQuote
+    : null;
   if (!summary && !quote) {
     return {
       ok: false,
