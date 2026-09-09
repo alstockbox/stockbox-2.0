@@ -15,6 +15,7 @@ on:
       - "supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql"
       - "supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql"
       - "supabase/migrations/20260910001500_background_job_atomic_claim.sql"
+      - "supabase/migrations/20260910003000_background_job_atomic_enqueue.sql"
       - ".github/workflows/batch-resilience-db-ci.yml"
 
 jobs:
@@ -40,6 +41,7 @@ jobs:
           cp supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql /tmp/stockbox-batch-migrations/
           cp supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql /tmp/stockbox-batch-migrations/
           cp supabase/migrations/20260910001500_background_job_atomic_claim.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260910003000_background_job_atomic_enqueue.sql /tmp/stockbox-batch-migrations/
           rm -rf supabase/migrations
           mkdir -p supabase/migrations
       - name: Start disposable Supabase
@@ -178,6 +180,76 @@ jobs:
 
             if v_running <> 4 or v_first_attempt <> 4 then
               raise exception 'Expected four disjoint first-attempt claims, got running=% first_attempt=%', v_running, v_first_attempt;
+            end if;
+          end
+          $$;
+          SQL
+      - name: Apply atomic background job admission
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260910003000_background_job_atomic_enqueue.sql
+      - name: Assert parallel background job admission is atomic and reusable after terminal state
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if has_function_privilege('anon', 'public.enqueue_background_job(text,jsonb,text,integer,timestamptz)', 'EXECUTE') then
+              raise exception 'anon must not execute enqueue_background_job';
+            end if;
+            if has_function_privilege('authenticated', 'public.enqueue_background_job(text,jsonb,text,integer,timestamptz)', 'EXECUTE') then
+              raise exception 'authenticated must not execute enqueue_background_job';
+            end if;
+            if not has_function_privilege('service_role', 'public.enqueue_background_job(text,jsonb,text,integer,timestamptz)', 'EXECUTE') then
+              raise exception 'service_role must execute enqueue_background_job';
+            end if;
+          end
+          $$;
+          SQL
+
+          psql "$DATABASE_URL" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+            "select id, deduplicated from public.enqueue_background_job('ci.atomic-enqueue', '{\"worker\":\"a\"}'::jsonb, 'same-key', 5, now());" \
+            > /tmp/stockbox-enqueue-a.txt &
+          enqueue_a=$!
+          psql "$DATABASE_URL" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+            "select id, deduplicated from public.enqueue_background_job('ci.atomic-enqueue', '{\"worker\":\"b\"}'::jsonb, 'same-key', 5, now());" \
+            > /tmp/stockbox-enqueue-b.txt &
+          enqueue_b=$!
+          wait "$enqueue_a"
+          wait "$enqueue_b"
+
+          test "$(cat /tmp/stockbox-enqueue-a.txt /tmp/stockbox-enqueue-b.txt | sed '/^[[:space:]]*$/d' | wc -l | xargs)" = "2"
+          test "$(cat /tmp/stockbox-enqueue-a.txt /tmp/stockbox-enqueue-b.txt | cut -d'|' -f1 | sort -u | wc -l | xargs)" = "1"
+          test "$(cat /tmp/stockbox-enqueue-a.txt /tmp/stockbox-enqueue-b.txt | cut -d'|' -f2 | sort | tr '\n' ' ' | xargs)" = "f t"
+
+          first_id="$(head -n1 /tmp/stockbox-enqueue-a.txt | cut -d'|' -f1)"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "update public.background_jobs set status='completed', completed_at=now(), updated_at=now() where id='${first_id}'::uuid and status='queued';"
+
+          psql "$DATABASE_URL" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+            "select id, deduplicated from public.enqueue_background_job('ci.atomic-enqueue', '{\"worker\":\"c\"}'::jsonb, 'same-key', 5, now());" \
+            > /tmp/stockbox-enqueue-after-terminal.txt
+          second_id="$(cut -d'|' -f1 /tmp/stockbox-enqueue-after-terminal.txt)"
+          second_deduplicated="$(cut -d'|' -f2 /tmp/stockbox-enqueue-after-terminal.txt)"
+          test "$second_id" != "$first_id"
+          test "$second_deduplicated" = "f"
+
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_total integer;
+            v_active integer;
+            v_terminal integer;
+          begin
+            select count(*),
+                   count(*) filter (where status in ('queued', 'running')),
+                   count(*) filter (where status = 'completed')
+              into v_total, v_active, v_terminal
+            from public.background_jobs
+            where kind = 'ci.atomic-enqueue'
+              and dedupe_key = 'same-key';
+
+            if v_total <> 2 or v_active <> 1 or v_terminal <> 1 then
+              raise exception 'Expected one terminal and one active dedupe generation, got total=% active=% terminal=%', v_total, v_active, v_terminal;
             end if;
           end
           $$;
