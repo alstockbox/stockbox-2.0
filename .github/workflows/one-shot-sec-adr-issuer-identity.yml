@@ -1,0 +1,69 @@
+name: One-shot SEC ADR issuer identity patch
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply exact SEC issuer identity guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/sec.ts")
+          source = path.read_text()
+          marker = '''  if (!availableFactSets.length) {
+            return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
+          }
+          '''
+          insertion = '''  if (!availableFactSets.length) {
+            return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
+          }
+          const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));
+          const mismatchedSourceCik = availableFactSets
+            .map((factSet) => padCik(factSet.cik))
+            .find((sourceCik) => !allowedSourceCiks.has(sourceCik));
+          if (mismatchedSourceCik) {
+            return {
+              ok: false,
+              reason: "invalid_row",
+              message: "SEC Companyfacts issuer identity does not match the requested canonical issuer CIK.",
+              diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "invalid_row"),
+            };
+          }
+          '''
+          count = source.count(marker)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one SEC Companyfacts availability marker, found {count}")
+          path.write_text(source.replace(marker, insertion, 1))
+          PY
+      - run: npm ci
+      - name: Prove targeted RED test is GREEN
+        run: npm test -- tests/data/depositary-receipt-sec-issuer-identity.test.ts
+      - name: Commit only SEC guard and remove this workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-sec-adr-issuer-identity.yml
+          git add src/lib/data/sec.ts
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/workflows/one-shot-sec-adr-issuer-identity.yml src/lib/data/sec.ts "
+          git commit -m "fix: verify SEC ADR issuer payload identity"
+          git push origin HEAD:fix/etf-investment-company-coverage
