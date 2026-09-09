@@ -2,9 +2,6 @@ name: StockBox Global Analysis Coverage Gate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/etf-investment-company-coverage
   schedule:
     - cron: "17 3 * * *"
 
@@ -21,7 +18,6 @@ env:
 
 jobs:
   prepare:
-    if: ${{ github.event_name != 'push' || contains(github.event.head_commit.message, '[run-global-audit]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
