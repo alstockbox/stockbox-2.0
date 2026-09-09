@@ -385,14 +385,45 @@ export function proposeRecommendationCalibrationV3(
   };
 }
 
+function hasBacktestEvidence(evidence: CalibrationPromotionEvidenceV3): boolean {
+  return evidence.backtestImproved === true;
+}
+
+function hasShadowEvidence(evidence: CalibrationPromotionEvidenceV3): boolean {
+  return evidence.shadowImproved === true;
+}
+
+function hasApproval(evidence: CalibrationPromotionEvidenceV3): boolean {
+  return evidence.explicitApproval === true;
+}
+
+/**
+ * Pure stage preview that mirrors the durable DB promotion contract. Later
+ * stages require cumulative evidence because this value object does not carry
+ * persisted evidence IDs or approval state between calls.
+ */
 export function canPromoteRecommendationCalibrationV3(
   stage: RecommendationCalibrationStageV3,
   evidence: CalibrationPromotionEvidenceV3,
 ): RecommendationCalibrationStageV3 {
-  if (stage === "CANDIDATE") return evidence.backtestImproved ? "BACKTESTED" : "CANDIDATE";
-  if (stage === "BACKTESTED") return evidence.shadowImproved ? "SHADOW_VALIDATED" : "BACKTESTED";
-  if (stage === "SHADOW_VALIDATED") return evidence.explicitApproval ? "APPROVED" : "SHADOW_VALIDATED";
-  if (stage === "APPROVED") return "PRODUCTION";
+  if (stage === "CANDIDATE") {
+    return hasBacktestEvidence(evidence) ? "BACKTESTED" : "CANDIDATE";
+  }
+  if (stage === "BACKTESTED") {
+    return hasBacktestEvidence(evidence) && hasShadowEvidence(evidence)
+      ? "SHADOW_VALIDATED"
+      : "BACKTESTED";
+  }
+  if (stage === "SHADOW_VALIDATED") {
+    return hasBacktestEvidence(evidence) && hasShadowEvidence(evidence) && hasApproval(evidence)
+      ? "APPROVED"
+      : "SHADOW_VALIDATED";
+  }
+  if (stage === "APPROVED") {
+    return hasBacktestEvidence(evidence) && hasShadowEvidence(evidence) && hasApproval(evidence)
+      ? "PRODUCTION"
+      : "APPROVED";
+  }
   return "PRODUCTION";
 }
 
@@ -405,8 +436,9 @@ const NEXT_CALIBRATION_STAGE: Record<RecommendationCalibrationStageV3, Recommend
 };
 
 /**
- * Enforces candidate -> backtest -> shadow -> approval -> production.
- * Production promotion additionally requires explicit human approval and positive backtest/shadow evidence.
+ * In-memory promotion guard matching the durable DB contract. Because the
+ * candidate value does not contain persisted evidence IDs, callers must supply
+ * cumulative evidence at each later stage instead of relying on implicit state.
  */
 export function advanceRecommendationCalibrationV3(
   candidate: RecommendationCalibrationCandidateV3,
@@ -416,16 +448,29 @@ export function advanceRecommendationCalibrationV3(
   const allowed = NEXT_CALIBRATION_STAGE[candidate.stage];
   if (allowed !== nextStage) throw new Error("INVALID_CALIBRATION_STAGE_TRANSITION");
 
-  if (nextStage === "SHADOW_VALIDATED" && evidence.backtestImproved !== true) {
+  if (nextStage === "BACKTESTED" && !hasBacktestEvidence(evidence)) {
     throw new Error("CALIBRATION_BACKTEST_IMPROVEMENT_REQUIRED");
   }
-  if (nextStage === "APPROVED" && evidence.shadowImproved !== true) {
-    throw new Error("CALIBRATION_SHADOW_IMPROVEMENT_REQUIRED");
+  if (nextStage === "SHADOW_VALIDATED") {
+    if (!hasBacktestEvidence(evidence)) {
+      throw new Error("CALIBRATION_BACKTEST_IMPROVEMENT_REQUIRED");
+    }
+    if (!hasShadowEvidence(evidence)) {
+      throw new Error("CALIBRATION_SHADOW_IMPROVEMENT_REQUIRED");
+    }
+  }
+  if (nextStage === "APPROVED") {
+    if (!hasBacktestEvidence(evidence) || !hasShadowEvidence(evidence)) {
+      throw new Error("CALIBRATION_BACKTEST_AND_SHADOW_EVIDENCE_REQUIRED");
+    }
+    if (!hasApproval(evidence)) {
+      throw new Error("CALIBRATION_EXPLICIT_APPROVAL_REQUIRED");
+    }
   }
   if (nextStage === "PRODUCTION" && (
-    evidence.explicitApproval !== true
-    || evidence.backtestImproved !== true
-    || evidence.shadowImproved !== true
+    !hasBacktestEvidence(evidence)
+    || !hasShadowEvidence(evidence)
+    || !hasApproval(evidence)
   )) {
     throw new Error("CALIBRATION_EXPLICIT_APPROVAL_AND_EVIDENCE_REQUIRED");
   }
