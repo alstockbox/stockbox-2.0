@@ -39,6 +39,10 @@ const creationMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/20260908222600_recommendation_v3_calibration_creation_event.sql"),
   "utf8",
 );
+const evidenceMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/20260909103000_recommendation_v3_calibration_evidence.sql"),
+  "utf8",
+);
 
 describe("Recommendation calibration V3 persistence", () => {
   it("uses stable model-lineage identity independent of evaluation timestamp and sample size", () => {
@@ -93,5 +97,26 @@ describe("Recommendation calibration V3 persistence", () => {
     expect(creationMigration).toContain("after insert on public.analysis_recommendation_v3_calibration_candidates");
     expect(creationMigration).toContain("CALIBRATION_DRIFT_CANDIDATE_CREATED");
     expect(creationMigration).toContain("analysis_recommendation_v3_calibration_events");
+  });
+
+  it("persists immutable service-role-only backtest and shadow evidence instead of trusting booleans", () => {
+    expect(evidenceMigration).toContain("analysis_recommendation_v3_calibration_evidence");
+    expect(evidenceMigration).toContain("evidence_kind in ('BACKTEST', 'SHADOW')");
+    expect(evidenceMigration).toContain("Recommendation calibration evidence is append-only");
+    expect(evidenceMigration).toContain("enable row level security");
+    expect(evidenceMigration).toContain("from authenticated");
+    expect(evidenceMigration).toContain("to service_role");
+    expect(evidenceMigration).toContain("CALIBRATION_EVIDENCE_LINEAGE_MISMATCH");
+  });
+
+  it("requires persisted evidence ids for promotion and makes approval explicit before production", () => {
+    expect(evidenceMigration).toContain("p_backtest_evidence_id uuid");
+    expect(evidenceMigration).toContain("p_shadow_evidence_id uuid");
+    expect(evidenceMigration).toContain("CALIBRATION_BACKTEST_EVIDENCE_REQUIRED");
+    expect(evidenceMigration).toContain("CALIBRATION_SHADOW_EVIDENCE_REQUIRED");
+    expect(evidenceMigration).toContain("CALIBRATION_EXPLICIT_APPROVAL_REQUIRED");
+    expect(evidenceMigration).toContain("backtest_evidence_id");
+    expect(evidenceMigration).toContain("shadow_evidence_id");
+    expect(evidenceMigration).toContain("drop function if exists public.advance_recommendation_v3_calibration");
   });
 });
