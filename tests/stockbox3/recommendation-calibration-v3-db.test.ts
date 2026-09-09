@@ -22,6 +22,7 @@ function candidate(overrides: Partial<RecommendationCalibrationCandidateV3> = {}
     benchmarkSampleSize: 40,
     hitRate: 0.4,
     meanExcessReturn: -0.03,
+    medianExcessReturn: -0.025,
     reasons: ["MEAN_EXCESS_RETURN_BELOW_MINUS_2_PERCENT"],
     ...overrides,
   };
@@ -43,6 +44,10 @@ const evidenceMigration = readFileSync(
   join(process.cwd(), "supabase/migrations/20260909103000_recommendation_v3_calibration_evidence.sql"),
   "utf8",
 );
+const medianMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/20260909113000_recommendation_v3_calibration_median.sql"),
+  "utf8",
+);
 
 describe("Recommendation calibration V3 persistence", () => {
   it("uses stable model-lineage identity independent of evaluation timestamp and sample size", () => {
@@ -59,7 +64,7 @@ describe("Recommendation calibration V3 persistence", () => {
     expect(nextModel).not.toBe(first);
   });
 
-  it("maps only objective aggregate calibration fields", () => {
+  it("maps only objective aggregate calibration fields including durable median evidence", () => {
     const row = toRecommendationCalibrationCandidateRowV3(candidate());
     const serialized = JSON.stringify(row);
 
@@ -67,6 +72,8 @@ describe("Recommendation calibration V3 persistence", () => {
     expect(row.analysis_archetype).toBe("standard");
     expect(row.model_version).toBe("model-v3");
     expect(row.recommendation_policy_version).toBe("policy-v3");
+    expect(row.mean_excess_return).toBe(-0.03);
+    expect(row.median_excess_return).toBe(-0.025);
     expect(row.backtest_improved).toBeNull();
     expect(row.shadow_improved).toBeNull();
     expect(row.explicit_approval).toBe(false);
@@ -74,6 +81,17 @@ describe("Recommendation calibration V3 persistence", () => {
     expect(serialized).not.toContain("personalized");
     expect(serialized).not.toContain("portfolio");
     expect(serialized).not.toContain("ai_output");
+  });
+
+  it("keeps legacy candidates missing median evidence as null rather than inventing zero", () => {
+    const row = toRecommendationCalibrationCandidateRowV3(candidate({ medianExcessReturn: undefined }));
+    expect(row.median_excess_return).toBeNull();
+  });
+
+  it("adds median evidence without weakening calibration table access controls", () => {
+    expect(medianMigration).toContain("add column if not exists median_excess_return numeric");
+    expect(medianMigration).toContain("missing data is never coerced to zero");
+    expect(medianMigration).not.toContain("grant ");
   });
 
   it("keeps calibration tables private and events append-only", () => {

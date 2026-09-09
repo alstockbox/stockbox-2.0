@@ -210,6 +210,7 @@ describe("Recommendation learning V3", () => {
     expect(candidate?.analysisArchetype).toBe("standard");
     expect(candidate?.modelVersion).toBe("stockbox-analysis-v3-test");
     expect(candidate?.recommendationPolicyVersion).toBe("stockbox-recommendation-policy-v3.0.0");
+    expect(candidate?.medianExcessReturn).toBe(-0.025);
     expect(candidate?.reasons).toContain("MEAN_EXCESS_RETURN_BELOW_MINUS_2_PERCENT");
     expect(candidate?.reasons).toContain("DIRECTIONAL_HIT_RATE_BELOW_45_PERCENT");
 

@@ -25,6 +25,7 @@ export type RecommendationCalibrationCandidateRowV3 = {
   benchmark_sample_size: number;
   hit_rate: number | null;
   mean_excess_return: number | null;
+  median_excess_return: number | null;
   reasons: string[];
   backtest_improved: boolean | null;
   shadow_improved: boolean | null;
@@ -124,6 +125,7 @@ export function toRecommendationCalibrationCandidateRowV3(
     benchmark_sample_size: Math.max(0, Math.min(Math.trunc(candidate.benchmarkSampleSize), Math.trunc(candidate.sampleSize))),
     hit_rate: candidate.hitRate,
     mean_excess_return: candidate.meanExcessReturn,
+    median_excess_return: candidate.medianExcessReturn ?? null,
     reasons: [...candidate.reasons],
     backtest_improved: null,
     shadow_improved: null,
@@ -214,6 +216,7 @@ export async function persistRecommendationCalibrationCandidateV3(
           benchmark_sample_size: row.benchmark_sample_size,
           hit_rate: row.hit_rate,
           mean_excess_return: row.mean_excess_return,
+          median_excess_return: row.median_excess_return,
           reasons: row.reasons,
           updated_at: row.updated_at,
         })

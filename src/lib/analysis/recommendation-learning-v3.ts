@@ -101,6 +101,8 @@ export type RecommendationCalibrationCandidateV3 = {
   benchmarkSampleSize: number;
   hitRate: number | null;
   meanExcessReturn: number | null;
+  /** Nullable for missing benchmark evidence; optional only for legacy candidate artifacts. */
+  medianExcessReturn?: number | null;
   reasons: string[];
 };
 
@@ -351,6 +353,7 @@ export function proposeRecommendationCalibrationV3(
     benchmarkSampleSize: performance.benchmarkCount,
     hitRate: performance.hitRate,
     meanExcessReturn: performance.meanExcessReturn,
+    medianExcessReturn: performance.medianExcessReturn,
     reasons,
   };
 }
