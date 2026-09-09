@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeDiagnosticMessage } from "@/lib/security/diagnostics";
 
@@ -10,6 +12,7 @@ export type BackgroundJob = {
   maxAttempts: number;
   availableAt: string;
   lockedAt: string | null;
+  lockedBy: string | null;
   dedupeKey: string | null;
 };
 
@@ -38,6 +41,7 @@ function mapJob(row: Record<string, unknown>): BackgroundJob {
     maxAttempts: Number(row.max_attempts ?? 5),
     availableAt: String(row.available_at),
     lockedAt: typeof row.locked_at === "string" ? row.locked_at : null,
+    lockedBy: typeof row.locked_by === "string" ? row.locked_by : null,
     dedupeKey: typeof row.dedupe_key === "string" ? row.dedupe_key : null,
   };
 }
@@ -98,12 +102,13 @@ export async function claimBackgroundJobs(input: {
   await admin.from("background_jobs").update({
     status: "queued",
     locked_at: null,
+    locked_by: null,
     available_at: now.toISOString(),
     updated_at: now.toISOString(),
   }).eq("status", "running").lt("locked_at", staleCutoff).in("kind", input.kinds);
 
   const candidates = await admin.from("background_jobs")
-    .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
+    .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,locked_by,dedupe_key")
     .eq("status", "queued")
     .in("kind", input.kinds)
     .lte("available_at", now.toISOString())
@@ -113,45 +118,57 @@ export async function claimBackgroundJobs(input: {
 
   const claimed: BackgroundJob[] = [];
   for (const candidate of candidates.data ?? []) {
+    const lockedBy = randomUUID();
     const claim = await admin.from("background_jobs").update({
       status: "running",
       attempts: Number(candidate.attempts ?? 0) + 1,
       locked_at: now.toISOString(),
+      locked_by: lockedBy,
       updated_at: now.toISOString(),
     }).eq("id", candidate.id).eq("status", "queued")
-      .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
+      .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,locked_by,dedupe_key")
       .maybeSingle();
     if (claim.data) claimed.push(mapJob(claim.data as Record<string, unknown>));
   }
   return claimed;
 }
 
-export async function completeBackgroundJob(jobId: string): Promise<void> {
+export async function completeBackgroundJob(
+  job: Pick<BackgroundJob, "id" | "lockedBy">,
+): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin || !job.lockedBy) return false;
   const now = new Date().toISOString();
-  await admin.from("background_jobs").update({
+  const result = await admin.from("background_jobs").update({
     status: "completed",
     locked_at: null,
+    locked_by: null,
     completed_at: now,
     last_error: null,
     updated_at: now,
-  }).eq("id", jobId).eq("status", "running");
+  }).eq("id", job.id).eq("status", "running").eq("locked_by", job.lockedBy)
+    .select("id")
+    .maybeSingle();
+  return !result.error && Boolean(result.data);
 }
 
-export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<void> {
+export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin || !job.lockedBy) return false;
   const now = new Date();
   const schedule = retryScheduleForJob(job, now);
-  await admin.from("background_jobs").update({
+  const result = await admin.from("background_jobs").update({
     status: schedule.status,
     locked_at: null,
+    locked_by: null,
     completed_at: schedule.status === "failed" ? now.toISOString() : null,
     available_at: schedule.availableAt ?? now.toISOString(),
     last_error: sanitizeDiagnosticMessage(error, "Background job failed."),
     updated_at: now.toISOString(),
-  }).eq("id", job.id).eq("status", "running");
+  }).eq("id", job.id).eq("status", "running").eq("locked_by", job.lockedBy)
+    .select("id")
+    .maybeSingle();
+  return !result.error && Boolean(result.data);
 }
 
 export async function runBackgroundJobs(input: {
@@ -173,8 +190,9 @@ export async function runBackgroundJobs(input: {
     }
     try {
       await handler(job);
-      await completeBackgroundJob(job.id);
-      completed += 1;
+      const committed = await completeBackgroundJob(job);
+      if (committed) completed += 1;
+      else failed += 1;
     } catch (error) {
       await failBackgroundJob(job, error);
       failed += 1;
