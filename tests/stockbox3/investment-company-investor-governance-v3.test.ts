@@ -18,7 +18,9 @@ const BOARD = [
   ["Sara Öhrvall", "sara-oehrvall"],
 ] as const;
 
-function boardHtml(board = BOARD): string {
+function boardHtml(
+  board: ReadonlyArray<readonly [string, string]> = BOARD,
+): string {
   return `<main><h1>Board of Directors</h1>${board.map(([name, slug]) => (
     `<a href="/about-investor/board-management/board-of-directors/${slug}">${name}</a>`
   )).join("")}</main>`;
