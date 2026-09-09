@@ -74,6 +74,18 @@ function dateValue(value: unknown): string | null {
   return Number.isFinite(parsed) ? date : null;
 }
 
+function normalizedSymbol(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function symbolsEquivalent(requested: string, returned: string): boolean {
+  const expected = normalizedSymbol(requested);
+  const actual = normalizedSymbol(returned);
+  if (expected === actual) return true;
+  if (!/^[A-Z0-9]{1,10}[.-][A-Z0-9]{1,5}$/.test(expected) || !/^[A-Z0-9]{1,10}[.-][A-Z0-9]{1,5}$/.test(actual)) return false;
+  return expected.replace(".", "-") === actual.replace(".", "-");
+}
+
 function failure<T>(reason: ProviderFailureReason, message: string): AdapterResult<T> {
   return {
     ok: false,
@@ -105,6 +117,13 @@ async function request(path: string, symbol: string, apiKey: string): Promise<En
       return failure(
         code === 429 ? "rate_limited" : code === 404 ? "not_found" : "upstream_error",
         textValue(payload.message) ?? `Twelve Data ${path} rejected the request.`,
+      );
+    }
+    const returnedSymbol = textValue(object(payload.meta)?.symbol);
+    if (returnedSymbol && !symbolsEquivalent(symbol, returnedSymbol)) {
+      return failure(
+        "unsupported_symbol",
+        `Twelve Data ${path} returned estimates for a different security symbol.`,
       );
     }
     return {
