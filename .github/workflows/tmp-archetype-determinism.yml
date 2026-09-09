@@ -24,21 +24,29 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+
           path = Path('tests/analysis/archetypes.test.ts')
           text = path.read_text()
-          anchor = '''    const result = asArchetype("standard", {
-              annualPeriods,
-              company: { reportingCurrency: "USD", tradingCurrency: "USD" },
-          '''
-          replacement = '''    const result = asArchetype("standard", {
-              annualPeriods,
-              analysisDate: "2026-08-25T00:00:00.000Z",
-              company: { reportingCurrency: "USD", tradingCurrency: "USD" },
-          '''
-          count = text.count(anchor)
-          if count != 2:
-              raise SystemExit(f'expected exactly 2 target blocks, found {count}')
-          path.write_text(text.replace(anchor, replacement))
+          names = [
+              'diagnoses valuation multiple gaps by failed input condition',
+              'diagnoses FCF yield by missing simple free-cash-flow inputs',
+          ]
+          insertion = '      analysisDate: "2026-08-25T00:00:00.000Z",\n'
+
+          for name in names:
+              start = text.index(f'  it("{name}"')
+              next_test = text.find('\n  it("', start + 1)
+              end = next_test if next_test != -1 else len(text)
+              segment = text[start:end]
+              marker = '      annualPeriods,\n'
+              if segment.count(marker) != 1:
+                  raise SystemExit(f'expected one annualPeriods marker in {name!r}, found {segment.count(marker)}')
+              if insertion in segment:
+                  raise SystemExit(f'analysisDate already present in {name!r}')
+              segment = segment.replace(marker, marker + insertion, 1)
+              text = text[:start] + segment + text[end:]
+
+          path.write_text(text)
           PY
           git diff --check
           git diff -- tests/analysis/archetypes.test.ts
