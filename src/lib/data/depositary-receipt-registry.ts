@@ -121,8 +121,10 @@ function matchingRegistryEntry(
   entries: DepositaryReceiptRegistryEntry[],
 ): DepositaryReceiptRegistryEntry | null {
   if (company.securityType !== "ADR" || !company.issuerId) return null;
-  const securityId = company.securityId?.trim() || null;
-  const issuerId = company.issuerId.trim();
+  if (company.securityId && company.securityId !== company.securityId.trim()) return null;
+  if (company.issuerId !== company.issuerId.trim()) return null;
+  const securityId = company.securityId || null;
+  const issuerId = company.issuerId;
   const ticker = normalized(company.canonicalTicker ?? company.ticker);
   const candidates = entries.filter((entry) =>
     entry.issuerId === issuerId
