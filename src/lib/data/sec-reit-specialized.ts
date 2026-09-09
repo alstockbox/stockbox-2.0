@@ -34,6 +34,7 @@ type ParserRule = {
   metric: SecReitRatioMetricKey;
   pattern: RegExp;
   scale: number;
+  priority: number;
 };
 
 const GUIDANCE_LANGUAGE = /\b(guidance|outlook|forecast|expected|expects|approximately|approx\.?|target|range)\b/i;
@@ -61,28 +62,45 @@ const ENGLISH_DATE = /\b(January|February|March|April|May|June|July|August|Septe
 const RULES: ParserRule[] = [
   {
     metric: "occupancy",
-    pattern: /(\d{1,3}(?:\.\d+)?)\s*%\s+(?:property[- ]level\s+)?occupancy\b/i,
+    pattern: /\boccupancy\s*-\s*by\s+number\s+of\s+properties(?:\(\d+\))?\s*(\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
+    priority: 100,
   },
   {
     metric: "occupancy",
-    pattern: /\b(?:period[- ]end\s+|average\s+|property[- ]level\s+)?occupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
+    pattern: /(\d{1,3}(?:\.\d+)?)\s*%\s+(?:property[- ]level\s+)?occupancy\b/i,
     scale: 0.01,
+    priority: 90,
+  },
+  {
+    metric: "occupancy",
+    pattern: /\b(?:period[- ]end|average|property[- ]level)\s+occupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
+    scale: 0.01,
+    priority: 80,
+  },
+  {
+    metric: "occupancy",
+    pattern: /\boccupancy\b(?:(?!\d{1,3}(?:\.\d+)?\s*%).){0,96}?(\d{1,3}(?:\.\d+)?)\s*%/i,
+    scale: 0.01,
+    priority: 10,
   },
   {
     metric: "sameStoreNoiGrowth",
     pattern: /\b(?:cash\s+)?same[- ]store(?:\s+cash)?\s+noi(?:\s+growth)?\*?\b(?:(?![+\-]?\d{1,3}(?:\.\d+)?\s*%).){0,96}?([+\-]?\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
+    priority: 50,
   },
   {
     metric: "netDebtToEbitdare",
     pattern: /\bnet\s+debt(?:\s+and\s+preferred\s+stock)?\s*(?:to|\/)\s*(?:annualized\s+(?:pro\s+forma\s+)?)?(?:adjusted\s+)?ebitdare\b(?:(?!\d{1,2}(?:\.\d+)?\s*x).){0,96}?(\d{1,2}(?:\.\d+)?)\s*x\b/i,
     scale: 1,
+    priority: 50,
   },
   {
     metric: "fixedChargeCoverage",
     pattern: /\bfixed[- ]charge\s+coverage(?:\s+ratio)?\b(?:(?!\d{1,2}(?:\.\d+)?\s*x).){0,96}?(\d{1,2}(?:\.\d+)?)\s*x\b/i,
     scale: 1,
+    priority: 50,
   },
 ];
 
@@ -294,6 +312,7 @@ export function parseSecReitSpecializedDocument(
 ): SecReitObservation[] {
   const lines = documentLines(html);
   const observations = new Map<SecReitMetricKey, SecReitObservation>();
+  const ratioPriorities = new Map<SecReitRatioMetricKey, number>();
   const ratioDataAsOf = latestExplicitFinancialDate(lines, context.periodEnd);
 
   for (const observation of parsePeriodSafePerShareObservations(lines, context)) {
@@ -303,7 +322,8 @@ export function parseSecReitSpecializedDocument(
   for (const line of lines) {
     if (GUIDANCE_LANGUAGE.test(line)) continue;
     for (const rule of RULES) {
-      if (observations.has(rule.metric)) continue;
+      const currentPriority = ratioPriorities.get(rule.metric);
+      if (currentPriority !== undefined && currentPriority >= rule.priority) continue;
       if (rule.metric === "fixedChargeCoverage" && fixedChargeLooksLikeThreshold(line)) continue;
       const match = line.match(rule.pattern);
       if (!match) continue;
@@ -318,6 +338,7 @@ export function parseSecReitSpecializedDocument(
         label: match[0].replace(/\s+/g, " ").trim(),
         sourceUrl: context.sourceUrl,
       });
+      ratioPriorities.set(rule.metric, rule.priority);
     }
   }
 
