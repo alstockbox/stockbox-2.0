@@ -10,6 +10,7 @@ export type DepositaryReceiptRegistryQaReport = {
   pass: boolean;
   totalEntries: number;
   duplicateSecurityIds: string[];
+  nonCanonicalSecurityIds: string[];
   ambiguousIssuerReceiptKeys: string[];
   nonCanonicalIssuerIdentitySecurityIds: string[];
   invalidRatioSecurityIds: string[];
@@ -53,6 +54,10 @@ export function qaDepositaryReceiptRegistry(
   entries: DepositaryReceiptRegistryEntry[],
 ): DepositaryReceiptRegistryQaReport {
   const duplicateSecurityIds = duplicateValues(entries.map((entry) => entry.securityId));
+  const nonCanonicalSecurityIds = entries
+    .filter((entry) => entry.securityId !== entry.securityId.trim())
+    .map((entry) => entry.securityId)
+    .sort();
   const ambiguousIssuerReceiptKeys = duplicateValues(
     entries
       .map(issuerReceiptKey)
@@ -89,6 +94,7 @@ export function qaDepositaryReceiptRegistry(
 
   return {
     pass: duplicateSecurityIds.length === 0
+      && nonCanonicalSecurityIds.length === 0
       && ambiguousIssuerReceiptKeys.length === 0
       && nonCanonicalIssuerIdentitySecurityIds.length === 0
       && invalidRatioSecurityIds.length === 0
@@ -98,6 +104,7 @@ export function qaDepositaryReceiptRegistry(
       && unverifiedMappingSecurityIds.length === 0,
     totalEntries: entries.length,
     duplicateSecurityIds,
+    nonCanonicalSecurityIds,
     ambiguousIssuerReceiptKeys,
     nonCanonicalIssuerIdentitySecurityIds,
     invalidRatioSecurityIds,
