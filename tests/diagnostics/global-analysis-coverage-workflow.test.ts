@@ -7,6 +7,7 @@ const workflowPath = ".github/workflows/analysis-coverage-live-gate.yml";
 const corpusPath = "scripts/diagnostics/data/global_etf_investment_tickers_20000.txt";
 const materializerPath = "scripts/diagnostics/materialize-global-audit-corpus.mjs";
 const expectedSha256 = "b4a63edf1564459dd849724f736145dd0ceb896cf178ec69994a9bebafc71e91";
+const liveAuditTestName = "captures classified per-ticker diagnostics for the requested release-hardening list";
 
 function parseTickers(raw: string): string[] {
   return raw
@@ -46,5 +47,11 @@ describe("global 20k analysis coverage workflow", () => {
 
     const gateInvocations = workflow.match(/evaluate-global-audit-gate\.mjs/g) ?? [];
     expect(gateInvocations).toHaveLength(1);
+  });
+
+  it("isolates the live shard audit from env-mutating unit tests", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    expect(workflow).toContain(`-t "${liveAuditTestName}"`);
   });
 });
