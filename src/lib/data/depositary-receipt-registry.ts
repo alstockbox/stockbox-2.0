@@ -10,6 +10,7 @@ export type DepositaryReceiptRegistryQaReport = {
   pass: boolean;
   totalEntries: number;
   duplicateSecurityIds: string[];
+  ambiguousIssuerReceiptKeys: string[];
   invalidRatioSecurityIds: string[];
   invalidRatioProvenanceSecurityIds: string[];
   missingSourceSecurityIds: string[];
@@ -31,6 +32,12 @@ function duplicateValues(values: string[]): string[] {
     .sort();
 }
 
+function issuerReceiptKey(entry: DepositaryReceiptRegistryEntry): string | null {
+  const issuerId = normalized(entry.issuerId);
+  const receiptTicker = normalized(entry.receiptTicker);
+  return issuerId && receiptTicker ? `${issuerId}|${receiptTicker}` : null;
+}
+
 function validPositiveRatio(entry: DepositaryReceiptRegistryEntry): boolean {
   return typeof entry.underlyingSharesPerReceipt === "number"
     && Number.isFinite(entry.underlyingSharesPerReceipt)
@@ -45,6 +52,11 @@ export function qaDepositaryReceiptRegistry(
   entries: DepositaryReceiptRegistryEntry[],
 ): DepositaryReceiptRegistryQaReport {
   const duplicateSecurityIds = duplicateValues(entries.map((entry) => entry.securityId));
+  const ambiguousIssuerReceiptKeys = duplicateValues(
+    entries
+      .map(issuerReceiptKey)
+      .filter((key): key is string => key !== null),
+  );
   const invalidRatioSecurityIds = entries
     .filter((entry) => entry.ratioVerified && !validPositiveRatio(entry))
     .map((entry) => entry.securityId)
@@ -72,6 +84,7 @@ export function qaDepositaryReceiptRegistry(
 
   return {
     pass: duplicateSecurityIds.length === 0
+      && ambiguousIssuerReceiptKeys.length === 0
       && invalidRatioSecurityIds.length === 0
       && invalidRatioProvenanceSecurityIds.length === 0
       && missingSourceSecurityIds.length === 0
@@ -79,6 +92,7 @@ export function qaDepositaryReceiptRegistry(
       && unverifiedMappingSecurityIds.length === 0,
     totalEntries: entries.length,
     duplicateSecurityIds,
+    ambiguousIssuerReceiptKeys,
     invalidRatioSecurityIds,
     invalidRatioProvenanceSecurityIds,
     missingSourceSecurityIds,
