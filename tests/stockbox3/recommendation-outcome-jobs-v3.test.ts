@@ -54,6 +54,28 @@ describe("Recommendation outcome jobs V3", () => {
     }
   });
 
+  it("rejects blank durable audit identity from legacy or malformed rows", () => {
+    for (const field of ["ticker", "analysis_archetype", "model_version", "recommendation_policy_version"] as const) {
+      expect(parseRecommendationOutcomeAuditRowV3(auditRow({ [field]: "   " }))).toBeNull();
+    }
+  });
+
+  it("canonicalizes outcome audit identity and keeps a blank optional fingerprint missing", () => {
+    expect(parseRecommendationOutcomeAuditRowV3(auditRow({
+      ticker: " msft ",
+      analysis_fingerprint: "   ",
+      analysis_archetype: " operating_company ",
+      model_version: " model-v3 ",
+      recommendation_policy_version: " recommendation-policy-v3 ",
+    }))).toMatchObject({
+      ticker: "MSFT",
+      analysis_fingerprint: null,
+      analysis_archetype: "operating_company",
+      model_version: "model-v3",
+      recommendation_policy_version: "recommendation-policy-v3",
+    });
+  });
+
   it("preserves valid audit quality evidence exactly", () => {
     expect(parseRecommendationOutcomeAuditRowV3(auditRow())).toMatchObject({
       conviction: 68,
