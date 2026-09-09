@@ -77,6 +77,9 @@ describe("Recommendation calibration evaluation V3", () => {
     for (const benchmarkPolicyVersion of ["stockbox-old-benchmark-policy", null]) {
       const result = recommendationOutcomeFromPersistenceV3(persisted({
         benchmark_policy_version: benchmarkPolicyVersion,
+        benchmark_return: "999",
+        excess_return: "999",
+        directional_hit: false,
       }), lineage);
 
       expect(result).not.toBeNull();
@@ -96,11 +99,26 @@ describe("Recommendation calibration evaluation V3", () => {
     expect(recommendationOutcomeFromPersistenceV3(persisted({ observed_price: 0 }), lineage)).toBeNull();
   });
 
-  it("fails closed for missing, fractional or negative lag evidence instead of inventing zero days", () => {
+  it("rejects stored absolute return values that do not reproduce from persisted prices", () => {
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ security_return: "0.09" }), lineage)).toBeNull();
+  });
+
+  it("rejects current-policy benchmark arithmetic that cannot be reproduced", () => {
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ benchmark_return: "0.04" }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ excess_return: "0.08" }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ directional_hit: false }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({ benchmark_ticker: null }), lineage)).toBeNull();
+  });
+
+  it("fails closed for missing, fractional, negative or inconsistent lag evidence instead of inventing zero days", () => {
     expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: null }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: 1.5 }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: -1 }), lineage)).toBeNull();
     expect(recommendationOutcomeFromPersistenceV3(persisted({ lag_days: "not-a-number" }), lineage)).toBeNull();
+    expect(recommendationOutcomeFromPersistenceV3(persisted({
+      evaluated_at: "2026-10-03T12:00:00.000Z",
+      lag_days: 0,
+    }), lineage)).toBeNull();
   });
 
   it("fails closed for malformed audit quality evidence instead of substituting zero", () => {

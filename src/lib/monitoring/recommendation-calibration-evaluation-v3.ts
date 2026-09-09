@@ -23,6 +23,8 @@ const RATINGS = new Set<RecommendationV3Rating>([
   "SELL",
   "UNAVAILABLE",
 ]);
+const DAY_MS = 86_400_000;
+const RETURN_RELATIVE_TOLERANCE = 1e-9;
 
 const OUTCOME_PROJECTION = [
   "recommendation_audit_id",
@@ -100,6 +102,21 @@ function normalizedRequiredText(value: unknown): string | null {
   return normalizedDimension(value);
 }
 
+function returnFromPrices(entryPrice: number, observedPrice: number): number {
+  return observedPrice / entryPrice - 1;
+}
+
+function returnMatches(stored: number, computed: number): boolean {
+  const scale = Math.max(1, Math.abs(stored), Math.abs(computed));
+  return Math.abs(stored - computed) <= RETURN_RELATIVE_TOLERANCE * scale;
+}
+
+function directionForRating(rating: RecommendationV3Rating): -1 | 0 | 1 {
+  if (rating === "STRONG_BUY" || rating === "BUY") return 1;
+  if (rating === "REDUCE" || rating === "SELL") return -1;
+  return 0;
+}
+
 function auditLineageRow(value: unknown): AuditLineageRowV3 | null {
   const row = persistenceRecord(value);
   if (!row) return null;
@@ -151,6 +168,17 @@ function validAuditLineageForOutcomeV3(lineage: AuditLineageRowV3): AuditLineage
   };
 }
 
+function benchmarkEvidencePresent(row: Record<string, unknown>): boolean {
+  return [
+    row.benchmark_ticker,
+    row.benchmark_entry_price,
+    row.benchmark_observed_price,
+    row.benchmark_return,
+    row.excess_return,
+    row.directional_hit,
+  ].some((value) => value !== null && value !== undefined);
+}
+
 export function recommendationOutcomeFromPersistenceV3(
   value: unknown,
   lineage: AuditLineageRowV3,
@@ -163,12 +191,18 @@ export function recommendationOutcomeFromPersistenceV3(
   if (typeof row.horizon !== "string" || !OUTCOME_HORIZONS.has(row.horizon as RecommendationOutcomeHorizonV3)) return null;
   if (!validDate(row.expected_at) || !validDate(row.evaluated_at)) return null;
 
+  const expectedAtMs = Date.parse(row.expected_at);
+  const evaluatedAtMs = Date.parse(row.evaluated_at);
+  if (evaluatedAtMs < expectedAtMs) return null;
   const lagDays = finiteNumber(row.lag_days);
-  if (lagDays === null || !Number.isInteger(lagDays) || lagDays < 0) return null;
+  const canonicalLagDays = Math.max(0, Math.round((evaluatedAtMs - expectedAtMs) / DAY_MS));
+  if (lagDays === null || !Number.isInteger(lagDays) || lagDays < 0 || lagDays !== canonicalLagDays) return null;
+
   const entryPrice = finiteNumber(row.entry_price);
   const observedPrice = finiteNumber(row.observed_price);
   const securityReturn = finiteNumber(row.security_return);
   if (entryPrice === null || entryPrice <= 0 || observedPrice === null || observedPrice <= 0 || securityReturn === null) return null;
+  if (!returnMatches(securityReturn, returnFromPrices(entryPrice, observedPrice))) return null;
 
   // Benchmark-relative evidence is accepted only when the row proves which
   // current assignment policy produced it. Legacy/stale benchmark evidence is
@@ -176,13 +210,36 @@ export function recommendationOutcomeFromPersistenceV3(
   // relative fields are downgraded to missing so calibration cannot mix policy
   // generations or infer a benchmark that StockBox cannot reproduce.
   const benchmarkLineageCurrent = row.benchmark_policy_version === RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3;
-  const benchmarkEntryPrice = benchmarkLineageCurrent ? finiteNumber(row.benchmark_entry_price) : null;
-  const benchmarkObservedPrice = benchmarkLineageCurrent ? finiteNumber(row.benchmark_observed_price) : null;
-  const benchmarkReturn = benchmarkLineageCurrent ? finiteNumber(row.benchmark_return) : null;
-  const excessReturn = benchmarkLineageCurrent ? finiteNumber(row.excess_return) : null;
-  const directionalHit = benchmarkLineageCurrent && typeof row.directional_hit === "boolean"
-    ? row.directional_hit
-    : null;
+  let benchmarkTicker: string | null = null;
+  let benchmarkEntryPrice: number | null = null;
+  let benchmarkObservedPrice: number | null = null;
+  let benchmarkReturn: number | null = null;
+  let excessReturn: number | null = null;
+  let directionalHit: boolean | null = null;
+
+  if (benchmarkLineageCurrent && benchmarkEvidencePresent(row)) {
+    benchmarkTicker = normalizedRequiredText(row.benchmark_ticker)?.toUpperCase() ?? null;
+    benchmarkEntryPrice = finiteNumber(row.benchmark_entry_price);
+    benchmarkObservedPrice = finiteNumber(row.benchmark_observed_price);
+    benchmarkReturn = finiteNumber(row.benchmark_return);
+    excessReturn = finiteNumber(row.excess_return);
+    if (benchmarkTicker === null
+        || benchmarkEntryPrice === null || benchmarkEntryPrice <= 0
+        || benchmarkObservedPrice === null || benchmarkObservedPrice <= 0
+        || benchmarkReturn === null || excessReturn === null) return null;
+    if (!returnMatches(benchmarkReturn, returnFromPrices(benchmarkEntryPrice, benchmarkObservedPrice))) return null;
+    if (!returnMatches(excessReturn, securityReturn - benchmarkReturn)) return null;
+
+    const direction = directionForRating(validatedLineage.rating);
+    if (direction === 0) {
+      if (row.directional_hit !== null && row.directional_hit !== undefined) return null;
+    } else {
+      if (typeof row.directional_hit !== "boolean") return null;
+      const expectedDirectionalHit = direction * excessReturn > 0;
+      if (row.directional_hit !== expectedDirectionalHit) return null;
+      directionalHit = row.directional_hit;
+    }
+  }
 
   return {
     policyVersion: RECOMMENDATION_OUTCOME_POLICY_VERSION,
@@ -200,9 +257,7 @@ export function recommendationOutcomeFromPersistenceV3(
     entryPrice,
     observedPrice,
     securityReturn,
-    benchmarkTicker: benchmarkLineageCurrent && typeof row.benchmark_ticker === "string" && row.benchmark_ticker.trim()
-      ? row.benchmark_ticker.trim().toUpperCase()
-      : null,
+    benchmarkTicker,
     benchmarkEntryPrice,
     benchmarkObservedPrice,
     benchmarkReturn,
