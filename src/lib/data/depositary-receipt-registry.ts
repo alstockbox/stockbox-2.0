@@ -92,14 +92,14 @@ function matchingRegistryEntry(
   company: CompanySearchResult,
   entries: DepositaryReceiptRegistryEntry[],
 ): DepositaryReceiptRegistryEntry | null {
-  if (company.securityType !== "ADR" || !company.securityId || !company.issuerId) return null;
-  const securityId = company.securityId.trim();
+  if (company.securityType !== "ADR" || !company.issuerId) return null;
+  const securityId = company.securityId?.trim() || null;
   const issuerId = company.issuerId.trim();
   const ticker = normalized(company.canonicalTicker ?? company.ticker);
   const candidates = entries.filter((entry) =>
-    entry.securityId === securityId
-    && entry.issuerId === issuerId
+    entry.issuerId === issuerId
     && normalized(entry.receiptTicker) === ticker
+    && (!securityId || entry.securityId === securityId)
   );
   if (candidates.length !== 1) return null;
   const entry = candidates[0];
@@ -121,6 +121,7 @@ export function attachVerifiedDepositaryReceiptRepresentation(
   if (!entry) return company as DepositaryReceiptCompany;
   return {
     ...company,
+    securityId: entry.securityId,
     depositaryReceipt: {
       kind: entry.kind,
       issuerId: entry.issuerId,
