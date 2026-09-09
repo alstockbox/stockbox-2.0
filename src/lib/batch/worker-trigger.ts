@@ -2,7 +2,20 @@ import { getServerEnv } from "@/lib/env/server";
 
 export const MAX_DURABLE_WORKER_DELAY_MS = 30_000;
 export const DURABLE_WORKER_TRIGGER_TIMEOUT_MS = 240_000;
-export const BATCH_WORKER_RECOVERY_RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
+export const BATCH_WORKER_RECOVERY_RETRY_DELAYS_MS = [
+  5_000,
+  15_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+] as const;
 export const BATCH_WORKER_RECOVERY_ATTEMPT_HEADER = "x-stockbox-batch-recovery-attempt";
 
 export function boundedDurableWorkerDelayMs(availableAt: string, nowMs = Date.now()): number {
