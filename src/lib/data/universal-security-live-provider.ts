@@ -1,12 +1,9 @@
-import { analyzeInvestmentCompany, classifyUniversalSecurity } from "@/lib/analysis/universal-security";
-import type { Recommendation } from "@/lib/analysis/types";
 import {
   analyzeCompany as analyzeUniversalCompany,
   searchCompanies,
   supportsUniversalSecurityAnalysis,
   type UniversalSecurityReport,
 } from "./universal-security-provider";
-import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { persistSpecialistRecommendationLiveAuditV3 } from "./recommendation-specialist-live-audit-v3";
 
 export { searchCompanies, supportsUniversalSecurityAnalysis };
@@ -14,104 +11,16 @@ export { searchCompanies, supportsUniversalSecurityAnalysis };
 type AnalyzeArgs = Parameters<typeof analyzeUniversalCompany>[0];
 type AnalyzeResult = Awaited<ReturnType<typeof analyzeUniversalCompany>>;
 
-function recommendationForScore(score: number | null, coverage: number): Recommendation {
-  if (score === null || coverage < 0.5) return "No Rating";
-  if (score >= 85) return "Strong Buy";
-  if (score >= 70) return "Buy";
-  if (score >= 45) return "Hold";
-  if (score >= 30) return "Sell";
-  return "Strong Sell";
-}
-
-function appendUnique<T>(values: T[] | undefined, value: T, key: (item: T) => string): T[] {
-  const existing = values ?? [];
-  const valueKey = key(value);
-  return existing.some((item) => key(item) === valueKey) ? existing : [...existing, value];
-}
-
-async function enrichWithOfficialInvestmentCompanyNav(
-  report: UniversalSecurityReport,
-  args: AnalyzeArgs,
-): Promise<UniversalSecurityReport> {
-  if (report.analysisArchetype !== "holding_company") return report;
-
-  const navResult = await fetchOfficialInvestmentCompanyNav(args.company);
-  report.providerDiagnostics = appendUnique(
-    report.providerDiagnostics,
-    navResult.ok ? navResult.data.diagnostic : navResult.diagnostic,
-    (item) => `${item.provider}|${item.capability}|${item.status}|${item.reason ?? ""}`,
-  );
-
-  if (!navResult.ok) {
-    report.score.missingData = [...new Set([
-      ...report.score.missingData,
-      `Official investment-company NAV unavailable: ${navResult.message} StockBox keeps NAV-dependent factors as N/A and does not substitute consolidated book equity.`,
-    ])];
-    return report;
-  }
-
-  const latest = report.engine?.metrics.latestPeriod ?? null;
-  const analysis = analyzeInvestmentCompany({
-    sharePrice: report.market?.price ?? null,
-    dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
-    reportedNav: navResult.data.reportedNav,
-    reportedNavPerShare: navResult.data.reportedNavPerShare,
-    cash: latest?.cashAndEquivalents ?? null,
-    debt: latest?.totalDebt ?? null,
-  });
-
-  report.securityClassification = classifyUniversalSecurity({
-    company: args.company,
-    analysisArchetype: "holding_company",
-  });
-  report.securityAnalysis = {
-    ...(report.securityAnalysis ?? {}),
-    investmentCompany: analysis,
-  };
-  report.sources = appendUnique(
-    report.sources,
-    navResult.data.source,
-    (item) => `${item.provider ?? item.name}|${item.url}|${item.dataAsOf ?? ""}`,
-  );
-
-  const securityScore = analysis.score.score;
-  if (typeof securityScore === "number" && Number.isFinite(securityScore)) {
-    report.score.score = securityScore;
-    report.score.personalizedScore = securityScore;
-    report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
-    report.dataCoverage = Math.max(report.dataCoverage ?? 0, analysis.score.coverage);
-    report.recommendation = recommendationForScore(securityScore, analysis.score.coverage);
-  }
-
-  report.score.missingData = [...new Set([
-    ...report.score.missingData.filter((item) => !item.startsWith("Investment-company model requires verified NAV/SOTP inputs")),
-    ...analysis.score.missing,
-  ])];
-
-  report.summary = `${report.summary} Verified official NAV${navResult.data.reportedNavPerShare !== null ? ` of ${navResult.data.reportedNavPerShare.toFixed(2)} per share` : ""}${navResult.data.navAsOf ? ` as of ${navResult.data.navAsOf}` : ""} is incorporated into the investment-company valuation model.`;
-
-  return report;
-}
-
 export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> {
   const result = await analyzeUniversalCompany(args);
   if (!result.ok) return result;
 
-  let report = result.data as UniversalSecurityReport;
-  if (report.analysisArchetype === "holding_company") {
-    try {
-      report = await enrichWithOfficialInvestmentCompanyNav(report, args);
-    } catch {
-      report.score.missingData = [...new Set([
-        ...report.score.missingData,
-        "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
-      ])];
-    }
-  }
+  const report = result.data as UniversalSecurityReport;
 
-  // The audit side channel is deliberately fail-open and response-independent.
-  // Standard operating-company reports are a no-op here because the canonical
-  // provider already handles their V3 shadow/audit path.
+  // The canonical universal provider owns all specialist enrichment. This
+  // wrapper only adds the fail-open learning/audit side channel so the audit
+  // sees the exact final report returned to callers and can never overwrite
+  // richer investment-company NAV/holdings/governance analysis.
   await persistSpecialistRecommendationLiveAuditV3(report);
 
   return {

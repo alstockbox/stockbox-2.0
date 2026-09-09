@@ -108,14 +108,17 @@ describe("Recommendation specialist live audit V3", () => {
     expect(thrown).toEqual(expect.objectContaining({ status: "evaluated", persisted: false, error: "audit down" }));
   });
 
-  it("keeps the universal live provider wired after final specialist enrichment", () => {
+  it("audits the canonical final specialist report without re-enriching it in the live wrapper", () => {
     const source = readFileSync(
       join(process.cwd(), "src/lib/data/universal-security-live-provider.ts"),
       "utf8",
     );
-    expect(source).toContain("report = await enrichWithOfficialInvestmentCompanyNav(report, args)");
+    expect(source).toContain("const result = await analyzeUniversalCompany(args)");
     expect(source).toContain("await persistSpecialistRecommendationLiveAuditV3(report)");
     expect(source.indexOf("await persistSpecialistRecommendationLiveAuditV3(report)"))
-      .toBeGreaterThan(source.indexOf("report = await enrichWithOfficialInvestmentCompanyNav(report, args)"));
+      .toBeGreaterThan(source.indexOf("const result = await analyzeUniversalCompany(args)"));
+    expect(source).not.toContain("enrichWithOfficialInvestmentCompanyNav");
+    expect(source).not.toContain("fetchOfficialInvestmentCompanyNav");
+    expect(source).not.toContain("analyzeInvestmentCompany");
   });
 });
