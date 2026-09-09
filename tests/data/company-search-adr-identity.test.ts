@@ -57,6 +57,7 @@ describe("global ADR issuer identity", () => {
       ticker: "BABA",
       canonicalTicker: "BABA",
       securityType: "ADR",
+      primarySecurity: false,
       cik: "0001577552",
       issuerId: "sec:0001577552",
       entityId: "sec:0001577552",
@@ -76,7 +77,7 @@ describe("global ADR issuer identity", () => {
       { ticker: "BABA", name: "CONFLICTING REGISTRANT", cik: "0001999999", exchange: "NYSE", country: "US" },
     ]);
 
-    const adr = exactAdr(await searchCompanyCatalog("BABA ADR", [adrProvider()]));
+    const adr = exactAdr(await searchCompanyCatalog("BABA", [adrProvider()]));
 
     expect(adr).toEqual(expect.objectContaining({ securityType: "ADR" }));
     expect(adr?.cik).toBeUndefined();
@@ -85,7 +86,7 @@ describe("global ADR issuer identity", () => {
   });
 
   it("does not establish SEC issuer identity when the ADR provider supplies a conflicting CIK", async () => {
-    const adr = exactAdr(await searchCompanyCatalog("BABA ADR", [adrProvider({ cik: "0001999999" })]));
+    const adr = exactAdr(await searchCompanyCatalog("BABA", [adrProvider({ cik: "0001999999" })]));
 
     expect(adr).toEqual(expect.objectContaining({ cik: "0001999999", securityType: "ADR" }));
     expect(adr?.issuerId).toBeUndefined();
