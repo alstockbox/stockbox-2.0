@@ -13,6 +13,9 @@ const LATOUR_BOARD_URL = "https://www.latour.se/en/corporate-governance/the-boar
 const LATOUR_INDEPENDENCE_STATEMENT_URL = "https://www.latour.se/~/media/Files/L/latour/documents/mtn-program/prospectus/Latour%20-%20Base%20Prospectus%2013%20February%202026%20FINAL%20locked.pdf";
 const LATOUR_INDEPENDENCE_AS_OF = "2026-02-13";
 const SVOLDER_BOARD_URL = "https://svolder.se/bolagsstyrning/styrelse/";
+const CREADES_BOARD_URL = "https://www.creades.se/bolagsstyrning/styrelse-ledande-befattningshavare-och-revisor/";
+const CREADES_INDEPENDENCE_STATEMENT_URL = "https://www.creades.se/media/0mfj3ehw/valberedningens-f%C3%B6rslag-%C3%A5rsst%C3%A4mma-2026.pdf";
+const CREADES_INDEPENDENCE_AS_OF = "2026-03-17";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -58,6 +61,16 @@ const SVOLDER_CURRENT_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] =
   { name: "Clas-Göran Lyrhem", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Magnus Malm", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Pernilla Ramslöv", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+];
+
+const CREADES_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
+  { name: "Sven Hagströmer", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Cecilia Hermansson", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Peter Nilsson", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Maria Rankka", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Anna Settman", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Lars Stugemo", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Hans Toll", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
 ];
 
 export type OfficialInvestmentCompanyGovernanceData = {
@@ -240,6 +253,39 @@ export function parseSvolderOfficialBoardRoster(html: string): string[] | null {
   return names.length === SVOLDER_CURRENT_DIRECTORS.length ? names : null;
 }
 
+export function parseCreadesOfficialBoardRoster(html: string): string[] | null {
+  const text = htmlToText(html);
+  if (!/årsstämman i creades den 15 april 2026[\s\S]*styrelsen ska bestå av sju ledamöter/i.test(text)) return null;
+  if (!/styrelsens sammanställning från och med den 15 april 2026/i.test(text)) return null;
+
+  const boardHeading = /<h2\b[^>]*>\s*STYRELSE\s*<\/h2>/i.exec(html);
+  if (!boardHeading || boardHeading.index === undefined) return null;
+  const boardStart = boardHeading.index + boardHeading[0].length;
+  const managementHeading = /<h2\b[^>]*>\s*LEDANDE\s+BEFATTNINGSHAVARE\s*<\/h2>/i.exec(html.slice(boardStart));
+  const boardEnd = managementHeading && managementHeading.index !== undefined
+    ? boardStart + managementHeading.index
+    : html.length;
+  const boardSection = html.slice(boardStart, boardEnd);
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const headingPattern = /<h3\b[^>]*>([\s\S]*?)<\/h3>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(boardSection)) !== null) {
+    const heading = htmlToText(match[1]);
+    const director = CREADES_2026_DIRECTORS.find(
+      (candidate) => normalizeDirectorName(candidate.name) === normalizeDirectorName(heading),
+    );
+    if (!director) continue;
+    const normalized = normalizeDirectorName(director.name);
+    if (seen.has(normalized)) return null;
+    seen.add(normalized);
+    names.push(director.name);
+  }
+
+  return names.length === CREADES_2026_DIRECTORS.length ? names : null;
+}
+
 function rosterMatchesVerifiedEvidence(
   currentRoster: string[],
   verifiedDirectors: InvestmentCompanyDirectorGovernanceEvidence[],
@@ -301,6 +347,18 @@ function issuerConfig(company: CompanySearchResult): GovernanceIssuerConfig | nu
       evidenceUrl: SVOLDER_BOARD_URL,
       directors: SVOLDER_CURRENT_DIRECTORS,
       parseRoster: parseSvolderOfficialBoardRoster,
+    };
+  }
+
+  const isCreades = /\bcred(?:-[ab])?\.st\b/.test(identity) || identity.includes("creades");
+  if (isCreades) {
+    return {
+      issuerName: "Creades",
+      boardUrl: CREADES_BOARD_URL,
+      evidenceUrl: CREADES_INDEPENDENCE_STATEMENT_URL,
+      evidenceAsOf: CREADES_INDEPENDENCE_AS_OF,
+      directors: CREADES_2026_DIRECTORS,
+      parseRoster: parseCreadesOfficialBoardRoster,
     };
   }
 
