@@ -1,13 +1,44 @@
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
 import hmac
 import io
 import math
+from pathlib import PurePosixPath
 import wave
 from urllib.parse import urlparse
 
-ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis"}
+ALLOWED_VOICE_MODES = {"hook", "educational", "serious_analysis", "excited"}
+ALLOWED_REFERENCE_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac"}
+CHATTERBOX_T3_MODEL = "v3"
 MAX_TEXT_CHARS = 1500
+
+VOICE_STYLE_PRESETS = {
+    "serious_analysis": {
+        "default_intensity": 35,
+        "exaggeration": (0.32, 0.50),
+        "cfg_weight": (0.52, 0.44),
+        "temperature": (0.72, 0.78),
+    },
+    "educational": {
+        "default_intensity": 50,
+        "exaggeration": (0.42, 0.64),
+        "cfg_weight": (0.50, 0.40),
+        "temperature": (0.76, 0.82),
+    },
+    "hook": {
+        "default_intensity": 70,
+        "exaggeration": (0.54, 0.82),
+        "cfg_weight": (0.46, 0.32),
+        "temperature": (0.78, 0.86),
+    },
+    "excited": {
+        "default_intensity": 85,
+        "exaggeration": (0.68, 0.95),
+        "cfg_weight": (0.40, 0.28),
+        "temperature": (0.82, 0.90),
+    },
+}
 
 
 def authorized(authorization: str | None, expected: str) -> bool:
@@ -24,6 +55,46 @@ def validate_reference_url(raw_url: str) -> None:
         raise ValueError("invalid_reference_url")
     if not hostname.endswith(".supabase.co"):
         raise ValueError("invalid_reference_host")
+
+
+def reference_audio_suffix(raw_url: str) -> str:
+    suffix = PurePosixPath(urlparse(raw_url).path).suffix.lower()
+    return suffix if suffix in ALLOWED_REFERENCE_AUDIO_SUFFIXES else ".audio"
+
+
+def chatterbox_model_kwargs() -> dict[str, str]:
+    return {"t3_model": CHATTERBOX_T3_MODEL}
+
+
+def torchaudio_save_kwargs() -> dict[str, str | int]:
+    return {"format": "wav", "encoding": "PCM_S", "bits_per_sample": 16}
+
+
+def _interpolate(bounds: tuple[float, float], ratio: float) -> float:
+    low, high = (Decimal(str(value)) for value in bounds)
+    decimal_ratio = Decimal(str(ratio))
+    value = low + (high - low) * decimal_ratio
+    return float(value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP))
+
+
+def voice_generation_kwargs(voice_mode: str, style_intensity: int | float | None) -> dict[str, float]:
+    preset = VOICE_STYLE_PRESETS.get(voice_mode)
+    if preset is None:
+        raise ValueError("unsupported_voice_mode")
+    if style_intensity is None:
+        intensity = float(preset["default_intensity"])
+    else:
+        if isinstance(style_intensity, bool) or not isinstance(style_intensity, (int, float)):
+            raise ValueError("invalid_style_intensity")
+        intensity = float(style_intensity)
+        if not math.isfinite(intensity) or intensity < 0 or intensity > 100:
+            raise ValueError("invalid_style_intensity")
+    ratio = intensity / 100.0
+    return {
+        "exaggeration": _interpolate(preset["exaggeration"], ratio),
+        "cfg_weight": _interpolate(preset["cfg_weight"], ratio),
+        "temperature": _interpolate(preset["temperature"], ratio),
+    }
 
 
 def validate_voice_request(language: str, voice_mode: str, text: str) -> None:

@@ -43,10 +43,27 @@ export type PortfolioTotals = {
   complete: boolean;
 };
 
+export type PortfolioLedgerPerformance = {
+  costBasisBaseByPosition: Map<string, number | null>;
+  realizedProfitLossBase: number | null;
+  dividendIncomeBase: number | null;
+  standaloneFeesBase: number | null;
+  tradingFeesBase: number | null;
+  totalFeesBase: number | null;
+};
+
 const EPSILON = 1e-10;
 
 function finiteNonNegative(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function finiteNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function positiveRate(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function normalizedTicker(value: string) {
@@ -57,12 +74,14 @@ function normalizedCurrency(value: string) {
   return value.trim().toUpperCase();
 }
 
+function transactionSort(left: PortfolioTransactionInput, right: PortfolioTransactionInput) {
+  const dateOrder = left.executedAt.localeCompare(right.executedAt);
+  if (dateOrder !== 0) return dateOrder;
+  return (left.id ?? "").localeCompare(right.id ?? "");
+}
+
 export function buildPortfolioPositions(transactions: PortfolioTransactionInput[]): PortfolioPosition[] {
-  const sorted = [...transactions].sort((left, right) => {
-    const dateOrder = left.executedAt.localeCompare(right.executedAt);
-    if (dateOrder !== 0) return dateOrder;
-    return (left.id ?? "").localeCompare(right.id ?? "");
-  });
+  const sorted = [...transactions].sort(transactionSort);
   const positions = new Map<string, PortfolioPosition>();
 
   for (const transaction of sorted) {
@@ -107,6 +126,117 @@ export function buildPortfolioPositions(transactions: PortfolioTransactionInput[
   }
 
   return [...positions.values()].sort((left, right) => left.ticker.localeCompare(right.ticker));
+}
+
+export function calculatePortfolioLedgerPerformance(
+  transactions: PortfolioTransactionInput[],
+  fxToBaseByTransactionId: ReadonlyMap<string, number | null>,
+): PortfolioLedgerPerformance {
+  const states = new Map<string, { quantity: number; baseCost: number | null }>();
+  let realizedProfitLossBase = 0;
+  let realizedComplete = true;
+  let dividendIncomeBase = 0;
+  let dividendsComplete = true;
+  let standaloneFeesBase = 0;
+  let standaloneFeesComplete = true;
+  let tradingFeesBase = 0;
+  let tradingFeesComplete = true;
+
+  for (const transaction of [...transactions].sort(transactionSort)) {
+    const ticker = normalizedTicker(transaction.ticker);
+    const currency = normalizedCurrency(transaction.currency);
+    if (!ticker || !/^[A-Z]{3}$/.test(currency)) continue;
+    const key = `${ticker}:${currency}`;
+    const rate = transaction.id ? positiveRate(fxToBaseByTransactionId.get(transaction.id)) : null;
+
+    if (transaction.type === "buy") {
+      const quantity = finiteNonNegative(transaction.quantity);
+      const price = finiteNonNegative(transaction.price);
+      if (quantity === null || quantity <= 0 || price === null) continue;
+      const fees = finiteNonNegative(transaction.fees) ?? 0;
+      const state = states.get(key) ?? { quantity: 0, baseCost: 0 };
+      const nativeCost = quantity * price + fees;
+      state.baseCost = state.baseCost === null || rate === null ? null : state.baseCost + nativeCost * rate;
+      state.quantity += quantity;
+      states.set(key, state);
+      if (fees > 0) {
+        if (rate === null) tradingFeesComplete = false;
+        else tradingFeesBase += fees * rate;
+      }
+      continue;
+    }
+
+    if (transaction.type === "sell") {
+      const quantity = finiteNonNegative(transaction.quantity);
+      const price = finiteNonNegative(transaction.price);
+      const fees = finiteNonNegative(transaction.fees) ?? 0;
+      const state = states.get(key);
+      if (quantity === null || quantity <= 0 || price === null || !state || state.quantity <= EPSILON) {
+        realizedComplete = false;
+        continue;
+      }
+      const soldQuantity = Math.min(quantity, state.quantity);
+      if (quantity > state.quantity + EPSILON) realizedComplete = false;
+      const allocatedBaseCost = state.baseCost === null ? null : (state.baseCost / state.quantity) * soldQuantity;
+      if (allocatedBaseCost === null || rate === null) {
+        realizedComplete = false;
+      } else {
+        realizedProfitLossBase += (soldQuantity * price - fees) * rate - allocatedBaseCost;
+      }
+      if (fees > 0) {
+        if (rate === null) tradingFeesComplete = false;
+        else tradingFeesBase += fees * rate;
+      }
+      state.quantity -= soldQuantity;
+      if (state.baseCost !== null && allocatedBaseCost !== null) {
+        state.baseCost = Math.max(0, state.baseCost - allocatedBaseCost);
+      }
+      if (state.quantity <= EPSILON) states.delete(key);
+      else states.set(key, state);
+      continue;
+    }
+
+    const cashAmount = finiteNonNegative(transaction.cashAmount);
+    if (cashAmount === null) continue;
+    if (transaction.type === "dividend") {
+      if (rate === null) dividendsComplete = false;
+      else dividendIncomeBase += cashAmount * rate;
+    } else if (transaction.type === "fee") {
+      if (rate === null) standaloneFeesComplete = false;
+      else standaloneFeesBase += cashAmount * rate;
+    }
+  }
+
+  const costBasisBaseByPosition = new Map(
+    [...states.entries()].map(([key, state]) => [key, state.baseCost] as const),
+  );
+  const realized = realizedComplete ? realizedProfitLossBase : null;
+  const dividends = dividendsComplete ? dividendIncomeBase : null;
+  const standaloneFees = standaloneFeesComplete ? standaloneFeesBase : null;
+  const tradingFees = tradingFeesComplete ? tradingFeesBase : null;
+
+  return {
+    costBasisBaseByPosition,
+    realizedProfitLossBase: realized,
+    dividendIncomeBase: dividends,
+    standaloneFeesBase: standaloneFees,
+    tradingFeesBase: tradingFees,
+    totalFeesBase: tradingFees === null || standaloneFees === null ? null : tradingFees + standaloneFees,
+  };
+}
+
+export function calculatePortfolioTotalProfitLoss(input: {
+  realizedProfitLossBase: number | null;
+  unrealizedProfitLossBase: number | null;
+  dividendIncomeBase: number | null;
+  standaloneFeesBase: number | null;
+}) {
+  const realized = finiteNumber(input.realizedProfitLossBase);
+  const unrealized = finiteNumber(input.unrealizedProfitLossBase);
+  const dividends = finiteNumber(input.dividendIncomeBase);
+  const standaloneFees = finiteNumber(input.standaloneFeesBase);
+  if (realized === null || unrealized === null || dividends === null || standaloneFees === null) return null;
+  return realized + unrealized + dividends - standaloneFees;
 }
 
 export function valuePortfolioPosition(input: {

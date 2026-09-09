@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import type { CompanySearchResult } from "@/lib/analysis/types";
 import { captureServerEvent } from "@/lib/analytics/events";
 import { requireUser } from "@/lib/auth/session";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
@@ -12,15 +13,28 @@ import { createClient } from "@/lib/supabase/server";
 
 const tickerSchema = z.string().trim().min(1).max(16).transform((value) => value.toUpperCase());
 const currencySchema = z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase());
+const optionalIdentitySchema = z.preprocess(
+  (value) => typeof value === "string" && value.trim() ? value.trim() : undefined,
+  z.string().max(256).optional(),
+);
 const transactionDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const time = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(time) && time <= Date.now() + 86_400_000;
 });
 
-async function resolveWorkspaceCompany(ticker: string, name?: string) {
+async function resolveWorkspaceCompany(
+  ticker: string,
+  name?: string,
+  identity: Partial<CompanySearchResult> = {},
+) {
   try {
     const candidates = await searchCompanies(ticker);
-    const resolution = resolveCanonicalCompanySelection({ ticker, canonicalTicker: ticker, name: name ?? ticker }, candidates);
+    const resolution = resolveCanonicalCompanySelection({
+      ticker,
+      canonicalTicker: ticker,
+      name: name ?? ticker,
+      ...identity,
+    }, candidates);
     return resolution.ok ? resolution.company : null;
   } catch {
     return null;
@@ -113,6 +127,14 @@ export async function addHoldingAction(formData: FormData) {
   const parsed = z.object({
     portfolioId: z.string().uuid(),
     ticker: tickerSchema,
+    companyName: z.string().trim().min(1).max(160),
+    securityId: optionalIdentitySchema,
+    issuerId: optionalIdentitySchema,
+    entityId: optionalIdentitySchema,
+    isin: optionalIdentitySchema,
+    figi: optionalIdentitySchema,
+    lei: optionalIdentitySchema,
+    cik: optionalIdentitySchema,
     quantity: z.coerce.number().positive().max(1_000_000_000),
     averageCost: z.coerce.number().nonnegative().max(1_000_000_000),
     currency: currencySchema,
@@ -121,15 +143,34 @@ export async function addHoldingAction(formData: FormData) {
   }).safeParse({
     portfolioId: formData.get("portfolioId"),
     ticker: formData.get("ticker"),
+    companyName: formData.get("companyName"),
+    securityId: formData.get("securityId"),
+    issuerId: formData.get("issuerId"),
+    entityId: formData.get("entityId"),
+    isin: formData.get("isin"),
+    figi: formData.get("figi"),
+    lei: formData.get("lei"),
+    cik: formData.get("cik"),
     quantity: formData.get("quantity"),
     averageCost: formData.get("averageCost"),
     currency: formData.get("currency"),
     purchaseDate: formData.get("purchaseDate"),
     fees: formData.get("fees") || 0,
   });
-  if (!parsed.success) redirect("/portfolio?error=transaction_input");
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
   if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
-  const company = await resolveWorkspaceCompany(parsed.data.ticker);
+  const company = await resolveWorkspaceCompany(parsed.data.ticker, parsed.data.companyName, {
+    securityId: parsed.data.securityId,
+    issuerId: parsed.data.issuerId,
+    entityId: parsed.data.entityId,
+    isin: parsed.data.isin,
+    figi: parsed.data.figi,
+    lei: parsed.data.lei,
+    cik: parsed.data.cik,
+  });
   if (!company) redirect("/portfolio?error=holding_identity");
   const supabase = await createClient();
   const { error } = await supabase?.rpc("record_portfolio_transaction", {
@@ -147,6 +188,143 @@ export async function addHoldingAction(formData: FormData) {
   }) ?? { error: new Error("Supabase unavailable") };
   if (error) redirect("/portfolio?error=transaction_save");
   revalidatePath("/portfolio");
+}
+
+export async function recordPortfolioSaleAction(formData: FormData) {
+  const user = await requireUser();
+  const parsed = z.object({
+    portfolioId: z.string().uuid(),
+    ticker: tickerSchema,
+    quantity: z.coerce.number().positive().max(1_000_000_000),
+    price: z.coerce.number().nonnegative().max(1_000_000_000),
+    currency: currencySchema,
+    saleDate: transactionDateSchema,
+    fees: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
+  }).safeParse({
+    portfolioId: formData.get("portfolioId"),
+    ticker: formData.get("ticker"),
+    quantity: formData.get("quantity"),
+    price: formData.get("price"),
+    currency: formData.get("currency"),
+    saleDate: formData.get("saleDate"),
+    fees: formData.get("fees") || 0,
+  });
+
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
+  if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
+
+  const supabase = await createClient();
+  if (!supabase) {
+    redirect("/portfolio?error=configuration");
+    return;
+  }
+
+  const { data: holding } = await supabase
+    .from("holdings")
+    .select("id,quantity")
+    .eq("portfolio_id", parsed.data.portfolioId)
+    .eq("ticker", parsed.data.ticker)
+    .eq("currency", parsed.data.currency)
+    .maybeSingle();
+  const ownedQuantity = holding ? Number(holding.quantity) : Number.NaN;
+  if (!holding || !Number.isFinite(ownedQuantity) || parsed.data.quantity > ownedQuantity) {
+    redirect("/portfolio?error=sell_quantity");
+    return;
+  }
+
+  const { error } = await supabase.rpc("record_portfolio_transaction", {
+    p_portfolio_id: parsed.data.portfolioId,
+    p_ticker: parsed.data.ticker,
+    p_transaction_type: "sell",
+    p_quantity: parsed.data.quantity,
+    p_price: parsed.data.price,
+    p_currency: parsed.data.currency,
+    p_executed_at: parsed.data.saleDate,
+    p_fees: parsed.data.fees,
+    p_cash_amount: null,
+    p_security_id: null,
+    p_notes: null,
+  });
+  if (error) {
+    const message = typeof error === "object" && error && "message" in error ? String(error.message) : "";
+    if (message.includes("Sell quantity exceeds owned quantity")) {
+      redirect("/portfolio?error=sell_quantity");
+      return;
+    }
+    redirect("/portfolio?error=transaction_save");
+    return;
+  }
+  revalidatePath("/portfolio");
+}
+
+async function recordPortfolioCashFlowAction(formData: FormData, transactionType: "dividend" | "fee") {
+  const user = await requireUser();
+  const parsed = z.object({
+    portfolioId: z.string().uuid(),
+    ticker: tickerSchema,
+    amount: z.coerce.number().positive().max(1_000_000_000),
+    currency: currencySchema,
+    transactionDate: transactionDateSchema,
+  }).safeParse({
+    portfolioId: formData.get("portfolioId"),
+    ticker: formData.get("ticker"),
+    amount: formData.get("amount"),
+    currency: formData.get("currency"),
+    transactionDate: formData.get("transactionDate"),
+  });
+  if (!parsed.success) {
+    redirect("/portfolio?error=transaction_input");
+    return;
+  }
+  if (!await userOwnsPortfolio(user.id, parsed.data.portfolioId)) return;
+
+  const supabase = await createClient();
+  if (!supabase) {
+    redirect("/portfolio?error=configuration");
+    return;
+  }
+  const { data: priorTransaction } = await supabase
+    .from("portfolio_transactions")
+    .select("id")
+    .eq("portfolio_id", parsed.data.portfolioId)
+    .eq("ticker", parsed.data.ticker)
+    .eq("currency", parsed.data.currency)
+    .limit(1)
+    .maybeSingle();
+  if (!priorTransaction) {
+    redirect("/portfolio?error=holding_identity");
+    return;
+  }
+
+  const { error } = await supabase.rpc("record_portfolio_transaction", {
+    p_portfolio_id: parsed.data.portfolioId,
+    p_ticker: parsed.data.ticker,
+    p_transaction_type: transactionType,
+    p_quantity: null,
+    p_price: null,
+    p_currency: parsed.data.currency,
+    p_executed_at: parsed.data.transactionDate,
+    p_fees: 0,
+    p_cash_amount: parsed.data.amount,
+    p_security_id: null,
+    p_notes: null,
+  });
+  if (error) {
+    redirect("/portfolio?error=transaction_save");
+    return;
+  }
+  revalidatePath("/portfolio");
+}
+
+export async function recordPortfolioDividendAction(formData: FormData) {
+  return recordPortfolioCashFlowAction(formData, "dividend");
+}
+
+export async function recordPortfolioFeeAction(formData: FormData) {
+  return recordPortfolioCashFlowAction(formData, "fee");
 }
 
 export async function updatePortfolioTransactionAction(formData: FormData) {

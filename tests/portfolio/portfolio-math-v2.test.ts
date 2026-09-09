@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyPortfolioWeights,
   buildPortfolioPositions,
+  calculatePortfolioLedgerPerformance,
+  calculatePortfolioTotalProfitLoss,
   calculatePortfolioTotals,
   diversificationScore,
   valuePortfolioPosition,
@@ -37,6 +39,64 @@ describe("portfolio transaction math", () => {
     expect(position.quantity).toBe(15);
     expect(position.costBasis).toBe(2250);
     expect(position.averagePurchasePrice).toBe(150);
+  });
+
+  it("calculates historical-FX realized P/L, dividends and fees without double counting trading fees", () => {
+    const transactions = [
+      { id: "buy", ticker: "AAPL", type: "buy" as const, quantity: 10, price: 100, fees: 10, currency: "USD", executedAt: "2026-01-01" },
+      { id: "sell", ticker: "AAPL", type: "sell" as const, quantity: 4, price: 150, fees: 2, currency: "USD", executedAt: "2026-03-01" },
+      { id: "dividend", ticker: "AAPL", type: "dividend" as const, cashAmount: 30, currency: "USD", executedAt: "2026-04-01" },
+      { id: "fee", ticker: "AAPL", type: "fee" as const, cashAmount: 5, currency: "USD", executedAt: "2026-05-01" },
+    ];
+    const ledger = calculatePortfolioLedgerPerformance(transactions, new Map([
+      ["buy", 10],
+      ["sell", 11],
+      ["dividend", 11.5],
+      ["fee", 11.2],
+    ]));
+
+    expect(ledger.costBasisBaseByPosition.get("AAPL:USD")).toBeCloseTo(6060, 8);
+    expect(ledger.realizedProfitLossBase).toBeCloseTo(2538, 8);
+    expect(ledger.dividendIncomeBase).toBeCloseTo(345, 8);
+    expect(ledger.standaloneFeesBase).toBeCloseTo(56, 8);
+    expect(ledger.tradingFeesBase).toBeCloseTo(122, 8);
+    expect(ledger.totalFeesBase).toBeCloseTo(178, 8);
+
+    const total = calculatePortfolioTotalProfitLoss({
+      realizedProfitLossBase: ledger.realizedProfitLossBase,
+      unrealizedProfitLossBase: 2580,
+      dividendIncomeBase: ledger.dividendIncomeBase,
+      standaloneFeesBase: ledger.standaloneFeesBase,
+    });
+    expect(total).toBeCloseTo(5407, 8);
+  });
+
+  it("fails closed only for performance components whose historical FX is missing", () => {
+    const transactions = [
+      { id: "buy", ticker: "AAPL", type: "buy" as const, quantity: 10, price: 100, fees: 10, currency: "USD", executedAt: "2026-01-01" },
+      { id: "sell", ticker: "AAPL", type: "sell" as const, quantity: 4, price: 150, fees: 2, currency: "USD", executedAt: "2026-03-01" },
+      { id: "dividend", ticker: "AAPL", type: "dividend" as const, cashAmount: 30, currency: "USD", executedAt: "2026-04-01" },
+      { id: "fee", ticker: "AAPL", type: "fee" as const, cashAmount: 5, currency: "USD", executedAt: "2026-05-01" },
+    ];
+    const ledger = calculatePortfolioLedgerPerformance(transactions, new Map([
+      ["buy", null],
+      ["sell", 11],
+      ["dividend", 11.5],
+      ["fee", null],
+    ]));
+
+    expect(ledger.costBasisBaseByPosition.get("AAPL:USD")).toBeNull();
+    expect(ledger.realizedProfitLossBase).toBeNull();
+    expect(ledger.dividendIncomeBase).toBeCloseTo(345, 8);
+    expect(ledger.standaloneFeesBase).toBeNull();
+    expect(ledger.tradingFeesBase).toBeNull();
+    expect(ledger.totalFeesBase).toBeNull();
+    expect(calculatePortfolioTotalProfitLoss({
+      realizedProfitLossBase: ledger.realizedProfitLossBase,
+      unrealizedProfitLossBase: 2580,
+      dividendIncomeBase: ledger.dividendIncomeBase,
+      standaloneFeesBase: ledger.standaloneFeesBase,
+    })).toBeNull();
   });
 
   it("does not mix currencies when FX is missing", () => {

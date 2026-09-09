@@ -11,12 +11,15 @@ from fastapi import Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from voice_contract import (
-    ALLOWED_VOICE_MODES,
     MAX_TEXT_CHARS,
     authorized,
+    chatterbox_model_kwargs,
     fake_wav,
+    reference_audio_suffix,
+    torchaudio_save_kwargs,
     validate_reference_url,
     validate_voice_request,
+    voice_generation_kwargs,
 )
 
 APP_NAME = "stockbox-growth-voice"
@@ -27,6 +30,7 @@ REQUIREMENTS_PATH = str(Path(__file__).with_name("requirements.txt"))
 CONTRACT_PATH = Path(__file__).with_name("voice_contract.py")
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
     .pip_install_from_requirements(REQUIREMENTS_PATH)
     .add_local_file(CONTRACT_PATH, remote_path="/root/voice_contract.py")
 )
@@ -43,6 +47,7 @@ class VoiceRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
     language: str
     voice_mode: str
+    style_intensity: int | None = Field(default=None, ge=0, le=100)
     reference_audio_url: str = Field(min_length=10, max_length=4096)
 
 
@@ -71,23 +76,32 @@ def _download_reference(url: str, destination: Path) -> None:
                 handle.write(chunk)
 
 
-def _synthesize_founder_voice(text: str, reference_path: Path, voice_mode: str) -> bytes:
+def _synthesize_founder_voice(
+    text: str,
+    reference_path: Path,
+    voice_mode: str,
+    style_intensity: int | None,
+) -> bytes:
     import torch
     import torchaudio
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+    model = ChatterboxMultilingualTTS.from_pretrained(
+        device=device,
+        **chatterbox_model_kwargs(),
+    )
     wav = model.generate(
         text.strip(),
         language_id="sv",
         audio_prompt_path=str(reference_path),
+        **voice_generation_kwargs(voice_mode, style_intensity),
     )
     audio = wav.detach().cpu()
     if audio.ndim == 1:
         audio = audio.unsqueeze(0)
     result = io.BytesIO()
-    torchaudio.save(result, audio, model.sr, format="wav")
+    torchaudio.save(result, audio, model.sr, **torchaudio_save_kwargs())
     return result.getvalue()
 
 
@@ -120,10 +134,16 @@ def synthesize(
         )
 
     with tempfile.TemporaryDirectory(prefix="stockbox-growth-voice-") as temp_dir:
-        reference_path = Path(temp_dir) / "reference.wav"
+        suffix = reference_audio_suffix(request.reference_audio_url)
+        reference_path = Path(temp_dir) / f"reference{suffix}"
         _download_reference(request.reference_audio_url, reference_path)
         try:
-            wav_bytes = _synthesize_founder_voice(request.text, reference_path, request.voice_mode)
+            wav_bytes = _synthesize_founder_voice(
+                request.text,
+                reference_path,
+                request.voice_mode,
+                request.style_intensity,
+            )
         finally:
             reference_path.unlink(missing_ok=True)
 

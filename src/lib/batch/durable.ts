@@ -5,8 +5,18 @@ import type {
   CompanySearchResult,
   InvestmentProfile,
 } from "@/lib/analysis/types";
+import {
+  BATCH_ITEM_EXECUTION_TIMEOUT_MS,
+  BATCH_ITEM_MAX_ATTEMPTS,
+  BATCH_ORCHESTRATION_CONCURRENCY,
+  BatchItemLeaseLostError,
+  cumulativeBatchItemAttempt,
+  mapWithBoundedConcurrency,
+  withBatchItemDeadline,
+} from "@/lib/batch/resilience";
+import { boundedDurableWorkerDelayMs } from "@/lib/batch/worker-trigger";
+import { resolveMostRelevantCompanySelection } from "@/lib/data/company-resolution";
 import { analyzeCompany, searchCompanies } from "@/lib/data/enhanced-provider";
-import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
 import { canAttemptConfiguredFundamentals } from "@/lib/data/security-classification";
 import {
   completeAnalysisReservation,
@@ -22,8 +32,17 @@ import {
   type BackgroundJob,
 } from "@/lib/jobs/background-jobs";
 import { recordMaterialAnalysisChangesForPersistedAnalysis } from "@/lib/research/analysis-changes";
-import { boundedDurableWorkerDelayMs } from "@/lib/batch/worker-trigger";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+export {
+  BATCH_ITEM_EXECUTION_TIMEOUT_MS,
+  BATCH_ITEM_MAX_ATTEMPTS,
+  BATCH_ORCHESTRATION_CONCURRENCY,
+  cumulativeBatchItemAttempt,
+  mapWithBoundedConcurrency,
+  staleBatchItemDisposition,
+  withBatchItemDeadline,
+} from "@/lib/batch/resilience";
 
 export const BATCH_ANALYSIS_JOB_KIND = "batch_analysis_item";
 export type DurableBatchRunStatus =
@@ -103,10 +122,12 @@ export type DurableBatchItem = {
   inputTicker: string;
   company: CompanySearchResult;
   status: DurableBatchItemStatus;
+  attempts: number;
   idempotencyKey: string;
   analysisId: string | null;
   error: string | null;
 };
+
 function requestFingerprint(input: {
   company: CompanySearchResult;
   analysisType: AnalysisType;
@@ -130,6 +151,7 @@ function batchItemFromRow(row: Record<string, unknown>): DurableBatchItem {
     inputTicker: String(row.input_ticker),
     company: row.company as CompanySearchResult,
     status: row.status as DurableBatchItemStatus,
+    attempts: Number(row.attempts ?? 0),
     idempotencyKey: String(row.idempotency_key),
     analysisId: typeof row.analysis_id === "string" ? row.analysis_id : null,
     error: typeof row.last_error === "string" ? row.last_error : null,
@@ -206,25 +228,29 @@ export async function createDurableBatch(input: {
     await admin.from("batch_runs").delete().eq("id", batchId).eq("user_id", input.userId);
     throw new Error(`Unable to create batch items: ${itemError?.message ?? "missing items"}`);
   }
-  let queued = 0;
-  for (const row of createdItems) {
-    const itemId = String(row.id);
-    const outcome = await enqueueBackgroundJob({
-      kind: BATCH_ANALYSIS_JOB_KIND,
-      dedupeKey: batchJobDedupeKey(itemId),
-      maxAttempts: 4,
-      payload: { batchItemId: itemId },
-    });
-    if (!outcome.ok) {
+
+  const enqueueResults = await mapWithBoundedConcurrency(
+    createdItems,
+    BATCH_ORCHESTRATION_CONCURRENCY,
+    async (row) => {
+      const itemId = String(row.id);
+      const outcome = await enqueueBackgroundJob({
+        kind: BATCH_ANALYSIS_JOB_KIND,
+        dedupeKey: batchJobDedupeKey(itemId),
+        maxAttempts: BATCH_ITEM_MAX_ATTEMPTS,
+        payload: { batchItemId: itemId, attemptOffset: 0 },
+      });
+      if (outcome.ok) return true;
+
       await admin.from("batch_items").update({
         status: "failed",
         last_error: "Unable to enqueue batch analysis.",
         completed_at: new Date().toISOString(),
-      }).eq("id", itemId);
-      continue;
-    }
-    queued += 1;
-  }
+      }).eq("id", itemId).eq("status", "queued");
+      return false;
+    },
+  );
+  const queued = enqueueResults.filter(Boolean).length;
   await refreshBatchRun(batchId);
   return { batchId, queued };
 }
@@ -234,19 +260,78 @@ function batchItemIdFromJob(job: BackgroundJob): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-async function markItemFailure(item: DurableBatchItem, error: unknown, permanent: boolean) {
+function attemptOffsetFromJob(job: BackgroundJob): number {
+  const value = job.payload.attemptOffset;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function throwIfExecutionExpired(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new BatchItemLeaseLostError();
+}
+
+async function assertBackgroundJobLease(job: BackgroundJob): Promise<void> {
+  const admin = createAdminClient();
+  if (!admin) throw new BatchItemLeaseLostError();
+  let query = admin.from("background_jobs")
+    .select("id")
+    .eq("id", job.id)
+    .eq("status", "running")
+    .eq("attempts", job.attempts);
+  query = job.lockedAt ? query.eq("locked_at", job.lockedAt) : query.is("locked_at", null);
+  const current = await query.maybeSingle();
+  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+}
+
+async function assertBatchItemLease(
+  itemId: string,
+  attempt: number,
+  leaseStartedAt: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfExecutionExpired(signal);
+  const admin = createAdminClient();
+  if (!admin) throw new BatchItemLeaseLostError();
+  const current = await admin.from("batch_items")
+    .select("id")
+    .eq("id", itemId)
+    .eq("status", "processing")
+    .eq("attempts", attempt)
+    .eq("started_at", leaseStartedAt)
+    .maybeSingle();
+  throwIfExecutionExpired(signal);
+  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+}
+
+async function markItemFailure(
+  job: BackgroundJob,
+  item: DurableBatchItem,
+  itemAttempt: number,
+  error: unknown,
+  permanent: boolean,
+) {
   const admin = createAdminClient();
   if (!admin) return;
   const message = error instanceof Error ? error.message.slice(0, 500) : "Unknown batch failure";
-  await admin.from("batch_items").update({
+  let update = admin.from("batch_items").update({
     status: permanent ? "failed" : "queued",
     last_error: message,
     completed_at: permanent ? new Date().toISOString() : null,
     updated_at: new Date().toISOString(),
-  }).eq("id", item.id);
-  await refreshBatchRun(item.batchId);
+  }).eq("id", item.id)
+    .eq("status", "processing")
+    .eq("attempts", itemAttempt);
+  if (job.lockedAt) update = update.eq("started_at", job.lockedAt);
+  const changed = await update.select("id").maybeSingle();
+  if (changed.data) await refreshBatchRun(item.batchId);
 }
-async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Promise<void> {
+
+async function executeBatchItem(
+  job: BackgroundJob,
+  item: DurableBatchItem,
+  itemAttempt: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfExecutionExpired(signal);
   const admin = createAdminClient();
   if (!admin) throw new Error("Supabase admin client is unavailable.");
   if (["completed", "cancelled"].includes(item.status)) return;
@@ -256,9 +341,14 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
     .select("user_id,status,analysis_type,investment_profile")
     .eq("id", item.batchId)
     .single();
+  throwIfExecutionExpired(signal);
   if (runError || !run) throw new Error("Batch run could not be loaded.");
   if (run.status === "cancelled") {
-    await admin.from("batch_items").update({ status: "cancelled", completed_at: new Date().toISOString() }).eq("id", item.id);
+    await admin.from("batch_items").update({
+      status: "cancelled",
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", item.id).in("status", ["queued", "processing"]);
     return;
   }
 
@@ -266,18 +356,34 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
   const analysisType = run.analysis_type as AnalysisType;
   const investmentProfile = run.investment_profile as InvestmentProfile;
   const { data: profile } = await admin.from("profiles").select("role").eq("id", userId).single();
+  throwIfExecutionExpired(signal);
   const isAdmin = profile?.role === "admin";
+  const startedAt = job.lockedAt ?? new Date().toISOString();
 
-  await admin.from("batch_items").update({
+  await assertBackgroundJobLease(job);
+  throwIfExecutionExpired(signal);
+  const lease = await admin.from("batch_items").update({
     status: "processing",
-    attempts: job.attempts,
-    started_at: new Date().toISOString(),
+    attempts: itemAttempt,
+    started_at: startedAt,
     last_error: null,
-    updated_at: new Date().toISOString(),
-  }).eq("id", item.id);
-  await admin.from("batch_runs").update({ status: "processing", started_at: new Date().toISOString() }).eq("id", item.batchId).eq("status", "queued");
+    updated_at: startedAt,
+  }).eq("id", item.id)
+    .in("status", ["queued", "processing"])
+    .select("id")
+    .maybeSingle();
+  if (!lease.data) throw new BatchItemLeaseLostError();
+
+  await admin.from("batch_runs").update({
+    status: "processing",
+    started_at: startedAt,
+    completed_at: null,
+    updated_at: startedAt,
+  }).eq("id", item.batchId).in("status", ["queued", "processing"]);
+
   const candidates = await searchCompanies(item.company.canonicalTicker ?? item.company.ticker);
-  const resolution = resolveCanonicalCompanySelection(item.company, candidates);
+  await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
+  const resolution = resolveMostRelevantCompanySelection(item.company, candidates);
   if (!resolution.ok) throw new Error(`Company identity verification failed: ${resolution.reason}.`);
   const canonicalCompany = resolution.company;
   if (!canAttemptConfiguredFundamentals(canonicalCompany)) {
@@ -290,16 +396,23 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
     idempotencyKey: item.idempotencyKey,
     requestFingerprint: fingerprint,
   });
+  await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
   if (replay.status === "conflict") throw new Error("Batch analysis idempotency conflict.");
   if (replay.status === "unavailable") throw new Error("Analysis retry safety is unavailable.");
   if (replay.status === "replay") {
-    await admin.from("batch_items").update({
+    const completed = await admin.from("batch_items").update({
       status: "completed",
       analysis_id: replay.id,
       completed_at: new Date().toISOString(),
       last_error: null,
       updated_at: new Date().toISOString(),
-    }).eq("id", item.id);
+    }).eq("id", item.id)
+      .eq("status", "processing")
+      .eq("attempts", itemAttempt)
+      .eq("started_at", startedAt)
+      .select("id")
+      .maybeSingle();
+    if (!completed.data) throw new BatchItemLeaseLostError();
     await refreshBatchRun(item.batchId);
     return;
   }
@@ -311,6 +424,7 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
     if (!entitlement.allowed) throw new Error("Monthly analysis limit reached.");
     reservationId = entitlement.reservationId ?? null;
   }
+  await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
   try {
     const result = await analyzeCompany({
       company: canonicalCompany,
@@ -319,6 +433,7 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
     });
     if (!result.ok) throw new Error(result.error || "Provider analysis failed.");
 
+    await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
     const persisted = await persistAnalysis({
       userId,
       report: result.data,
@@ -340,25 +455,36 @@ async function executeBatchItem(job: BackgroundJob, item: DurableBatchItem): Pro
       }
       reservationId = null;
     }
-    result.data.id = analysisId;
-    await recordMaterialAnalysisChangesForPersistedAnalysis({
-      userId,
-      analysisId,
-      report: result.data,
-    }).catch(() => undefined);
-    await recordUsageEvent({
-      userId,
-      event: "analysis_completed",
-      metadata: { ticker: result.data.ticker, batchId: item.batchId, batchItemId: item.id },
-    });
-    await admin.from("batch_items").update({
+
+    await assertBatchItemLease(item.id, itemAttempt, startedAt, signal);
+    const completed = await admin.from("batch_items").update({
       status: "completed",
       analysis_id: analysisId,
       completed_at: new Date().toISOString(),
       last_error: null,
       updated_at: new Date().toISOString(),
-    }).eq("id", item.id);
+    }).eq("id", item.id)
+      .eq("status", "processing")
+      .eq("attempts", itemAttempt)
+      .eq("started_at", startedAt)
+      .select("id")
+      .maybeSingle();
+    if (!completed.data) throw new BatchItemLeaseLostError();
+
+    result.data.id = analysisId;
     await refreshBatchRun(item.batchId);
+    await Promise.all([
+      recordMaterialAnalysisChangesForPersistedAnalysis({
+        userId,
+        analysisId,
+        report: result.data,
+      }).catch(() => undefined),
+      recordUsageEvent({
+        userId,
+        event: "analysis_completed",
+        metadata: { ticker: result.data.ticker, batchId: item.batchId, batchItemId: item.id },
+      }).catch(() => undefined),
+    ]);
   } catch (error) {
     if (reservationId) {
       await releaseAnalysisReservation({ reservationId, status: "failed" }).catch(() => undefined);
@@ -375,20 +501,29 @@ export async function handleBatchAnalysisJob(job: BackgroundJob): Promise<void> 
   const { data, error } = await admin.from("batch_items").select("*").eq("id", itemId).single();
   if (error || !data) throw new Error("Queued batch item could not be loaded.");
   const item = batchItemFromRow(data as Record<string, unknown>);
+  const itemAttempt = cumulativeBatchItemAttempt(job.attempts, attemptOffsetFromJob(job));
+  const deadline = new AbortController();
 
   try {
-    await executeBatchItem(job, item);
+    await withBatchItemDeadline(
+      executeBatchItem(job, item, itemAttempt, deadline.signal),
+      BATCH_ITEM_EXECUTION_TIMEOUT_MS,
+      () => deadline.abort(),
+    );
   } catch (reason) {
+    if (reason instanceof BatchItemLeaseLostError) return;
     const retryable = shouldRetryBatchFailure(job, reason);
-    await markItemFailure(item, reason, !retryable);
+    await markItemFailure(job, item, itemAttempt, reason, !retryable);
     if (!retryable) return;
     throw reason;
   }
 }
+
 export async function runDurableBatchJobs(limit = 2) {
   return runBackgroundJobs({
     kinds: [BATCH_ANALYSIS_JOB_KIND],
     limit: Math.max(1, Math.min(limit, 5)),
+    staleAfterMinutes: 5,
     handlers: { [BATCH_ANALYSIS_JOB_KIND]: handleBatchAnalysisJob },
   });
 }
@@ -409,28 +544,41 @@ export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<n
 
 export async function getDurableBatchRun(input: { userId: string; batchId: string }) {
   const admin = createAdminClient();
-  if (!admin) return null;
-  const { data: run } = await admin.from("batch_runs")
+  if (!admin) return { status: "unavailable" } as const;
+
+  const { data: run, error: runError } = await admin.from("batch_runs")
     .select("id,user_id,status,analysis_type,investment_profile,total_items,completed_items,failed_items,cancelled_items,created_at,started_at,completed_at")
     .eq("id", input.batchId)
     .eq("user_id", input.userId)
     .maybeSingle();
-  if (!run) return null;
-  const { data: items } = await admin.from("batch_items")
-    .select("id,input_ticker,canonical_ticker,company_name,status,analysis_id,last_error,attempts,created_at,started_at,completed_at")
+  if (runError) return { status: "unavailable" } as const;
+  if (!run) return { status: "not_found" } as const;
+
+  const { data: items, error: itemsError } = await admin.from("batch_items")
+    .select("id,input_ticker,canonical_ticker,company_name,status,analysis_id,last_error,attempts,created_at,started_at,completed_at,updated_at")
     .eq("batch_id", input.batchId)
     .eq("user_id", input.userId)
     .order("created_at", { ascending: true });
+  if (itemsError) return { status: "unavailable" } as const;
+
   const analysisIds = (items ?? []).map((item) => item.analysis_id).filter((id): id is string => typeof id === "string");
   const reportById = new Map<string, AnalysisReport>();
   if (analysisIds.length) {
-    const { data: analyses } = await admin.from("analyses").select("id,report").eq("user_id", input.userId).in("id", analysisIds);
+    const { data: analyses, error: analysesError } = await admin.from("analyses")
+      .select("id,report")
+      .eq("user_id", input.userId)
+      .in("id", analysisIds);
+    if (analysesError) return { status: "unavailable" } as const;
     for (const analysis of analyses ?? []) reportById.set(String(analysis.id), analysis.report as AnalysisReport);
   }
+
   return {
-    run,
-    items: (items ?? []).map((item) => ({ ...item, report: item.analysis_id ? reportById.get(item.analysis_id) ?? null : null })),
-  };
+    status: "found",
+    batch: {
+      run,
+      items: (items ?? []).map((item) => ({ ...item, report: item.analysis_id ? reportById.get(item.analysis_id) ?? null : null })),
+    },
+  } as const;
 }
 
 export async function retryDurableBatchFailures(input: { userId: string; batchId: string }) {
@@ -442,33 +590,41 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
     .eq("user_id", input.userId)
     .eq("status", "failed");
   if (error) throw new Error(`Unable to load failed batch items: ${error.message}`);
-  let queued = 0;
-  for (const row of failed ?? []) {
-    const itemId = String(row.id);
-    const reset = await admin.from("batch_items").update({
-      status: "queued",
-      last_error: null,
-      completed_at: null,
-      updated_at: new Date().toISOString(),
-    }).eq("id", itemId).eq("user_id", input.userId);
-    if (reset.error) continue;
-    const outcome = await enqueueBackgroundJob({
-      kind: BATCH_ANALYSIS_JOB_KIND,
-      dedupeKey: batchJobDedupeKey(itemId),
-      maxAttempts: 4,
-      payload: { batchItemId: itemId },
-    });
-    if (outcome.ok) {
-      queued += 1;
-      continue;
-    }
-    await admin.from("batch_items").update({
-      status: "failed",
-      last_error: "Unable to enqueue batch analysis retry.",
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", itemId).eq("user_id", input.userId);
-  }
+
+  const retryResults = await mapWithBoundedConcurrency(
+    failed ?? [],
+    BATCH_ORCHESTRATION_CONCURRENCY,
+    async (row) => {
+      const itemId = String(row.id);
+      const reset = await admin.from("batch_items").update({
+        status: "queued",
+        attempts: 0,
+        started_at: null,
+        last_error: null,
+        completed_at: null,
+        updated_at: new Date().toISOString(),
+      }).eq("id", itemId).eq("user_id", input.userId).eq("status", "failed");
+      if (reset.error) return false;
+
+      const outcome = await enqueueBackgroundJob({
+        kind: BATCH_ANALYSIS_JOB_KIND,
+        dedupeKey: batchJobDedupeKey(itemId),
+        maxAttempts: BATCH_ITEM_MAX_ATTEMPTS,
+        payload: { batchItemId: itemId, attemptOffset: 0 },
+      });
+      if (outcome.ok) return true;
+
+      await admin.from("batch_items").update({
+        status: "failed",
+        last_error: "Unable to enqueue batch analysis retry.",
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", itemId).eq("user_id", input.userId).eq("status", "queued");
+      return false;
+    },
+  );
+  const queued = retryResults.filter(Boolean).length;
+
   if (queued) {
     await admin.from("batch_runs").update({
       status: "queued",
@@ -487,7 +643,9 @@ export async function cancelDurableBatch(input: { userId: string; batchId: strin
     status: "cancelled",
     completed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq("batch_id", input.batchId).eq("user_id", input.userId).eq("status", "queued");
+  }).eq("batch_id", input.batchId)
+    .eq("user_id", input.userId)
+    .in("status", ["queued", "processing"]);
   const status = await refreshBatchRun(input.batchId);
   return { status };
 }

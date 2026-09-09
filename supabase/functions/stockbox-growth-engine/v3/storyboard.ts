@@ -1,5 +1,14 @@
 // Pure Edge mirror of src/lib/growth/storyboard.ts.
 // Keep JSON parity covered by tests/growth-v3-edge-parity.test.ts.
+type EdgeFounderVoiceMode = "hook" | "educational" | "serious_analysis" | "excited";
+
+const DEFAULT_VOICE_STYLE_INTENSITY: Record<EdgeFounderVoiceMode, number> = {
+  serious_analysis: 35,
+  educational: 50,
+  hook: 70,
+  excited: 85,
+};
+
 export type EdgeStoryboardInput = {
   contentId: string;
   renderJobId: string;
@@ -10,6 +19,8 @@ export type EdgeStoryboardInput = {
   script: string;
   ctaText: string;
   ctaUrl: string;
+  voiceMode?: EdgeFounderVoiceMode;
+  voiceStyleIntensity?: number;
   allowGeneratedScene?: boolean;
   preferredVisualRefs?: string[];
 };
@@ -43,6 +54,7 @@ export function buildGrowthStoryboard(input: EdgeStoryboardInput) {
   const bodies = sentenceChunks(input.script, 3);
   const refs = Array.isArray(input.preferredVisualRefs) ? input.preferredVisualRefs.filter(Boolean) : [];
   const visualKind = (index: number) => refs[index] ? "stockbox_ui" : index === 1 ? "chart" : "motion_graphic";
+  const founderVoiceMode: EdgeFounderVoiceMode = input.voiceMode ?? "educational";
   const scenes = [
     { id: "hook", kind: "motion_graphic", startMs: 0, endMs: 2_500, headline: compact(input.hook || input.title, 220), body: "En snabb StockBox-genomgång." },
     { id: "body-1", kind: visualKind(0), startMs: 2_500, endMs: 10_000, headline: compact(bodies[0], 180), body: refs[0] ? "StockBox-vy med relevant analysdata." : "Fokusera på den första datapunkten och sätt den i sitt sammanhang.", ...(refs[0] ? { visualRef: refs[0] } : {}) },
@@ -62,7 +74,10 @@ export function buildGrowthStoryboard(input: EdgeStoryboardInput) {
     title: compact(input.title, 220),
     hook: compact(input.hook, 500),
     script: compact(input.script, 6_000),
-    voiceMode: input.language === "sv" ? "educational" : "generic_english",
+    voiceMode: input.language === "sv" ? founderVoiceMode : "generic_english",
+    ...(input.language === "sv" ? {
+      voiceStyleIntensity: input.voiceStyleIntensity ?? DEFAULT_VOICE_STYLE_INTENSITY[founderVoiceMode],
+    } : {}),
     scenes,
     subtitles: subtitleChunks(input.script),
     cta: { text: compact(input.ctaText, 220), url: input.ctaUrl },

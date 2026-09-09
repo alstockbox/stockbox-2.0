@@ -29,6 +29,7 @@ export const RATE_LIMITS = {
   adminAnalysis: { limit: 400, windowMs: 10 * 60 * 1000 },
   support: { limit: 8, windowMs: 10 * 60 * 1000 },
   batchResolve: { limit: 30, windowMs: 10 * 60 * 1000 },
+  adminBatchResolve: { limit: 2_000, windowMs: 10 * 60 * 1000 },
   companySearch: { limit: 60, windowMs: 60 * 1000 },
   share: { limit: 30, windowMs: 10 * 60 * 1000 },
   analytics: { limit: 60, windowMs: 60 * 1000 },

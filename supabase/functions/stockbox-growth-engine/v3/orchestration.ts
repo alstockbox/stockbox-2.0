@@ -30,6 +30,11 @@ export type FounderEnhancer = (input: {
   cta: string;
 }) => Promise<Partial<{ hook: string; script: string; caption: string; cta: string }> | null>;
 
+export type FounderVoiceDelivery = {
+  voiceMode: "educational" | "serious_analysis" | "hook" | "excited";
+  voiceStyleIntensity: number;
+};
+
 function n(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -51,6 +56,33 @@ function projectedVoiceCost(cfg: Record<string, any>, language: "sv" | "en") {
   if (raw === null || raw === undefined || String(raw).trim() === "") return null;
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function selectFounderVoiceDelivery(row: {
+  hook_type?: unknown;
+  pillar?: unknown;
+  title?: unknown;
+  topic?: unknown;
+}): FounderVoiceDelivery {
+  const hookType = clean(row.hook_type, "", 200).toLocaleLowerCase("sv-SE");
+  const pillar = clean(row.pillar, "", 200).toLocaleLowerCase("sv-SE");
+
+  const excitedSignals = ["surprise", "urgency", "breaking", "hype", "viral", "wow", "överrask", "chock", "nyhet"];
+  if (excitedSignals.some((signal) => hookType.includes(signal))) {
+    return { voiceMode: "excited", voiceStyleIntensity: 85 };
+  }
+
+  const hookSignals = ["problem", "warning", "varning", "misstag", "mistake", "risk", "contrarian", "fear", "loss"];
+  if (hookSignals.some((signal) => hookType.includes(signal))) {
+    return { voiceMode: "hook", voiceStyleIntensity: 70 };
+  }
+
+  const seriousPillars = ["fundamental", "aktieanalys", "stock analysis", "fundamental analysis"];
+  if (seriousPillars.some((signal) => pillar.includes(signal))) {
+    return { voiceMode: "serious_analysis", voiceStyleIntensity: 35 };
+  }
+
+  return { voiceMode: "educational", voiceStyleIntensity: 50 };
 }
 
 function visitorIdentity(event: any) {
@@ -96,7 +128,7 @@ export async function enqueueV3Renders(ctx: GrowthV3Context) {
   };
 
   const [contentRows, attribution, profiles] = await Promise.all([
-    ctx.db.select("acq_content", "select=id,title,body,topic,language,cta,utm_url,status,updated_at&campaign_id=eq.auto_growth_v2&status=in.(draft,repurposed)&order=updated_at.desc&limit=36"),
+    ctx.db.select("acq_content", "select=id,title,body,topic,language,hook_type,pillar,format,cta,utm_url,status,updated_at&campaign_id=eq.auto_growth_v2&status=in.(draft,repurposed)&order=updated_at.desc&limit=36"),
     aggregateAttributedGrowth(ctx),
     ctx.db.select("acq_voice_profiles", "select=id,language,status,updated_at&status=eq.active&language=eq.sv&order=updated_at.desc&limit=1"),
   ]);
@@ -169,6 +201,7 @@ export async function enqueueV3Renders(ctx: GrowthV3Context) {
     const row = candidate.row;
     const template = "educational_checklist" as const;
     const idempotencyKey = `v3:${date}:${row.id}:${template}:${candidate.language}`;
+    const voiceDelivery = candidate.language === "sv" ? selectFounderVoiceDelivery(row) : null;
     const renderSpec = buildGrowthStoryboard({
       contentId: String(row.id),
       renderJobId: `pending:${idempotencyKey}`,
@@ -179,6 +212,7 @@ export async function enqueueV3Renders(ctx: GrowthV3Context) {
       script: clean(row.body || row.title, "Titta på helheten, jämför utvecklingen över tid och sätt siffrorna i sitt sammanhang.", 5_500),
       ctaText: clean(row.cta, "Analysera bolaget i StockBox", 220).replace(/https?:\/\/\S+/g, "").trim() || "Analysera bolaget i StockBox",
       ctaUrl: row.utm_url || `${(ctx.baseUrl || "https://www.getstockbox.app").replace(/\/$/, "")}/`,
+      ...(voiceDelivery || {}),
       allowGeneratedScene: configBool(ctx.cfg.growth_generative_provider_enabled, false),
       preferredVisualRefs: [],
     });
@@ -199,6 +233,7 @@ export async function enqueueV3Renders(ctx: GrowthV3Context) {
         expected_growth_score: candidate.expectedGrowthScore,
         attributed_qualified_visits_28d: candidate.visits,
         score_inputs: candidate.growth,
+        voice_delivery: voiceDelivery ? { voice_mode: voiceDelivery.voiceMode, style_intensity: voiceDelivery.voiceStyleIntensity } : null,
       },
     }], "idempotency_key");
     if (inserted?.length) created += 1;

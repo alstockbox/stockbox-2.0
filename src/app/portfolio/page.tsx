@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { AlertTriangle, BriefcaseBusiness, CalendarDays, Plus, Save, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import type { AnalysisReport } from "@/lib/analysis/types";
 import { PortfolioAnalyzer } from "@/components/portfolio/portfolio-analyzer";
+import { PortfolioCashFlowForm } from "@/components/portfolio/portfolio-cash-flow-form";
+import { PortfolioCashFlowHistoryRow } from "@/components/portfolio/portfolio-cash-flow-history-row";
+import { PortfolioPurchaseForm } from "@/components/portfolio/portfolio-purchase-form";
+import { PortfolioSaleForm } from "@/components/portfolio/portfolio-sale-form";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, Container, Section } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -19,7 +23,7 @@ import {
 
 export const metadata: Metadata = { title: "Portfolio" };
 
-type PageProps = { searchParams: Promise<{ limit?: string; error?: string }> };
+type PageProps = { searchParams: Promise<{ limit?: string; error?: string; transactions?: string }> };
 type Numeric = number | string | null;
 type PortfolioRow = { id: string; name: string; base_currency: string; created_at: string };
 type HoldingRow = { id: string; portfolio_id: string; ticker: string; quantity: Numeric; average_cost: Numeric; currency: string; acquired_at: string | null; created_at: string };
@@ -45,6 +49,12 @@ type SnapshotRow = {
   invested_capital: Numeric;
   unrealized_pl: Numeric;
   unrealized_pl_percent: Numeric;
+  realized_pl: Numeric;
+  dividend_income: Numeric;
+  standalone_fees: Numeric;
+  trading_fees: Numeric;
+  total_fees: Numeric;
+  total_pl: Numeric;
   portfolio_score: Numeric;
   risk_score: Numeric;
   valuation_score: Numeric;
@@ -52,6 +62,7 @@ type SnapshotRow = {
   growth_score: Numeric;
   momentum_score: Numeric;
   diversification_score: Numeric;
+  ledger_revision: Numeric;
   holdings: SnapshotHolding[] | null;
   failures: Array<{ ticker?: string; reason?: string }> | null;
   analysis_summary: { strongestHolding?: string | null; weakestHolding?: string | null; largestPosition?: string | null; largestPositionWeight?: number | null; completeValuation?: boolean } | null;
@@ -108,6 +119,7 @@ function recommendationTone(recommendation: string | null | undefined) {
 
 export default async function PortfolioPage({ searchParams }: PageProps) {
   const [params, user, locale] = await Promise.all([searchParams, getCurrentUser(), getLocale()]);
+  const showAllTransactions = params.transactions === "all";
   const copy = getP0Copy(locale).portfolio;
   const sv = locale === "sv";
   const supabase = user ? await createClient() : null;
@@ -128,6 +140,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
   const transactionsAvailable = !transactionResult.error;
   const transactions = (transactionResult.data ?? []) as TransactionRow[];
 
+  const revisionResult = supabase && ids.length
+    ? await supabase.from("portfolio_ledger_revisions").select("portfolio_id,revision").in("portfolio_id", ids)
+    : { data: [], error: null };
+  const revisionsAvailable = !revisionResult.error;
+  const currentLedgerRevision = new Map<string, number>();
+  for (const row of (revisionResult.data ?? []) as Array<{ portfolio_id: string; revision: Numeric }>) {
+    const revision = numeric(row.revision);
+    if (revision !== null && Number.isSafeInteger(revision) && revision >= 0) currentLedgerRevision.set(row.portfolio_id, revision);
+  }
+
   const tickers = [...new Set(holdings.map((holding) => holding.ticker.trim().toUpperCase()))];
   const analysisResult = supabase && tickers.length
     ? await supabase.from("analyses").select("id,ticker,created_at,score,recommendation,report").eq("user_id", user?.id ?? "").in("ticker", tickers).order("created_at", { ascending: false })
@@ -141,25 +163,33 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
   const snapshotResult = supabase && ids.length
     ? await supabase.from("portfolio_snapshots")
-      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
+      .select("id,portfolio_id,base_currency,portfolio_value,invested_capital,unrealized_pl,unrealized_pl_percent,realized_pl,dividend_income,standalone_fees,trading_fees,total_fees,total_pl,portfolio_score,risk_score,valuation_score,quality_score,growth_score,momentum_score,diversification_score,ledger_revision,holdings,failures,analysis_summary,prices_updated_at,analyses_updated_at,created_at")
       .in("portfolio_id", ids).order("created_at", { ascending: false }).limit(60)
     : { data: [], error: null };
-  const snapshotsAvailable = !snapshotResult.error;
+  const snapshotsAvailable = !snapshotResult.error && revisionsAvailable;
   const snapshots = (snapshotResult.data ?? []) as SnapshotRow[];
   const latestSnapshot = new Map<string, SnapshotRow>();
-  for (const snapshot of snapshots) if (!latestSnapshot.has(snapshot.portfolio_id)) latestSnapshot.set(snapshot.portfolio_id, snapshot);
+  for (const snapshot of snapshots) {
+    const currentRevision = currentLedgerRevision.get(snapshot.portfolio_id);
+    const snapshotRevision = numeric(snapshot.ledger_revision);
+    if (snapshotRevision === currentRevision && !latestSnapshot.has(snapshot.portfolio_id)) latestSnapshot.set(snapshot.portfolio_id, snapshot);
+  }
 
   const feedback = params.limit
     ? copy.limit
     : params.error === "transaction_input"
-      ? (sv ? "Kontrollera antal, pris, datum, avgift och valuta." : "Check quantity, price, date, fee and currency.")
-      : params.error === "transaction_save"
-        ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
-        : params.error === "transaction_delete"
-          ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
-          : params.error
-            ? copy.error
-            : null;
+      ? (sv ? "Kontrollera bolag, antal, pris, datum, avgift och valuta." : "Check company, quantity, price, date, fee and currency.")
+      : params.error === "holding_identity"
+        ? (sv ? "Bolaget kunde inte verifieras. Sök igen och välj rätt bolag från listan." : "The company could not be verified. Search again and select the correct company from the list.")
+        : params.error === "sell_quantity"
+          ? (sv ? "Försäljningen kan inte registreras eftersom antalet överskrider den tillgängliga positionen på valt datum." : "The sale cannot be recorded because the quantity exceeds the available position on the selected date.")
+          : params.error === "transaction_save"
+            ? (sv ? "Transaktionen kunde inte sparas. Kontrollera innehavet och försök igen." : "The transaction could not be saved. Check the position and try again.")
+            : params.error === "transaction_delete"
+              ? (sv ? "Transaktionen kunde inte tas bort." : "The transaction could not be deleted.")
+              : params.error
+                ? copy.error
+                : null;
   const today = new Date().toISOString().slice(0, 10);
 
   return (
@@ -167,7 +197,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
       <Container>
         <p className="text-sm font-semibold text-[#e1cb95]">{copy.kicker}</p>
         <h1 className="serif mt-2 text-3xl font-semibold sm:text-4xl">{sv ? "Din riktiga portfölj, inte bara en tickerlista" : "Your actual portfolio, not just a ticker list"}</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera varje köp med antal, pris och datum. StockBox räknar cost basis, kopplar dina senaste analyser till positionerna och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record each purchase with quantity, price and date. StockBox calculates cost basis, connects your latest research to each position and saves snapshots so you can follow the portfolio over time."}</p>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#9aa7b8]">{sv ? "Registrera köp, försäljningar, utdelningar och avgifter. StockBox räknar cost basis och realiserat resultat från hela transaktionskedjan, normaliserar historiska kassaflöden till basvalutan och sparar snapshots så att du kan följa portföljens utveckling över tid." : "Record purchases, sales, dividends and fees. StockBox calculates cost basis and realized performance from the complete transaction chain, normalizes historical cash flows into the base currency and saves snapshots so you can follow the portfolio over time."}</p>
 
         {!user ? (
           <Card className="mt-8">
@@ -198,19 +228,14 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
 
               <Card>
                 <h2 className="font-semibold">{sv ? "Registrera ett köp" : "Record a purchase"}</h2>
-                <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Flera köp i samma aktie sparas separat och räknas ihop till korrekt genomsnittligt inköpspris." : "Multiple purchases of the same stock are stored separately and combined into the correct average purchase price."}</p>
+                <p className="mt-2 text-xs leading-5 text-[#9aa7b8]">{sv ? "Sök efter bolaget och välj rätt aktie innan du registrerar köpet. Flera köp i samma aktie sparas separat och räknas ihop till korrekt genomsnittligt inköpspris." : "Search for the company and select the correct security before recording the purchase. Multiple purchases of the same stock are stored separately and combined into the correct average purchase price."}</p>
                 {portfolios.length ? (
-                  <form action={addHoldingAction} className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <select name="portfolioId" required aria-label={copy.portfolio} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3">
-                      {portfolios.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                    <input name="ticker" required maxLength={16} placeholder={copy.ticker} aria-label={copy.ticker} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3 uppercase" />
-                    <input name="quantity" required type="number" min="0.000001" step="any" placeholder={copy.quantity} aria-label={copy.quantity} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <input name="averageCost" required type="number" min="0" step="any" placeholder={sv ? "Pris per aktie" : "Price per share"} aria-label={sv ? "Pris per aktie" : "Price per share"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <input name="purchaseDate" required type="date" max={today} defaultValue={today} aria-label={sv ? "Inköpsdatum" : "Purchase date"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" />
-                    <div className="grid grid-cols-[1fr_1.2fr] gap-2"><input name="currency" required defaultValue="SEK" maxLength={3} pattern="[A-Za-z]{3}" aria-label={copy.currency} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3 uppercase" /><input name="fees" type="number" min="0" step="any" defaultValue="0" aria-label={sv ? "Avgift" : "Fee"} placeholder={sv ? "Avgift" : "Fee"} className="h-11 rounded-md border border-white/12 bg-[#07111f] px-3" /></div>
-                    <Button className="min-h-11 sm:col-span-2 xl:col-span-3"><Plus className="h-4 w-4" aria-hidden="true" />{sv ? "Lägg till köp" : "Add purchase"}</Button>
-                  </form>
+                  <PortfolioPurchaseForm
+                    portfolios={portfolios.map((item) => ({ id: item.id, name: item.name, baseCurrency: item.base_currency }))}
+                    locale={locale}
+                    today={today}
+                    action={addHoldingAction}
+                  />
                 ) : <p className="mt-3 text-sm text-[#9aa7b8]">{copy.createFirst}</p>}
               </Card>
             </div>
@@ -223,6 +248,16 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                   ? portfolioTransactions.map((row) => ({ id: row.id, ticker: row.ticker, type: row.transaction_type, quantity: numeric(row.quantity), price: numeric(row.price), cashAmount: numeric(row.cash_amount), fees: numeric(row.fees), currency: row.currency, executedAt: row.executed_at }))
                   : portfolioHoldings.map((holding) => ({ id: holding.id, ticker: holding.ticker, type: "buy", quantity: numeric(holding.quantity), price: numeric(holding.average_cost), fees: 0, currency: holding.currency, executedAt: holding.acquired_at ?? holding.created_at.slice(0, 10) }));
                 const positions = buildPortfolioPositions(transactionInputs);
+                const activePositionKeys = new Set(positions.map((position) => `${position.ticker}:${position.currency}`));
+                const closedCashFlowPositions = portfolioTransactions.reduce<Array<{ ticker: string; currency: string }>>((closed, transaction) => {
+                  if (transaction.transaction_type !== "buy") return closed;
+                  const ticker = transaction.ticker.trim().toUpperCase();
+                  const currency = transaction.currency.trim().toUpperCase();
+                  const key = `${ticker}:${currency}`;
+                  if (!ticker || !currency || activePositionKeys.has(key) || closed.some((identity) => `${identity.ticker}:${identity.currency}` === key)) return closed;
+                  closed.push({ ticker, currency });
+                  return closed;
+                }, []);
                 const latest = latestSnapshot.get(portfolio.id) ?? null;
                 const history = snapshots.filter((snapshot) => snapshot.portfolio_id === portfolio.id).slice(0, 10);
                 const snapshotHoldings = Array.isArray(latest?.holdings) ? latest.holdings : [];
@@ -244,16 +279,34 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                       </form>
                     </div>
 
-                    {positions.length ? (
+                    {positions.length || portfolioTransactions.length ? (
                       <>
-                        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
+
+                        {latest ? (
+                        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Portföljvärde" : "Portfolio value"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.portfolio_value, portfolio.base_currency, locale)}</p></div>
                           <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Investerat kapital" : "Invested capital"}</p><p className="mt-1 text-lg font-semibold">{money(latest?.invested_capital, portfolio.base_currency, locale)}</p></div>
-                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest?.unrealized_pl_percent)})</span></p></div>
-                          <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest?.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
+                          <div className="rounded-lg border border-white/10 bg-[#07111f]/70 p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 text-lg font-semibold ${(numeric(latest?.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest?.total_pl, portfolio.base_currency, locale)}</p></div>
                         </div>
 
-                        <PortfolioAnalyzer portfolioId={portfolio.id} holdings={analyzerHoldings} locale={locale} lastSnapshotAt={latest?.created_at ?? null} />
+                        ) : null}
+
+                        {latest ? (
+                          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Realiserat P/L" : "Realized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.realized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.realized_pl, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Orealiserat P/L" : "Unrealized P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.unrealized_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.unrealized_pl, portfolio.base_currency, locale)} <span className="text-xs">({percentage(latest.unrealized_pl_percent)})</span></p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Utdelningar" : "Dividends"}</p><p className="mt-1 font-semibold text-emerald-200">{money(latest.dividend_income, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><p className="text-xs text-[#8f9bac]">{sv ? "Avgifter" : "Fees"}</p><p className="mt-1 font-semibold text-red-200">{money(latest.total_fees, portfolio.base_currency, locale)}</p><p className="mt-1 text-[10px] text-[#6f7b8c]">{sv ? "Courtage" : "Trading"}: {money(latest.trading_fees, portfolio.base_currency, locale)} · {sv ? "Övrigt" : "Other"}: {money(latest.standalone_fees, portfolio.base_currency, locale)}</p></div>
+                            <div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className={`mt-1 font-semibold ${(numeric(latest.total_pl) ?? 0) >= 0 ? "text-emerald-200" : "text-red-200"}`}>{money(latest.total_pl, portfolio.base_currency, locale)}</p></div>
+                          </div>
+                        ) : null}
+
+                        {positions.length ? (
+                          <>
+                        {latest ? (
+                          <div className="mt-5 rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 p-3"><p className="text-xs text-[#bba975]">StockBox Portfolio Score</p><p className="mt-1 text-lg font-semibold text-[#f4efe5]">{score(latest.portfolio_score)}<span className="text-xs text-[#8f9bac]">/100</span></p></div>
+                        ) : null}
 
                         {latest ? (
                           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -266,7 +319,7 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                         ) : null}
 
                         <div className="mt-6">
-                          <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Positioner" : "Positions"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Mobilanpassade kort med inköpsdata, marknadsläge och senaste StockBox-signaler." : "Mobile-friendly cards with purchase data, market state and latest StockBox signals."}</p></div>{latest ? <p className="text-xs text-[#7f8b9b]">{sv ? "Priser uppdaterade" : "Prices updated"}: {dateTime(latest.prices_updated_at, locale)}</p> : null}</div>
+                          <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Positioner" : "Positions"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Mobilanpassade kort med inköpsdata, marknadsläge, kassaflöden och senaste StockBox-signaler." : "Mobile-friendly cards with purchase data, market state, cash flows and latest StockBox signals."}</p></div>{latest ? <p className="text-xs text-[#7f8b9b]">{sv ? "Priser uppdaterade" : "Prices updated"}: {dateTime(latest.prices_updated_at, locale)}</p> : null}</div>
                           <div className="mt-3 grid gap-3 xl:grid-cols-2">
                             {positions.map((position) => {
                               const analysisRows = analysisHistory.get(position.ticker) ?? [];
@@ -307,18 +360,43 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                   <div className="mt-4 flex flex-wrap items-center gap-2"><div className="rounded-lg border border-[#e1cb95]/20 bg-[#e1cb95]/5 px-3 py-2"><span className="text-xs text-[#bba975]">Score</span><span className="ml-2 font-semibold">{currentScore === null ? "—" : Math.round(currentScore)}</span>{scoreDelta !== null ? <span className={`ml-2 text-xs ${scoreDelta >= 0 ? "text-emerald-200" : "text-red-200"}`}>{scoreDelta >= 0 ? "+" : ""}{scoreDelta.toFixed(1)}</span> : null}</div><span className="text-xs text-[#7f8b9b]">{sv ? "Analys" : "Analysis"}: {dateTime(latestAnalysis?.created_at, locale)}</span></div>
                                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{dims.map(([label, value]) => <div key={label} className="rounded-md bg-white/[0.035] p-2"><p className="truncate text-[10px] text-[#7f8b9b]">{label}</p><p className="mt-1 text-xs font-semibold">{value === null ? "—" : Math.round(value)}</p></div>)}</div>
                                   <p className="mt-3 text-[11px] leading-5 text-[#6f7b8c]">{sv ? `Första registrerade köp: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell visas som StockBox analysindikator, aldrig som garanti.` : `First recorded purchase: ${position.firstPurchaseDate ?? "—"}. Buy/Hold/Sell is shown as a StockBox research indicator, never a guarantee.`}</p>
+                                  <PortfolioSaleForm portfolioId={portfolio.id} ticker={position.ticker} quantity={position.quantity} currency={position.currency} today={today} locale={locale} />
+                                  <PortfolioCashFlowForm portfolioId={portfolio.id} ticker={position.ticker} currency={position.currency} today={today} locale={locale} />
                                 </div>
                               );
                             })}
                           </div>
                         </div>
+                          </>
+                        ) : (
+                          <div className="mt-6 rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-6 text-center">
+                            <BriefcaseBusiness className="mx-auto h-8 w-8 text-[#e1cb95]" />
+                            <h3 className="mt-3 font-semibold">{sv ? "Inga aktiva positioner" : "No active positions"}</h3>
+                            <p className="mx-auto mt-2 max-w-lg text-sm text-[#8f9bac]">{sv ? "Alla positioner är stängda. Transaktionshistorik, portföljhistorik och kassaflöden finns kvar nedan." : "All positions are closed. Transaction history, portfolio history and cash-flow entries remain available below."}</p>
+                          </div>
+                        )}
+
+                        {closedCashFlowPositions.length ? (
+                          <div className="mt-7 border-t border-white/10 pt-6">
+                            <h3 className="font-semibold text-[#f4efe5]">{sv ? "Stängda positioner" : "Closed positions"}</h3>
+                            <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Utdelningar och värdepappersspecifika avgifter kan fortfarande registreras mot värdepapper som tidigare funnits i portföljen." : "Dividends and security-specific fees can still be recorded against securities previously held in this portfolio."}</p>
+                            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                              {closedCashFlowPositions.map((identity) => (
+                                <div key={`closed-${identity.ticker}-${identity.currency}`} className="rounded-xl border border-white/10 bg-[#0b1829] p-4">
+                                  <div className="flex items-center justify-between gap-3"><p className="font-mono text-sm font-semibold text-[#e1cb95]">{identity.ticker}</p><span className="text-xs text-[#8f9bac]">{identity.currency}</span></div>
+                                  <PortfolioCashFlowForm portfolioId={portfolio.id} ticker={identity.ticker} currency={identity.currency} today={today} locale={locale} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <h3 className="font-semibold text-[#f4efe5]">{sv ? "Köp- och transaktionshistorik" : "Purchase and transaction history"}</h3>
-                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp är en egen rad. Ändringar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase is its own row. Changes rebuild position cost basis from the complete transaction chain."}</p>
+                          <p className="mt-1 text-xs leading-5 text-[#8f9bac]">{sv ? "Varje köp, försäljning, utdelning och avgift är en egen rad. Köp och försäljningar räknar om positionens cost basis från hela transaktionskedjan." : "Every purchase, sale, dividend and fee is its own row. Purchases and sales rebuild position cost basis from the complete transaction chain."}</p>
                           {transactionsAvailable && portfolioTransactions.length ? (
                             <div className="mt-3 grid gap-2">
-                              {portfolioTransactions.slice(0, 30).map((transaction) => (
+                              {portfolioTransactions.slice(0, showAllTransactions ? portfolioTransactions.length : 30).map((transaction) => (
                                 <div key={transaction.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3">
                                   {transaction.transaction_type === "buy" || transaction.transaction_type === "sell" ? (
                                     <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
@@ -335,17 +413,35 @@ export default async function PortfolioPage({ searchParams }: PageProps) {
                                       <form action={removePortfolioTransactionAction}><input type="hidden" name="id" value={transaction.id} /><Button variant="ghost" className="min-h-10" title={sv ? "Ta bort transaktion" : "Delete transaction"}><Trash2 className="h-4 w-4" /><span className="sr-only">{sv ? "Ta bort" : "Delete"} {transaction.ticker}</span></Button></form>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center justify-between gap-3 text-sm"><span><span className="mr-2 rounded bg-white/8 px-2 py-1 text-[10px] uppercase">{transaction.transaction_type}</span><strong>{transaction.ticker}</strong> · {money(transaction.cash_amount, transaction.currency, locale)} · {transaction.executed_at}</span><form action={removePortfolioTransactionAction}><input type="hidden" name="id" value={transaction.id} /><Button variant="ghost" className="min-h-10"><Trash2 className="h-4 w-4" /><span className="sr-only">{sv ? "Ta bort" : "Delete"}</span></Button></form></div>
+                                    <PortfolioCashFlowHistoryRow
+                                      id={transaction.id}
+                                      ticker={transaction.ticker}
+                                      transactionType={transaction.transaction_type}
+                                      cashAmount={transaction.cash_amount}
+                                      currency={transaction.currency}
+                                      executedAt={transaction.executed_at}
+                                      today={today}
+                                      locale={locale}
+                                    />
                                   )}
                                 </div>
                               ))}
+                              {portfolioTransactions.length > 30 ? (
+                                <div className="pt-1">
+                                  <ButtonLink href={showAllTransactions ? "/portfolio" : "/portfolio?transactions=all"} variant="ghost">
+                                    {showAllTransactions
+                                      ? (sv ? "Visa färre" : "Show fewer")
+                                      : (sv ? `Visa alla ${portfolioTransactions.length}` : `Show all ${portfolioTransactions.length}`)}
+                                  </ButtonLink>
+                                </div>
+                              ) : null}
                             </div>
                           ) : <p className="mt-3 text-sm text-[#7f8b9b]">{transactionsAvailable ? (sv ? "Ingen transaktionshistorik ännu." : "No transaction history yet.") : (sv ? "Historiken aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
                         </div>
 
                         <div className="mt-7 border-t border-white/10 pt-6">
                           <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-semibold text-[#f4efe5]">{sv ? "Portfolio history" : "Portfolio history"}</h3><p className="mt-1 text-xs text-[#8f9bac]">{sv ? "Varje helportföljanalys sparar en snapshot för senare trendgrafer och jämförelser." : "Every whole-portfolio analysis saves a snapshot for future trend charts and comparisons."}</p></div>{summary?.strongestHolding || summary?.weakestHolding ? <p className="text-xs text-[#8f9bac]">{sv ? "Starkast" : "Strongest"}: <strong className="text-[#c9d2df]">{summary.strongestHolding ?? "—"}</strong> · {sv ? "Svagast" : "Weakest"}: <strong className="text-[#c9d2df]">{summary.weakestHolding ?? "—"}</strong></p> : null}</div>
-                          {history.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{history.map((snapshot) => <div key={snapshot.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><div className="flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-xs text-[#8f9bac]"><CalendarDays className="h-3.5 w-3.5" />{dateTime(snapshot.created_at, locale)}</span>{(numeric(snapshot.unrealized_pl) ?? 0) >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-200" /> : <TrendingDown className="h-4 w-4 text-red-200" />}</div><div className="mt-3 grid grid-cols-3 gap-2"><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Värde" : "Value"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.portfolio_value, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">Score</p><p className="mt-1 text-xs font-semibold">{score(snapshot.portfolio_score)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Risk" : "Risk"}</p><p className="mt-1 text-xs font-semibold">{score(snapshot.risk_score)}</p></div></div>{snapshot.failures?.length ? <p className="mt-2 text-[10px] text-amber-200">{snapshot.failures.length} {sv ? "datavarningar" : "data warnings"}</p> : null}</div>)}</div> : <p className="mt-3 text-sm text-[#7f8b9b]">{snapshotsAvailable ? (sv ? "Kör din första portföljanalys för att skapa historik." : "Run your first portfolio analysis to create history.") : (sv ? "Historik aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
+                          {history.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{history.map((snapshot) => <div key={snapshot.id} className="rounded-lg border border-white/10 bg-white/[0.025] p-3"><div className="flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1.5 text-xs text-[#8f9bac]"><CalendarDays className="h-3.5 w-3.5" />{dateTime(snapshot.created_at, locale)}</span>{(numeric(snapshot.total_pl) ?? numeric(snapshot.unrealized_pl) ?? 0) >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-200" /> : <TrendingDown className="h-4 w-4 text-red-200" />}</div><div className="mt-3 grid grid-cols-3 gap-2"><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Värde" : "Value"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.portfolio_value, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">{sv ? "Totalt P/L" : "Total P/L"}</p><p className="mt-1 text-xs font-semibold">{money(snapshot.total_pl, snapshot.base_currency, locale)}</p></div><div><p className="text-[10px] text-[#6f7b8c]">Score</p><p className="mt-1 text-xs font-semibold">{score(snapshot.portfolio_score)}</p></div></div>{snapshot.failures?.length ? <p className="mt-2 text-[10px] text-amber-200">{snapshot.failures.length} {sv ? "datavarningar" : "data warnings"}</p> : null}</div>)}</div> : <p className="mt-3 text-sm text-[#7f8b9b]">{snapshotsAvailable ? (sv ? "Kör din första portföljanalys för att skapa historik." : "Run your first portfolio analysis to create history.") : (sv ? "Historik aktiveras efter databasmigreringen." : "History activates after the database migration.")}</p>}
                         </div>
                       </>
                     ) : (

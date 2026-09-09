@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   holdingUpdate: vi.fn(),
   holdingDelete: vi.fn(),
   holdingEq: vi.fn(),
+  transactionSelect: vi.fn(),
+  transactionEq: vi.fn(),
+  transactionLimit: vi.fn(),
+  transactionMaybeSingle: vi.fn(),
   searchCompanies: vi.fn(),
   resolveCanonicalCompanySelection: vi.fn(),
 }));
@@ -35,6 +39,9 @@ import {
   addWatchlistItemAction,
   createPortfolioAction,
   deletePortfolioAction,
+  recordPortfolioDividendAction,
+  recordPortfolioFeeAction,
+  recordPortfolioSaleAction,
   removeHoldingAction,
   updateHoldingAction,
 } from "../../src/lib/workspace/actions";
@@ -68,17 +75,39 @@ describe("workspace server actions", () => {
       delete: mocks.holdingDelete,
       eq: mocks.holdingEq,
     };
+    const transactionQuery = {
+      select: mocks.transactionSelect,
+      eq: mocks.transactionEq,
+      limit: mocks.transactionLimit,
+      maybeSingle: mocks.transactionMaybeSingle,
+    };
     mocks.portfolioSelect.mockReturnValue(portfolioQuery);
     mocks.portfolioEq.mockReturnValue(portfolioQuery);
     mocks.portfolioDelete.mockReturnValue(portfolioQuery);
     mocks.portfolioMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000222" } });
     mocks.holdingSelect.mockReturnValue(holdingQuery);
     mocks.holdingEq.mockReturnValue(holdingQuery);
-    mocks.holdingMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000333", portfolio_id: "00000000-0000-4000-8000-000000000222" } });
+    mocks.holdingMaybeSingle.mockResolvedValue({
+      data: {
+        id: "00000000-0000-4000-8000-000000000333",
+        portfolio_id: "00000000-0000-4000-8000-000000000222",
+        ticker: "AAPL",
+        quantity: "5",
+        currency: "USD",
+      },
+    });
     mocks.holdingInsert.mockResolvedValue({ error: null });
     mocks.holdingUpdate.mockReturnValue(holdingQuery);
     mocks.holdingDelete.mockReturnValue(holdingQuery);
-    mocks.from.mockImplementation((table: string) => table === "portfolios" ? portfolioQuery : holdingQuery);
+    mocks.transactionSelect.mockReturnValue(transactionQuery);
+    mocks.transactionEq.mockReturnValue(transactionQuery);
+    mocks.transactionLimit.mockReturnValue(transactionQuery);
+    mocks.transactionMaybeSingle.mockResolvedValue({ data: { id: "00000000-0000-4000-8000-000000000444" } });
+    mocks.from.mockImplementation((table: string) => {
+      if (table === "portfolios") return portfolioQuery;
+      if (table === "portfolio_transactions") return transactionQuery;
+      return holdingQuery;
+    });
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
   });
 
@@ -104,6 +133,7 @@ describe("workspace server actions", () => {
     await addHoldingAction(data({
       portfolioId: "00000000-0000-4000-8000-000000000222",
       ticker: "aapl",
+      companyName: "Apple Inc.",
       quantity: "2",
       averageCost: "210",
       currency: "usd",
@@ -121,6 +151,117 @@ describe("workspace server actions", () => {
       p_executed_at: "2026-09-01",
       p_fees: 3.5,
       p_cash_amount: null,
+      p_security_id: null,
+      p_notes: null,
+    });
+  });
+
+  it("records a sale against an existing owned position through the transaction rpc", async () => {
+    await recordPortfolioSaleAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      quantity: "1.5",
+      price: "230",
+      currency: "usd",
+      saleDate: "2026-09-06",
+      fees: "2",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "sell",
+      p_quantity: 1.5,
+      p_price: 230,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 2,
+      p_cash_amount: null,
+      p_security_id: null,
+      p_notes: null,
+    });
+  });
+
+  it("rejects a sale larger than the current owned quantity before calling the rpc", async () => {
+    await recordPortfolioSaleAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      quantity: "6",
+      price: "230",
+      currency: "usd",
+      saleDate: "2026-09-06",
+      fees: "0",
+    }));
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/portfolio?error=sell_quantity");
+    expect(mocks.rpc).not.toHaveBeenCalledWith("record_portfolio_transaction", expect.anything());
+  });
+
+  it("records dividend cash flow against an existing owned position", async () => {
+    await recordPortfolioDividendAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "30.5",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "dividend",
+      p_quantity: null,
+      p_price: null,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 0,
+      p_cash_amount: 30.5,
+      p_security_id: null,
+      p_notes: null,
+    });
+  });
+
+  it("records dividend cash flow for a closed position when the security exists in the ledger", async () => {
+    await recordPortfolioDividendAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "12.75",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.holdingSelect).not.toHaveBeenCalled();
+    expect(mocks.transactionSelect).toHaveBeenCalledWith("id");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("portfolio_id", "00000000-0000-4000-8000-000000000222");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("ticker", "AAPL");
+    expect(mocks.transactionEq).toHaveBeenCalledWith("currency", "USD");
+    expect(mocks.transactionLimit).toHaveBeenCalledWith(1);
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", expect.objectContaining({
+      p_transaction_type: "dividend",
+      p_cash_amount: 12.75,
+    }));
+    expect(mocks.redirect).not.toHaveBeenCalledWith("/portfolio?error=holding_identity");
+  });
+
+  it("records a security-specific standalone fee against an existing owned position", async () => {
+    await recordPortfolioFeeAction(data({
+      portfolioId: "00000000-0000-4000-8000-000000000222",
+      ticker: "aapl",
+      amount: "5.25",
+      currency: "usd",
+      transactionDate: "2026-09-06",
+    }));
+
+    expect(mocks.rpc).toHaveBeenCalledWith("record_portfolio_transaction", {
+      p_portfolio_id: "00000000-0000-4000-8000-000000000222",
+      p_ticker: "AAPL",
+      p_transaction_type: "fee",
+      p_quantity: null,
+      p_price: null,
+      p_currency: "USD",
+      p_executed_at: "2026-09-06",
+      p_fees: 0,
+      p_cash_amount: 5.25,
       p_security_id: null,
       p_notes: null,
     });

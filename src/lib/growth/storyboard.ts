@@ -1,4 +1,13 @@
-import { RenderSpecSchema, type RenderSpec, type RenderTemplate } from "./render-spec";
+import { RenderSpecSchema, type RenderSpec, type RenderTemplate, type VoiceMode } from "./render-spec";
+
+type FounderVoiceMode = Exclude<VoiceMode, "generic_english">;
+
+const DEFAULT_VOICE_STYLE_INTENSITY: Record<FounderVoiceMode, number> = {
+  serious_analysis: 35,
+  educational: 50,
+  hook: 70,
+  excited: 85,
+};
 
 export type GrowthStoryboardInput = {
   contentId: string;
@@ -10,6 +19,8 @@ export type GrowthStoryboardInput = {
   script: string;
   ctaText: string;
   ctaUrl: string;
+  voiceMode?: FounderVoiceMode;
+  voiceStyleIntensity?: number;
   allowGeneratedScene?: boolean;
   preferredVisualRefs?: string[];
 };
@@ -67,6 +78,7 @@ export function buildGrowthStoryboard(input: GrowthStoryboardInput): RenderSpec 
   const bodies = sentenceChunks(input.script, 3);
   const refs = Array.isArray(input.preferredVisualRefs) ? input.preferredVisualRefs.filter(Boolean) : [];
   const visualKind = (index: number) => refs[index] ? "stockbox_ui" as const : index === 1 ? "chart" as const : "motion_graphic" as const;
+  const founderVoiceMode: FounderVoiceMode = input.voiceMode ?? "educational";
 
   const scenes: RenderSpec["scenes"] = [
     {
@@ -144,7 +156,10 @@ export function buildGrowthStoryboard(input: GrowthStoryboardInput): RenderSpec 
     title: compact(input.title, 220),
     hook: compact(input.hook, 500),
     script: compact(input.script, 6_000),
-    voiceMode: input.language === "sv" ? "educational" as const : "generic_english" as const,
+    voiceMode: input.language === "sv" ? founderVoiceMode : "generic_english" as const,
+    ...(input.language === "sv" ? {
+      voiceStyleIntensity: input.voiceStyleIntensity ?? DEFAULT_VOICE_STYLE_INTENSITY[founderVoiceMode],
+    } : {}),
     scenes,
     subtitles: subtitleChunks(input.script),
     cta: { text: compact(input.ctaText, 220), url: input.ctaUrl },
