@@ -133,32 +133,37 @@ export function toRecommendationOutcomeV3Row(
     benchmarkObservedAt = normalizedText(input.benchmarkObservedAt);
     benchmarkPriceSource = normalizedText(input.benchmarkPriceSource);
 
-    const benchmarkShapeComplete = benchmarkTicker !== null
-      && benchmarkEntryObservedAt !== null
-      && input.benchmarkEntryPrice !== null
-      && finitePositive(input.benchmarkEntryPrice)
-      && benchmarkObservedAt !== null
-      && input.benchmarkObservedPrice !== null
-      && finitePositive(input.benchmarkObservedPrice)
-      && input.benchmarkReturn !== null
-      && Number.isFinite(input.benchmarkReturn)
-      && input.excessReturn !== null
-      && Number.isFinite(input.excessReturn)
-      && benchmarkPriceSource !== null;
+    const benchmarkEntryPriceInput = input.benchmarkEntryPrice;
+    const benchmarkObservedPriceInput = input.benchmarkObservedPrice;
+    const benchmarkReturnInput = input.benchmarkReturn;
+    const excessReturnInput = input.excessReturn;
 
-    if (!benchmarkShapeComplete) {
+    if (
+      benchmarkTicker === null
+      || benchmarkEntryObservedAt === null
+      || benchmarkEntryPriceInput === null
+      || !finitePositive(benchmarkEntryPriceInput)
+      || benchmarkObservedAt === null
+      || benchmarkObservedPriceInput === null
+      || !finitePositive(benchmarkObservedPriceInput)
+      || benchmarkReturnInput === null
+      || !Number.isFinite(benchmarkReturnInput)
+      || excessReturnInput === null
+      || !Number.isFinite(excessReturnInput)
+      || benchmarkPriceSource === null
+    ) {
       throw new Error("INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_EVIDENCE");
     }
 
-    benchmarkEntryPrice = input.benchmarkEntryPrice;
-    benchmarkObservedPrice = input.benchmarkObservedPrice;
-    benchmarkReturn = input.benchmarkReturn;
-    excessReturn = input.excessReturn;
+    benchmarkEntryPrice = benchmarkEntryPriceInput;
+    benchmarkObservedPrice = benchmarkObservedPriceInput;
+    benchmarkReturn = benchmarkReturnInput;
+    excessReturn = excessReturnInput;
 
-    if (!returnMatches(benchmarkReturn, returnFromPrices(benchmarkEntryPrice, benchmarkObservedPrice))) {
+    if (!returnMatches(benchmarkReturnInput, returnFromPrices(benchmarkEntryPriceInput, benchmarkObservedPriceInput))) {
       throw new Error("INVALID_RECOMMENDATION_OUTCOME_BENCHMARK_RETURN");
     }
-    if (!returnMatches(excessReturn, input.securityReturn - benchmarkReturn)) {
+    if (!returnMatches(excessReturnInput, input.securityReturn - benchmarkReturnInput)) {
       throw new Error("INVALID_RECOMMENDATION_OUTCOME_EXCESS_RETURN");
     }
   } else if (input.directionalHit !== null) {
