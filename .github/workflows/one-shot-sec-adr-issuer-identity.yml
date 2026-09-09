@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply exact SEC issuer identity guard
+      - name: Apply SEC issuer identity guard
         shell: bash
         run: |
           python - <<'PY'
@@ -29,14 +29,8 @@ jobs:
 
           path = Path("src/lib/data/sec.ts")
           source = path.read_text()
-          marker = '''  if (!availableFactSets.length) {
-            return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
-          }
-          '''
-          insertion = '''  if (!availableFactSets.length) {
-            return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
-          }
-          const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));
+          anchor = "const facts = mergeSecCompanyFacts(availableFactSets);"
+          guard = '''const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));
           const mismatchedSourceCik = availableFactSets
             .map((factSet) => padCik(factSet.cik))
             .find((sourceCik) => !allowedSourceCiks.has(sourceCik));
@@ -49,10 +43,10 @@ jobs:
             };
           }
           '''
-          count = source.count(marker)
+          count = source.count(anchor)
           if count != 1:
-              raise SystemExit(f"Expected exactly one SEC Companyfacts availability marker, found {count}")
-          path.write_text(source.replace(marker, insertion, 1))
+              raise SystemExit(f"Expected exactly one SEC merge anchor, found {count}")
+          path.write_text(source.replace(anchor, guard + anchor, 1))
           PY
       - run: npm ci
       - name: Prove targeted RED test is GREEN
