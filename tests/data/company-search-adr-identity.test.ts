@@ -38,8 +38,8 @@ function adrProvider(overrides: Record<string, unknown> = {}): CompanySearchProv
   };
 }
 
-function exactAdr(results: Awaited<ReturnType<typeof searchCompanyCatalog>>) {
-  return results.find((company) => company.canonicalTicker === "BABA" && company.securityType === "ADR");
+function exactAdr(results: Awaited<ReturnType<typeof searchCompanyCatalog>>, ticker = "BABA") {
+  return results.find((company) => company.canonicalTicker === ticker && company.securityType === "ADR");
 }
 
 describe("global ADR issuer identity", () => {
@@ -69,6 +69,43 @@ describe("global ADR issuer identity", () => {
     }));
     expect(adr?.securityId).toBeUndefined();
     expect(results.filter((company) => company.canonicalTicker === "BABA" && company.matchType?.startsWith("exact_"))).toHaveLength(1);
+  });
+
+  it("attaches a source-backed live ADR mapping only after SEC issuer reconciliation and exposes issuer fundamentals capability", async () => {
+    mocks.fetchSecTickerUniverse.mockResolvedValue([
+      { ticker: "NVO", name: "NOVO NORDISK A/S", cik: "0000353278", exchange: "NYSE", country: "US" },
+    ]);
+
+    const results = await searchCompanyCatalog("NVO", [adrProvider({
+      ticker: "NVO",
+      canonicalTicker: "NVO",
+      name: "Novo Nordisk A/S American Depositary Receipt",
+    })]);
+    const adr = exactAdr(results, "NVO");
+
+    expect(adr).toEqual(expect.objectContaining({
+      ticker: "NVO",
+      canonicalTicker: "NVO",
+      securityType: "ADR",
+      primarySecurity: false,
+      cik: "0000353278",
+      issuerId: "sec:0000353278",
+      entityId: "sec:0000353278",
+      securityId: "adr:sec:0000353278:nvo",
+      depositaryReceipt: expect.objectContaining({
+        issuerId: "sec:0000353278",
+        receiptTicker: "NVO",
+        primaryListingTicker: "NOVO-B.CO",
+        underlyingSharesPerReceipt: 1,
+        mappingVerified: true,
+        ratioVerified: true,
+      }),
+      providerCapabilities: expect.objectContaining({
+        fundamentals: true,
+        marketData: true,
+        providerIds: expect.arrayContaining(["global-adr-provider", "sec-ticker-universe", "sec-companyfacts"]),
+      }),
+    }));
   });
 
   it("fails closed when the SEC universe contains more than one CIK for the same exact ADR ticker", async () => {
