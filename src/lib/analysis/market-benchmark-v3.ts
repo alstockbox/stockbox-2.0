@@ -152,6 +152,27 @@ export function benchmarkForCompanyV3(company: CompanySearchResult): MarketBench
   return exchangeDefinition ? result(exchangeDefinition, "exchange") : null;
 }
 
+/**
+ * Outcome calibration must compare like with like. A fund's listing venue does
+ * not identify its economic exposure: a US-listed ETF can track global equity,
+ * bonds, commodities, a sector, a factor, or a daily-reset leveraged index.
+ * Until StockBox has verified benchmark/index attribution in the specialist
+ * evidence, ETF outcomes remain intentionally unbenchmarked. Their absolute
+ * returns are still persisted, while excess-return and hit-rate evidence stay
+ * null and therefore cannot contaminate calibration.
+ *
+ * Investment companies remain equity securities, so their listing-market
+ * benchmark is retained. Ordinary operating-company archetypes are unchanged.
+ */
+export function benchmarkForRecommendationOutcomeV3(
+  company: CompanySearchResult,
+  analysisArchetype: string,
+): MarketBenchmarkV3 | null {
+  const archetype = analysisArchetype.trim().toLowerCase();
+  if (archetype.startsWith("etf:")) return null;
+  return benchmarkForCompanyV3(company);
+}
+
 export function benchmarkCompanySelectionV3(benchmark: MarketBenchmarkV3): CompanySearchResult {
   return {
     ticker: benchmark.ticker,

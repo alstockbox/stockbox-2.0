@@ -8,7 +8,7 @@ import {
 } from "@/lib/analysis/recommendation-learning-v3";
 import {
   benchmarkCompanySelectionV3,
-  benchmarkForCompanyV3,
+  benchmarkForRecommendationOutcomeV3,
 } from "@/lib/analysis/market-benchmark-v3";
 import type { RecommendationV3Rating } from "@/lib/analysis/recommendation-v3";
 import { resolveCanonicalCompanySelection } from "@/lib/data/company-search";
@@ -295,7 +295,7 @@ export async function handleRecommendationOutcomeJobV3(job: BackgroundJob): Prom
     throw new Error("Verified security outcome prices are unavailable within the allowed date tolerance.");
   }
 
-  const benchmark = benchmarkForCompanyV3(company);
+  const benchmark = benchmarkForRecommendationOutcomeV3(company, audit.analysis_archetype);
   let benchmarkEntry = null as ReturnType<typeof selectEntryPriceObservationV3>;
   let benchmarkObserved = null as ReturnType<typeof selectHorizonPriceObservationV3>;
   if (benchmark) {
