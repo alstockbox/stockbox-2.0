@@ -51,7 +51,7 @@ function etfReport(): UniversalSecurityReport {
         warnings: [],
       },
     },
-  } as UniversalSecurityReport;
+  } as unknown as UniversalSecurityReport;
 }
 
 describe("Recommendation specialist live audit V3", () => {
