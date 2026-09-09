@@ -24,6 +24,17 @@ const adrCompany: CompanySearchResult = {
   entityId: "sec:0000353278",
 };
 
+const adrCompanyWithoutUpstreamIdentity: CompanySearchResult = {
+  ticker: "NVO",
+  canonicalTicker: "NVO",
+  name: "Novo Nordisk A/S ADR",
+  exchange: "NYSE",
+  country: "US",
+  currency: "USD",
+  securityType: "ADR",
+  cik: "0000353278",
+};
+
 describe("SEC ADR issuer fundamentals identity", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -54,5 +65,31 @@ describe("SEC ADR issuer fundamentals identity", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toMatch(/issuer|identity|CIK/i);
+  });
+
+  it("derives a stable SEC issuer entity id after validating the ADR Companyfacts CIK", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/xbrl/companyfacts/")) {
+        return new Response(JSON.stringify({
+          cik: 353278,
+          entityName: "Novo Nordisk A/S",
+          facts: {},
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.includes("/submissions/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected SEC test URL: ${url}`);
+    }));
+
+    const result = await fetchCompanyFundamentalsResult(adrCompanyWithoutUpstreamIdentity);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.entityId).toBe("sec:0000353278");
   });
 });
