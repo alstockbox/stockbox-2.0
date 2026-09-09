@@ -69,8 +69,14 @@ function verifiedIssuerMapping(
   if (!representation.mappingVerified) {
     return { ok: false, reason: "Depositary-receipt issuer mapping has not been independently verified." };
   }
-  if (!company.issuerId || !representation.issuerId || company.issuerId !== representation.issuerId) {
-    return { ok: false, reason: "Depositary-receipt issuer identity does not match the verified issuer mapping." };
+  if (
+    !company.issuerId
+    || !representation.issuerId
+    || company.issuerId !== company.issuerId.trim()
+    || representation.issuerId !== representation.issuerId.trim()
+    || company.issuerId !== representation.issuerId
+  ) {
+    return { ok: false, reason: "Depositary-receipt issuer identity does not match the verified canonical issuer mapping." };
   }
   if (!representation.primaryListingTicker.trim()) {
     return { ok: false, reason: "Depositary-receipt primary listing is unavailable." };
@@ -357,7 +363,6 @@ export function gateDepositaryReceiptValuationInputs(
       "market quote currency does not match the verified depositary-receipt trading currency.",
     );
   }
-
   const valuation = assessDepositaryReceiptValuationAccess(company, fxContext);
   if (!valuation.allowed || valuation.underlyingSharesPerReceipt === null) {
     return disabledValuationInputs(market, fundamentals, valuation.reason);
