@@ -45,6 +45,13 @@ export type ObjectiveRecommendationReanalysisV3 =
   | { status: "retryable_failure"; error: string }
   | { status: "permanent_failure"; error: string };
 
+function requiresSpecialistRecommendationAuditV3(report: UniversalSecurityReport): boolean {
+  if (report.securityAnalysis?.etf || report.securityAnalysis?.investmentCompany) return true;
+  const kind = report.securityClassification?.kind;
+  return kind === "investment_company"
+    || (typeof kind === "string" && kind.endsWith("_etf"));
+}
+
 export function recommendationReviewEventFromAnalysisV3(input: {
   data: UniversalSecurityReport;
   stockbox3?: {
@@ -54,11 +61,13 @@ export function recommendationReviewEventFromAnalysisV3(input: {
     };
   };
 }): RecommendationV3ShadowEvent | null {
-  // Specialist output must win over the pre-enrichment operating-company shadow.
-  // This is essential for investment companies and gives ETFs a native audit
-  // path without ever synthesizing corporate fundamentals.
+  // Specialist output is authoritative for ETFs and investment companies.
+  // If the specialist audit cannot be produced, fail closed instead of falling
+  // back to the pre-enrichment operating-company shadow, which could reintroduce
+  // synthetic corporate assumptions for a specialist security.
   const specialist = createSpecialistRecommendationV3ShadowEvent(input.data);
   if (specialist) return specialist;
+  if (requiresSpecialistRecommendationAuditV3(input.data)) return null;
 
   const shadow = input.stockbox3?.recommendationV3Shadow;
   return shadow?.status === "evaluated" && shadow.event ? shadow.event : null;
