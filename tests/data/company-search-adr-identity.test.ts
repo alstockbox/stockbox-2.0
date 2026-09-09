@@ -105,6 +105,10 @@ describe("global ADR issuer identity", () => {
         marketData: true,
         providerIds: expect.arrayContaining(["global-adr-provider", "sec-ticker-universe", "sec-companyfacts"]),
       }),
+      analysisCapability: expect.objectContaining({
+        fundamentals: "partial",
+        marketData: "available",
+      }),
     }));
   });
 
