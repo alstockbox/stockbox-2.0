@@ -14,6 +14,7 @@ const TARGET_TOLERANCE_DAYS = 7;
 const MIN_BETA_OBSERVATIONS = 52;
 const MAX_BETA_LAG_DAYS = 21;
 const YAHOO_REQUEST_TIMEOUT_MS = 10_000;
+const CORPORATE_ACTIONS_REVALIDATE_SECONDS = 60 * 60 * 6;
 const BETA_BENCHMARK_BY_SUFFIX: Array<[string, string]> = [[".TWO", "^TWII"], [".ST", "^OMX"], [".L", "^FTSE"], [".DE", "^GDAXI"], [".F", "^GDAXI"], [".PA", "^FCHI"], [".AS", "^AEX"], [".SW", "^SSMI"], [".TO", "^GSPTSE"], [".V", "^GSPTSE"], [".AX", "^AXJO"], [".T", "^N225"], [".HK", "^HSI"], [".SS", "000001.SS"], [".SZ", "000001.SS"], [".KS", "^KS11"], [".KQ", "^KS11"], [".TW", "^TWII"], [".NS", "^NSEI"], [".BO", "^BSESN"], [".SA", "^BVSP"], [".MX", "^MXX"], [".BA", "^MERV"], [".MC", "^IBEX"], [".MI", "FTSEMIB.MI"], [".CO", "^OMXC25"], [".HE", "^OMXH25"], [".OL", "OSEAX.OL"], [".SI", "^STI"], [".JK", "^JKSE"], [".KL", "^KLSE"], [".NZ", "^NZ50"]];
 const BETA_BENCHMARK_BY_COUNTRY: Record<string, string> = { US: "^GSPC", "UNITED STATES": "^GSPC", SE: "^OMX", SWEDEN: "^OMX", GB: "^FTSE", UK: "^FTSE", "UNITED KINGDOM": "^FTSE", DE: "^GDAXI", GERMANY: "^GDAXI", FR: "^FCHI", FRANCE: "^FCHI", NL: "^AEX", NETHERLANDS: "^AEX", CH: "^SSMI", SWITZERLAND: "^SSMI", CA: "^GSPTSE", CANADA: "^GSPTSE", AU: "^AXJO", AUSTRALIA: "^AXJO", JP: "^N225", JAPAN: "^N225", HK: "^HSI", "HONG KONG": "^HSI", CN: "000001.SS", CHINA: "000001.SS", KR: "^KS11", "SOUTH KOREA": "^KS11", TW: "^TWII", TAIWAN: "^TWII", IN: "^NSEI", INDIA: "^NSEI", BR: "^BVSP", BRAZIL: "^BVSP", MX: "^MXX", MEXICO: "^MXX", AR: "^MERV", ARGENTINA: "^MERV", ES: "^IBEX", SPAIN: "^IBEX", IT: "FTSEMIB.MI", ITALY: "FTSEMIB.MI", DK: "^OMXC25", DENMARK: "^OMXC25", FI: "^OMXH25", FINLAND: "^OMXH25", NO: "OSEAX.OL", NORWAY: "OSEAX.OL", SG: "^STI", SINGAPORE: "^STI", ID: "^JKSE", INDONESIA: "^JKSE", MY: "^KLSE", MALAYSIA: "^KLSE", NZ: "^NZ50", "NEW ZEALAND": "^NZ50" };
 const BETA_BENCHMARK_BY_EXCHANGE: Record<string, string> = {
@@ -336,6 +337,74 @@ async function requestChart(symbol: string, range: "2y" | "10y" = "2y"): Promise
   }
 }
 
+type CorporateActions = {
+  dividendEvents: MarketDividendEvent[];
+  splitEvents: MarketSplitEvent[];
+};
+
+async function fetchMaximumCorporateActions(
+  symbol: string,
+  currency: string | null,
+): Promise<CorporateActions | null> {
+  const url = new URL(`${BASE_URL}/${encodeURIComponent(symbol)}`);
+  url.searchParams.set("range", "max");
+  url.searchParams.set("interval", "1mo");
+  url.searchParams.set("events", "div,splits");
+  url.searchParams.set("includeAdjustedClose", "false");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), YAHOO_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+      next: { revalidate: CORPORATE_ACTIONS_REVALIDATE_SECONDS },
+    });
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!contentType.includes("json")) return null;
+    const payload = object(await response.json());
+    if (!payload || yahooError(payload)) return null;
+    const result = firstChartResult(payload);
+    if (!result) return null;
+    const observedSymbol = stringValue(object(result.meta)?.symbol);
+    if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) return null;
+    return {
+      dividendEvents: parseDividendEvents(result, currency),
+      splitEvents: parseSplitEvents(result),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function mergeDividendEvents(
+  baseEvents: MarketDividendEvent[] = [],
+  extendedEvents: MarketDividendEvent[] = [],
+): MarketDividendEvent[] {
+  const deduped = new Map<string, MarketDividendEvent>();
+  for (const event of [...baseEvents, ...extendedEvents]) {
+    deduped.set(`${event.date}:${event.amount}`, event);
+  }
+  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function mergeSplitEvents(
+  baseEvents: MarketSplitEvent[] = [],
+  extendedEvents: MarketSplitEvent[] = [],
+): MarketSplitEvent[] {
+  const deduped = new Map<string, MarketSplitEvent>();
+  for (const event of [...baseEvents, ...extendedEvents]) {
+    deduped.set(
+      `${event.date}:${event.numerator ?? ""}:${event.denominator ?? ""}:${event.splitRatio ?? ""}`,
+      event,
+    );
+  }
+  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function performance(rows: PriceRow[]): MarketSnapshot["performance"] {
   const current = rows.at(-1);
   if (!current) return {};
@@ -396,8 +465,15 @@ export const yahooMarketDataProvider: MarketDataProvider = {
     const betaEstimate = verifiedBenchmarkResult ? historicalWeeklyBeta(history, parseRows(verifiedBenchmarkResult)) : null;
     const yearRows = lastYearRows(history);
     const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
-    const dividendEvents = parseDividendEvents(result, marketCurrency);
-    const splitEvents = parseSplitEvents(result);
+    const baseDividendEvents = parseDividendEvents(result, marketCurrency);
+    const baseSplitEvents = parseSplitEvents(result);
+    const maximumCorporateActions = await fetchMaximumCorporateActions(symbol, marketCurrency);
+    const dividendEvents = maximumCorporateActions
+      ? mergeDividendEvents(baseDividendEvents, maximumCorporateActions.dividendEvents)
+      : baseDividendEvents;
+    const splitEvents = maximumCorporateActions
+      ? mergeSplitEvents(baseSplitEvents, maximumCorporateActions.splitEvents)
+      : baseSplitEvents;
     const yearHigh = metaNumber(meta, "fiftyTwoWeekHigh") ?? (yearRows.length ? Math.max(...yearRows.map((row) => row.close)) : null);
     const yearLow = metaNumber(meta, "fiftyTwoWeekLow") ?? (yearRows.length ? Math.min(...yearRows.map((row) => row.close)) : null);
 
