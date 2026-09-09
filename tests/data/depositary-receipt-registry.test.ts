@@ -45,6 +45,50 @@ describe("depositary receipt registry", () => {
     expect(result.depositaryReceipt?.ratioSource).toBe("depositary disclosure");
   });
 
+  it("assigns the authoritative registry security id when discovery has stable issuer identity but no security id", () => {
+    const result = attachVerifiedDepositaryReceiptRepresentation(
+      company({ securityId: undefined }),
+      [verifiedEntry()],
+    );
+
+    expect(result.securityId).toBe("adr:issuer-novo:nvo");
+    expect(result.issuerId).toBe("issuer-novo");
+    expect(result.depositaryReceipt?.primaryListingTicker).toBe("NOVO-B.CO");
+  });
+
+  it("does not overwrite a conflicting discovered security id", () => {
+    const result = attachVerifiedDepositaryReceiptRepresentation(
+      company({ securityId: "adr:issuer-novo:other" }),
+      [verifiedEntry()],
+    );
+
+    expect(result.securityId).toBe("adr:issuer-novo:other");
+    expect(result.depositaryReceipt).toBeUndefined();
+  });
+
+  it("does not attach when issuer and receipt ticker match more than one registry security", () => {
+    const result = attachVerifiedDepositaryReceiptRepresentation(
+      company({ securityId: undefined }),
+      [
+        verifiedEntry(),
+        verifiedEntry({ securityId: "adr:issuer-novo:nvo-alt", sourceUrl: "https://example.invalid/alternate" }),
+      ],
+    );
+
+    expect(result.securityId).toBeUndefined();
+    expect(result.depositaryReceipt).toBeUndefined();
+  });
+
+  it("does not use receipt ticker alone when issuer identity is missing", () => {
+    const result = attachVerifiedDepositaryReceiptRepresentation(
+      company({ securityId: undefined, issuerId: undefined }),
+      [verifiedEntry()],
+    );
+
+    expect(result.securityId).toBeUndefined();
+    expect(result.depositaryReceipt).toBeUndefined();
+  });
+
   it("does not attach a ticker-only match when stable identity disagrees", () => {
     const result = attachVerifiedDepositaryReceiptRepresentation(company({ issuerId: "issuer-other" }), [verifiedEntry()]);
     expect(result.depositaryReceipt).toBeUndefined();
