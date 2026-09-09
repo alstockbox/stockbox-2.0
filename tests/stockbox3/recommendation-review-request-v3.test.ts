@@ -38,7 +38,7 @@ describe("Recommendation review requests V3", () => {
     expect(buildRecommendationReviewRequestFromNewsV3(news("Routine minor product refresh"))).toBeNull();
   });
 
-  it("creates a lifecycle review request only when the objective engine says reconsider", () => {
+  it("creates a high-priority lifecycle review only when the objective engine says reconsider", () => {
     const previous = {
       snapshotId: "before",
       ticker: "MSFT",
@@ -54,12 +54,13 @@ describe("Recommendation review requests V3", () => {
       snapshotId: "after",
       observedAt: "2026-09-09T10:00:00.000Z",
       objectiveScore: 70,
-      conviction: 65,
+      conviction: 75,
     };
     const lifecycle = deriveRecommendationLifecycleV3(previous, current);
     const request = buildRecommendationReviewRequestFromLifecycleV3(lifecycle);
 
     expect(lifecycle.state).toBe("WEAKENED");
+    expect(lifecycle.severity).toBe("watch");
     expect(request?.trigger).toBe("LIFECYCLE_RECONSIDER");
     expect(request?.priority).toBe("high");
     expect(request?.sourceId).toBe("after");
@@ -69,8 +70,36 @@ describe("Recommendation review requests V3", () => {
       snapshotId: "stable",
       observedAt: "2026-09-10T10:00:00.000Z",
       objectiveScore: 71,
-      conviction: 67,
+      conviction: 77,
     });
     expect(buildRecommendationReviewRequestFromLifecycleV3(stable)).toBeNull();
+  });
+
+  it("escalates important lifecycle deterioration to urgent", () => {
+    const lifecycle = deriveRecommendationLifecycleV3(
+      {
+        snapshotId: "before",
+        ticker: "MSFT",
+        observedAt: "2026-09-08T10:00:00.000Z",
+        rating: "BUY",
+        objectiveScore: 85,
+        conviction: 90,
+        dataQuality: 92,
+        modelUncertainty: 10,
+      },
+      {
+        snapshotId: "after",
+        ticker: "MSFT",
+        observedAt: "2026-09-09T10:00:00.000Z",
+        rating: "BUY",
+        objectiveScore: 68,
+        conviction: 65,
+        dataQuality: 90,
+        modelUncertainty: 12,
+      },
+    );
+
+    expect(lifecycle.severity).toBe("important");
+    expect(buildRecommendationReviewRequestFromLifecycleV3(lifecycle)?.priority).toBe("urgent");
   });
 });
