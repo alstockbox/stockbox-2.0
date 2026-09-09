@@ -1,9 +1,7 @@
 name: Temporary Alpha Phase 2 RED
 
 on:
-  push:
-    branches:
-      - feat/alpha-persistence-scanner-forward-port-20260910
+  workflow_dispatch:
 
 permissions:
   contents: read
