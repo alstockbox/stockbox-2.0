@@ -121,4 +121,34 @@ describe("enhanced provider licensed estimates wiring", () => {
     expect(result.ok).toBe(true);
     expect(mocks.estimateFetch).not.toHaveBeenCalled();
   });
+
+  it("keeps the core analysis usable and exposes diagnostics when estimates are unavailable", async () => {
+    mocks.estimateFetch.mockResolvedValue({
+      ok: false,
+      reason: "rate_limited",
+      message: "Estimate provider rate limited.",
+      diagnostic: {
+        provider: "Twelve Data analyst estimates",
+        capability: "estimates",
+        status: "unavailable",
+        reason: "rate_limited",
+        observedAt: "2026-09-09T12:00:00.000Z",
+      },
+    });
+
+    const result = await analyzeCompany({
+      company,
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    } as never);
+
+    expect(mocks.estimateFetch).toHaveBeenCalledWith(company, "licensed-key");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.forwardEstimates).toBeUndefined();
+    expect(result.data.providerDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: "estimates", status: "unavailable", reason: "rate_limited" }),
+    ]));
+    expect(result.data.sources).toEqual([]);
+  });
 });
