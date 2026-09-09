@@ -11,7 +11,7 @@ permissions:
 jobs:
   alpha-phase2-red:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,3 +22,7 @@ jobs:
         run: npm ci
       - name: Run Phase 2 contracts
         run: npm test -- tests/analysis/alpha-scan-policy.test.ts tests/analysis/alpha-universe.test.ts tests/db/alpha-persistence-migrations.test.ts tests/analysis/alpha-scanner-boundary.test.ts
+      - name: Lint Phase 2 files
+        run: npx eslint src/lib/alpha/repository.ts src/lib/alpha/universe.ts src/lib/alpha/universe-repository.ts src/lib/alpha/scan-policy.ts src/lib/alpha/scanner.ts src/lib/alpha/outcome-collector.ts tests/analysis/alpha-scan-policy.test.ts tests/analysis/alpha-universe.test.ts tests/analysis/alpha-scanner-boundary.test.ts tests/db/alpha-persistence-migrations.test.ts
+      - name: Typecheck
+        run: npm run typecheck
