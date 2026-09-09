@@ -15,6 +15,9 @@ export type BackgroundJob = {
 
 export type BackgroundJobHandler = (job: BackgroundJob) => Promise<void>;
 
+const BACKGROUND_JOB_CLAIM_UNAVAILABLE = "Background job claim is temporarily unavailable.";
+const BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE = "Background job lease update is temporarily unavailable.";
+
 export function retryScheduleForJob(
   job: Pick<BackgroundJob, "attempts" | "maxAttempts">,
   now = new Date(),
@@ -60,34 +63,29 @@ export async function enqueueBackgroundJob(input: {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Supabase admin client is unavailable." };
 
-  const now = new Date().toISOString();
-  const insert = await admin.from("background_jobs").insert({
-    kind: input.kind,
-    status: "queued",
-    payload: input.payload,
-    dedupe_key: input.dedupeKey ?? null,
-    max_attempts: Math.max(1, Math.min(input.maxAttempts ?? 5, 10)),
-    available_at: input.availableAt ?? now,
-    updated_at: now,
-  }).select("id").single();
+  const result = await admin.rpc("enqueue_background_job", {
+    p_kind: input.kind,
+    p_payload: input.payload,
+    p_dedupe_key: input.dedupeKey ?? null,
+    p_max_attempts: Math.max(1, Math.min(input.maxAttempts ?? 5, 10)),
+    p_available_at: input.availableAt ?? new Date().toISOString(),
+  });
 
-  if (!insert.error && insert.data) {
-    return { ok: true, id: String(insert.data.id), deduplicated: false };
+  const row = Array.isArray(result.data)
+    ? result.data[0] as Record<string, unknown> | undefined
+    : result.data as Record<string, unknown> | null;
+
+  if (!result.error && row?.id) {
+    return {
+      ok: true,
+      id: String(row.id),
+      deduplicated: row.deduplicated === true,
+    };
   }
-  if (insert.error?.code === "23505" && input.dedupeKey) {
-    const existing = await admin.from("background_jobs")
-      .select("id")
-      .eq("kind", input.kind)
-      .eq("dedupe_key", input.dedupeKey)
-      .in("status", ["queued", "running"])
-      .maybeSingle();
-    if (existing.data) {
-      return { ok: true, id: String(existing.data.id), deduplicated: true };
-    }
-  }
+
   return {
     ok: false,
-    error: sanitizeDiagnosticMessage(insert.error?.message, "Unable to enqueue background job."),
+    error: sanitizeDiagnosticMessage(result.error?.message, "Unable to enqueue background job."),
   };
 }
 
@@ -121,16 +119,16 @@ async function recoverStaleBackgroundJobs(input: {
   now: Date;
 }): Promise<void> {
   const admin = createAdminClient();
-  if (!admin) return;
+  if (!admin) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
   const stale = await admin.from("background_jobs")
     .select("id,attempts,max_attempts,locked_at")
     .eq("status", "running")
     .lt("locked_at", input.staleCutoff)
     .in("kind", input.kinds)
     .limit(250);
-  if (stale.error) return;
+  if (stale.error) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
 
-  await Promise.all((stale.data ?? []).map(async (row) => {
+  const recoveryResults = await Promise.all((stale.data ?? []).map(async (row) => {
     const attempts = Number(row.attempts ?? 0);
     const schedule = staleJobRecoverySchedule({
       attempts,
@@ -149,8 +147,11 @@ async function recoverStaleBackgroundJobs(input: {
       .eq("status", "running")
       .eq("attempts", attempts);
     if (typeof row.locked_at === "string") update = update.eq("locked_at", row.locked_at);
-    await update;
+    return update;
   }));
+  if (recoveryResults.some((result) => result.error)) {
+    throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
+  }
 }
 
 export async function claimBackgroundJobs(input: {
@@ -158,8 +159,9 @@ export async function claimBackgroundJobs(input: {
   limit?: number;
   staleAfterMinutes?: number;
 }): Promise<BackgroundJob[]> {
+  if (!input.kinds.length) return [];
   const admin = createAdminClient();
-  if (!admin || !input.kinds.length) return [];
+  if (!admin) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
   const now = new Date();
   const staleCutoff = new Date(
     now.getTime() - Math.max(5, input.staleAfterMinutes ?? 15) * 60_000,
@@ -167,49 +169,18 @@ export async function claimBackgroundJobs(input: {
 
   await recoverStaleBackgroundJobs({ kinds: input.kinds, staleCutoff, now });
 
-  const candidates = await admin.from("background_jobs")
-    .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
-    .eq("status", "queued")
-    .in("kind", input.kinds)
-    .lte("available_at", now.toISOString())
-    .order("available_at", { ascending: true })
-    .limit(Math.max(1, Math.min(input.limit ?? 10, 50)));
-  if (candidates.error) return [];
+  const claim = await admin.rpc("claim_background_jobs", {
+    p_kinds: input.kinds,
+    p_limit: Math.max(1, Math.min(input.limit ?? 10, 50)),
+  });
+  if (claim.error) throw new Error(BACKGROUND_JOB_CLAIM_UNAVAILABLE);
 
-  const claimed: BackgroundJob[] = [];
-  for (const candidate of candidates.data ?? []) {
-    const attempts = Number(candidate.attempts ?? 0);
-    const maxAttempts = Number(candidate.max_attempts ?? 5);
-    if (attempts >= maxAttempts) {
-      await admin.from("background_jobs").update({
-        status: "failed",
-        completed_at: now.toISOString(),
-        locked_at: null,
-        last_error: "Background job retry budget exhausted before claim.",
-        updated_at: now.toISOString(),
-      }).eq("id", candidate.id)
-        .eq("status", "queued")
-        .eq("attempts", attempts);
-      continue;
-    }
-    const claim = await admin.from("background_jobs").update({
-      status: "running",
-      attempts: attempts + 1,
-      locked_at: now.toISOString(),
-      updated_at: now.toISOString(),
-    }).eq("id", candidate.id)
-      .eq("status", "queued")
-      .eq("attempts", attempts)
-      .select("id,kind,status,payload,attempts,max_attempts,available_at,locked_at,dedupe_key")
-      .maybeSingle();
-    if (claim.data) claimed.push(mapJob(claim.data as Record<string, unknown>));
-  }
-  return claimed;
+  return (claim.data ?? []).map((row: unknown) => mapJob(row as Record<string, unknown>));
 }
 
 export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return false;
+  if (!admin) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   const now = new Date().toISOString();
   let update = admin.from("background_jobs").update({
     status: "completed",
@@ -222,12 +193,13 @@ export async function completeBackgroundJob(job: BackgroundJob): Promise<boolean
     .eq("attempts", job.attempts);
   update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
   const result = await update.select("id").maybeSingle();
+  if (result.error) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   return Boolean(result.data);
 }
 
 export async function failBackgroundJob(job: BackgroundJob, error: unknown): Promise<boolean> {
   const admin = createAdminClient();
-  if (!admin) return false;
+  if (!admin) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   const now = new Date();
   const schedule = retryScheduleForJob(job, now);
   let update = admin.from("background_jobs").update({
@@ -242,6 +214,7 @@ export async function failBackgroundJob(job: BackgroundJob, error: unknown): Pro
     .eq("attempts", job.attempts);
   update = job.lockedAt ? update.eq("locked_at", job.lockedAt) : update.is("locked_at", null);
   const result = await update.select("id").maybeSingle();
+  if (result.error) throw new Error(BACKGROUND_JOB_LEASE_UPDATE_UNAVAILABLE);
   return Boolean(result.data);
 }
 
@@ -264,14 +237,16 @@ export async function runBackgroundJobs(input: {
       const applied = await failBackgroundJob(job, new Error(`No handler registered for ${job.kind}.`));
       return applied ? "failed" as const : "superseded" as const;
     }
+
     try {
       await handler(job);
-      const applied = await completeBackgroundJob(job);
-      return applied ? "completed" as const : "superseded" as const;
     } catch (error) {
       const applied = await failBackgroundJob(job, error);
       return applied ? "failed" as const : "superseded" as const;
     }
+
+    const applied = await completeBackgroundJob(job);
+    return applied ? "completed" as const : "superseded" as const;
   }));
 
   return {

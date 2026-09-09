@@ -242,11 +242,13 @@ export async function createDurableBatch(input: {
       });
       if (outcome.ok) return true;
 
+      const enqueueUnavailableAt = new Date().toISOString();
       await admin.from("batch_items").update({
-        status: "failed",
-        last_error: "Unable to enqueue batch analysis.",
-        completed_at: new Date().toISOString(),
-      }).eq("id", itemId).eq("status", "queued");
+        last_error: "Batch worker enqueue is temporarily unavailable.",
+        updated_at: enqueueUnavailableAt,
+      }).eq("id", itemId)
+        .eq("status", "queued")
+        .eq("attempts", 0);
       return false;
     },
   );
@@ -265,13 +267,27 @@ function attemptOffsetFromJob(job: BackgroundJob): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
+const BATCH_LEASE_VERIFICATION_UNAVAILABLE = "Batch lease verification is temporarily unavailable.";
+const BATCH_LEASE_UPDATE_UNAVAILABLE = "Batch lease update is temporarily unavailable.";
+const BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE = "Batch worker queue inspection is temporarily unavailable.";
+
 function throwIfExecutionExpired(signal?: AbortSignal): void {
   if (signal?.aborted) throw new BatchItemLeaseLostError();
 }
 
+function assertLeaseReadResult(result: { data: unknown; error: unknown }): void {
+  if (result.error) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
+  if (!result.data) throw new BatchItemLeaseLostError();
+}
+
+function assertLeaseMutationResult(result: { data: unknown; error: unknown }): void {
+  if (result.error) throw new Error(BATCH_LEASE_UPDATE_UNAVAILABLE);
+  if (!result.data) throw new BatchItemLeaseLostError();
+}
+
 async function assertBackgroundJobLease(job: BackgroundJob): Promise<void> {
   const admin = createAdminClient();
-  if (!admin) throw new BatchItemLeaseLostError();
+  if (!admin) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
   let query = admin.from("background_jobs")
     .select("id")
     .eq("id", job.id)
@@ -279,7 +295,7 @@ async function assertBackgroundJobLease(job: BackgroundJob): Promise<void> {
     .eq("attempts", job.attempts);
   query = job.lockedAt ? query.eq("locked_at", job.lockedAt) : query.is("locked_at", null);
   const current = await query.maybeSingle();
-  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+  assertLeaseReadResult(current);
 }
 
 async function assertBatchItemLease(
@@ -290,7 +306,7 @@ async function assertBatchItemLease(
 ): Promise<void> {
   throwIfExecutionExpired(signal);
   const admin = createAdminClient();
-  if (!admin) throw new BatchItemLeaseLostError();
+  if (!admin) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
   const current = await admin.from("batch_items")
     .select("id")
     .eq("id", itemId)
@@ -299,7 +315,7 @@ async function assertBatchItemLease(
     .eq("started_at", leaseStartedAt)
     .maybeSingle();
   throwIfExecutionExpired(signal);
-  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+  assertLeaseReadResult(current);
 }
 
 async function markItemFailure(
@@ -372,7 +388,7 @@ async function executeBatchItem(
     .in("status", ["queued", "processing"])
     .select("id")
     .maybeSingle();
-  if (!lease.data) throw new BatchItemLeaseLostError();
+  assertLeaseMutationResult(lease);
 
   await admin.from("batch_runs").update({
     status: "processing",
@@ -412,7 +428,7 @@ async function executeBatchItem(
       .eq("started_at", startedAt)
       .select("id")
       .maybeSingle();
-    if (!completed.data) throw new BatchItemLeaseLostError();
+    assertLeaseMutationResult(completed);
     await refreshBatchRun(item.batchId);
     return;
   }
@@ -469,7 +485,7 @@ async function executeBatchItem(
       .eq("started_at", startedAt)
       .select("id")
       .maybeSingle();
-    if (!completed.data) throw new BatchItemLeaseLostError();
+    assertLeaseMutationResult(completed);
 
     result.data.id = analysisId;
     await refreshBatchRun(item.batchId);
@@ -530,7 +546,7 @@ export async function runDurableBatchJobs(limit = 2) {
 
 export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<number | null> {
   const admin = createAdminClient();
-  if (!admin) return null;
+  if (!admin) throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
   const next = await admin.from("background_jobs")
     .select("available_at")
     .eq("kind", BATCH_ANALYSIS_JOB_KIND)
@@ -538,7 +554,11 @@ export async function nextDurableBatchWorkerDelayMs(now = new Date()): Promise<n
     .order("available_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  if (next.error || !next.data || typeof next.data.available_at !== "string") return null;
+  if (next.error) throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
+  if (!next.data) return null;
+  if (typeof next.data.available_at !== "string") {
+    throw new Error(BATCH_WORKER_QUEUE_INSPECTION_UNAVAILABLE);
+  }
   return boundedDurableWorkerDelayMs(next.data.available_at, now.getTime());
 }
 
@@ -596,13 +616,14 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
     BATCH_ORCHESTRATION_CONCURRENCY,
     async (row) => {
       const itemId = String(row.id);
+      const resetAt = new Date().toISOString();
       const reset = await admin.from("batch_items").update({
         status: "queued",
         attempts: 0,
         started_at: null,
         last_error: null,
         completed_at: null,
-        updated_at: new Date().toISOString(),
+        updated_at: resetAt,
       }).eq("id", itemId).eq("user_id", input.userId).eq("status", "failed");
       if (reset.error) return false;
 
@@ -615,11 +636,13 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
       if (outcome.ok) return true;
 
       await admin.from("batch_items").update({
-        status: "failed",
-        last_error: "Unable to enqueue batch analysis retry.",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("id", itemId).eq("user_id", input.userId).eq("status", "queued");
+        last_error: "Batch retry worker enqueue is temporarily unavailable.",
+        updated_at: resetAt,
+      }).eq("id", itemId)
+        .eq("user_id", input.userId)
+        .eq("status", "queued")
+        .eq("attempts", 0)
+        .eq("updated_at", resetAt);
       return false;
     },
   );
