@@ -1,0 +1,55 @@
+name: Temporary ETF CI sync
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+    paths:
+      - ".github/workflows/tmp-sync-etf-ci.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reapply branch CI hardening on merged main workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/stockbox-2-upgrade-ci.yml')
+          text = path.read_text()
+          replacements = [
+              (
+                  '      - upgrade/stockbox-2-ux-portfolio-mobile-20260905\n',
+                  '      - upgrade/stockbox-2-ux-portfolio-mobile-20260905\n      - fix/etf-investment-company-coverage\n',
+              ),
+              (
+                  '      - "src/lib/**"\n',
+                  '      - "src/lib/**"\n      - "scripts/diagnostics/**"\n',
+              ),
+              (
+                  '      - name: Install PostgreSQL client\n        run: |\n          sudo apt-get update\n',
+                  '      - name: Install PostgreSQL client\n        run: |\n          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources\n          sudo apt-get update\n',
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one CI sync anchor, found {count}: {old!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git rm .github/workflows/tmp-sync-etf-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/stockbox-2-upgrade-ci.yml
+          git diff --cached --check
+          git commit -m "ci: preserve ETF branch verification after main sync"
+          git push origin HEAD:fix/etf-investment-company-coverage
