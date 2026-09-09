@@ -1,0 +1,23 @@
+name: Temporary licensed estimates RED
+
+on:
+  push:
+    branches:
+      - feat/licensed-estimates-forward-port-20260909
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run licensed estimates contracts
+        run: npx vitest run tests/data/twelve-data-estimates.test.ts tests/data/estimate-report-augment.test.ts
