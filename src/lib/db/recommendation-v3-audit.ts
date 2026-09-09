@@ -42,23 +42,40 @@ function normalizeDimension(value: string | null | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function requiredAuditIdentity(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new Error("INVALID_RECOMMENDATION_V3_AUDIT_IDENTITY");
+  }
+  return normalized;
+}
+
 /**
  * Explicit allowlist mapper for the private V3 audit store.
  * Do not spread the shadow event here: adding a future event field must never
  * silently expand what is persisted. In particular, no user id, raw financial
  * payload or personalized-score value belongs in this row.
+ *
+ * Durable dedupe identity is canonicalized at the write boundary. Required
+ * identity components fail closed when blank, while a blank optional analysis
+ * fingerprint remains genuinely missing instead of becoming a false identity.
  */
 export function toRecommendationV3AuditRow(
   event: RecommendationV3ShadowEvent,
   updatedAt = event.observedAt,
 ): RecommendationV3AuditRow {
+  const ticker = requiredAuditIdentity(event.ticker);
+  const analysisArchetype = requiredAuditIdentity(event.analysisArchetype);
+  const modelVersion = requiredAuditIdentity(event.modelVersion);
+  const recommendationPolicyVersion = requiredAuditIdentity(event.recommendationPolicyVersion);
+
   return {
     observed_at: event.observedAt,
-    ticker: event.ticker,
-    analysis_fingerprint: event.analysisFingerprint,
-    analysis_archetype: event.analysisArchetype,
+    ticker,
+    analysis_fingerprint: normalizeDimension(event.analysisFingerprint),
+    analysis_archetype: analysisArchetype,
     sector: normalizeDimension(event.sector),
-    model_version: event.modelVersion,
+    model_version: modelVersion,
     legacy_rating: event.legacyRating,
     normalized_legacy_rating: event.normalizedLegacyRating,
     v3_rating: event.v3Rating,
@@ -73,7 +90,7 @@ export function toRecommendationV3AuditRow(
     reason_codes: [...event.reasonCodes],
     coverage_policy_version: event.coveragePolicyVersion,
     anomaly_policy_version: event.anomalyPolicyVersion,
-    recommendation_policy_version: event.recommendationPolicyVersion,
+    recommendation_policy_version: recommendationPolicyVersion,
     coverage_profile: event.coverageProfile,
     verified_coverage: event.verifiedCoverage,
     retrieval_coverage: event.retrievalCoverage,
