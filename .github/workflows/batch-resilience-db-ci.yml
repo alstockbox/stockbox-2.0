@@ -6,6 +6,7 @@ on:
       - "src/lib/batch/**"
       - "src/lib/jobs/**"
       - "tests/batch/**"
+      - "tests/jobs/**"
       - "tests/db/quota-reservation-recovery.test.ts"
       - "supabase/migrations/20260824090000_analysis_quota_reservations.sql"
       - "supabase/migrations/20260901153822_background_job_durability.sql"
@@ -13,6 +14,7 @@ on:
       - "supabase/migrations/20260905132000_align_batch_items_company_column.sql"
       - "supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql"
       - "supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql"
+      - "supabase/migrations/20260910001500_background_job_atomic_claim.sql"
       - ".github/workflows/batch-resilience-db-ci.yml"
 
 jobs:
@@ -37,6 +39,7 @@ jobs:
           cp supabase/migrations/20260905132000_align_batch_items_company_column.sql /tmp/stockbox-batch-migrations/
           cp supabase/migrations/20260907133500_batch_extreme_resilience_indexes.sql /tmp/stockbox-batch-migrations/
           cp supabase/migrations/20260907154000_stale_analysis_quota_recovery.sql /tmp/stockbox-batch-migrations/
+          cp supabase/migrations/20260910001500_background_job_atomic_claim.sql /tmp/stockbox-batch-migrations/
           rm -rf supabase/migrations
           mkdir -p supabase/migrations
       - name: Start disposable Supabase
@@ -121,6 +124,64 @@ jobs:
           SQL
       - name: Apply background job durability
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260901153822_background_job_durability.sql
+      - name: Apply atomic background job claim
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260910001500_background_job_atomic_claim.sql
+      - name: Assert parallel background job claims are atomic and disjoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          insert into public.background_jobs (kind, status, payload, attempts, max_attempts, available_at)
+          select 'ci.atomic-claim', 'queued', '{}'::jsonb, 0, 5, now()
+          from generate_series(1, 4);
+
+          do $$
+          begin
+            if has_function_privilege('anon', 'public.claim_background_jobs(text[],integer)', 'EXECUTE') then
+              raise exception 'anon must not execute claim_background_jobs';
+            end if;
+            if has_function_privilege('authenticated', 'public.claim_background_jobs(text[],integer)', 'EXECUTE') then
+              raise exception 'authenticated must not execute claim_background_jobs';
+            end if;
+            if not has_function_privilege('service_role', 'public.claim_background_jobs(text[],integer)', 'EXECUTE') then
+              raise exception 'service_role must execute claim_background_jobs';
+            end if;
+          end
+          $$;
+          SQL
+
+          psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c \
+            "select id from public.claim_background_jobs(array['ci.atomic-claim']::text[], 2);" \
+            > /tmp/stockbox-claim-a.txt &
+          claim_a=$!
+          psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c \
+            "select id from public.claim_background_jobs(array['ci.atomic-claim']::text[], 2);" \
+            > /tmp/stockbox-claim-b.txt &
+          claim_b=$!
+          wait "$claim_a"
+          wait "$claim_b"
+
+          test "$(cat /tmp/stockbox-claim-a.txt /tmp/stockbox-claim-b.txt | sed '/^[[:space:]]*$/d' | sort -u | wc -l | xargs)" = "4"
+
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare
+            v_running integer;
+            v_first_attempt integer;
+          begin
+            select count(*), count(*) filter (where attempts = 1)
+              into v_running, v_first_attempt
+            from public.background_jobs
+            where kind = 'ci.atomic-claim'
+              and status = 'running'
+              and locked_at is not null;
+
+            if v_running <> 4 or v_first_attempt <> 4 then
+              raise exception 'Expected four disjoint first-attempt claims, got running=% first_attempt=%', v_running, v_first_attempt;
+            end if;
+          end
+          $$;
+          SQL
       - name: Apply durable batch schema
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/stockbox-batch-migrations/20260901154120_durable_batch_runs.sql
       - name: Apply batch company alignment
