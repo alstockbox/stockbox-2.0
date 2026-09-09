@@ -929,34 +929,30 @@ export async function analyzeCompany({
   if (primaryListingCompany && valuationInputs.market?.price !== null) {
     const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
     providerDiagnostics.push(...primaryListingResolution.diagnostics);
-    if (primaryListingResolution.result.ok) {
-      const primaryListingMarket = primaryListingResolution.result.data;
-      if (primaryListingResolution.source) {
-        sources.push({
-          ...primaryListingResolution.source,
-          accessedAt,
-          provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
-          capability: "market_data",
-          dataAsOf: primaryListingMarket.date,
-          version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
-        });
-      }
-      const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
-        analysisCompany,
-        valuationInputs.market,
-        primaryListingMarket,
-      );
-      if (primaryListingReconciliation.status === "conflict") {
-        valuationInputs = disableDepositaryReceiptValuationInputs(
-          market,
-          fundamentals,
-          primaryListingReconciliation.reason,
-        );
-        warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
-      } else if (primaryListingReconciliation.status === "unavailable") {
-        warnings.push(`ADR/ADS primary-listing reconciliation was unavailable: ${primaryListingReconciliation.reason}`);
-      }
-    }
+    const primaryListingMarket = primaryListingResolution.result.ok ? primaryListingResolution.result.data : null;
+  if (primaryListingMarket && primaryListingResolution.source) {
+    sources.push({
+      ...primaryListingResolution.source,
+      accessedAt,
+      provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
+      capability: "market_data",
+      dataAsOf: primaryListingMarket.date,
+      version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
+    });
+  }
+  const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
+    analysisCompany,
+    valuationInputs.market,
+    primaryListingMarket,
+  );
+  if (primaryListingReconciliation.status !== "aligned") {
+    valuationInputs = disableDepositaryReceiptValuationInputs(
+      market,
+      fundamentals,
+      primaryListingReconciliation.reason,
+    );
+    warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
+  }
   }
 
   const providerOrchestrationMs = Date.now() - startedAt;
