@@ -1,0 +1,49 @@
+name: One-shot finish SEC ADR guard formatting
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Normalize classification indentation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/lib/data/sec.ts")
+          source = path.read_text()
+          old = "\n    const classification = classifyCompany("
+          new = "\n  const classification = classifyCompany("
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one over-indented classification line, found {count}")
+          path.write_text(source.replace(old, new, 1))
+          PY
+      - run: npm ci
+      - run: npm test -- tests/data/depositary-receipt-sec-issuer-identity.test.ts
+      - name: Commit final formatting and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-finish-sec-adr-format.yml
+          git add src/lib/data/sec.ts
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/workflows/one-shot-finish-sec-adr-format.yml src/lib/data/sec.ts "
+          git commit -m "style: finish SEC ADR issuer guard formatting"
+          git push origin HEAD:fix/etf-investment-company-coverage
