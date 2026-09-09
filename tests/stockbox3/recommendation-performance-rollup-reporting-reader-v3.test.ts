@@ -35,9 +35,9 @@ function row(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function snapshot(rollups = [row()]) {
+function snapshot(rollups = [row()], evaluatedAt = "2026-09-09T14:30:00.000Z") {
   return {
-    evaluatedAt: "2026-09-09T14:30:00.000Z",
+    evaluatedAt,
     outcomePolicyVersion: RECOMMENDATION_OUTCOME_POLICY_VERSION,
     benchmarkPolicyVersion: RECOMMENDATION_OUTCOME_BENCHMARK_POLICY_VERSION_V3,
     sourceLimit: 5_000,
@@ -80,6 +80,26 @@ describe("Recommendation performance reporting reader V3", () => {
     });
   });
 
+  it("rejects a future-dated materialization instead of treating negative age as fresh", async () => {
+    atomicRead.mockResolvedValue({
+      ok: true,
+      configured: true,
+      snapshot: snapshot([row()], "2026-09-09T15:00:00.001Z"),
+    });
+
+    const result = await readRecommendationPerformanceRollupSnapshotForReportingV3({
+      maxAgeMs: HOUR_MS,
+      now: "2026-09-09T15:00:00.000Z",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      configured: true,
+      snapshot: null,
+      error: "INVALID_RECOMMENDATION_PERFORMANCE_ROLLUP_SNAPSHOT",
+    });
+  });
+
   it("rejects duplicate logical rollups instead of double-counting a malformed snapshot", () => {
     const duplicate = row({ sampleCount: 999 });
     const result = validateRecommendationPerformanceRollupSnapshotForReportingV3(
@@ -117,6 +137,18 @@ describe("Recommendation performance reporting reader V3", () => {
       configured: true,
       snapshot: null,
       error: "INVALID_RECOMMENDATION_PERFORMANCE_ROLLUP_FRESHNESS_POLICY",
+    });
+  });
+
+  it("treats an invalid snapshot timestamp as snapshot corruption, not caller policy failure", () => {
+    const result = validateRecommendationPerformanceRollupSnapshotForReportingV3(
+      snapshot([row()], "not-a-date"),
+      { maxAgeMs: HOUR_MS, now: "2026-09-09T15:00:00.000Z" },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "INVALID_RECOMMENDATION_PERFORMANCE_ROLLUP_SNAPSHOT",
     });
   });
 });

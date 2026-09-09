@@ -55,7 +55,8 @@ function logicalRollupIdentity(row: RecommendationPerformanceRollupReadRowV3): s
 /**
  * Adds reporting-consumer guardrails on top of the atomic database snapshot.
  * The low-level reader remains cadence-neutral while this contract rejects
- * duplicate logical rows and snapshots older than the caller explicitly allows.
+ * duplicate logical rows, future-dated snapshots and snapshots older than the
+ * caller explicitly allows.
  */
 export function validateRecommendationPerformanceRollupSnapshotForReportingV3(
   snapshot: RecommendationPerformanceRollupSnapshotV3,
@@ -67,8 +68,11 @@ export function validateRecommendationPerformanceRollupSnapshotForReportingV3(
 
   const nowMs = validTimestampMs(options.now ?? new Date().toISOString());
   const evaluatedAtMs = validTimestampMs(snapshot.evaluatedAt);
-  if (nowMs === null || evaluatedAtMs === null) {
+  if (nowMs === null) {
     return { ok: false, error: RECOMMENDATION_PERFORMANCE_ROLLUP_INVALID_FRESHNESS_POLICY_ERROR_V3 };
+  }
+  if (evaluatedAtMs === null || evaluatedAtMs > nowMs) {
+    return { ok: false, error: RECOMMENDATION_PERFORMANCE_ROLLUP_INVALID_SNAPSHOT_ERROR_V3 };
   }
 
   const identities = new Set<string>();
