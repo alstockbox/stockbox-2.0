@@ -875,7 +875,10 @@ async function fetchMetadata(symbol: string): Promise<YahooMetadata> {
   url.searchParams.set("newsCount", "0");  const response = await fetchJson(url);
   if (!response.ok) return { sector: null, industry: null, name: null };
   const quotes = Array.isArray(response.data.quotes) ? response.data.quotes : [];
-  const quote = quotes.map(object).find((item) => stringValue(item?.symbol)?.toUpperCase() === symbol.toUpperCase()) ?? null;
+  const quote = quotes.map(object).find((item) => {
+    const returnedSymbol = stringValue(item?.symbol);
+    return returnedSymbol ? yahooSymbolsEquivalent(symbol, returnedSymbol) : false;
+  }) ?? null;
   return {
     sector: stringValue(quote?.sector),
     industry: stringValue(quote?.industry),
