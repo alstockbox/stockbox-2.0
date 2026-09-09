@@ -1,4 +1,4 @@
-name: Temporary Alpha Core RED
+name: Temporary Alpha Core Verification
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  alpha-core-red:
+  alpha-core-verification:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,3 +29,24 @@ jobs:
           tests/analysis/alpha-report-adapter.test.ts
           tests/analysis/alpha-weight-profiles.test.ts
           tests/analysis/hidden-gems-ranking.test.ts
+      - name: Lint Alpha pure-core files
+        run: >-
+          npx eslint
+          src/lib/alpha/types.ts
+          src/lib/alpha/market-cap.ts
+          src/lib/alpha/weights.ts
+          src/lib/alpha/engine.ts
+          src/lib/alpha/hidden-gems.ts
+          src/lib/alpha/outcomes.ts
+          src/lib/alpha/report-adapter.ts
+          src/lib/alpha/prediction-snapshot.ts
+          src/lib/alpha/index.ts
+          tests/analysis/alpha-breakout-intelligence.test.ts
+          tests/analysis/alpha-market-cap-policy.test.ts
+          tests/analysis/alpha-outcomes.test.ts
+          tests/analysis/alpha-prediction-snapshot.test.ts
+          tests/analysis/alpha-report-adapter.test.ts
+          tests/analysis/alpha-weight-profiles.test.ts
+          tests/analysis/hidden-gems-ranking.test.ts
+      - name: Typecheck
+        run: npm run typecheck
