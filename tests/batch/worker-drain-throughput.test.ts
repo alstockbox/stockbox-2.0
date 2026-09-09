@@ -11,9 +11,16 @@ describe("batch worker drain throughput", () => {
       resolve(process.cwd(), "src/app/api/jobs/batch/run/route.ts"),
       "utf8",
     );
+    const durable = readFileSync(
+      resolve(process.cwd(), "src/lib/batch/durable.ts"),
+      "utf8",
+    );
 
     expect(workerRoute).toContain("BATCH_ORCHESTRATION_CONCURRENCY");
     expect(workerRoute).toContain("runDurableBatchJobs(BATCH_ORCHESTRATION_CONCURRENCY)");
     expect(workerRoute).not.toMatch(/runDurableBatchJobs\(3\)/);
+
+    expect(durable).toContain("Math.min(limit, BATCH_ORCHESTRATION_CONCURRENCY)");
+    expect(durable).not.toMatch(/Math\.min\(limit,\s*5\)/);
   });
 });
