@@ -139,9 +139,28 @@ function matchingRegistryEntry(
   return entry;
 }
 
-// Intentionally empty until each mapping is backed by an authoritative issuer/depositary source.
-// Ticker-only guesses are forbidden; add entries through reviewed source-backed data changes.
-export const verifiedDepositaryReceiptRegistry: DepositaryReceiptRegistryEntry[] = [];
+// Only reviewed mappings backed by authoritative issuer/depositary sources belong here.
+// Ticker-only guesses are forbidden.
+export const verifiedDepositaryReceiptRegistry: DepositaryReceiptRegistryEntry[] = [
+  {
+    securityId: "adr:sec:0000353278:nvo",
+    issuerId: "sec:0000353278",
+    receiptTicker: "NVO",
+    primaryListingTicker: "NOVO-B.CO",
+    kind: "ADR",
+    underlyingSharesPerReceipt: 1,
+    issuerReportingCurrency: "DKK",
+    primaryListingCurrency: "DKK",
+    receiptTradingCurrency: "USD",
+    ratioSource: "Novo Nordisk Form 20-F 2025 Item 12D",
+    ratioAsOf: "2026-02-04",
+    source: "Novo Nordisk Form 20-F 2025 Item 12D",
+    sourceUrl: "https://www.sec.gov/Archives/edgar/data/353278/000035327826000012/nvo-20251231.htm",
+    sourceAsOf: "2026-02-04",
+    mappingVerified: true,
+    ratioVerified: true,
+  },
+];
 
 export function attachVerifiedDepositaryReceiptRepresentation(
   company: CompanySearchResult,
