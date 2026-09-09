@@ -610,6 +610,7 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
     async (row) => {
       const itemId = String(row.id);
       const reset = await admin.from("batch_items").update({
+        status: "queued",
         attempts: 0,
         started_at: null,
         last_error: null,
