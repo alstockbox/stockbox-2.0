@@ -395,3 +395,40 @@ export function canPromoteRecommendationCalibrationV3(
   if (stage === "APPROVED") return "PRODUCTION";
   return "PRODUCTION";
 }
+
+const NEXT_CALIBRATION_STAGE: Record<RecommendationCalibrationStageV3, RecommendationCalibrationStageV3 | null> = {
+  CANDIDATE: "BACKTESTED",
+  BACKTESTED: "SHADOW_VALIDATED",
+  SHADOW_VALIDATED: "APPROVED",
+  APPROVED: "PRODUCTION",
+  PRODUCTION: null,
+};
+
+/**
+ * Enforces candidate -> backtest -> shadow -> approval -> production.
+ * Production promotion additionally requires explicit human approval and positive backtest/shadow evidence.
+ */
+export function advanceRecommendationCalibrationV3(
+  candidate: RecommendationCalibrationCandidateV3,
+  nextStage: RecommendationCalibrationStageV3,
+  evidence: CalibrationPromotionEvidenceV3 = {},
+): RecommendationCalibrationCandidateV3 {
+  const allowed = NEXT_CALIBRATION_STAGE[candidate.stage];
+  if (allowed !== nextStage) throw new Error("INVALID_CALIBRATION_STAGE_TRANSITION");
+
+  if (nextStage === "SHADOW_VALIDATED" && evidence.backtestImproved !== true) {
+    throw new Error("CALIBRATION_BACKTEST_IMPROVEMENT_REQUIRED");
+  }
+  if (nextStage === "APPROVED" && evidence.shadowImproved !== true) {
+    throw new Error("CALIBRATION_SHADOW_IMPROVEMENT_REQUIRED");
+  }
+  if (nextStage === "PRODUCTION" && (
+    evidence.explicitApproval !== true
+    || evidence.backtestImproved !== true
+    || evidence.shadowImproved !== true
+  )) {
+    throw new Error("CALIBRATION_EXPLICIT_APPROVAL_AND_EVIDENCE_REQUIRED");
+  }
+
+  return { ...candidate, stage: nextStage };
+}
