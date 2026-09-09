@@ -388,7 +388,12 @@ export const yahooMarketDataProvider: MarketDataProvider = {
 
     const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
     const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
-    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+    const benchmarkObservedSymbol = benchmarkResult ? stringValue(object(benchmarkResult.meta)?.symbol) : null;
+    const verifiedBenchmarkResult = benchmarkResult
+      && (!benchmarkObservedSymbol || (benchmarkSymbol && yahooSymbolsEquivalent(benchmarkSymbol, benchmarkObservedSymbol)))
+      ? benchmarkResult
+      : null;
+    const betaEstimate = verifiedBenchmarkResult ? historicalWeeklyBeta(history, parseRows(verifiedBenchmarkResult)) : null;
     const yearRows = lastYearRows(history);
     const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
     const dividendEvents = parseDividendEvents(result, marketCurrency);
