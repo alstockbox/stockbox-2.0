@@ -11,6 +11,15 @@ const marketDataProviderSchema = z.preprocess(
   z.enum(["twelve_data", "stooq", "yahoo", "disabled"]).default("yahoo")
 );
 
+const estimatesProviderSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().toLowerCase();
+    return normalized || undefined;
+  },
+  z.enum(["twelve_data", "disabled"]).default("disabled"),
+);
+
 const providerListSchema = z.preprocess(
   (value) => typeof value === "string"
     ? value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
@@ -51,6 +60,7 @@ const envSchema = z.object({
   MARKET_DATA_PROVIDER: marketDataProviderSchema,
   MARKET_DATA_FALLBACK_PROVIDERS: providerListSchema,
   GLOBAL_SYMBOL_SEARCH_PROVIDER: z.enum(["twelve_data", "disabled"]).default("disabled"),
+  ESTIMATES_PROVIDER: estimatesProviderSchema,
   TWELVE_DATA_API_KEY: z.string().optional().or(z.literal("")),
   ALPHA_VANTAGE_API_KEY: z.string().optional().or(z.literal("")),
   NEWS_PROVIDER: z.string().default("disabled"),
@@ -149,6 +159,10 @@ export function getMarketDataProviderChain(env = getServerEnv()) {
 
 export function getGlobalSymbolSearchProvider(env = getServerEnv()) {
   return env.GLOBAL_SYMBOL_SEARCH_PROVIDER;
+}
+
+export function getEstimatesProvider(env = getServerEnv()) {
+  return env.ESTIMATES_PROVIDER;
 }
 
 export function adminEmails() {
