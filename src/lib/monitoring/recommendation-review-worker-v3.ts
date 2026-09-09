@@ -5,6 +5,7 @@ import {
   searchCompanies,
   supportsUniversalSecurityAnalysis,
 } from "@/lib/data/universal-security-live-provider";
+import type { UniversalSecurityReport } from "@/lib/data/universal-security-provider";
 import {
   claimRecommendationReviewRequestsV3,
   completeRecommendationReviewRequestV3,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/db/recommendation-review-requests-v3";
 import { persistRecommendationV3ShadowAudit } from "@/lib/db/recommendation-v3-audit";
 import { isFeatureEnabled, isKilled } from "@/lib/feature-flags";
+import { createSpecialistRecommendationV3ShadowEvent } from "./recommendation-specialist-shadow-v3";
 
 export type RecommendationReviewWorkerPauseReasonV3 =
   | "recommendation_v3_disabled"
@@ -42,6 +44,25 @@ export type ObjectiveRecommendationReanalysisV3 =
   | { status: "ready"; event: RecommendationV3ShadowEvent }
   | { status: "retryable_failure"; error: string }
   | { status: "permanent_failure"; error: string };
+
+export function recommendationReviewEventFromAnalysisV3(input: {
+  data: UniversalSecurityReport;
+  stockbox3?: {
+    recommendationV3Shadow?: {
+      status: string;
+      event?: RecommendationV3ShadowEvent;
+    };
+  };
+}): RecommendationV3ShadowEvent | null {
+  // Specialist output must win over the pre-enrichment operating-company shadow.
+  // This is essential for investment companies and gives ETFs a native audit
+  // path without ever synthesizing corporate fundamentals.
+  const specialist = createSpecialistRecommendationV3ShadowEvent(input.data);
+  if (specialist) return specialist;
+
+  const shadow = input.stockbox3?.recommendationV3Shadow;
+  return shadow?.status === "evaluated" && shadow.event ? shadow.event : null;
+}
 
 export async function runObjectiveRecommendationReanalysisV3(
   request: ClaimedRecommendationReviewRequestV3,
@@ -98,14 +119,17 @@ export async function runObjectiveRecommendationReanalysisV3(
     return { status: "retryable_failure", error: analysis.error || "OBJECTIVE_REANALYSIS_FAILED" };
   }
 
-  const shadow = analysis.stockbox3?.recommendationV3Shadow;
-  if (!shadow || shadow.status !== "evaluated") {
+  const event = recommendationReviewEventFromAnalysisV3({
+    data: analysis.data as UniversalSecurityReport,
+    stockbox3: analysis.stockbox3,
+  });
+  if (!event) {
     return {
       status: "retryable_failure",
       error: "OBJECTIVE_REANALYSIS_DID_NOT_PRODUCE_RECOMMENDATION_V3_AUDIT",
     };
   }
-  return { status: "ready", event: shadow.event };
+  return { status: "ready", event };
 }
 
 export type RecommendationReviewWorkerResultV3 = {
@@ -201,9 +225,10 @@ export async function runRecommendationReviewWorkerV3(options: {
         continue;
       }
 
-      // The live provider already attempts this write. We deliberately perform
-      // the idempotent upsert again and inspect its return value so COMPLETED
-      // means the objective V3 audit is durably persisted, not merely evaluated.
+      // The live operating-company provider already attempts this write. We
+      // deliberately perform the idempotent upsert here for every instrument,
+      // including specialist ETF/investment-company events, and inspect the
+      // result so COMPLETED always means durable objective V3 audit persistence.
       const audit = await dependencies.persistAudit(reanalysis.event);
       if (!audit.ok) {
         await transitionFailure(request, `RECOMMENDATION_V3_AUDIT_PERSIST_FAILED:${audit.error}`, false);

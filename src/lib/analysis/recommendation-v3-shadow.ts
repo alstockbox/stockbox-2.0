@@ -12,6 +12,16 @@ import {
 } from "./recommendation-v3";
 import type { FinancialAnalysisInput, FinancialAnalysisResult } from "./types";
 
+export type RecommendationV3CoveragePolicyVersion =
+  | CoverageAssessment["policyVersion"]
+  | "stockbox-specialist-coverage-policy-v3.0.0";
+export type RecommendationV3AnomalyPolicyVersion =
+  | DataAnomalyAssessmentV3["policyVersion"]
+  | "stockbox-specialist-integrity-policy-v3.0.0";
+export type RecommendationV3PolicyVersion =
+  | typeof RECOMMENDATION_V3_POLICY_VERSION
+  | "stockbox-specialist-recommendation-policy-v3.0.0";
+
 export type RecommendationV3ShadowEvent = {
   event: "stockbox.recommendation_v3_shadow";
   observedAt: string;
@@ -30,9 +40,9 @@ export type RecommendationV3ShadowEvent = {
   confidenceGatePassed: boolean;
   confidenceGateHardBlocked: boolean;
   reasonCodes: string[];
-  coveragePolicyVersion: CoverageAssessment["policyVersion"];
-  anomalyPolicyVersion: DataAnomalyAssessmentV3["policyVersion"];
-  recommendationPolicyVersion: typeof RECOMMENDATION_V3_POLICY_VERSION;
+  coveragePolicyVersion: RecommendationV3CoveragePolicyVersion;
+  anomalyPolicyVersion: RecommendationV3AnomalyPolicyVersion;
+  recommendationPolicyVersion: RecommendationV3PolicyVersion;
   coverageProfile: string;
   verifiedCoverage: number;
   retrievalCoverage: number;
