@@ -9,6 +9,9 @@ const INDUSTRIVARDEN_INDEPENDENCE_STATEMENT_URL = "https://www.industrivarden.se
 const INVESTOR_BOARD_URL = "https://www.investorab.com/about-investor/board-management/board-of-directors";
 const INVESTOR_INDEPENDENCE_STATEMENT_URL = "https://www.investorab.com/media/e3hbxzb5/information-about-proposed-board-of-directors-2026.pdf";
 const INVESTOR_INDEPENDENCE_AS_OF = "2026-05-07";
+const LATOUR_BOARD_URL = "https://www.latour.se/en/corporate-governance/the-board-of-directors";
+const LATOUR_INDEPENDENCE_STATEMENT_URL = "https://www.latour.se/~/media/Files/L/latour/documents/mtn-program/prospectus/Latour%20-%20Base%20Prospectus%2013%20February%202026%20FINAL%20locked.pdf";
+const LATOUR_INDEPENDENCE_AS_OF = "2026-02-13";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -34,6 +37,17 @@ const INVESTOR_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Hans Stråberg", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Fred Wallenberg", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
   { name: "Sara Öhrvall", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+];
+
+const LATOUR_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
+  { name: "Johan Nordström", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Mariana Burenstam Linder", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Anders Böös", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Carl Douglas", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Eric Douglas", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Johan Hjertonsson", independentFromCompanyManagement: false, independentFromMajorShareholders: true },
+  { name: "Lena Olving", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Hélène Barnekow", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
 ];
 
 export type OfficialInvestmentCompanyGovernanceData = {
@@ -145,6 +159,53 @@ export function parseInvestorOfficialBoardRoster(html: string): string[] | null 
   return names.length === INVESTOR_2026_DIRECTORS.length ? names : null;
 }
 
+export function parseLatourOfficialBoardRoster(html: string): string[] | null {
+  const text = htmlToText(html);
+  if (!/\bboard of latour consists of eight regular members,\s*includ(?:ing|ig) the ceo\b/i.test(text)) return null;
+  if (!/annual general meeting in 2026,\s*johan nordström was elected chairman of the board/i.test(text)) return null;
+  if (!/two of the members are not independent of the company['’]s largest owner,\s*eric douglas and carl douglas/i.test(text)) return null;
+
+  const independenceMarkers = [...text.matchAll(/\bIndependent:\s*(Yes|No)\b/gi)];
+  if (independenceMarkers.length !== LATOUR_2026_DIRECTORS.length) return null;
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let previousMarkerEnd = 0;
+
+  for (const marker of independenceMarkers) {
+    const markerIndex = marker.index ?? -1;
+    if (markerIndex < 0) return null;
+    const window = text.slice(previousMarkerEnd, markerIndex);
+    const normalizedWindow = window.toLocaleLowerCase("en-US");
+    let director: InvestmentCompanyDirectorGovernanceEvidence | null = null;
+    let nearestIndex = -1;
+
+    for (const candidate of LATOUR_2026_DIRECTORS) {
+      const candidateIndex = normalizedWindow.lastIndexOf(normalizeDirectorName(candidate.name));
+      if (candidateIndex > nearestIndex) {
+        director = candidate;
+        nearestIndex = candidateIndex;
+      }
+    }
+
+    if (!director || nearestIndex < 0) return null;
+    const normalizedName = normalizeDirectorName(director.name);
+    if (seen.has(normalizedName)) return null;
+
+    const expectedCombinedIndependence = director.independentFromCompanyManagement === true
+      && director.independentFromMajorShareholders === true
+      ? "yes"
+      : "no";
+    if ((marker[1] ?? "").toLocaleLowerCase("en-US") !== expectedCombinedIndependence) return null;
+
+    seen.add(normalizedName);
+    names.push(director.name);
+    previousMarkerEnd = markerIndex + marker[0].length;
+  }
+
+  return names.length === LATOUR_2026_DIRECTORS.length ? names : null;
+}
+
 function rosterMatchesVerifiedEvidence(
   currentRoster: string[],
   verifiedDirectors: InvestmentCompanyDirectorGovernanceEvidence[],
@@ -183,6 +244,18 @@ function issuerConfig(company: CompanySearchResult): GovernanceIssuerConfig | nu
       evidenceAsOf: INVESTOR_INDEPENDENCE_AS_OF,
       directors: INVESTOR_2026_DIRECTORS,
       parseRoster: parseInvestorOfficialBoardRoster,
+    };
+  }
+
+  const isLatour = /\blato(?:-[ab])?\.st\b/.test(identity) || identity.includes("investment ab latour");
+  if (isLatour) {
+    return {
+      issuerName: "Latour",
+      boardUrl: LATOUR_BOARD_URL,
+      evidenceUrl: LATOUR_INDEPENDENCE_STATEMENT_URL,
+      evidenceAsOf: LATOUR_INDEPENDENCE_AS_OF,
+      directors: LATOUR_2026_DIRECTORS,
+      parseRoster: parseLatourOfficialBoardRoster,
     };
   }
 
