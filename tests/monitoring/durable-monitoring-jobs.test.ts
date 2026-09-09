@@ -8,12 +8,19 @@ describe("durable watchlist monitoring jobs", () => {
     expect(watchlistJobDedupeKey(" aapl ")).toBe("watchlist:AAPL");
   });
 
-  it("routes cron execution through the durable queue", () => {
+  it("routes cron execution through the isolated v3 monitoring cycle and durable watchlist queue", () => {
     const route = readFileSync(
       resolve(process.cwd(), "src/app/api/monitoring/run/route.ts"),
       "utf8",
     );
-    expect(route).toContain("runDurableWatchlistMonitoring");
+    const cycle = readFileSync(
+      resolve(process.cwd(), "src/lib/monitoring/monitoring-cycle-v3.ts"),
+      "utf8",
+    );
+
+    expect(route).toContain("runMonitoringCycleV3");
+    expect(cycle).toContain("runDurableWatchlistMonitoring");
     expect(route).not.toContain("runOfficialWatchlistMonitoring");
+    expect(cycle).not.toContain("runOfficialWatchlistMonitoring");
   });
 });
