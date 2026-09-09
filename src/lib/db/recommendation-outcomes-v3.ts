@@ -139,6 +139,11 @@ export function toRecommendationOutcomeV3Row(
     throw new Error("INVALID_RECOMMENDATION_OUTCOME_SECURITY_RETURN");
   }
 
+  const securityPriceSource = normalizedText(input.securityPriceSource);
+  if (securityPriceSource === null) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_SECURITY_PRICE_SOURCE");
+  }
+
   const benchmarkEvidencePresent = hasAnyBenchmarkEvidence(input);
   let benchmarkTicker: string | null = null;
   let benchmarkEntryObservedAt: string | null = null;
@@ -213,7 +218,7 @@ export function toRecommendationOutcomeV3Row(
     benchmark_return: benchmarkReturn,
     excess_return: excessReturn,
     directional_hit: benchmarkEvidencePresent ? input.directionalHit : null,
-    security_price_source: input.securityPriceSource.trim(),
+    security_price_source: securityPriceSource,
     benchmark_price_source: benchmarkPriceSource,
     updated_at: updatedAt,
   };
