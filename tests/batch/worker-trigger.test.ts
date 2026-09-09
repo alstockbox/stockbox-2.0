@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BATCH_ITEM_EXECUTION_TIMEOUT_MS } from "@/lib/batch/durable";
+import { BATCH_WORKER_CLAIM_LIMIT } from "@/lib/batch/worker-wave";
 import {
   boundedDurableWorkerDelayMs,
   DURABLE_WORKER_TRIGGER_TIMEOUT_MS,
@@ -37,8 +38,11 @@ describe("durable batch worker chaining", () => {
 
   it("drains several queued jobs per worker invocation with bounded concurrency", () => {
     const workerRoute = readFileSync(resolve(process.cwd(), "src/app/api/jobs/batch/run/route.ts"), "utf8");
+    const workerWave = readFileSync(resolve(process.cwd(), "src/lib/batch/worker-wave.ts"), "utf8");
     const jobs = readFileSync(resolve(process.cwd(), "src/lib/jobs/background-jobs.ts"), "utf8");
-    expect(workerRoute).toContain("runDurableBatchJobs(3)");
+    expect(BATCH_WORKER_CLAIM_LIMIT).toBeGreaterThanOrEqual(8);
+    expect(workerRoute).toContain("runDurableBatchWorkerWave");
+    expect(workerWave).toContain("limit: BATCH_WORKER_CLAIM_LIMIT");
     expect(jobs).toContain("await Promise.all(jobs.map");
   });
 
