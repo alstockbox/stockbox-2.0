@@ -11,7 +11,7 @@ const SOURCE_PROVIDER = "Yahoo Finance";
 const PROVIDER_VERSION = "yahoo-etf-holding-fundamentals-v2";
 const REQUEST_TIMEOUT_MS = 10_000;
 const SUCCESS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MODULES = "financialData,defaultKeyStatistics,summaryDetail,assetProfile";
+const MODULES = "financialData,defaultKeyStatistics,summaryDetail,assetProfile,price";
 const HOSTS = [
   "https://query1.finance.yahoo.com",
   "https://query2.finance.yahoo.com",
@@ -61,6 +61,21 @@ function numberValue(value: unknown): number | undefined {
   const wrapped = object(value);
   const raw = wrapped?.raw;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+}
+
+function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+  const requestedSymbol = requested.trim().toUpperCase();
+  const returnedSymbol = returned.trim().toUpperCase();
+  if (requestedSymbol === returnedSymbol) return true;
+
+  const requestedClass = requestedSymbol.match(/^([A-Z0-9]{1,8})[.-]([A-Z])$/);
+  const returnedClass = returnedSymbol.match(/^([A-Z0-9]{1,8})[.-]([A-Z])$/);
+  return Boolean(
+    requestedClass
+    && returnedClass
+    && requestedClass[1] === returnedClass[1]
+    && requestedClass[2] === returnedClass[2],
+  );
 }
 
 function quoteSummaryResult(payload: unknown): JsonObject | null {
@@ -129,6 +144,7 @@ export async function fetchYahooEtfHoldingFundamentals(
   if (cached) return cached;
 
   let sawValidYahooPayload = false;
+  let sawSymbolMismatch = false;
 
   for (const host of HOSTS) {
     const url = requestUrl(host, ticker);
@@ -145,6 +161,12 @@ export async function fetchYahooEtfHoldingFundamentals(
       const result = quoteSummaryResult(await response.json());
       if (!result) continue;
       sawValidYahooPayload = true;
+
+      const observedSymbol = stringValue(object(result.price)?.symbol);
+      if (observedSymbol && !yahooSymbolsEquivalent(ticker, observedSymbol)) {
+        sawSymbolMismatch = true;
+        continue;
+      }
 
       const data = parseVerifiedFields(result);
       if (!hasVerifiedField(data)) continue;
@@ -172,6 +194,13 @@ export async function fetchYahooEtfHoldingFundamentals(
     } catch {
       // Try the alternate Yahoo host. If both fail, the adapter fails closed below.
     }
+  }
+
+  if (sawSymbolMismatch) {
+    return unavailable(
+      "symbol_mismatch",
+      "Yahoo holding fundamentals symbol identity does not match the requested holding ticker.",
+    );
   }
 
   if (sawValidYahooPayload) {
