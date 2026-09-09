@@ -1,0 +1,87 @@
+name: Temporary Yahoo market symbol GREEN
+
+on:
+  push:
+    branches:
+      - fix/etf-investment-company-coverage
+    paths:
+      - .github/workflows/tmp-yahoo-market-symbol-green.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify RED parent
+        run: test "$(git rev-parse HEAD^)" = "376ec2d96ad878d523da5f16b61f57fa0149dd81"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply Yahoo market symbol identity fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/data/yahoo-market.ts")
+          text = path.read_text()
+
+          old = '''function toYahooSymbol(company: CompanySearchResult): string {
+            const symbol = (company.canonicalTicker ?? company.ticker).trim().toUpperCase();
+            if ((company.country ?? "").toUpperCase() === "US" && symbol.includes(".")) return symbol.replaceAll(".", "-");
+            if (/\\.[A-Z]{1,5}$/.test(symbol)) return symbol;
+            return symbol;
+          }
+
+          function betaBenchmarkSymbol(company: CompanySearchResult): string | null {'''
+          new = '''function toYahooSymbol(company: CompanySearchResult): string {
+            const symbol = (company.canonicalTicker ?? company.ticker).trim().toUpperCase();
+            if ((company.country ?? "").toUpperCase() === "US" && symbol.includes(".")) return symbol.replaceAll(".", "-");
+            if (/\\.[A-Z]{1,5}$/.test(symbol)) return symbol;
+            return symbol;
+          }
+
+          function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+            const expected = requested.trim().toUpperCase();
+            const actual = returned.trim().toUpperCase();
+            if (expected === actual) return true;
+            if (!/^[A-Z]{1,6}[.-][A-Z]$/.test(expected) || !/^[A-Z]{1,6}[.-][A-Z]$/.test(actual)) return false;
+            return expected.replace(".", "-") === actual.replace(".", "-");
+          }
+
+          function betaBenchmarkSymbol(company: CompanySearchResult): string | null {'''
+          if text.count(old) != 1:
+              raise SystemExit(f"helper patch anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+
+          old = '''    const meta = object(result.meta) ?? {};
+              const history = parseRows(result);'''
+          new = '''    const meta = object(result.meta) ?? {};
+              const observedSymbol = stringValue(meta.symbol);
+              if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) {
+                return failure("invalid_row", "Yahoo Finance chart symbol identity does not match the requested security.");
+              }
+              const history = parseRows(result);'''
+          if text.count(old) != 1:
+              raise SystemExit(f"result patch anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Targeted Yahoo market regressions
+        run: npm test -- tests/data/yahoo-market-symbol-identity.test.ts tests/data/yahoo-market.test.ts
+      - name: Typecheck Yahoo market fix
+        run: npm run typecheck
+      - name: Commit source fix and self-remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/data/yahoo-market.ts
+          git rm .github/workflows/tmp-yahoo-market-symbol-green.yml
+          git commit -m "fix: verify Yahoo market symbol identity"
+          git push origin HEAD:fix/etf-investment-company-coverage
