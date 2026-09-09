@@ -265,13 +265,26 @@ function attemptOffsetFromJob(job: BackgroundJob): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
+const BATCH_LEASE_VERIFICATION_UNAVAILABLE = "Batch lease verification is temporarily unavailable.";
+const BATCH_LEASE_UPDATE_UNAVAILABLE = "Batch lease update is temporarily unavailable.";
+
 function throwIfExecutionExpired(signal?: AbortSignal): void {
   if (signal?.aborted) throw new BatchItemLeaseLostError();
 }
 
+function assertLeaseReadResult(result: { data: unknown; error: unknown }): void {
+  if (result.error) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
+  if (!result.data) throw new BatchItemLeaseLostError();
+}
+
+function assertLeaseMutationResult(result: { data: unknown; error: unknown }): void {
+  if (result.error) throw new Error(BATCH_LEASE_UPDATE_UNAVAILABLE);
+  if (!result.data) throw new BatchItemLeaseLostError();
+}
+
 async function assertBackgroundJobLease(job: BackgroundJob): Promise<void> {
   const admin = createAdminClient();
-  if (!admin) throw new BatchItemLeaseLostError();
+  if (!admin) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
   let query = admin.from("background_jobs")
     .select("id")
     .eq("id", job.id)
@@ -279,7 +292,7 @@ async function assertBackgroundJobLease(job: BackgroundJob): Promise<void> {
     .eq("attempts", job.attempts);
   query = job.lockedAt ? query.eq("locked_at", job.lockedAt) : query.is("locked_at", null);
   const current = await query.maybeSingle();
-  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+  assertLeaseReadResult(current);
 }
 
 async function assertBatchItemLease(
@@ -290,7 +303,7 @@ async function assertBatchItemLease(
 ): Promise<void> {
   throwIfExecutionExpired(signal);
   const admin = createAdminClient();
-  if (!admin) throw new BatchItemLeaseLostError();
+  if (!admin) throw new Error(BATCH_LEASE_VERIFICATION_UNAVAILABLE);
   const current = await admin.from("batch_items")
     .select("id")
     .eq("id", itemId)
@@ -299,7 +312,7 @@ async function assertBatchItemLease(
     .eq("started_at", leaseStartedAt)
     .maybeSingle();
   throwIfExecutionExpired(signal);
-  if (current.error || !current.data) throw new BatchItemLeaseLostError();
+  assertLeaseReadResult(current);
 }
 
 async function markItemFailure(
@@ -372,7 +385,7 @@ async function executeBatchItem(
     .in("status", ["queued", "processing"])
     .select("id")
     .maybeSingle();
-  if (!lease.data) throw new BatchItemLeaseLostError();
+  assertLeaseMutationResult(lease);
 
   await admin.from("batch_runs").update({
     status: "processing",
@@ -412,7 +425,7 @@ async function executeBatchItem(
       .eq("started_at", startedAt)
       .select("id")
       .maybeSingle();
-    if (!completed.data) throw new BatchItemLeaseLostError();
+    assertLeaseMutationResult(completed);
     await refreshBatchRun(item.batchId);
     return;
   }
@@ -469,7 +482,7 @@ async function executeBatchItem(
       .eq("started_at", startedAt)
       .select("id")
       .maybeSingle();
-    if (!completed.data) throw new BatchItemLeaseLostError();
+    assertLeaseMutationResult(completed);
 
     result.data.id = analysisId;
     await refreshBatchRun(item.batchId);
@@ -597,7 +610,6 @@ export async function retryDurableBatchFailures(input: { userId: string; batchId
     async (row) => {
       const itemId = String(row.id);
       const reset = await admin.from("batch_items").update({
-        status: "queued",
         attempts: 0,
         started_at: null,
         last_error: null,
