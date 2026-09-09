@@ -207,6 +207,30 @@ describe("Recommendation specialist shadow V3", () => {
     expect(selected).not.toBe(corporate);
   });
 
+  it("does not fall back to a corporate audit when specialist analysis exists but cannot produce specialist lineage", () => {
+    const corporate = { modelVersion: "corporate-pre-enrichment" } as RecommendationV3ShadowEvent;
+    const selected = recommendationReviewEventFromAnalysisV3({
+      data: report({ ticker: "   " }),
+      stockbox3: { recommendationV3Shadow: { status: "evaluated", event: corporate } },
+    });
+
+    expect(selected).toBeNull();
+  });
+
+  it("does not fall back to a corporate audit for a specialist-classified security whose specialist analysis is unavailable", () => {
+    const corporate = { modelVersion: "corporate-pre-enrichment" } as RecommendationV3ShadowEvent;
+    const specialistWithoutAnalysis = report({
+      securityAnalysis: undefined,
+      securityClassification: { kind: "equity_etf", confidence: 1, reason: "test" },
+    });
+    const selected = recommendationReviewEventFromAnalysisV3({
+      data: specialistWithoutAnalysis,
+      stockbox3: { recommendationV3Shadow: { status: "evaluated", event: corporate } },
+    });
+
+    expect(selected).toBeNull();
+  });
+
   it("falls back to canonical corporate shadow for ordinary operating-company reports", () => {
     const corporate = { modelVersion: "corporate-v3" } as RecommendationV3ShadowEvent;
     const ordinary = report({ securityAnalysis: undefined, securityClassification: undefined });
