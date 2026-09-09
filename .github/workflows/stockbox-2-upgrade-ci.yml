@@ -113,6 +113,7 @@ jobs:
         run: supabase start -x vector,edge-runtime,logflare
       - name: Install PostgreSQL client
         run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y postgresql-client
       - name: Apply base schema
