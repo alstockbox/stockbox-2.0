@@ -1,4 +1,5 @@
 import type { CompanySearchResult } from "@/lib/analysis/types";
+import { assessDepositaryReceiptFundamentalsAccess } from "./depositary-receipt";
 
 const ADR_PATTERN = /\badr\b|american depositary|depositary receipt/i;
 const FUND_PRODUCT_PATTERN = /\betf\b|\bfund\b|mutual fund|index fund|ucits|sicav|portfolio|tracker|exchange[-\s]traded|trust index/i;
@@ -51,6 +52,13 @@ export function supportsLiveFundamentalsSecurity(company: CompanySearchResult | 
 }
 
 export function canAttemptConfiguredFundamentals(company: CompanySearchResult): boolean {
-  if (inferSecurityType(company) !== "Common Stock") return false;
-  return true;
+  const securityType = inferSecurityType(company);
+  if (securityType === "Common Stock") return true;
+  if (securityType === "ADR") {
+    return assessDepositaryReceiptFundamentalsAccess({
+      ...company,
+      securityType: "ADR",
+    }).allowed;
+  }
+  return false;
 }

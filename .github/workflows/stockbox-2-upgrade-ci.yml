@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - upgrade/stockbox-2-ux-portfolio-mobile-20260905
+      - fix/etf-investment-company-coverage
   pull_request:
     paths:
       - "src/app/**"
       - "src/components/**"
       - "src/lib/**"
+      - "scripts/diagnostics/**"
       - "tests/**"
       - "supabase/migrations/**"
       - "vercel.json"
@@ -137,6 +139,7 @@ jobs:
         run: supabase start -x vector,edge-runtime,logflare
       - name: Install PostgreSQL client
         run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y postgresql-client
       - name: Apply base schema

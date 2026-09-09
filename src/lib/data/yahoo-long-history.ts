@@ -9,8 +9,19 @@ const REQUEST_TIMEOUT_MS = 10_000;
 type JsonObject = Record<string, unknown>;
 type CurrencyPricePoint = VerifiedMarketHistoryEnrichment["priceHistory"][number];
 
+export type YahooAdjustedPricePoint = {
+  date: string;
+  adjustedClose: number;
+  currency: string;
+  provider: typeof PROVIDER_ID;
+};
+
+export type YahooLongHistoryData = VerifiedMarketHistoryEnrichment & {
+  adjustedPriceHistory: YahooAdjustedPricePoint[];
+};
+
 export type YahooLongHistoryResult =
-  | { ok: true; data: VerifiedMarketHistoryEnrichment; diagnostic: ProviderDiagnostic; source: AnalysisSource }
+  | { ok: true; data: YahooLongHistoryData; diagnostic: ProviderDiagnostic; source: AnalysisSource }
   | { ok: false; diagnostic: ProviderDiagnostic; reason: string };
 
 function object(value: unknown): JsonObject | null {
@@ -39,6 +50,14 @@ function yahooSymbol(company: CompanySearchResult): string {
   return symbol;
 }
 
+function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+  const expected = requested.trim().toUpperCase();
+  const actual = returned.trim().toUpperCase();
+  if (expected === actual) return true;
+  if (!/^[A-Z]{1,6}[.-][A-Z]$/.test(expected) || !/^[A-Z]{1,6}[.-][A-Z]$/.test(actual)) return false;
+  return expected.replace(".", "-") === actual.replace(".", "-");
+}
+
 function failure(reason: string): YahooLongHistoryResult {
   return {
     ok: false,
@@ -63,6 +82,22 @@ function parsePriceHistory(result: JsonObject, currency: string): CurrencyPriceP
   return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function parseAdjustedPriceHistory(result: JsonObject, currency: string): YahooAdjustedPricePoint[] {
+  const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const indicators = object(result.indicators);
+  const adjusted = Array.isArray(indicators?.adjclose) ? object(indicators.adjclose[0]) : null;
+  const closes = Array.isArray(adjusted?.adjclose) ? adjusted.adjclose : [];
+  const deduped = new Map<string, YahooAdjustedPricePoint>();
+  timestamps.forEach((timestamp, index) => {
+    const date = dateFromUnix(timestamp);
+    const adjustedClose = numberValue(closes[index]);
+    if (!date || adjustedClose === null || adjustedClose <= 0 || adjustedClose > 1_000_000_000) return;
+    if (Date.parse(`${date}T00:00:00Z`) > Date.now()) return;
+    deduped.set(date.slice(0, 7), { date, adjustedClose, currency, provider: PROVIDER_ID });
+  });
+  return [...deduped.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function parseDividends(result: JsonObject, currency: string): MarketDividendEvent[] {
   const dividends = object(object(result.events)?.dividends);
   if (!dividends) return [];
@@ -83,7 +118,7 @@ export async function fetchYahooLongHistory(company: CompanySearchResult): Promi
   url.searchParams.set("range", "max");
   url.searchParams.set("interval", "1mo");
   url.searchParams.set("events", "div,splits");
-  url.searchParams.set("includeAdjustedClose", "false");
+  url.searchParams.set("includeAdjustedClose", "true");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -101,15 +136,19 @@ export async function fetchYahooLongHistory(company: CompanySearchResult): Promi
     const result = object(results[0]);
     const error = object(chart?.error);
     if (!result) return failure(stringValue(error?.description) ?? "empty_response");
-    const currency = stringValue(object(result.meta)?.currency);
+    const meta = object(result.meta);
+    const observedSymbol = stringValue(meta?.symbol);
+    if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) return failure("symbol_identity_mismatch");
+    const currency = stringValue(meta?.currency);
     if (!currency) return failure("currency_unknown");
     const priceHistory = parsePriceHistory(result, currency);
+    const adjustedPriceHistory = parseAdjustedPriceHistory(result, currency);
     const dividendEvents = parseDividends(result, currency);
     if (!priceHistory.length && !dividendEvents.length) return failure("empty_history");
     const observedAt = new Date().toISOString();
     return {
       ok: true,
-      data: { quoteCurrency: currency, priceHistory, dividendEvents, provider: PROVIDER_ID },
+      data: { quoteCurrency: currency, priceHistory, adjustedPriceHistory, dividendEvents, provider: PROVIDER_ID },
       diagnostic: providerDiagnostic(
         "Yahoo Finance long history",
         "market_data",

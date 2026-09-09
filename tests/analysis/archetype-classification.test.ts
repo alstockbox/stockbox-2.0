@@ -358,14 +358,15 @@ describe("investment holding-company refinement", () => {
     { sicDescription: "Business Development Company Financial Services", name: "Goldman Sachs BDC, Inc." },
     { sicDescription: "Credit Services Financial Services", name: "Sixth Street Specialty Lending, Inc." },
     { sic: "6726", sicDescription: "Unit Investment Trusts, Face-Amount Certificate Offices, and Closed-End Management Investment Offices", name: "Specialty Finance BDC" },
-  ])("routes BDC and specialty-lending financials to NAV-style holding methodology: $name", (input) => {
+  ])("keeps BDC and specialty-lending financials fail-closed until a dedicated credit model exists: $name", (input) => {
     const result = classifyCompany(input);
 
     expect(result).toEqual(expect.objectContaining({
       sector: "financials",
-      analysisArchetype: "holding_company",
+      analysisArchetype: "unknown",
     }));
     expect(result.classificationDiagnostics.confidence).toBeGreaterThanOrEqual(0.8);
+    expect(result.classificationDiagnostics.reason).toMatch(/dedicated|specialized|bdc|lending/i);
   });
 });
 

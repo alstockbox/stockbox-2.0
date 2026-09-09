@@ -94,6 +94,14 @@ function toYahooSymbol(company: CompanySearchResult): string {
   return symbol;
 }
 
+function yahooSymbolsEquivalent(requested: string, returned: string): boolean {
+  const expected = requested.trim().toUpperCase();
+  const actual = returned.trim().toUpperCase();
+  if (expected === actual) return true;
+  if (!/^[A-Z]{1,6}[.-][A-Z]$/.test(expected) || !/^[A-Z]{1,6}[.-][A-Z]$/.test(actual)) return false;
+  return expected.replace(".", "-") === actual.replace(".", "-");
+}
+
 function betaBenchmarkSymbol(company: CompanySearchResult): string | null {
   const symbol = toYahooSymbol(company);
   const suffixMatch = BETA_BENCHMARK_BY_SUFFIX.find(([suffix]) => symbol.endsWith(suffix));
@@ -361,6 +369,10 @@ export const yahooMarketDataProvider: MarketDataProvider = {
     if (!result) return failure("empty_response", "Yahoo Finance returned no chart result for this security.");
 
     const meta = object(result.meta) ?? {};
+    const observedSymbol = stringValue(meta.symbol);
+    if (observedSymbol && !yahooSymbolsEquivalent(symbol, observedSymbol)) {
+      return failure("invalid_row", "Yahoo Finance chart symbol identity does not match the requested security.");
+    }
     const history = parseRows(result);
     const latest = history.at(-1);
     const metaDate = unixDate(meta.regularMarketTime);
@@ -376,7 +388,12 @@ export const yahooMarketDataProvider: MarketDataProvider = {
 
     const benchmarkResponse = benchmarkSymbol ? await requestChart(benchmarkSymbol) : null;
     const benchmarkResult = benchmarkResponse?.ok ? firstChartResult(benchmarkResponse.data) : null;
-    const betaEstimate = benchmarkResult ? historicalWeeklyBeta(history, parseRows(benchmarkResult)) : null;
+    const benchmarkObservedSymbol = benchmarkResult ? stringValue(object(benchmarkResult.meta)?.symbol) : null;
+    const verifiedBenchmarkResult = benchmarkResult
+      && (!benchmarkObservedSymbol || (benchmarkSymbol && yahooSymbolsEquivalent(benchmarkSymbol, benchmarkObservedSymbol)))
+      ? benchmarkResult
+      : null;
+    const betaEstimate = verifiedBenchmarkResult ? historicalWeeklyBeta(history, parseRows(verifiedBenchmarkResult)) : null;
     const yearRows = lastYearRows(history);
     const marketCurrency = stringValue(meta.currency) ?? company.currency ?? null;
     const dividendEvents = parseDividendEvents(result, marketCurrency);

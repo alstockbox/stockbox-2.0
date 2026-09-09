@@ -48,6 +48,11 @@ describe("server environment parsing", () => {
     expect(env.CRON_SECRET).toBe("test-cron-secret");
   });
 
+  it("preserves an optional Alpha Vantage ETF fallback key", () => {
+    const env = parseServerEnv({ ALPHA_VANTAGE_API_KEY: "alpha-test-key" });
+    expect(env.ALPHA_VANTAGE_API_KEY).toBe("alpha-test-key");
+  });
+
   it.each([undefined, "", "   "])("normalizes MARKET_DATA_PROVIDER %s to the reliable no-env Yahoo fallback", (provider) => {
     const env = parseServerEnv({ MARKET_DATA_PROVIDER: provider });
     expect(getMarketDataProvider(env)).toBe("yahoo");
