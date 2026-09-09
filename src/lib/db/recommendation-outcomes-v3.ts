@@ -68,6 +68,10 @@ export function toRecommendationOutcomeV3Row(
   input: RecommendationOutcomePersistInputV3,
   updatedAt = input.evaluatedAt,
 ): RecommendationOutcomeRowV3 {
+  if (!Number.isFinite(input.lagDays) || !Number.isInteger(input.lagDays) || input.lagDays < 0) {
+    throw new Error("INVALID_RECOMMENDATION_OUTCOME_LAG_DAYS");
+  }
+
   return {
     recommendation_audit_id: input.recommendationAuditId.trim(),
     policy_version: input.policyVersion,
@@ -75,7 +79,7 @@ export function toRecommendationOutcomeV3Row(
     horizon: input.horizon,
     expected_at: input.expectedAt,
     evaluated_at: input.evaluatedAt,
-    lag_days: Math.max(0, Math.trunc(input.lagDays)),
+    lag_days: input.lagDays,
     entry_observed_at: input.entryObservedAt,
     entry_price: input.entryPrice,
     observed_price: input.observedPrice,
