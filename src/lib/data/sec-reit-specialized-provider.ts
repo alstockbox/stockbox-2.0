@@ -192,11 +192,12 @@ function observationMetric(observation: SecReitObservation, filing: EarningsFili
     provenance: {
       source: "SEC EDGAR earnings exhibit",
       provider: PROVIDER_ID,
-      valueKind: "reported",
+      valueKind: observation.valueKind ?? "reported",
       periodEnd: observation.dataAsOf ?? undefined,
       filedAt: filing.filingDate,
       form: "8-K",
       accession: filing.accession,
+      ...(observation.inputs ? { inputs: observation.inputs } : {}),
       note: observation.sourceUrl,
     },
   };
@@ -231,7 +232,7 @@ function buildReitMetrics(
     fundsFromOperationsGrowth: emptyMetric(),
     adjustedFundsFromOperationsGrowth: emptyMetric(),
     adjustedFundsFromOperationsPayout: metric("affoPayout"),
-    dividendCoverage: emptyMetric(),
+    dividendCoverage: metric("dividendCoverage"),
     occupancy: metric("occupancy"),
     sameStoreNoiGrowth: metric("sameStoreNoiGrowth"),
     netDebtToEbitdare: metric("netDebtToEbitdare"),
