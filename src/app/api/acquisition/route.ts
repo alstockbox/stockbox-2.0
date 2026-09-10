@@ -1,6 +1,5 @@
 import { normalizeAcquisitionPayload, isLikelyBot } from "@/lib/analytics/acquisition";
 import { getCurrentUser } from "@/lib/auth/session";
-import { reportStockBoxEvent, stockBoxSignupEvent } from "@/lib/integrations/smb-os";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   checkDistributedRateLimit,
@@ -32,24 +31,19 @@ export async function POST(request: Request) {
 
   const value = normalized.value;
   const userAgent = request.headers.get("user-agent");
-  const isBot = isLikelyBot(userAgent);
   const isInternal = process.env.NODE_ENV !== "production"
     || request.headers.get("host")?.includes("localhost") === true;
 
   const { error } = await supabase.from("acq_events").insert({
     ...value,
-    is_bot: isBot,
+    is_bot: isLikelyBot(userAgent),
     is_internal: isInternal,
     raw_payload: payload,
     updated_at: new Date().toISOString(),
   });
 
-  if (!error || error.code === "23505") {
-    if (value.event_name === "signup_completed" && !isBot && !isInternal) {
-      await reportStockBoxEvent(stockBoxSignupEvent(value.idempotency_key));
-    }
-    return new Response(null, { status: 204 });
-  }
+  if (!error) return new Response(null, { status: 204 });
+  if (error.code === "23505") return new Response(null, { status: 204 });
 
   console.error("Acquisition event insert failed", { code: error.code, message: error.message });
   return Response.json({ error: "event_storage_failed" }, { status: 500 });
