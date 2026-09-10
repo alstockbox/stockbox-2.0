@@ -6,6 +6,8 @@ import { ButtonLink } from "@/components/ui/button";
 import {
   classifyPortfolioUpgradeNetCase,
   comparePortfolioUpgradeEvidence,
+  rankPortfolioUpgradeOptions,
+  summarizePortfolioUpgradeEvidence,
   type PortfolioUpgradeNetCaseLabel,
 } from "@/lib/portfolio/portfolio-ai-upgrade-evidence";
 import {
@@ -280,6 +282,19 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
     return result;
   }, [upgradeEvidenceByTicker]);
 
+  const rankedUpgradeCandidates = useMemo(() => rankPortfolioUpgradeOptions(
+    upgradeCandidates.map((candidate) => ({
+      ...candidate,
+      netCase: upgradeNetCaseByTicker.get(candidate.ticker) ?? {
+        label: "insufficient" as const,
+        positiveEvidence: 0,
+        negativeEvidence: 0,
+        netEvidence: null,
+        comparableDimensions: 0,
+      },
+    })),
+  ), [upgradeCandidates, upgradeNetCaseByTicker]);
+
   const rebalancePlan = useMemo(() => {
     if (!selected) return [];
     const current = selected.holdings
@@ -373,7 +388,7 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
             </div>
           </div>
 
-          {weakHolding && upgradeCandidates.length ? (
+          {weakHolding && rankedUpgradeCandidates.length ? (
             <div className="rounded-xl border border-[#e1cb95]/15 bg-[#e1cb95]/[0.035] p-4">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
@@ -384,14 +399,21 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                 <span className="rounded-full border border-white/10 bg-black/10 px-3 py-1 text-[10px] text-[#9aa7b8]">{sv ? "Jämförelse, inte order" : "Comparison, not an order"}</span>
               </div>
               <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                {upgradeCandidates.map((candidate) => {
+                {rankedUpgradeCandidates.map((candidate, index) => {
                   const drivers = upgradeDriversByTicker.get(candidate.ticker) ?? [];
                   const evidence = upgradeEvidenceByTicker.get(candidate.ticker);
-                  const netCase = upgradeNetCaseByTicker.get(candidate.ticker);
+                  const netCase = candidate.netCase;
+                  const evidenceSummary = evidence ? summarizePortfolioUpgradeEvidence(evidence) : null;
                   return (
                     <div key={candidate.ticker} className="rounded-lg border border-white/10 bg-black/10 p-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div><p className="font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p><p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p></div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-mono text-sm font-semibold text-[#e1cb95]">{candidate.ticker}</p>
+                            {index === 0 && netCase.label !== "insufficient" ? <span className="rounded-full border border-[#e1cb95]/25 bg-[#e1cb95]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#e1cb95]">{sv ? "Bäst match" : "Best match"}</span> : null}
+                          </div>
+                          <p className="mt-1 line-clamp-1 text-xs text-[#9aa7b8]">{candidate.name}</p>
+                        </div>
                         <span className="rounded-full border border-emerald-400/20 bg-emerald-950/20 px-2 py-1 text-[10px] font-semibold text-emerald-200">+{candidate.scoreImprovement.toFixed(0)} score</span>
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-[#8f9bac]">
@@ -400,11 +422,15 @@ export function PortfolioAiCoach({ locale, portfolios, candidates, asOf }: Props
                         <div className="rounded bg-white/[0.035] p-2"><span>{sv ? "Kvalitet" : "Quality"}</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.quality ?? 0)}</p></div>
                         <div className="rounded bg-white/[0.035] p-2"><span>Risk</span><p className="mt-1 text-xs font-semibold text-[#eef2f7]">{Math.round(candidate.risk ?? 0)}</p></div>
                       </div>
-                      {netCase ? (
-                        <div className="mt-3 rounded-md border border-white/10 bg-white/[0.025] px-2.5 py-2 text-[10px] text-[#8f9bac]">
-                          <span>{sv ? "Netto-case" : "Net case"}: </span><span className="font-semibold text-[#eef2f7]">{netCaseLabel(netCase.label, sv)}</span>
-                        </div>
-                      ) : null}
+                      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.025] px-2.5 py-2 text-[10px] text-[#8f9bac]">
+                        <span>{sv ? "Netto-case" : "Net case"}: </span><span className="font-semibold text-[#eef2f7]">{netCaseLabel(netCase.label, sv)}</span>
+                      </div>
+                      {evidenceSummary?.primaryStrength ? (
+                        <p className="mt-2 text-[10px] leading-4 text-[#9aa7b8]">
+                          {sv ? "Starkast på" : "Strongest on"} <span className="font-semibold text-emerald-100">{driverLabel(evidenceSummary.primaryStrength.dimension, sv)} +{evidenceSummary.primaryStrength.delta.toFixed(0)}</span>
+                          {evidenceSummary.primaryTradeoff ? <>{sv ? ", men svagare på " : ", but weaker on "}<span className="font-semibold text-amber-100">{driverLabel(evidenceSummary.primaryTradeoff.dimension, sv)} {evidenceSummary.primaryTradeoff.delta.toFixed(0)}</span></> : <>{sv ? "; inga verifierade nackdelar i jämförbara dimensioner." : "; no verified downside in comparable dimensions."}</>}
+                        </p>
+                      ) : evidence ? <p className="mt-2 text-[10px] leading-4 text-[#6f7b8c]">{sv ? "Otillräckligt jämförbart underlag för en kort evidenssammanfattning." : "Insufficient comparable evidence for a concise summary."}</p> : null}
                       {drivers.length ? (
                         <div className="mt-3 border-t border-white/10 pt-3">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8f9bac]">{sv ? "Varför bättre?" : "Why better?"}</p>
