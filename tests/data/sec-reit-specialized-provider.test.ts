@@ -88,8 +88,13 @@ describe("SEC REIT specialized provider", () => {
         '<tr><td>3</td><td>External</td><td><a href="https://example.com/not-sec.htm">external</a></td><td>EX-99.3</td></tr>',
       ));
       if (url.endsWith("/ex991.htm")) return response(`
+        <p>Portfolio Overview As of June 30, 2026</p>
         <p>98.8% occupancy</p>
         <p>Net Debt to Annualized Pro Forma Adjusted EBITDAre was 5.4x</p>
+        <table>
+          <tr><th></th><th>Three Months Ended June 30, 2026</th><th>Three Months Ended June 30, 2025</th></tr>
+          <tr><td>AFFO Payout %</td><td>74.5%</td><td>79.9%</td></tr>
+        </table>
       `);
       if (url.endsWith("/ex992.htm")) return response(`
         <table><tr><td>Cash Same Store NOI*</td><td>8.5%</td></tr></table>
@@ -107,6 +112,19 @@ describe("SEC REIT specialized provider", () => {
       expect(result.data.sameStoreNoiGrowth).toMatchObject({ value: 0.085, unit: "ratio", dataAsOf: "2026-06-30" });
       expect(result.data.netDebtToEbitdare).toMatchObject({ value: 5.4, unit: "ratio", dataAsOf: "2026-06-30" });
       expect(result.data.fixedChargeCoverage).toMatchObject({ value: 4.7, unit: "ratio", dataAsOf: "2026-06-30" });
+      expect(result.data.adjustedFundsFromOperationsPayout).toMatchObject({
+        value: 0.745,
+        unit: "ratio",
+        dataAsOf: "2026-06-30",
+      });
+      expect(result.data.adjustedFundsFromOperationsPayout.provenance).toMatchObject({
+        provider: "sec-reit-filings",
+        valueKind: "reported",
+        periodEnd: "2026-06-30",
+        filedAt: "2026-07-30",
+        form: "8-K",
+        accession: "0000000001-26-000010",
+      });
       expect(result.data.occupancy.provenance).toMatchObject({
         provider: "sec-reit-filings",
         valueKind: "reported",
