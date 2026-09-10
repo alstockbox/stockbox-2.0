@@ -31,7 +31,6 @@ describe("StockBox SMB OS adapter", () => {
       analysisId: "analysis-123",
       ticker: "VOLV-B",
       analysisType: "deep",
-      researchView: "balanced",
       score: 81,
     });
     expect(event.eventId).toBe("analysis:analysis-123:completed");
@@ -39,12 +38,13 @@ describe("StockBox SMB OS adapter", () => {
     expect(event.metadata).not.toHaveProperty("userId");
   });
 
-  it("maps only positive SEK paid invoices to revenue", () => {
+  it("books positive SEK cash as revenue only when VAT exempt", () => {
     expect(stockBoxPaidInvoiceEvent({
       stripeEventId: "evt_paid_1",
       invoiceId: "in_1",
       amountPaidCents: 4900,
       currency: "sek",
+      vatMode: "small_business_exempt",
       billingReason: "subscription_create",
     })).toMatchObject({
       eventId: "stripe:evt_paid_1:revenue",
@@ -52,8 +52,24 @@ describe("StockBox SMB OS adapter", () => {
       kind: "revenue",
       amountSek: 49,
     });
-    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_2", invoiceId: "in_2", amountPaidCents: 4900, currency: "eur" })).toBeNull();
-    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_3", invoiceId: "in_3", amountPaidCents: 0, currency: "sek" })).toBeNull();
+  });
+
+  it("keeps gross paid cash out of revenue when VAT treatment is not exempt", () => {
+    expect(stockBoxPaidInvoiceEvent({
+      stripeEventId: "evt_paid_2",
+      invoiceId: "in_2",
+      amountPaidCents: 4900,
+      currency: "sek",
+      vatMode: "vat_registered",
+    })).toMatchObject({
+      eventId: "stripe:evt_paid_2:gross-cash",
+      type: "measurement",
+      metricName: "gross_cash_received_sek",
+      metricValue: 49,
+      unit: "SEK",
+    });
+    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_3", invoiceId: "in_3", amountPaidCents: 4900, currency: "eur" })).toBeNull();
+    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_4", invoiceId: "in_4", amountPaidCents: 0, currency: "sek" })).toBeNull();
   });
 
   it("is disabled without server configuration", async () => {
