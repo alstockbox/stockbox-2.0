@@ -201,6 +201,7 @@ const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|lo
 const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energy|utilities|industrials|materials|real estate|consumer|communication)\b/i;
 const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
 const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
+const LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT = 0.95;
 
 export function classifyUniversalSecurity(input: {
   company?: Pick<CompanySearchResult, "securityType" | "name" | "ticker"> | null;
@@ -377,7 +378,9 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
     dividendYield: weightedMetric(normalized, (holding) => holding.dividendYield),
     top10Weight: sortedWeights.length ? sortedWeights.slice(0, 10).reduce((sum, weight) => sum + weight, 0) : null,
     largestHoldingWeight: sortedWeights[0] ?? null,
-    holdingsHhi: sortedWeights.length ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0) : null,
+    holdingsHhi: coveredWeight >= LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT && sortedWeights.length
+      ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0)
+      : null,
     sectorHhi: hhiFromBuckets(normalized.map((holding) => holding.sector), normalized.map((holding) => holding.weight)),
     countryHhi: hhiFromBuckets(normalized.map((holding) => holding.country), normalized.map((holding) => holding.weight)),
   };
