@@ -6,6 +6,8 @@ import {
   stockBoxSignupEvent,
 } from "./smb-os";
 
+const occurredAt = "2026-09-10T10:15:30.000Z";
+
 afterEach(() => {
   delete process.env.SMB_OS_CORE_URL;
   delete process.env.SMB_OS_INGEST_KEY;
@@ -13,11 +15,12 @@ afterEach(() => {
 });
 
 describe("StockBox SMB OS adapter", () => {
-  it("maps signup to an idempotent non-financial measurement", () => {
-    expect(stockBoxSignupEvent("evt:signup-1")).toEqual({
+  it("maps signup to an idempotent non-financial measurement with source time", () => {
+    expect(stockBoxSignupEvent({ idempotencyKey: "evt:signup-1", occurredAt })).toEqual({
       projectId: "stockbox",
       module: "stockbox",
       eventId: "acquisition:evt:signup-1",
+      occurredAt,
       type: "measurement",
       metricName: "signup_completed",
       metricValue: 1,
@@ -26,14 +29,16 @@ describe("StockBox SMB OS adapter", () => {
     });
   });
 
-  it("uses persisted analysis id as the activation idempotency key", () => {
+  it("uses persisted analysis id as the activation idempotency key and preserves source time", () => {
     const event = stockBoxAnalysisCompletedEvent({
       analysisId: "analysis-123",
       ticker: "VOLV-B",
       analysisType: "deep",
       score: 81,
+      occurredAt,
     });
     expect(event.eventId).toBe("analysis:analysis-123:completed");
+    expect(event.occurredAt).toBe(occurredAt);
     expect(event.type).toBe("measurement");
     expect(event.metadata).not.toHaveProperty("userId");
   });
@@ -44,10 +49,12 @@ describe("StockBox SMB OS adapter", () => {
       invoiceId: "in_1",
       amountPaidCents: 4900,
       currency: "sek",
+      occurredAt,
       vatMode: "small_business_exempt",
       billingReason: "subscription_create",
     })).toMatchObject({
       eventId: "stripe:evt_paid_1:revenue",
+      occurredAt,
       type: "economic",
       kind: "revenue",
       amountSek: 49,
@@ -60,27 +67,29 @@ describe("StockBox SMB OS adapter", () => {
       invoiceId: "in_2",
       amountPaidCents: 4900,
       currency: "sek",
+      occurredAt,
       vatMode: "vat_registered",
     })).toMatchObject({
       eventId: "stripe:evt_paid_2:gross-cash",
+      occurredAt,
       type: "measurement",
       metricName: "gross_cash_received_sek",
       metricValue: 49,
       unit: "SEK",
     });
-    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_3", invoiceId: "in_3", amountPaidCents: 4900, currency: "eur" })).toBeNull();
-    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_4", invoiceId: "in_4", amountPaidCents: 0, currency: "sek" })).toBeNull();
+    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_3", invoiceId: "in_3", amountPaidCents: 4900, currency: "eur", occurredAt })).toBeNull();
+    expect(stockBoxPaidInvoiceEvent({ stripeEventId: "evt_4", invoiceId: "in_4", amountPaidCents: 0, currency: "sek", occurredAt })).toBeNull();
   });
 
   it("is disabled without server configuration", async () => {
-    await expect(reportStockBoxEvent(stockBoxSignupEvent("x"))).resolves.toEqual({ status: "disabled" });
+    await expect(reportStockBoxEvent(stockBoxSignupEvent({ idempotencyKey: "x", occurredAt }))).resolves.toEqual({ status: "disabled" });
   });
 
   it("fails open when Core rejects delivery", async () => {
     process.env.SMB_OS_CORE_URL = "https://core.example.com";
     process.env.SMB_OS_INGEST_KEY = "secret";
     const fetchImpl = vi.fn(async () => new Response("no", { status: 503 })) as unknown as typeof fetch;
-    await expect(reportStockBoxEvent(stockBoxSignupEvent("x"), { fetchImpl })).resolves.toEqual({ status: "failed" });
+    await expect(reportStockBoxEvent(stockBoxSignupEvent({ idempotencyKey: "x", occurredAt }), { fetchImpl })).resolves.toEqual({ status: "failed" });
   });
 
   it("sends the secret only as an authorization header", async () => {
@@ -91,6 +100,6 @@ describe("StockBox SMB OS adapter", () => {
       expect(String(init?.body)).not.toContain("secret");
       return Response.json({ ok: true, duplicate: true });
     }) as unknown as typeof fetch;
-    await expect(reportStockBoxEvent(stockBoxSignupEvent("x"), { fetchImpl })).resolves.toEqual({ status: "delivered", duplicate: true });
+    await expect(reportStockBoxEvent(stockBoxSignupEvent({ idempotencyKey: "x", occurredAt }), { fetchImpl })).resolves.toEqual({ status: "delivered", duplicate: true });
   });
 });
