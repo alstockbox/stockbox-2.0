@@ -37,4 +37,15 @@ describe("Alpha admin observability boundary", () => {
     expect(page).toMatch(/alpha_prediction_outcomes[\s\S]*?\.limit\(20\)/);
     expect(page).not.toMatch(/runAlphaUniverseScan|collectMaturedAlphaOutcomes/);
   });
+
+  it("surfaces telemetry query failures instead of presenting zeroes as healthy data", () => {
+    expect(existsSync(alphaAdminPath)).toBe(true);
+    if (!existsSync(alphaAdminPath)) return;
+
+    const page = source(alphaAdminPath);
+    expect(page).toContain("telemetryErrorCount");
+    expect(page).toMatch(/\.error/g);
+    expect(page).toContain("Alpha telemetry healthy");
+    expect(page).toContain("telemetry queries failed");
+  });
 });
