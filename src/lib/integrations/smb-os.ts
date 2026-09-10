@@ -6,12 +6,14 @@ type BaseModuleEvent = {
   eventId: string;
 };
 
+type MeasurementName = "signup_completed" | "analysis_completed" | "gross_cash_received_sek";
+
 export type StockBoxModuleEvent =
   | (BaseModuleEvent & {
       type: "measurement";
-      metricName: "signup_completed" | "analysis_completed";
-      metricValue: 1;
-      unit: "count";
+      metricName: MeasurementName;
+      metricValue: number;
+      unit: "count" | "SEK";
       metadata: JsonMetadata;
     })
   | (BaseModuleEvent & {
@@ -47,7 +49,6 @@ export function stockBoxAnalysisCompletedEvent(input: {
   analysisId: string;
   ticker: string;
   analysisType: string;
-  researchView: string;
   score: number;
 }): StockBoxModuleEvent {
   return {
@@ -60,7 +61,6 @@ export function stockBoxAnalysisCompletedEvent(input: {
       analysisId: input.analysisId,
       ticker: input.ticker,
       analysisType: input.analysisType,
-      researchView: input.researchView,
       score: input.score,
     },
   };
@@ -71,19 +71,35 @@ export function stockBoxPaidInvoiceEvent(input: {
   invoiceId: string;
   amountPaidCents: number;
   currency: string;
+  vatMode?: "small_business_exempt" | "vat_registered" | "" | null;
   billingReason?: string | null;
 }): StockBoxModuleEvent | null {
   if (input.currency.toLowerCase() !== "sek" || input.amountPaidCents <= 0) return null;
+  const amountSek = input.amountPaidCents / 100;
+  const metadata: JsonMetadata = {
+    invoiceId: input.invoiceId,
+    currency: "sek",
+    billingReason: input.billingReason ?? null,
+    vatMode: input.vatMode || null,
+  };
+
+  if (input.vatMode === "small_business_exempt") {
+    return {
+      ...base(`stripe:${input.stripeEventId}:revenue`),
+      type: "economic",
+      kind: "revenue",
+      amountSek,
+      metadata,
+    };
+  }
+
   return {
-    ...base(`stripe:${input.stripeEventId}:revenue`),
-    type: "economic",
-    kind: "revenue",
-    amountSek: input.amountPaidCents / 100,
-    metadata: {
-      invoiceId: input.invoiceId,
-      currency: "sek",
-      billingReason: input.billingReason ?? null,
-    },
+    ...base(`stripe:${input.stripeEventId}:gross-cash`),
+    type: "measurement",
+    metricName: "gross_cash_received_sek",
+    metricValue: amountSek,
+    unit: "SEK",
+    metadata,
   };
 }
 
