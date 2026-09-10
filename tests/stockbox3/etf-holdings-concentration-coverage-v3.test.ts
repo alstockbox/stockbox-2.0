@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computeLookThroughMetrics } from "@/lib/analysis/universal-security";
+import { analyzeEtf, computeLookThroughMetrics } from "@/lib/analysis/universal-security";
 import { fetchYahooEtfData } from "@/lib/data/yahoo-etf";
 
 const etf = {
@@ -82,5 +82,56 @@ describe("StockBox 3 ETF holdings concentration coverage", () => {
 
     expect(metrics.coveredWeight).toBeCloseTo(0.96, 10);
     expect(metrics.holdingsHhi).toBeCloseTo(0.50 ** 2 + 0.30 ** 2 + 0.16 ** 2, 10);
+  });
+
+  it("does not let holding count alone satisfy the ETF diversification factor", () => {
+    const result = analyzeEtf({
+      subtype: "equity_etf",
+      numberOfHoldings: 500,
+    });
+    const diversification = result.score.factors.find((factor) => factor.key === "diversification");
+
+    expect(diversification?.status).toBe("missing");
+    expect(diversification?.score).toBeNull();
+  });
+
+  it("does not normalize an incomplete Yahoo sector distribution into a complete sector HHI", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("quoteSummary")) {
+        return {
+          ok: true,
+          json: async () => ({
+            quoteSummary: {
+              result: [{
+                fundProfile: { categoryName: "Large Blend" },
+                topHoldings: {
+                  holdingCount: { raw: 100 },
+                  sectorWeightings: [
+                    { technology: { raw: 0.25 } },
+                    { financialServices: { raw: 0.15 } },
+                  ],
+                },
+              }],
+            },
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          quoteResponse: {
+            result: [{ quoteType: "ETF", regularMarketPrice: { raw: 100 } }],
+          },
+        }),
+      } as Response;
+    });
+
+    const result = await fetchYahooEtfData(etf);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+
+    expect(result.data.input.sectorHhi).toBeNull();
   });
 });
