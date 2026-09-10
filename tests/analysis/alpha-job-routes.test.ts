@@ -17,16 +17,17 @@ describe("Alpha server-owned job routes", () => {
 
     const route = source(scanRoutePath);
     expect(route).toContain('from "@/lib/alpha/scanner"');
+    expect(route).toContain('from "@/lib/server/cron-auth"');
     expect(route).toContain("runAlphaUniverseScan");
     expect(route).toContain("getServerEnv().CRON_SECRET");
-    expect(route).toContain("isPayoutCronAuthorized");
+    expect(route).toContain("isCronAuthorized");
     expect(route).toContain('export const runtime = "nodejs"');
     expect(route).toContain("export const maxDuration = 300");
     expect(route).toMatch(/status:\s*401/);
     expect(route).toMatch(/status:\s*503/);
     expect(route).toContain("export const GET = run");
     expect(route).toContain("export const POST = run");
-    expect(route).not.toMatch(/persistAnalysis|analysis_quota|reserveAnalysis/);
+    expect(route).not.toMatch(/persistAnalysis|analysis_quota|reserveAnalysis|@\/lib\/affiliate\/payouts/);
   });
 
   it("wires matured outcome collection behind the same server-only boundary", () => {
@@ -35,16 +36,17 @@ describe("Alpha server-owned job routes", () => {
 
     const route = source(outcomesRoutePath);
     expect(route).toContain('from "@/lib/alpha/outcome-collector"');
+    expect(route).toContain('from "@/lib/server/cron-auth"');
     expect(route).toContain("collectMaturedAlphaOutcomes");
     expect(route).toContain("getServerEnv().CRON_SECRET");
-    expect(route).toContain("isPayoutCronAuthorized");
+    expect(route).toContain("isCronAuthorized");
     expect(route).toContain('export const runtime = "nodejs"');
     expect(route).toContain("export const maxDuration = 300");
     expect(route).toMatch(/status:\s*401/);
     expect(route).toMatch(/status:\s*503/);
     expect(route).toContain("export const GET = run");
     expect(route).toContain("export const POST = run");
-    expect(route).not.toMatch(/persistAnalysis|analysis_quota|reserveAnalysis/);
+    expect(route).not.toMatch(/persistAnalysis|analysis_quota|reserveAnalysis|@\/lib\/affiliate\/payouts/);
   });
 
   it("schedules both Alpha maintenance jobs without replacing existing Vercel crons", () => {

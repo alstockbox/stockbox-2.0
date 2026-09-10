@@ -1,14 +1,14 @@
-import { isPayoutCronAuthorized } from "@/lib/affiliate/payouts";
 import { requireAdmin } from "@/lib/auth/session";
 import { getServerEnv } from "@/lib/env/server";
 import { runDurableWatchlistMonitoring } from "@/lib/monitoring/jobs";
+import { isCronAuthorized } from "@/lib/server/cron-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const secret = getServerEnv().CRON_SECRET;
-  if (!isPayoutCronAuthorized(request.headers.get("authorization"), secret)) {
+  if (!isCronAuthorized(request.headers.get("authorization"), secret)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
   try {
