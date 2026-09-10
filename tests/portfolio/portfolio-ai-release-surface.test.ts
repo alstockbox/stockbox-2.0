@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const coach = readFileSync("src/components/portfolio/portfolio-ai-coach.tsx", "utf8");
 const route = readFileSync("src/app/portfolio/ai/page.tsx", "utf8");
-const portfolioPage = readFileSync("src/app/portfolio/page.tsx", "utf8");
+const analyzer = readFileSync("src/components/portfolio/portfolio-analyzer.tsx", "utf8");
 
 describe("Portfolio AI main release surface", () => {
   it("reads only snapshots matching the current ledger revision", () => {
@@ -32,7 +32,9 @@ describe("Portfolio AI main release surface", () => {
     expect(route).toContain("current ledger revision");
   });
 
-  it("links the existing Portfolio 2 surface to the isolated AI route", () => {
-    expect(portfolioPage).toContain("/portfolio/ai");
+  it("links the existing Portfolio 2 analyzer to the isolated AI route for the selected portfolio", () => {
+    expect(analyzer).toContain("/portfolio/ai?portfolioId=");
+    expect(analyzer).toContain("encodeURIComponent(portfolioId)");
+    expect(analyzer).toContain("Öppna Portfolio AI");
   });
 });
