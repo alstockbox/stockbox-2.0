@@ -57,6 +57,16 @@ describe("StockBox 3 Lundbergs dividend-history authority", () => {
     expect(source).not.toContain("netPurchasesSales");
   });
 
+  it("cuts dedicated dividend history off strictly before the historical market year", () => {
+    const provider = fs.readFileSync(
+      path.join(process.cwd(), "src/lib/data/universal-security-provider.ts"),
+      "utf8",
+    );
+    expect(provider).toMatch(
+      /officialDividendHistory\.years\.filter\(\s*\(point\)\s*=>\s*point\.year\s*<\s*marketYear\s*,?\s*\)/,
+    );
+  });
+
   it("wires dedicated dividend history only into the 4% dividend-quality factor", () => {
     const provider = fs.readFileSync(
       path.join(process.cwd(), "src/lib/data/universal-security-provider.ts"),
