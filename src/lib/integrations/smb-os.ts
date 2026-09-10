@@ -4,6 +4,7 @@ type BaseModuleEvent = {
   projectId: "stockbox";
   module: "stockbox";
   eventId: string;
+  occurredAt: string;
 };
 
 type MeasurementName = "signup_completed" | "analysis_completed" | "gross_cash_received_sek";
@@ -30,13 +31,13 @@ export type SmbOsDeliveryResult =
 
 const endpointPath = "/_api/core/external-module-event";
 
-function base(eventId: string): BaseModuleEvent {
-  return { projectId: "stockbox", module: "stockbox", eventId };
+function base(eventId: string, occurredAt: string): BaseModuleEvent {
+  return { projectId: "stockbox", module: "stockbox", eventId, occurredAt };
 }
 
-export function stockBoxSignupEvent(idempotencyKey: string): StockBoxModuleEvent {
+export function stockBoxSignupEvent(input: { idempotencyKey: string; occurredAt: string }): StockBoxModuleEvent {
   return {
-    ...base(`acquisition:${idempotencyKey}`),
+    ...base(`acquisition:${input.idempotencyKey}`, input.occurredAt),
     type: "measurement",
     metricName: "signup_completed",
     metricValue: 1,
@@ -50,9 +51,10 @@ export function stockBoxAnalysisCompletedEvent(input: {
   ticker: string;
   analysisType: string;
   score: number;
+  occurredAt: string;
 }): StockBoxModuleEvent {
   return {
-    ...base(`analysis:${input.analysisId}:completed`),
+    ...base(`analysis:${input.analysisId}:completed`, input.occurredAt),
     type: "measurement",
     metricName: "analysis_completed",
     metricValue: 1,
@@ -71,6 +73,7 @@ export function stockBoxPaidInvoiceEvent(input: {
   invoiceId: string;
   amountPaidCents: number;
   currency: string;
+  occurredAt: string;
   vatMode?: "small_business_exempt" | "vat_registered" | "" | null;
   billingReason?: string | null;
 }): StockBoxModuleEvent | null {
@@ -85,7 +88,7 @@ export function stockBoxPaidInvoiceEvent(input: {
 
   if (input.vatMode === "small_business_exempt") {
     return {
-      ...base(`stripe:${input.stripeEventId}:revenue`),
+      ...base(`stripe:${input.stripeEventId}:revenue`, input.occurredAt),
       type: "economic",
       kind: "revenue",
       amountSek,
@@ -94,7 +97,7 @@ export function stockBoxPaidInvoiceEvent(input: {
   }
 
   return {
-    ...base(`stripe:${input.stripeEventId}:gross-cash`),
+    ...base(`stripe:${input.stripeEventId}:gross-cash`, input.occurredAt),
     type: "measurement",
     metricName: "gross_cash_received_sek",
     metricValue: amountSek,
