@@ -549,8 +549,10 @@ function etfDiversificationScore(input: EtfAnalysisInput, lookThrough: LookThrou
   const countScore = scoreByAnchors(input.numberOfHoldings ?? null, [[10, 20], [30, 50], [100, 80], [500, 95]]);
   const hhiScore = scoreByAnchors(concentration.holdingsHhi, [[0.02, 100], [0.05, 85], [0.1, 65], [0.2, 35], [0.4, 10]]);
   const sectorScore = scoreByAnchors(concentration.sectorHhi, [[0.1, 95], [0.2, 75], [0.4, 45], [0.7, 15]]);
-  const scores = [countScore, hhiScore, sectorScore].filter(isFiniteNumber);
-  return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
+  const concentrationScores = [hhiScore, sectorScore].filter(isFiniteNumber);
+  if (!concentrationScores.length) return null;
+  const scores = [countScore, ...concentrationScores].filter(isFiniteNumber);
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
 }
 
 function etfConcentrationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
