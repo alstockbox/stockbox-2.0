@@ -4,6 +4,7 @@ import { yahooSymbolForCompany } from "./yahoo-fundamentals";
 
 const PROVIDER_ID = "yahoo-etf";
 const REQUEST_TIMEOUT_MS = 10_000;
+const HOLDINGS_HHI_MIN_REPRESENTED_WEIGHT = 0.95;
 
 type JsonObject = Record<string, unknown>;
 
@@ -122,10 +123,13 @@ function parseSectorHhi(topHoldings: JsonObject | null): number | null {
 
 function holdingConcentration(holdings: EtfHolding[]) {
   const weights = holdings.map((holding) => holding.weight > 1.5 ? holding.weight / 100 : holding.weight).sort((a, b) => b - a);
+  const representedWeight = weights.reduce((sum, value) => sum + value, 0);
   return {
     top10Weight: weights.length ? weights.slice(0, 10).reduce((sum, value) => sum + value, 0) : null,
     largestHoldingWeight: weights[0] ?? null,
-    holdingsHhi: weights.length ? weights.reduce((sum, value) => sum + value ** 2, 0) : null,
+    holdingsHhi: representedWeight >= HOLDINGS_HHI_MIN_REPRESENTED_WEIGHT
+      ? weights.reduce((sum, value) => sum + value ** 2, 0)
+      : null,
   };
 }
 
