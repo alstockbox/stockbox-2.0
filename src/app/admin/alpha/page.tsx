@@ -114,6 +114,7 @@ export default async function AlphaAdminPage() {
   let predictionCount = 0;
   let outcomeCount = 0;
   let retryQueueCount = 0;
+  let telemetryErrorCount = 0;
   let scanRuns: ScanRunRow[] = [];
   let retryQueue: QueueRow[] = [];
   let predictions: PredictionRow[] = [];
@@ -157,6 +158,18 @@ export default async function AlphaAdminPage() {
         .limit(20),
     ]);
 
+    telemetryErrorCount = [
+      universeCountResult,
+      scanRunCountResult,
+      predictionCountResult,
+      outcomeCountResult,
+      retryQueueCountResult,
+      scanRunResult,
+      retryQueueResult,
+      predictionResult,
+      outcomeResult,
+    ].filter((result) => Boolean(result.error)).length;
+
     universeCount = universeCountResult.count ?? 0;
     scanRunCount = scanRunCountResult.count ?? 0;
     predictionCount = predictionCountResult.count ?? 0;
@@ -168,6 +181,7 @@ export default async function AlphaAdminPage() {
     outcomes = (outcomeResult.data ?? []) as unknown as OutcomeRow[];
   }
 
+  const telemetryHealthy = Boolean(supabase) && telemetryErrorCount === 0;
   const latestRun = scanRuns[0] ?? null;
   const stats = [
     { label: "Eligible universe", value: universeCount, note: "server-owned securities" },
@@ -193,8 +207,12 @@ export default async function AlphaAdminPage() {
               Read-only operational telemetry for the server-owned Alpha scanner and point-in-time outcome ledger.
             </p>
           </div>
-          <span className={`rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs ${supabase ? "text-emerald-200" : "text-red-200"}`}>
-            {supabase ? "Service-role database ready" : "Service-role database unavailable"}
+          <span className={`rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs ${telemetryHealthy ? "text-emerald-200" : "text-red-200"}`}>
+            {!supabase
+              ? "Service-role database unavailable"
+              : telemetryErrorCount > 0
+                ? `${telemetryErrorCount} telemetry queries failed`
+                : "Alpha telemetry healthy"}
           </span>
         </div>
 
