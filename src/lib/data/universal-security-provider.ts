@@ -369,8 +369,10 @@ async function enrichInvestmentCompanyReport(
     : null;
   const governanceContributes = governance?.score !== null && governance?.score !== undefined;
   const officialDividendHistory = getOfficialInvestmentCompanyDividendHistory(company);
-  const dividendQuality = officialDividendHistory
-    ? deriveInvestmentCompanyDividendQuality(officialDividendHistory.years)
+  const dividendQuality = officialDividendHistory && marketYear !== undefined
+    ? deriveInvestmentCompanyDividendQuality(
+      officialDividendHistory.years.filter((point) => point.year < marketYear),
+    )
     : officialKeyRatios.ok && marketYear !== undefined
       ? deriveInvestmentCompanyDividendQuality(
         officialKeyRatios.data.years.filter((point) => point.year < marketYear),
