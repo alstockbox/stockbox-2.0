@@ -174,6 +174,12 @@ function englishDateToIso(line: string): string | null {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+function explicitQuarterEndOnLine(line: string): string | null {
+  const marker = line.match(THREE_MONTH_RESULTS);
+  if (!marker || marker.index === undefined) return null;
+  return englishDateToIso(line.slice(marker.index));
+}
+
 function isIsoDate(value: string | null | undefined): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
@@ -347,7 +353,9 @@ export function parseSecReitSpecializedDocument(
         metric: rule.metric,
         value,
         unit: "ratio",
-        dataAsOf: ratioDataAsOf,
+        dataAsOf: rule.metric === "affoPayout"
+          ? (explicitQuarterEndOnLine(line) ?? ratioDataAsOf)
+          : ratioDataAsOf,
         label: match[0].replace(/\s+/g, " ").trim(),
         sourceUrl: context.sourceUrl,
       });
