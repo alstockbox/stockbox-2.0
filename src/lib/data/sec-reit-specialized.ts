@@ -2,6 +2,7 @@ export type SecReitMetricKey =
   | "fundsFromOperationsPerShare"
   | "adjustedFundsFromOperationsPerShare"
   | "affoPayout"
+  | "dividendCoverage"
   | "occupancy"
   | "sameStoreNoiGrowth"
   | "netDebtToEbitdare"
@@ -24,6 +25,8 @@ export type SecReitObservation = {
   dataAsOf: string | null;
   label: string;
   sourceUrl: string;
+  valueKind?: "reported" | "derived";
+  inputs?: string[];
 };
 
 export type SecReitDocumentContext = {
@@ -247,6 +250,63 @@ function perShareObservation(
   };
 }
 
+function parseBasisSafeDividendCoverage(
+  lines: string[],
+  context: SecReitDocumentContext,
+): SecReitObservation | null {
+  for (const line of lines) {
+    if (GUIDANCE_LANGUAGE.test(line)) continue;
+
+    const dividendLabel = line.match(/\bmonthly\s+dividends?\s+paid\s+per\s+share\b/i);
+    if (!dividendLabel || dividendLabel.index === undefined) continue;
+
+    const dividendTail = line.slice(dividendLabel.index);
+    const comparisonIndex = dividendTail.search(/\bas\s+compared\s+to\b/i);
+    const currentDividendSegment = comparisonIndex >= 0
+      ? dividendTail.slice(0, comparisonIndex)
+      : dividendTail;
+    const dividendValueMatch = currentDividendSegment.match(/[$€£]\s*([0-9]{1,4}(?:\.\d+)?)/);
+    const dividendPeriodMarker = currentDividendSegment.match(THREE_MONTH_RESULTS);
+    if (!dividendValueMatch || !dividendPeriodMarker || dividendPeriodMarker.index === undefined) continue;
+    const dividendDate = englishDateToIso(currentDividendSegment.slice(dividendPeriodMarker.index));
+    if (!dividendDate) continue;
+
+    const affoLink = line.match(
+      /\brepresenting\s+\d{1,3}(?:\.\d+)?\s*%\s+of\s+(?:our\s+)?diluted\s+AFFO\s+per\s+(?:common\s+)?share\b/i,
+    );
+    if (!affoLink || affoLink.index === undefined) continue;
+
+    const affoTail = line.slice(affoLink.index);
+    const affoValueMatch = affoTail.match(
+      /\bdiluted\s+AFFO\s+per\s+(?:common\s+)?share(?:\s+of)?\s*[$€£]\s*([0-9]{1,4}(?:\.\d+)?)/i,
+    );
+    const affoPeriodMarker = affoTail.match(THREE_MONTH_RESULTS);
+    if (!affoValueMatch || !affoPeriodMarker || affoPeriodMarker.index === undefined) continue;
+    const affoDate = englishDateToIso(affoTail.slice(affoPeriodMarker.index));
+    if (!affoDate || affoDate !== dividendDate) continue;
+
+    const dividendPerShare = Number(dividendValueMatch[1]);
+    const affoPerShare = Number(affoValueMatch[1]);
+    if (!(dividendPerShare > 0) || !(affoPerShare > 0)) continue;
+
+    const value = affoPerShare / dividendPerShare;
+    if (!Number.isFinite(value) || value <= 0 || value > 100) continue;
+
+    return {
+      metric: "dividendCoverage",
+      value,
+      unit: "ratio",
+      dataAsOf: dividendDate,
+      label: "Diluted AFFO per share / dividends paid per share",
+      sourceUrl: context.sourceUrl,
+      valueKind: "derived",
+      inputs: ["adjustedFundsFromOperationsPerShare", "dividendsPaidPerShare"],
+    };
+  }
+
+  return null;
+}
+
 function parsePeriodSafePerShareObservations(
   lines: string[],
   context: SecReitDocumentContext,
@@ -337,6 +397,9 @@ export function parseSecReitSpecializedDocument(
   for (const observation of parsePeriodSafePerShareObservations(lines, context)) {
     observations.set(observation.metric, observation);
   }
+
+  const dividendCoverage = parseBasisSafeDividendCoverage(lines, context);
+  if (dividendCoverage) observations.set(dividendCoverage.metric, dividendCoverage);
 
   for (const line of lines) {
     if (GUIDANCE_LANGUAGE.test(line)) continue;
