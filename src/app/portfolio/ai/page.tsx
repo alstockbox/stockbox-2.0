@@ -74,6 +74,20 @@ export default async function PortfolioAiPage({ searchParams }: PageProps) {
   }
 
   const supabase = await createClient();
+  if (!supabase) {
+    return (
+      <Section className="pb-10 pt-8 sm:pt-10">
+        <Container>
+          <ButtonLink href="/portfolio" variant="ghost">← {sv ? "Till portföljer" : "Back to portfolios"}</ButtonLink>
+          <Card className="mt-5">
+            <h1 className="serif text-3xl font-semibold">Portfolio AI</h1>
+            <p className="mt-3 text-sm leading-6 text-[#9aa7b8]">{sv ? "Portfolio AI kan inte läsa ett verifierat dataunderlag i den här miljön just nu." : "Portfolio AI cannot read a verified data source in this environment right now."}</p>
+          </Card>
+        </Container>
+      </Section>
+    );
+  }
+
   const portfolioResult = params.portfolioId
     ? await supabase.from("portfolios").select("id,name,base_currency").eq("id", params.portfolioId).maybeSingle()
     : await supabase.from("portfolios").select("id,name,base_currency").order("created_at").limit(1).maybeSingle();
