@@ -875,7 +875,10 @@ async function fetchMetadata(symbol: string): Promise<YahooMetadata> {
   url.searchParams.set("newsCount", "0");  const response = await fetchJson(url);
   if (!response.ok) return { sector: null, industry: null, name: null };
   const quotes = Array.isArray(response.data.quotes) ? response.data.quotes : [];
-  const quote = quotes.map(object).find((item) => stringValue(item?.symbol)?.toUpperCase() === symbol.toUpperCase()) ?? null;
+  const quote = quotes.map(object).find((item) => {
+    const returnedSymbol = stringValue(item?.symbol);
+    return returnedSymbol ? yahooSymbolsEquivalent(symbol, returnedSymbol) : false;
+  }) ?? null;
   return {
     sector: stringValue(quote?.sector),
     industry: stringValue(quote?.industry),
@@ -1013,6 +1016,16 @@ async function fetchTimeseries(symbol: string): Promise<AdapterResult<YahooValue
   url.searchParams.set("period2", stableYahooPeriod2());
   const response = await fetchJson(url);
   if (!response.ok) return response;
+  const timeseries = object(response.data.timeseries);
+  const results = Array.isArray(timeseries?.result) ? timeseries.result : [];
+  const observedSymbols = results
+    .map((entry) => object(object(entry)?.meta)?.symbol)
+    .flatMap((value) => Array.isArray(value) ? value : value === undefined || value === null ? [] : [value])
+    .map(stringValue)
+    .filter((value): value is string => Boolean(value));
+  if (observedSymbols.some((observedSymbol) => !yahooSymbolsEquivalent(symbol, observedSymbol))) {
+    return failure("invalid_row", "Yahoo Finance fundamentals symbol identity does not match the requested security.");
+  }
   const values = parseSeries(response.data);
   if (!values.length) return failure("empty_response", "Yahoo Finance returned no usable fundamentals facts for this security.");
   return {

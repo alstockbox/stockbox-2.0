@@ -1,0 +1,152 @@
+name: StockBox Global Analysis Coverage Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stockbox-global-analysis-coverage-gate
+  cancel-in-progress: false
+
+env:
+  STOCKBOX_TICKER_FILE: scripts/diagnostics/data/global_etf_investment_tickers_20000.txt
+  STOCKBOX_BATCH_LIMIT: "100"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Materialize and verify exact 20k ticker corpus
+        run: node scripts/diagnostics/materialize-global-audit-corpus.mjs scripts/diagnostics/data/global_etf_investment_tickers_20000.txt
+
+      - name: Build contiguous shard matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const raw = fs.readFileSync(process.env.STOCKBOX_TICKER_FILE, "utf8");
+          const tickers = raw.split(/[\s,]+/).map((value) => value.trim()).filter(Boolean);
+          const limit = Number(process.env.STOCKBOX_BATCH_LIMIT);
+          if (tickers.length !== 20_000) throw new Error(`Expected 20,000 tickers, received ${tickers.length}`);
+          if (!Number.isInteger(limit) || limit <= 0) throw new Error(`Invalid shard limit: ${process.env.STOCKBOX_BATCH_LIMIT}`);
+          const include = [];
+          for (let offset = 0; offset < tickers.length; offset += limit) include.push({ offset });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\n`);
+          NODE
+
+  shard:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Materialize and verify exact 20k ticker corpus
+        run: node scripts/diagnostics/materialize-global-audit-corpus.mjs scripts/diagnostics/data/global_etf_investment_tickers_20000.txt
+
+      - name: Run live global ticker audit shard
+        env:
+          STOCKBOX_BATCH_OFFSET: ${{ matrix.offset }}
+          STOCKBOX_BATCH_CONCURRENCY: "3"
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .stockbox-diagnostics/shards
+          npx vitest run scripts/diagnostics/user-large-ticker-audit.test.ts --config scripts/diagnostics/vitest.live.config.ts
+
+          shard_file=".stockbox-diagnostics/user-large-ticker-audit-${STOCKBOX_BATCH_OFFSET}-${STOCKBOX_BATCH_LIMIT}.json"
+          test -f "$shard_file"
+          cp "$shard_file" ".stockbox-diagnostics/shards/shard-${STOCKBOX_BATCH_OFFSET}.json"
+
+          node - "$shard_file" "$STOCKBOX_BATCH_OFFSET" "$STOCKBOX_BATCH_LIMIT" <<'NODE'
+          const fs = require("node:fs");
+          const [path, expectedOffsetRaw, expectedLimitRaw] = process.argv.slice(2);
+          const payload = JSON.parse(fs.readFileSync(path, "utf8"));
+          const expectedOffset = Number(expectedOffsetRaw);
+          const expectedLimit = Number(expectedLimitRaw);
+          if (payload.offset !== expectedOffset) throw new Error(`Shard offset mismatch: expected ${expectedOffset}, received ${payload.offset}`);
+          if (payload.limit !== expectedLimit) throw new Error(`Shard limit mismatch: expected ${expectedLimit}, received ${payload.limit}`);
+          if (payload.totalInput !== 20_000) throw new Error(`Shard corpus mismatch: expected 20000, received ${payload.totalInput}`);
+          if (!Array.isArray(payload.results) || payload.results.length === 0) throw new Error("Shard produced no results");
+          NODE
+
+      - name: Upload shard evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockbox-global-audit-shard-${{ matrix.offset }}
+          path: .stockbox-diagnostics/shards/shard-${{ matrix.offset }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  merge-and-gate:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download all shard evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stockbox-global-audit-shard-*
+          path: .stockbox-diagnostics/shards
+          merge-multiple: true
+
+      - name: Merge audit shards and verify corpus continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/diagnostics/merge-global-audit-shards.mjs \
+            --output .stockbox-diagnostics/global-audit-merged.json \
+            .stockbox-diagnostics/shards/shard-*.json
+
+      - name: Enforce coverage and integrity thresholds
+        env:
+          STOCKBOX_GATE_MIN_DISCOVERY: "0.995"
+          STOCKBOX_GATE_MIN_SUPPORT: "0.99"
+          STOCKBOX_GATE_MIN_COMPLETION: "0.99"
+          STOCKBOX_GATE_MIN_SPECIALIST_COVERAGE: "0.99"
+          STOCKBOX_GATE_MIN_GROUP_SIZE: "20"
+        run: node scripts/diagnostics/evaluate-global-audit-gate.mjs .stockbox-diagnostics/global-audit-merged.json
+
+      - name: Upload merged live audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockbox-global-analysis-coverage-audit
+          path: |
+            .stockbox-diagnostics/global-audit-merged.json
+            .stockbox-diagnostics/shards/shard-*.json
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+import { evaluateGlobalAuditGate } from "./evaluate-global-audit-gate.mjs";
+
+const complete = (input = 100) => ({
+  input,
+  discovered: input,
+  supported: input,
+  completed: input,
+  rated: input,
+  noRating: 0,
+  discoveryRate: 1,
+  supportCoverageRate: 1,
+  completionRate: 1,
+  ratingRate: 1,
+  noRatingRate: 0,
+});
+
+type AuditSummary = ReturnType<typeof complete>;
+
+type GateFixture = {
+  overall: AuditSummary;
+  specialist: {
+    input: number;
+    completed: number;
+    targetEligible: number;
+    meets99PercentCoverage: number;
+    coverageTargetRate: number;
+  };
+  integrity: {
+    ratingBelowCoverageTarget: string[];
+    noRatingAtOrAboveCoverageTargetWithScore: string[];
+    analysisEngineErrors: string[];
+    scoreRatingMismatches: string[];
+  };
+  bySecurityType: Record<string, AuditSummary>;
+  byMarket: Record<string, AuditSummary>;
+};
+
+const fixture = (): GateFixture => ({
+  overall: complete(200),
+  specialist: { input: 50, completed: 50, targetEligible: 50, meets99PercentCoverage: 50, coverageTargetRate: 1 },
+  integrity: {
+    ratingBelowCoverageTarget: [],
+    noRatingAtOrAboveCoverageTargetWithScore: [],
+    analysisEngineErrors: [],
+    scoreRatingMismatches: [],
+  },
+  bySecurityType: { "Common Stock": complete(100), "ETF/Fund": complete(50) },
+  byMarket: { UNSUFFIXED: complete(100), ST: complete(50) },
+});
+
+describe("global audit release gate", () => {
+  it("passes a healthy measured universe", () => {
+    expect(evaluateGlobalAuditGate(fixture())).toEqual({ pass: true, violations: [] });
+  });
+
+  it("fails below the support target", () => {
+    const kpis = fixture();
+    kpis.overall.supportCoverageRate = 0.98;
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.some((item: string) => item.includes("support coverage"))).toBe(true);
+  });
+
+  it("fails on specialist integrity violations", () => {
+    const kpis = fixture();
+    kpis.integrity.ratingBelowCoverageTarget = ["TEST1"];
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("TEST1");
+  });
+
+  it("fails on any analysis engine error", () => {
+    const kpis = fixture();
+    kpis.integrity.analysisEngineErrors = ["BROKEN"];
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("BROKEN");
+  });
+
+  it("fails on any canonical score and rating mismatch", () => {
+    const kpis = fixture();
+    kpis.integrity.scoreRatingMismatches = ["MISMATCH"];
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("MISMATCH");
+  });
+
+  it("fails closed when zero-tolerance integrity fields are missing", () => {
+    const kpis: Parameters<typeof evaluateGlobalAuditGate>[0] = fixture();
+    if (!kpis?.integrity) throw new Error("fixture integrity payload is missing");
+    delete kpis.integrity.analysisEngineErrors;
+    const result = evaluateGlobalAuditGate(kpis);
+    expect(result.pass).toBe(false);
+    expect(result.violations.join(" ")).toContain("analysisEngineErrors");
+  });
+
+  it("checks large market groups independently while ignoring tiny groups", () => {
+    const kpis = fixture();
+    kpis.byMarket.ST.supportCoverageRate = 0.98;
+    expect(evaluateGlobalAuditGate(kpis).pass).toBe(false);
+
+    const tiny = fixture();
+    tiny.byMarket.TINY = { ...complete(5), supportCoverageRate: 0 };
+    expect(evaluateGlobalAuditGate(tiny).pass).toBe(true);
+  });
+});

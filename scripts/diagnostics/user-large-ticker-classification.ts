@@ -137,6 +137,14 @@ function isUnsupportedSecurityType(company: CompanySearchResult): boolean {
   return (company.securityType ?? "Common Stock") !== "Common Stock";
 }
 
+function isFundOrEtf(company: CompanySearchResult): boolean {
+  return company.securityType === "ETF/Fund";
+}
+
+function isExplicitUnsupportedFundError(error: string): boolean {
+  return /closed-end fund specialist analysis is not yet available|fund structure could not be verified well enough to select a specialist model/i.test(error);
+}
+
 function hasConfiguredFundamentalsGap(company: CompanySearchResult): boolean {
   return !isUnsupportedSecurityType(company)
     && (
@@ -154,7 +162,10 @@ export function classifyAnalysisFailure(
   company: CompanySearchResult,
   diagnostics: ProviderDiagnostic[] = [],
 ): AnalysisFailureClassification {
-  if (isUnsupportedSecurityType(company)) {
+  if (
+    isUnsupportedSecurityType(company)
+    && (!isFundOrEtf(company) || isExplicitUnsupportedFundError(error))
+  ) {
     return {
       status: "unsupported",
       rootCauses: unsupportedSecurityRootCauses(company),

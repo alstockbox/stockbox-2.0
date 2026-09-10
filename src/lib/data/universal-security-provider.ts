@@ -1,15 +1,22 @@
 import { randomUUID } from "node:crypto";
 import {
+  SPECIALIST_COVERAGE_TARGET,
+  specialistCoverageGateMessage,
+  specialistCoverageMeetsTarget,
+} from "@/lib/analysis/specialist-coverage";
+import {
   analyzeEtf,
   analyzeInvestmentCompany,
   classifyUniversalSecurity,
   type EtfAnalysisResult,
+  type EtfHolding,
   type InvestmentCompanyAnalysisResult,
   type UniversalSecurityClassification,
   type WeightedSecurityFactor,
 } from "@/lib/analysis/universal-security";
 import type {
   AnalysisReport,
+  AnalysisSource,
   AnalysisType,
   CompanySearchResult,
   DcfRange,
@@ -23,13 +30,36 @@ import type {
   ScoreDimensionKey,
   StockBoxScore,
 } from "@/lib/analysis/types";
+import { getServerEnv } from "@/lib/env/server";
 import {
   analyzeCompany as analyzeOperatingCompany,
   fetchConfiguredMarketData,
   searchCompanies,
 } from "./enhanced-provider";
+import {
+  enrichEtfLookThroughHoldings,
+  type EtfHoldingFundamentalData,
+} from "./etf-look-through-enrichment";
+import { fetchEtfProviderChain } from "./etf-provider-chain";
+import { classifyFundStructure } from "./fund-structure-classification";
+import { deriveInvestmentCompanyCapitalAllocation } from "./investment-company-capital-allocation";
+import { deriveInvestmentCompanyDividendQuality } from "./investment-company-dividend-quality";
+import { deriveInvestmentCompanyGovernance } from "./investment-company-governance";
+import { enrichInvestmentCompanyHoldingsQuality } from "./investment-company-holdings-quality";
+import {
+  deriveInvestmentCompanyAnnualNavGrowth,
+  deriveInvestmentCompanyNavGrowth,
+  type InvestmentCompanyNavGrowth,
+} from "./investment-company-nav-history";
+import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
+import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
+import { fetchOfficialInvestmentCompanyKeyRatios } from "./official-investment-company-key-ratios";
+import { fetchOfficialInvestmentCompanyLeverage } from "./official-investment-company-leverage";
+import { fetchOfficialInvestmentCompanyNav } from "./official-investment-company-nav";
 import { inferSecurityType } from "./security-classification";
-import { fetchYahooEtfData } from "./yahoo-etf";
+import { fetchYahooEtfHoldingFundamentals } from "./yahoo-etf-holding-fundamentals";
+import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
 
@@ -72,7 +102,7 @@ function emptyMetrics(market: MarketSnapshot | null): Metrics {
 }
 
 function recommendationForScore(score: number | null, coverage: number): Recommendation {
-  if (score === null || coverage < 0.5) return "No Rating";
+  if (score === null || !specialistCoverageMeetsTarget(coverage)) return "No Rating";
   if (score >= 85) return "Strong Buy";
   if (score >= 70) return "Buy";
   if (score >= 45) return "Hold";
@@ -146,12 +176,13 @@ function etfScore(result: EtfAnalysisResult): StockBoxScore {
     dimension("growth", "Portfolio / credit quality", factors, ["bond_credit"], 0.04),
     dimension("risk", "Concentration & structural risk", factors, ["concentration", "bond_duration", "path_dependency"], 0.07),
   ];
+  const gateMessage = specialistCoverageGateMessage("ETF", result.score.coverage);
   return {
     score: result.score.score,
     personalizedScore: result.score.score,
     confidence: Math.round(Math.min(98, Math.max(5, result.score.coverage * 100))),
     dimensions,
-    missingData: result.score.missing,
+    missingData: [...new Set([...result.score.missing, ...(gateMessage ? [gateMessage] : [])])],
   };
 }
 
@@ -186,20 +217,97 @@ function etfFlags(result: EtfAnalysisResult): { red: Flag[]; green: Flag[] } {
 
 function describeEtf(result: EtfAnalysisResult, company: CompanySearchResult): { oneSentence: string; summary: string } {
   const score = result.score.score === null ? "No score" : `${Math.round(result.score.score)}/100`;
-  const coverage = Math.round(result.score.coverage * 100);
+  const coverage = Math.round(result.score.coverage * 1000) / 10;
   const type = (result.subtype ?? "equity_etf").replaceAll("_", " ").toUpperCase();
   const missing = result.score.missing.length ? ` Missing/N/A factors: ${result.score.missing.join(", ")}.` : "";
+  const gate = specialistCoverageMeetsTarget(result.score.coverage)
+    ? ` The ${(SPECIALIST_COVERAGE_TARGET * 100).toFixed(0)}% verified-data rating gate is met.`
+    : ` Coverage is below the ${(SPECIALIST_COVERAGE_TARGET * 100).toFixed(0)}% verified-data rating gate, so the recommendation is No Rating.`;
   return {
     oneSentence: `${company.name} is analyzed as ${type} with StockBox ETF score ${score} at ${coverage}% factor coverage.`,
-    summary: `StockBox used the ETF-specific model instead of corporate revenue, margin and P/E scoring. The model evaluates underlying holdings where available, look-through valuation, cost, diversification, liquidity, tracking quality, risk-adjusted returns, concentration, fund stability and product structure.${missing}`,
+    summary: `StockBox used the ETF-specific model instead of corporate revenue, margin and P/E scoring. The model evaluates underlying holdings where available, look-through valuation, cost, diversification, liquidity, tracking quality, risk-adjusted returns, concentration and fund stability. Investor-jurisdiction tax treatment is excluded unless explicit context is available.${missing}${gate}`,
   };
+}
+
+function supportsEquityEtfLookThrough(subtype: string | null | undefined): boolean {
+  return subtype === "equity_etf"
+    || subtype === "index_etf"
+    || subtype === "sector_etf"
+    || subtype === "factor_etf";
+}
+
+function holdingFundamentalDataContributes(
+  holding: EtfHolding,
+  data: EtfHoldingFundamentalData,
+): boolean {
+  return (Object.keys(data) as Array<keyof EtfHoldingFundamentalData>).some((key) => {
+    const value = data[key];
+    return value !== null && value !== undefined && (holding[key] === null || holding[key] === undefined);
+  });
+}
+
+const INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS = 120;
+const INVESTMENT_COMPANY_ANNUAL_LEVERAGE_MAX_YEAR_LAG = 1;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseIsoDay(value: string | null | undefined): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return timestamp;
+}
+
+function isOfficialDisclosureComparable(asOf: string | null | undefined, marketAsOf: string | null | undefined): boolean {
+  const disclosureDay = parseIsoDay(asOf);
+  const marketDay = parseIsoDay(marketAsOf);
+  if (disclosureDay === null || marketDay === null) return false;
+  const ageDays = (marketDay - disclosureDay) / DAY_MS;
+  return ageDays >= 0 && ageDays <= INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS;
+}
+
+function emptyInvestmentCompanyNavGrowth(): InvestmentCompanyNavGrowth {
+  return {
+    navGrowth1y: null,
+    navGrowth3yCagr: null,
+    navGrowth5yCagr: null,
+  };
+}
+
+function verifiedInvestmentCompanyLeverageRatio(
+  years: Array<{ year: number; debtEquitiesRatio: number }> | null | undefined,
+  marketYear: number | undefined,
+): number | null {
+  if (marketYear === undefined) return null;
+
+  const latest = [...(years ?? [])]
+    .filter((point) => Number.isInteger(point.year))
+    .sort((left, right) => right.year - left.year)[0];
+  if (!latest) return null;
+
+  const yearLag = marketYear - latest.year;
+  if (yearLag < 0 || yearLag > INVESTMENT_COMPANY_ANNUAL_LEVERAGE_MAX_YEAR_LAG) return null;
+
+  const ratio = latest.debtEquitiesRatio;
+  return Number.isFinite(ratio) && ratio >= 0 && ratio < 1 ? ratio : null;
 }
 
 async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult> {
   const accessedAt = new Date().toISOString();
+  const env = getServerEnv();
   const [marketResult, etfResult] = await Promise.all([
     fetchConfiguredMarketData(args.company),
-    fetchYahooEtfData(args.company),
+    fetchEtfProviderChain(args.company, env.ALPHA_VANTAGE_API_KEY),
   ]);
   const market = marketResult.ok ? marketResult.data : null;
   if (!etfResult.ok) {
@@ -207,13 +315,67 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
       ok: false,
       error: "ETF-specific metadata is unavailable for this security.",
       sources: [],
-      warnings: [etfResult.message],
-      providerDiagnostics: [marketResult.diagnostic, etfResult.diagnostic],
+      warnings: etfResult.warnings.length ? etfResult.warnings : [etfResult.message],
+      providerDiagnostics: [marketResult.diagnostic, ...etfResult.diagnostics],
     };
+  }
+
+  const fundStructure = classifyFundStructure({
+    company: args.company,
+    quoteType: etfResult.data.quoteType,
+    category: etfResult.data.category,
+  });
+  if (fundStructure.structure !== "exchange_traded_fund") {
+    const closedEnd = fundStructure.structure === "closed_end_fund";
+    const structureWarning = closedEnd
+      ? "Closed-end funds require a dedicated specialist model using verified NAV/share, discount or premium to NAV, leverage, distribution quality and coverage, portfolio exposure and liquidity. StockBox will not substitute ETF scoring for those economics."
+      : `StockBox could not verify whether this listed fund is an ETF, closed-end fund, or another fund structure. ${fundStructure.reason}`;
+    return {
+      ok: false,
+      error: closedEnd
+        ? "Closed-end fund specialist analysis is not yet available for this security."
+        : "Fund structure could not be verified well enough to select a specialist model.",
+      sources: etfResult.data.sources,
+      warnings: [...new Set([...etfResult.data.warnings, structureWarning])],
+      providerDiagnostics: [marketResult.diagnostic, ...etfResult.data.diagnostics],
+    };
+  }
+
+  const holdingSources: AnalysisSource[] = [];
+  const holdingDiagnostics: ProviderDiagnostic[] = [];
+  let holdings = etfResult.data.input.holdings;
+  let lookThroughBudgetWarning: string | null = null;
+
+  if (
+    supportsEquityEtfLookThrough(etfResult.data.input.subtype)
+    && Array.isArray(holdings)
+    && holdings.length > 0
+  ) {
+    const enrichment = await enrichEtfLookThroughHoldings(
+      holdings,
+      async (holding) => {
+        const result = await fetchYahooEtfHoldingFundamentals(holding);
+        if (result.ok && holdingFundamentalDataContributes(holding, result.data)) {
+          if (!holdingSources.some((source) => source.provider === result.source.provider && source.version === result.source.version)) {
+            holdingSources.push(result.source);
+          }
+          if (!holdingDiagnostics.some((diagnostic) => diagnostic.provider === result.diagnostic.provider)) {
+            holdingDiagnostics.push(result.diagnostic);
+          }
+        }
+        return result;
+      },
+      { maxRequests: 12 },
+    );
+    holdings = enrichment.holdings;
+    if (enrichment.budgetExhausted && !enrichment.targetReached) {
+      lookThroughBudgetWarning = "ETF look-through quality enrichment reached its request budget before 80% of portfolio weight had verified holding-quality evidence; holdings quality remains N/A until the threshold is met.";
+    }
   }
 
   const input = {
     ...etfResult.data.input,
+    holdings,
     averageDailyDollarVolume: etfResult.data.input.averageDailyDollarVolume
       ?? (market?.price && market?.volume ? market.price * market.volume : null),
   };
@@ -227,8 +389,17 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     quoteType: etfResult.data.quoteType,
     category: etfResult.data.category,
   });
-  const sources = [etfResult.data.source];
-  const providerDiagnostics: ProviderDiagnostic[] = [marketResult.diagnostic, etfResult.data.diagnostic];
+  const sources = [...etfResult.data.sources, ...holdingSources];
+  const providerDiagnostics: ProviderDiagnostic[] = [
+    marketResult.diagnostic,
+    ...etfResult.data.diagnostics,
+    ...holdingDiagnostics,
+  ];
+  const reportWarnings = [...new Set([
+    ...etfResult.data.warnings,
+    ...(lookThroughBudgetWarning ? [lookThroughBudgetWarning] : []),
+    ...analysis.warnings,
+  ])];
   const report: UniversalSecurityReport = {
     id: randomUUID(),
     ticker: args.company.ticker,
@@ -253,8 +424,8 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     scenarios: [],
     sources,
     disclaimer: "StockBox is an analytical tool. ETF scores depend on available holdings, fund-structure and market data and are not individualized financial advice or guaranteed outcomes.",
-    modelVersion: "universal-security-v1",
-    reportSchemaVersion: "universal-security-v1",
+    modelVersion: "universal-security-v2",
+    reportSchemaVersion: "universal-security-v2",
     dataCoverage: analysis.score.coverage,
     market: market ?? undefined,
     dataAsOf: market?.date ?? null,
@@ -263,39 +434,375 @@ async function analyzeEtfSecurity(args: AnalyzeArgs): Promise<CoreAnalyzeResult>
     securityClassification: classification,
     securityAnalysis: { etf: analysis },
   };
-  report.score.missingData = [...new Set([...report.score.missingData, ...analysis.warnings])];
+  report.score.missingData = [...new Set([...report.score.missingData, ...reportWarnings])];
   return {
     ok: true,
     data: report,
     sources,
-    warnings: analysis.warnings,
+    warnings: reportWarnings,
   };
 }
 
-function enrichInvestmentCompanyReport(report: UniversalSecurityReport): UniversalSecurityReport {
+async function enrichInvestmentCompanyReport(
+  report: UniversalSecurityReport,
+  company: CompanySearchResult,
+): Promise<UniversalSecurityReport> {
   if (report.analysisArchetype !== "holding_company") return report;
+
   const latest = report.engine?.metrics.latestPeriod ?? null;
+  const marketDate = report.market?.date ?? null;
+  const [officialNav, longHistory, officialHoldings, officialKeyRatios, officialGovernance, officialLeverage] = await Promise.all([
+    fetchOfficialInvestmentCompanyNav(company),
+    marketDate ? fetchYahooLongHistory(company) : Promise.resolve(null),
+    fetchOfficialInvestmentCompanyHoldings(company),
+    fetchOfficialInvestmentCompanyKeyRatios(company),
+    fetchOfficialInvestmentCompanyGovernance(company),
+    fetchOfficialInvestmentCompanyLeverage(company),
+  ]);
+  const navComparable = officialNav.ok && isOfficialDisclosureComparable(
+    officialNav.data.navAsOf,
+    marketDate,
+  );
+  const holdingsComparable = officialHoldings.ok && isOfficialDisclosureComparable(
+    officialHoldings.data.asOf,
+    marketDate,
+  );
+  const leverageComparable = officialLeverage.ok && isOfficialDisclosureComparable(
+    officialLeverage.data.asOf,
+    marketDate,
+  );
+  const navFreshnessMessage = officialNav.ok && !navComparable
+    ? `Official NAV dated ${officialNav.data.navAsOf ?? "unknown"} is stale or not comparable with market price date ${marketDate ?? "unknown"}. NAV valuation requires verified official NAV no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    : null;
+  const holdingsFreshnessMessage = officialHoldings.ok && !holdingsComparable
+    ? `Official holdings dated ${officialHoldings.data.asOf} are stale or not comparable with market price date ${marketDate ?? "unknown"}. Diversification requires verified official holdings no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    : null;
+  const datedNavGrowth = officialNav.ok && navComparable && officialNav.data.navAsOf
+    ? deriveInvestmentCompanyNavGrowth(officialNav.data.navPerShareHistory, officialNav.data.navAsOf)
+    : emptyInvestmentCompanyNavGrowth();
+  const marketTimestamp = parseIsoDay(marketDate);
+  const marketYear = marketTimestamp === null
+    ? undefined
+    : new Date(marketTimestamp).getUTCFullYear();
+  const officialAnnualNavGrowth = officialNav.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(officialNav.data.annualNavPerShareHistory, marketYear)
+    : emptyInvestmentCompanyNavGrowth();
+  const keyRatioAnnualNavGrowth = officialKeyRatios.ok && marketYear !== undefined
+    ? deriveInvestmentCompanyAnnualNavGrowth(officialKeyRatios.data.years, marketYear)
+    : emptyInvestmentCompanyNavGrowth();
+  const navGrowth: InvestmentCompanyNavGrowth = {
+    navGrowth1y: datedNavGrowth.navGrowth1y ?? officialAnnualNavGrowth.navGrowth1y ?? keyRatioAnnualNavGrowth.navGrowth1y,
+    navGrowth3yCagr: datedNavGrowth.navGrowth3yCagr ?? officialAnnualNavGrowth.navGrowth3yCagr ?? keyRatioAnnualNavGrowth.navGrowth3yCagr,
+    navGrowth5yCagr: datedNavGrowth.navGrowth5yCagr ?? officialAnnualNavGrowth.navGrowth5yCagr ?? keyRatioAnnualNavGrowth.navGrowth5yCagr,
+  };
+  const shareholderReturns = longHistory?.ok && marketDate
+    ? deriveInvestmentCompanyShareholderReturns(longHistory.data.adjustedPriceHistory, marketDate)
+    : { shareholderReturn3yCagr: null, shareholderReturn5yCagr: null };
+  const shareholderReturnContributes = shareholderReturns.shareholderReturn3yCagr !== null
+    || shareholderReturns.shareholderReturn5yCagr !== null;
+  const capitalAllocation = officialKeyRatios.ok
+    ? deriveInvestmentCompanyCapitalAllocation(officialKeyRatios.data.years)
+    : null;
+  const capitalAllocationMessage = officialKeyRatios.ok && capitalAllocation?.score === null
+    ? `Official investment-company key ratios could not support capital allocation because ${
+      (capitalAllocation.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
+    }. Capital allocation remains N/A.`
+    : null;
+  const dividendQuality = officialKeyRatios.ok
+    ? deriveInvestmentCompanyDividendQuality(officialKeyRatios.data.years)
+    : null;
+  const dividendQualityMessage = officialKeyRatios.ok && dividendQuality?.score === null
+    ? `Official dividend-history key ratios could not support dividend quality because ${
+      (dividendQuality.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
+    }. Dividend quality remains N/A.`
+    : null;
+  const governance = officialGovernance.ok
+    ? deriveInvestmentCompanyGovernance(officialGovernance.data.directors)
+    : null;
+  const governanceMessage = officialGovernance.ok && governance?.score === null
+    ? `Official governance evidence could not support governance scoring because ${
+      (governance.reason ?? "verified evidence was insufficient").replaceAll("_", " ")
+    }. Governance remains N/A.`
+    : null;
+  let investmentHoldings: EtfHolding[] | undefined = holdingsComparable
+    ? officialHoldings.data.holdings.map((holding) => ({
+      name: holding.name,
+      weight: holding.weight,
+      issuerFundamentalsEligible: holding.issuerFundamentalsEligible,
+    }))
+    : undefined;
+  const holdingsQualitySources: AnalysisSource[] = [];
+  const holdingsQualityDiagnostics: ProviderDiagnostic[] = [];
+  let holdingsQualityMessage: string | null = null;
+
+  if (investmentHoldings?.length) {
+    const enrichment = await enrichInvestmentCompanyHoldingsQuality(
+      investmentHoldings,
+      {
+        searchCompanies,
+        fetchHoldingFundamentals: fetchYahooEtfHoldingFundamentals,
+      },
+      { maxSearches: 12 },
+    );
+    investmentHoldings = enrichment.holdings;
+    holdingsQualitySources.push(...enrichment.sources);
+    holdingsQualityDiagnostics.push(...enrichment.diagnostics);
+    if (!enrichment.targetReached) {
+      holdingsQualityMessage = enrichment.budgetExhausted
+        ? "Investment-company holdings-quality enrichment reached its search budget before 80% of total portfolio weight had verified quality evidence; unresolved and private holdings remain in the denominator and holdings quality stays N/A."
+        : "Investment-company holdings quality could not be verified across 80% of total official portfolio weight; unresolved and private holdings remain in the denominator and holdings quality stays N/A.";
+    }
+  }
+
+  const dilutedShares = report.market?.sharesOutstanding
+    ?? latest?.currentSharesOutstanding
+    ?? latest?.sharesDiluted
+    ?? null;
+  const verifiedAnnualLeverageRatio = officialKeyRatios.ok
+    ? verifiedInvestmentCompanyLeverageRatio(
+      officialKeyRatios.data.years,
+      marketYear,
+    )
+    : null;
+  const verifiedLeverageRatio = leverageComparable && officialLeverage.ok
+    ? officialLeverage.data.ratio
+    : verifiedAnnualLeverageRatio;
+  const leverageFreshnessMessage = officialLeverage.ok && !leverageComparable && verifiedLeverageRatio === null
+    ? `Official leverage dated ${officialLeverage.data.asOf} is stale or not comparable with market price date ${marketDate ?? "unknown"}. Leverage requires verified current issuer evidence no more than ${INVESTMENT_COMPANY_DISCLOSURE_MAX_AGE_DAYS} days old and not later than the market-price date; the source is retained for provenance but excluded from specialist coverage.`
+    : null;
+
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
-    dilutedShares: report.market?.sharesOutstanding ?? latest?.currentSharesOutstanding ?? latest?.sharesDiluted ?? null,
-    cash: latest?.cashAndEquivalents ?? null,
-    debt: latest?.totalDebt ?? null,
+    dilutedShares,
+    reportedNav: navComparable ? officialNav.data.reportedNav : null,
+    reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
+    holdingCompanyLeverageRatio: verifiedLeverageRatio,
+    ...navGrowth,
+    ...shareholderReturns,
+    capitalAllocationScore: capitalAllocation?.score ?? null,
+    managementGovernanceScore: governance?.score ?? null,
+    dividendQualityScore: dividendQuality?.score ?? null,
+    holdings: investmentHoldings,
   });
+
   report.securityClassification = classifyUniversalSecurity({
-    company: { ticker: report.ticker, name: report.companyName, securityType: "Common Stock" },
+    company,
     analysisArchetype: "holding_company",
   });
   report.securityAnalysis = { ...(report.securityAnalysis ?? {}), investmentCompany: analysis };
+  report.dataCoverage = analysis.score.coverage;
+  report.recommendation = recommendationForScore(analysis.score.score, analysis.score.coverage);
+
+  if (officialNav.ok) {
+    const navSource = officialNav.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === navSource.provider
+      && source.url === navSource.url
+      && source.version === navSource.version
+    ))) {
+      report.sources = [...report.sources, navSource];
+    }
+    const navHistorySource = officialNav.data.historySource;
+    if (navHistorySource && !report.sources.some((source) => (
+      source.provider === navHistorySource.provider
+      && source.url === navHistorySource.url
+      && source.version === navHistorySource.version
+    ))) {
+      report.sources = [...report.sources, navHistorySource];
+    }
+  }
+
+  if (officialHoldings.ok) {
+    const holdingsSource = officialHoldings.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === holdingsSource.provider
+      && source.url === holdingsSource.url
+      && source.version === holdingsSource.version
+    ))) {
+      report.sources = [...report.sources, holdingsSource];
+    }
+  }
+
+  if (officialKeyRatios.ok) {
+    const keyRatioSource = officialKeyRatios.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === keyRatioSource.provider
+      && source.url === keyRatioSource.url
+      && source.version === keyRatioSource.version
+    ))) {
+      report.sources = [...report.sources, keyRatioSource];
+    }
+  }
+
+  if (officialGovernance.ok) {
+    for (const governanceSource of officialGovernance.data.sources) {
+      if (!report.sources.some((source) => (
+        source.provider === governanceSource.provider
+        && source.url === governanceSource.url
+        && source.version === governanceSource.version
+      ))) {
+        report.sources = [...report.sources, governanceSource];
+      }
+    }
+  }
+
+  if (officialLeverage.ok) {
+    const leverageSource = officialLeverage.data.source;
+    if (!report.sources.some((source) => (
+      source.provider === leverageSource.provider
+      && source.url === leverageSource.url
+      && source.version === leverageSource.version
+    ))) {
+      report.sources = [...report.sources, leverageSource];
+    }
+  }
+
+  for (const qualitySource of holdingsQualitySources) {
+    if (!report.sources.some((source) => (
+      source.provider === qualitySource.provider
+      && source.url === qualitySource.url
+      && source.version === qualitySource.version
+    ))) {
+      report.sources = [...report.sources, qualitySource];
+    }
+  }
+
+  if (longHistory?.ok && shareholderReturnContributes) {
+    const historySource = longHistory.source;
+    if (!report.sources.some((source) => (
+      source.provider === historySource.provider
+      && source.url === historySource.url
+      && source.version === historySource.version
+    ))) {
+      report.sources = [...report.sources, historySource];
+    }
+  }
+
+  const navDiagnostic: ProviderDiagnostic = officialNav.ok
+    ? navComparable
+      ? officialNav.data.diagnostic
+      : {
+        ...officialNav.data.diagnostic,
+        status: "partial",
+        reason: "official_nav_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialNav.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === navDiagnostic.provider
+    && diagnostic.status === navDiagnostic.status
+    && diagnostic.reason === navDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), navDiagnostic];
+  }
+
+  const holdingsDiagnostic: ProviderDiagnostic = officialHoldings.ok
+    ? holdingsComparable
+      ? officialHoldings.data.diagnostic
+      : {
+        ...officialHoldings.data.diagnostic,
+        status: "partial",
+        reason: "official_holdings_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialHoldings.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === holdingsDiagnostic.provider
+    && diagnostic.status === holdingsDiagnostic.status
+    && diagnostic.reason === holdingsDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), holdingsDiagnostic];
+  }
+
+  const keyRatioDiagnostic: ProviderDiagnostic = officialKeyRatios.ok
+    ? dividendQuality?.score !== null && dividendQuality?.score !== undefined
+      ? officialKeyRatios.data.diagnostic
+      : {
+        ...officialKeyRatios.data.diagnostic,
+        status: "partial",
+        reason: dividendQuality?.reason ?? "dividend_quality_unavailable",
+      }
+    : officialKeyRatios.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === keyRatioDiagnostic.provider
+    && diagnostic.status === keyRatioDiagnostic.status
+    && diagnostic.reason === keyRatioDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), keyRatioDiagnostic];
+  }
+
+  const governanceDiagnostic = officialGovernance.ok
+    ? officialGovernance.data.diagnostic
+    : officialGovernance.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === governanceDiagnostic.provider
+    && diagnostic.status === governanceDiagnostic.status
+    && diagnostic.reason === governanceDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), governanceDiagnostic];
+  }
+
+  const leverageDiagnostic: ProviderDiagnostic = officialLeverage.ok
+    ? leverageComparable
+      ? officialLeverage.data.diagnostic
+      : {
+        ...officialLeverage.data.diagnostic,
+        status: "partial",
+        reason: "official_leverage_stale_or_unverifiable_for_market_comparison",
+      }
+    : officialLeverage.diagnostic;
+  if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+    diagnostic.provider === leverageDiagnostic.provider
+    && diagnostic.status === leverageDiagnostic.status
+    && diagnostic.reason === leverageDiagnostic.reason
+  ))) {
+    report.providerDiagnostics = [...(report.providerDiagnostics ?? []), leverageDiagnostic];
+  }
+
+  for (const qualityDiagnostic of holdingsQualityDiagnostics) {
+    if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+      diagnostic.provider === qualityDiagnostic.provider
+      && diagnostic.status === qualityDiagnostic.status
+      && diagnostic.reason === qualityDiagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), qualityDiagnostic];
+    }
+  }
+
+  if (longHistory) {
+    const historyDiagnostic: ProviderDiagnostic = longHistory.ok && !shareholderReturnContributes
+      ? {
+        ...longHistory.diagnostic,
+        status: "partial",
+        reason: "adjusted_close_history_insufficient_for_3y_5y_shareholder_returns",
+      }
+      : longHistory.diagnostic;
+    if (!(report.providerDiagnostics ?? []).some((diagnostic) => (
+      diagnostic.provider === historyDiagnostic.provider
+      && diagnostic.status === historyDiagnostic.status
+      && diagnostic.reason === historyDiagnostic.reason
+    ))) {
+      report.providerDiagnostics = [...(report.providerDiagnostics ?? []), historyDiagnostic];
+    }
+  }
+
   if (analysis.score.score !== null) {
     report.score.score = analysis.score.score;
     report.score.personalizedScore = analysis.score.score;
-    report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
   }
+  report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, analysis.score.coverage * 100)));
   const missing = analysis.score.missing;
-  if (missing.length) {
+  const gateMessage = specialistCoverageGateMessage("Investment-company", analysis.score.coverage);
+  if (missing.length || gateMessage || navFreshnessMessage || holdingsFreshnessMessage || leverageFreshnessMessage || holdingsQualityMessage || capitalAllocationMessage || dividendQualityMessage || governanceMessage) {
     report.score.missingData = [...new Set([
       ...report.score.missingData,
-      `Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`,
+      ...(navFreshnessMessage ? [navFreshnessMessage] : []),
+      ...(holdingsFreshnessMessage ? [holdingsFreshnessMessage] : []),
+      ...(leverageFreshnessMessage ? [leverageFreshnessMessage] : []),
+      ...(holdingsQualityMessage ? [holdingsQualityMessage] : []),
+      ...(capitalAllocationMessage ? [capitalAllocationMessage] : []),
+      ...(dividendQualityMessage ? [dividendQualityMessage] : []),
+      ...(governanceMessage ? [governanceMessage] : []),
+      ...(missing.length ? [`Investment-company model requires verified NAV/SOTP inputs for full scoring: ${missing.join(", ")}. Missing NAV inputs remain N/A and are never replaced with consolidated book equity.`] : []),
+      ...(gateMessage ? [gateMessage] : []),
     ])];
   }
   return report;
@@ -311,5 +818,10 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<CoreAnalyzeResu
   if (securityType === "ETF/Fund") return analyzeEtfSecurity(args);
   const core = await analyzeOperatingCompany(args);
   if (!core.ok) return core;
-  return { ...core, data: enrichInvestmentCompanyReport(core.data as UniversalSecurityReport) };
+  const report = await enrichInvestmentCompanyReport(core.data as UniversalSecurityReport, args.company);
+  return {
+    ...core,
+    data: report,
+    sources: report.sources,
+  };
 }
