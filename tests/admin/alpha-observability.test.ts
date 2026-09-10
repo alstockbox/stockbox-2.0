@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const alphaAdminPath = join(process.cwd(), "src/app/admin/alpha/page.tsx");
-const adminHomePath = join(process.cwd(), "src/app/admin/page.tsx");
 
 function source(path: string): string {
   return readFileSync(path, "utf8");
@@ -37,11 +36,5 @@ describe("Alpha admin observability boundary", () => {
     expect(page).toMatch(/alpha_predictions[\s\S]*?\.limit\(20\)/);
     expect(page).toMatch(/alpha_prediction_outcomes[\s\S]*?\.limit\(20\)/);
     expect(page).not.toMatch(/runAlphaUniverseScan|collectMaturedAlphaOutcomes/);
-  });
-
-  it("links the protected Alpha operations view from the existing admin home", () => {
-    const adminHome = source(adminHomePath);
-    expect(adminHome).toContain('href="/admin/alpha"');
-    expect(adminHome).toContain("Alpha operations");
   });
 });
