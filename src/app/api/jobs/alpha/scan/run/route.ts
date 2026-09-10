@@ -1,13 +1,13 @@
-import { isPayoutCronAuthorized } from "@/lib/affiliate/payouts";
 import { runAlphaUniverseScan } from "@/lib/alpha/scanner";
 import { getServerEnv } from "@/lib/env/server";
+import { isCronAuthorized } from "@/lib/server/cron-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 async function run(request: Request) {
   const secret = getServerEnv().CRON_SECRET;
-  if (!isPayoutCronAuthorized(request.headers.get("authorization"), secret)) {
+  if (!isCronAuthorized(request.headers.get("authorization"), secret)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
