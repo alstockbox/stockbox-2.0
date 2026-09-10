@@ -369,6 +369,15 @@ async function enrichInvestmentCompanyReport(
     : null;
   const governanceContributes = governance?.score !== null && governance?.score !== undefined;
   const officialDividendHistory = getOfficialInvestmentCompanyDividendHistory(company);
+  const dividendQuality = officialDividendHistory
+    ? deriveInvestmentCompanyDividendQuality(officialDividendHistory.years)
+    : officialKeyRatios.ok && marketYear !== undefined
+      ? deriveInvestmentCompanyDividendQuality(
+        officialKeyRatios.data.years.filter((point) => point.year < marketYear),
+      )
+      : null;
+  const dividendQualityContributes = dividendQuality?.score !== null && dividendQuality?.score !== undefined;
+  const keyRatioDividendQualityContributes = officialDividendHistory === null && dividendQualityContributes;
   const annualLeverageRatio = officialKeyRatios.ok
     ? selectVerifiedAnnualLeverageRatio(officialKeyRatios.data.years, marketYear)
     : null;
@@ -387,14 +396,6 @@ async function enrichInvestmentCompanyReport(
     )
     : null;
   const capitalAllocationContributes = capitalAllocation?.score !== null && capitalAllocation?.score !== undefined;
-  const dividendQuality = deriveInvestmentCompanyDividendQuality(
-    officialDividendHistory?.years
-      ?? (officialKeyRatios.ok && marketYear !== undefined
-        ? officialKeyRatios.data.years.filter((point) => point.year < marketYear)
-        : []),
-  );
-  const dividendQualityContributes = dividendQuality.score !== null;
-  const keyRatioDividendQualityContributes = officialDividendHistory === null && dividendQualityContributes;
   const keyRatioAnnualNavHistory = officialKeyRatios.ok
     ? annualNavPerShareHistoryFromKeyRatios(officialKeyRatios.data.years)
     : [];
@@ -462,7 +463,7 @@ async function enrichInvestmentCompanyReport(
     holdingCompanyLeverageRatio: verifiedLeverageRatio,
     capitalAllocationScore: capitalAllocation?.score ?? null,
     managementGovernanceScore: governance?.score ?? null,
-    dividendQualityScore: dividendQuality.score,
+    dividendQualityScore: dividendQuality?.score ?? null,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -586,7 +587,7 @@ async function enrichInvestmentCompanyReport(
     if (!dividendQualityContributes) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
-        `Official dividend-quality evidence is incomplete or unsuitable (${dividendQuality.reason ?? "market_year_unavailable"}); dividend quality remains N/A.`,
+        `Official dividend-quality evidence is incomplete or unsuitable (${dividendQuality?.reason ?? "market_year_unavailable"}); dividend quality remains N/A.`,
       ])];
     }
   }
