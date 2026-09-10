@@ -16,6 +16,7 @@ const SVOLDER_BOARD_URL = "https://svolder.se/bolagsstyrning/styrelse/";
 const CREADES_BOARD_URL = "https://www.creades.se/bolagsstyrning/styrelse-ledande-befattningshavare-och-revisor/";
 const CREADES_INDEPENDENCE_STATEMENT_URL = "https://www.creades.se/media/0mfj3ehw/valberedningens-f%C3%B6rslag-%C3%A5rsst%C3%A4mma-2026.pdf";
 const CREADES_INDEPENDENCE_AS_OF = "2026-03-17";
+const LUNDBERGS_BOARD_URL = "https://www.lundbergforetagen.se/en/governance/board-directors";
 
 const INDUSTRIVARDEN_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Fredrik Lundberg", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
@@ -71,6 +72,18 @@ const CREADES_2026_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
   { name: "Anna Settman", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Lars Stugemo", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
   { name: "Hans Toll", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+];
+
+const LUNDBERGS_CURRENT_DIRECTORS: InvestmentCompanyDirectorGovernanceEvidence[] = [
+  { name: "Bo Selling", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Carl Bennet", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Sofia Frändberg", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Louise Lindh", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
+  { name: "Fredrik Lundberg", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
+  { name: "Katarina Martinson", independentFromCompanyManagement: true, independentFromMajorShareholders: false },
+  { name: "Krister Mattsson", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
+  { name: "Sten Peterson", independentFromCompanyManagement: false, independentFromMajorShareholders: false },
+  { name: "Lars Pettersson", independentFromCompanyManagement: true, independentFromMajorShareholders: true },
 ];
 
 export type OfficialInvestmentCompanyGovernanceData = {
@@ -286,6 +299,48 @@ export function parseCreadesOfficialBoardRoster(html: string): string[] | null {
   return names.length === CREADES_2026_DIRECTORS.length ? names : null;
 }
 
+function lundbergsIndependenceSentence(director: InvestmentCompanyDirectorGovernanceEvidence): string {
+  if (director.independentFromCompanyManagement && director.independentFromMajorShareholders) {
+    return "independent in relation to the company and in relation to the company's major shareholders";
+  }
+  if (!director.independentFromCompanyManagement && !director.independentFromMajorShareholders) {
+    return "not independent in relation to the company and in relation to the company's major shareholders";
+  }
+  if (director.independentFromCompanyManagement && !director.independentFromMajorShareholders) {
+    return "independent in relation to the company but not independent in relation to the company's major shareholders";
+  }
+  return "";
+}
+
+export function parseLundbergsOfficialBoardRoster(html: string): string[] | null {
+  const text = htmlToText(html);
+  if (!/\bboard of directors\b/i.test(text)) return null;
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const headingPattern = /<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>([\s\S]*?)(?=<h[1-4]\b|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(html)) !== null) {
+    const heading = htmlToText(match[1]);
+    const director = LUNDBERGS_CURRENT_DIRECTORS.find(
+      (candidate) => normalizeDirectorName(candidate.name) === normalizeDirectorName(heading),
+    );
+    if (!director) continue;
+
+    const normalized = normalizeDirectorName(director.name);
+    if (seen.has(normalized)) return null;
+    const expectedSentence = lundbergsIndependenceSentence(director);
+    if (!expectedSentence) return null;
+    const evidenceText = htmlToText(match[2]).toLocaleLowerCase("en-US");
+    if (!evidenceText.includes(expectedSentence)) return null;
+
+    seen.add(normalized);
+    names.push(director.name);
+  }
+
+  return names.length === LUNDBERGS_CURRENT_DIRECTORS.length ? names : null;
+}
+
 function rosterMatchesVerifiedEvidence(
   currentRoster: string[],
   verifiedDirectors: InvestmentCompanyDirectorGovernanceEvidence[],
@@ -359,6 +414,19 @@ function issuerConfig(company: CompanySearchResult): GovernanceIssuerConfig | nu
       evidenceAsOf: CREADES_INDEPENDENCE_AS_OF,
       directors: CREADES_2026_DIRECTORS,
       parseRoster: parseCreadesOfficialBoardRoster,
+    };
+  }
+
+  const isLundbergs = /\blund(?:-[ab])?\.st\b/.test(identity)
+    || identity.includes("lundbergföretagen")
+    || identity.includes("lundbergforetagen");
+  if (isLundbergs) {
+    return {
+      issuerName: "Lundbergs",
+      boardUrl: LUNDBERGS_BOARD_URL,
+      evidenceUrl: LUNDBERGS_BOARD_URL,
+      directors: LUNDBERGS_CURRENT_DIRECTORS,
+      parseRoster: parseLundbergsOfficialBoardRoster,
     };
   }
 
