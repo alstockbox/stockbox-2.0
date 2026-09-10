@@ -1,4 +1,10 @@
-import type { InvestmentCompanyKeyRatioYear } from "@/lib/data/official-investment-company-key-ratios";
+export type InvestmentCompanyDividendQualityYear = {
+  year: number;
+  sharesOutstanding?: number | null;
+  dividendsPaid?: number | null;
+  dividendPerShare?: number | null;
+  dividendsReceived?: number | null;
+};
 
 const REQUIRED_YEARS = 5;
 const DIVIDEND_RECONCILIATION_TOLERANCE = 0.02;
@@ -31,7 +37,7 @@ function emptyResult(
   };
 }
 
-function isCompleteDividendYear(point: InvestmentCompanyKeyRatioYear): boolean {
+function isCompleteDividendYear(point: InvestmentCompanyDividendQualityYear): boolean {
   return Number.isInteger(point.year)
     && Number.isFinite(point.sharesOutstanding)
     && (point.sharesOutstanding as number) > 0
@@ -43,7 +49,7 @@ function isCompleteDividendYear(point: InvestmentCompanyKeyRatioYear): boolean {
     && (point.dividendsReceived as number) >= 0;
 }
 
-function reconcilesDividendAccounting(point: InvestmentCompanyKeyRatioYear): boolean {
+function reconcilesDividendAccounting(point: InvestmentCompanyDividendQualityYear): boolean {
   const expectedPaid = (point.sharesOutstanding as number) * (point.dividendPerShare as number);
   const dividendsPaid = point.dividendsPaid as number;
   if (!Number.isFinite(expectedPaid) || expectedPaid < 0 || !Number.isFinite(dividendsPaid)) return false;
@@ -62,7 +68,7 @@ function fundingScore(buffer: number | null): number {
 }
 
 export function deriveInvestmentCompanyDividendQuality(
-  history: InvestmentCompanyKeyRatioYear[] | null | undefined,
+  history: InvestmentCompanyDividendQualityYear[] | null | undefined,
 ): InvestmentCompanyDividendQuality {
   const ordered = [...(history ?? [])]
     .filter((point) => Number.isInteger(point.year))
