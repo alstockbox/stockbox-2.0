@@ -30,6 +30,18 @@ export type PortfolioUpgradeNetCase = {
   comparableDimensions: number;
 };
 
+export type PortfolioUpgradeRankOption = {
+  ticker: string;
+  profileRank: number;
+  scoreImprovement: number;
+  netCase: PortfolioUpgradeNetCase;
+};
+
+export type PortfolioUpgradeEvidenceSummary = {
+  primaryStrength: PortfolioUpgradeEvidenceItem | null;
+  primaryTradeoff: PortfolioUpgradeEvidenceItem | null;
+};
+
 function relevanceWeight(
   dimension: PortfolioUpgradeDriverDimension,
   risk: RiskPreference,
@@ -160,5 +172,46 @@ export function classifyPortfolioUpgradeNetCase(
     negativeEvidence,
     netEvidence,
     comparableDimensions: comparison.comparableDimensions,
+  };
+}
+
+export function rankPortfolioUpgradeOptions<T extends PortfolioUpgradeRankOption>(options: T[]): T[] {
+  const labelPriority: Record<PortfolioUpgradeNetCaseLabel, number> = {
+    strong_improvement: 0,
+    mixed: 1,
+    marginal: 2,
+    insufficient: 3,
+  };
+
+  return [...options].sort((a, b) => {
+    const labelDifference = labelPriority[a.netCase.label] - labelPriority[b.netCase.label];
+    if (labelDifference !== 0) return labelDifference;
+
+    const aProfileRank = Number.isFinite(a.profileRank) ? a.profileRank : Number.POSITIVE_INFINITY;
+    const bProfileRank = Number.isFinite(b.profileRank) ? b.profileRank : Number.POSITIVE_INFINITY;
+    if (aProfileRank !== bProfileRank) return aProfileRank - bProfileRank;
+
+    const aNetEvidence = a.netCase.netEvidence ?? Number.NEGATIVE_INFINITY;
+    const bNetEvidence = b.netCase.netEvidence ?? Number.NEGATIVE_INFINITY;
+    if (aNetEvidence !== bNetEvidence) return bNetEvidence - aNetEvidence;
+
+    const aScoreImprovement = Number.isFinite(a.scoreImprovement) ? a.scoreImprovement : Number.NEGATIVE_INFINITY;
+    const bScoreImprovement = Number.isFinite(b.scoreImprovement) ? b.scoreImprovement : Number.NEGATIVE_INFINITY;
+    if (aScoreImprovement !== bScoreImprovement) return bScoreImprovement - aScoreImprovement;
+
+    return a.ticker.localeCompare(b.ticker);
+  });
+}
+
+export function summarizePortfolioUpgradeEvidence(
+  comparison: PortfolioUpgradeEvidenceComparison,
+): PortfolioUpgradeEvidenceSummary {
+  if (comparison.comparableDimensions < 2) {
+    return { primaryStrength: null, primaryTradeoff: null };
+  }
+
+  return {
+    primaryStrength: comparison.strengths[0] ?? null,
+    primaryTradeoff: comparison.tradeoffs[0] ?? null,
   };
 }
