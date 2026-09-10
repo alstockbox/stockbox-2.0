@@ -149,6 +149,36 @@ describe("SEC REIT specialist document parser", () => {
     });
   });
 
+  it("extracts only directly reported current-quarter AFFO payout", () => {
+    const metrics = metricMap(`
+      <table>
+        <tr><th></th><th>Three Months Ended June 30, 2026</th><th>Three Months Ended June 30, 2025</th></tr>
+        <tr><td>AFFO Payout %</td><td>74.5%</td><td>79.9%</td></tr>
+        <tr><td>Diluted AFFO available to common stockholders</td><td>$0.812</td><td>$0.772</td></tr>
+        <tr><td>Diluted AFFO per common share</td><td>$1.09</td><td>$1.05</td></tr>
+      </table>
+    `, filingContext);
+
+    expect(metrics.affoPayout).toMatchObject({
+      value: 0.745,
+      unit: "ratio",
+      dataAsOf: "2026-06-30",
+      sourceUrl: filingContext.sourceUrl,
+    });
+  });
+
+  it("does not derive AFFO payout from distributions or AFFO per share when no payout row is reported", () => {
+    const metrics = metricMap(`
+      <table>
+        <tr><th></th><th>Three Months Ended June 30, 2026</th></tr>
+        <tr><td>Diluted AFFO available to common stockholders</td><td>$0.812</td></tr>
+        <tr><td>Diluted AFFO per common share</td><td>$1.09</td></tr>
+      </table>
+    `, filingContext);
+
+    expect(metrics.affoPayout).toBeUndefined();
+  });
+
   it("does not promote guidance, undated per-share values, or modified FFO aliases into reported FFO/AFFO", () => {
     const observations = parseSecReitSpecializedDocument(`
       <p>2026 Guidance: Core FFO per diluted share is expected to range from $6.22 to $6.30.</p>
