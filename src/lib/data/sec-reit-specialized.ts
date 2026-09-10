@@ -1,6 +1,7 @@
 export type SecReitMetricKey =
   | "fundsFromOperationsPerShare"
   | "adjustedFundsFromOperationsPerShare"
+  | "affoPayout"
   | "occupancy"
   | "sameStoreNoiGrowth"
   | "netDebtToEbitdare"
@@ -60,6 +61,12 @@ const MONTHS: Record<string, number> = {
 const ENGLISH_DATE = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})\b/i;
 
 const RULES: ParserRule[] = [
+  {
+    metric: "affoPayout",
+    pattern: /\bAFFO\s+Payout\s*%?\s+(\d{1,3}(?:\.\d+)?)\s*%/i,
+    scale: 0.01,
+    priority: 100,
+  },
   {
     metric: "occupancy",
     pattern: /\boccupancy\s*-\s*by\s+number\s+of\s+properties(?:\(\d+\))?\s*(\d{1,3}(?:\.\d+)?)\s*%/i,
