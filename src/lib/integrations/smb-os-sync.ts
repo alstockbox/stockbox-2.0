@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   reportStockBoxEvent,
   stockBoxAnalysisCompletedEvent,
+  stockBoxInvoicePaidOccurredAt,
   stockBoxPaidInvoiceEvent,
   stockBoxSignupEvent,
   type StockBoxModuleEvent,
@@ -148,11 +149,13 @@ export async function runSmbOsSync(options?: { lookbackHours?: number }): Promis
   for (const stripeEvent of stripeEvents) {
     const invoice = stripeEvent.data.object as Stripe.Invoice;
     const mapped = stockBoxPaidInvoiceEvent({
-      stripeEventId: stripeEvent.id,
       invoiceId: invoice.id,
       amountPaidCents: invoice.amount_paid,
       currency: invoice.currency,
-      occurredAt: new Date(stripeEvent.created * 1000).toISOString(),
+      occurredAt: stockBoxInvoicePaidOccurredAt({
+        paidAtSeconds: invoice.status_transitions?.paid_at ?? null,
+        eventCreatedSeconds: stripeEvent.created,
+      }),
       vatMode: env.LEGAL_VAT_MODE,
       billingReason: invoice.billing_reason,
     });

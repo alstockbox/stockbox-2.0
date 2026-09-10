@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   reportStockBoxEvent,
   stockBoxAnalysisCompletedEvent,
+  stockBoxInvoicePaidOccurredAt,
   stockBoxPaidInvoiceEvent,
   stockBoxSignupEvent,
 } from "@/lib/integrations/smb-os";
@@ -41,6 +42,17 @@ describe("StockBox SMB OS adapter", () => {
     expect(event.occurredAt).toBe(occurredAt);
     expect(event.type).toBe("measurement");
     expect(event.metadata).not.toHaveProperty("userId");
+  });
+
+  it("uses invoice paid_at as source time and falls back to Stripe event creation time", () => {
+    expect(stockBoxInvoicePaidOccurredAt({
+      paidAtSeconds: 1789035330,
+      eventCreatedSeconds: 1789035600,
+    })).toBe("2026-09-10T10:15:30.000Z");
+    expect(stockBoxInvoicePaidOccurredAt({
+      paidAtSeconds: null,
+      eventCreatedSeconds: 1789035600,
+    })).toBe("2026-09-10T10:20:00.000Z");
   });
 
   it("books positive SEK cash as revenue only when VAT exempt", () => {

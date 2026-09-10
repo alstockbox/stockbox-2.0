@@ -35,6 +35,16 @@ function base(eventId: string, occurredAt: string): BaseModuleEvent {
   return { projectId: "stockbox", module: "stockbox", eventId, occurredAt };
 }
 
+export function stockBoxInvoicePaidOccurredAt(input: {
+  paidAtSeconds?: number | null;
+  eventCreatedSeconds: number;
+}): string {
+  const sourceSeconds = typeof input.paidAtSeconds === "number" && Number.isFinite(input.paidAtSeconds) && input.paidAtSeconds >= 0
+    ? input.paidAtSeconds
+    : input.eventCreatedSeconds;
+  return new Date(sourceSeconds * 1000).toISOString();
+}
+
 export function stockBoxSignupEvent(input: { idempotencyKey: string; occurredAt: string }): StockBoxModuleEvent {
   return {
     ...base(`acquisition:${input.idempotencyKey}`, input.occurredAt),
@@ -69,7 +79,7 @@ export function stockBoxAnalysisCompletedEvent(input: {
 }
 
 export function stockBoxPaidInvoiceEvent(input: {
-  stripeEventId: string;
+  stripeEventId?: string;
   invoiceId: string;
   amountPaidCents: number;
   currency: string;
@@ -88,7 +98,7 @@ export function stockBoxPaidInvoiceEvent(input: {
 
   if (input.vatMode === "small_business_exempt") {
     return {
-      ...base(`stripe:${input.stripeEventId}:revenue`, input.occurredAt),
+      ...base(`stripe:invoice:${input.invoiceId}:revenue`, input.occurredAt),
       type: "economic",
       kind: "revenue",
       amountSek,
@@ -97,7 +107,7 @@ export function stockBoxPaidInvoiceEvent(input: {
   }
 
   return {
-    ...base(`stripe:${input.stripeEventId}:gross-cash`, input.occurredAt),
+    ...base(`stripe:invoice:${input.invoiceId}:gross-cash`, input.occurredAt),
     type: "measurement",
     metricName: "gross_cash_received_sek",
     metricValue: amountSek,
