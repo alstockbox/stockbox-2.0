@@ -97,7 +97,7 @@ export async function runSmbOsSync(options?: { lookbackHours?: number }): Promis
   const [signupQuery, analysisQuery, stripeEvents] = await Promise.all([
     supabase
       .from("acq_events")
-      .select("idempotency_key")
+      .select("idempotency_key,occurred_at")
       .eq("event_name", "signup_completed")
       .eq("is_bot", false)
       .eq("is_internal", false)
@@ -106,7 +106,7 @@ export async function runSmbOsSync(options?: { lookbackHours?: number }): Promis
       .limit(MAX_SOURCE_ROWS),
     supabase
       .from("analyses")
-      .select("id,ticker,analysis_type,score")
+      .select("id,ticker,analysis_type,score,created_at")
       .gte("created_at", sinceIso)
       .order("created_at", { ascending: true })
       .limit(MAX_SOURCE_ROWS),
@@ -117,24 +117,34 @@ export async function runSmbOsSync(options?: { lookbackHours?: number }): Promis
   if (analysisQuery.error) throw new Error("Analysis source query failed for SMB OS sync.");
 
   const events: StockBoxModuleEvent[] = [];
+  let skipped = 0;
   for (const row of signupQuery.data ?? []) {
-    if (typeof row.idempotency_key === "string" && row.idempotency_key) {
-      events.push(stockBoxSignupEvent(row.idempotency_key));
+    if (typeof row.idempotency_key === "string" && row.idempotency_key && typeof row.occurred_at === "string") {
+      events.push(stockBoxSignupEvent({ idempotencyKey: row.idempotency_key, occurredAt: row.occurred_at }));
+    } else {
+      skipped += 1;
     }
   }
   for (const row of analysisQuery.data ?? []) {
-    if (typeof row.id === "string" && typeof row.ticker === "string" && typeof row.analysis_type === "string") {
+    if (
+      typeof row.id === "string" &&
+      typeof row.ticker === "string" &&
+      typeof row.analysis_type === "string" &&
+      typeof row.created_at === "string"
+    ) {
       events.push(stockBoxAnalysisCompletedEvent({
         analysisId: row.id,
         ticker: row.ticker,
         analysisType: row.analysis_type,
         score: Number(row.score ?? 0),
+        occurredAt: row.created_at,
       }));
+    } else {
+      skipped += 1;
     }
   }
 
   const env = getServerEnv();
-  let skipped = 0;
   for (const stripeEvent of stripeEvents) {
     const invoice = stripeEvent.data.object as Stripe.Invoice;
     const mapped = stockBoxPaidInvoiceEvent({
@@ -142,6 +152,7 @@ export async function runSmbOsSync(options?: { lookbackHours?: number }): Promis
       invoiceId: invoice.id,
       amountPaidCents: invoice.amount_paid,
       currency: invoice.currency,
+      occurredAt: new Date(stripeEvent.created * 1000).toISOString(),
       vatMode: env.LEGAL_VAT_MODE,
       billingReason: invoice.billing_reason,
     });
