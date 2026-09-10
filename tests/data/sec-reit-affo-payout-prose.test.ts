@@ -26,6 +26,20 @@ describe("SEC REIT direct AFFO payout prose", () => {
     });
   });
 
+  it("uses the payout statement's explicit quarter end instead of a later unrelated document date", () => {
+    const metrics = metricMap(`
+      <p>For the three months ended June 30, 2026, operating results remained resilient.</p>
+      <p>The amount of monthly dividends paid per share was $0.812 in the three months ended June 30, 2026, representing 74.5% of our diluted AFFO per share of $1.09 during the three months ended June 30, 2026.</p>
+      <p>Liquidity available as of August 5, 2026 was approximately $4.0 billion.</p>
+    `);
+
+    expect(metrics.affoPayout).toMatchObject({
+      value: 0.745,
+      unit: "ratio",
+      dataAsOf: "2026-06-30",
+    });
+  });
+
   it("does not treat AFFO payout guidance as a reported actual", () => {
     const metrics = metricMap(`
       <p>2026 Guidance: we expect dividends to represent 74.5% of diluted AFFO per share.</p>
