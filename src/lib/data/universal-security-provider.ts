@@ -44,6 +44,7 @@ import {
   type InvestmentCompanyNavGrowth,
 } from "./investment-company-nav-history";
 import { deriveInvestmentCompanyShareholderReturns } from "./investment-company-shareholder-return";
+import { getOfficialInvestmentCompanyDividendHistory } from "./official-investment-company-dividend-history";
 import { fetchOfficialInvestmentCompanyGovernance } from "./official-investment-company-governance";
 import { fetchOfficialInvestmentCompanyHoldings } from "./official-investment-company-holdings";
 import {
@@ -367,6 +368,7 @@ async function enrichInvestmentCompanyReport(
     ? deriveInvestmentCompanyGovernance(officialGovernance.data.directors)
     : null;
   const governanceContributes = governance?.score !== null && governance?.score !== undefined;
+  const officialDividendHistory = getOfficialInvestmentCompanyDividendHistory(company);
   const annualLeverageRatio = officialKeyRatios.ok
     ? selectVerifiedAnnualLeverageRatio(officialKeyRatios.data.years, marketYear)
     : null;
@@ -385,12 +387,14 @@ async function enrichInvestmentCompanyReport(
     )
     : null;
   const capitalAllocationContributes = capitalAllocation?.score !== null && capitalAllocation?.score !== undefined;
-  const dividendQuality = officialKeyRatios.ok && marketYear !== undefined
-    ? deriveInvestmentCompanyDividendQuality(
-      officialKeyRatios.data.years.filter((point) => point.year < marketYear),
-    )
-    : null;
-  const dividendQualityContributes = dividendQuality?.score !== null && dividendQuality?.score !== undefined;
+  const dividendQuality = deriveInvestmentCompanyDividendQuality(
+    officialDividendHistory?.years
+      ?? (officialKeyRatios.ok && marketYear !== undefined
+        ? officialKeyRatios.data.years.filter((point) => point.year < marketYear)
+        : []),
+  );
+  const dividendQualityContributes = dividendQuality.score !== null;
+  const keyRatioDividendQualityContributes = officialDividendHistory === null && dividendQualityContributes;
   const keyRatioAnnualNavHistory = officialKeyRatios.ok
     ? annualNavPerShareHistoryFromKeyRatios(officialKeyRatios.data.years)
     : [];
@@ -458,7 +462,7 @@ async function enrichInvestmentCompanyReport(
     holdingCompanyLeverageRatio: verifiedLeverageRatio,
     capitalAllocationScore: capitalAllocation?.score ?? null,
     managementGovernanceScore: governance?.score ?? null,
-    dividendQualityScore: dividendQuality?.score ?? null,
+    dividendQualityScore: dividendQuality.score,
     reportedNav: navComparable ? officialNav.data.reportedNav : null,
     reportedNavPerShare: navComparable ? officialNav.data.reportedNavPerShare : null,
     ...navGrowth,
@@ -535,6 +539,17 @@ async function enrichInvestmentCompanyReport(
     ])];
   }
 
+  if (officialDividendHistory) {
+    const dividendSource = officialDividendHistory.source;
+    if (!report.sources.some((existing) => (
+      existing.provider === dividendSource.provider
+      && existing.url === dividendSource.url
+      && existing.version === dividendSource.version
+    ))) {
+      report.sources = [...report.sources, dividendSource];
+    }
+  }
+
   if (officialKeyRatios.ok) {
     const keyRatioSource = officialKeyRatios.data.source;
     if (!report.sources.some((existing) => (
@@ -546,7 +561,7 @@ async function enrichInvestmentCompanyReport(
     }
     const keyRatiosContribute = annualLeverageContributes
       || capitalAllocationContributes
-      || dividendQualityContributes
+      || keyRatioDividendQualityContributes
       || keyRatioNavGrowthContributes;
     const keyRatioDiagnostic: ProviderDiagnostic = keyRatiosContribute
       ? officialKeyRatios.data.diagnostic
@@ -571,7 +586,7 @@ async function enrichInvestmentCompanyReport(
     if (!dividendQualityContributes) {
       report.score.missingData = [...new Set([
         ...report.score.missingData,
-        `Official dividend-quality evidence is incomplete or unsuitable (${dividendQuality?.reason ?? "market_year_unavailable"}); dividend quality remains N/A.`,
+        `Official dividend-quality evidence is incomplete or unsuitable (${dividendQuality.reason ?? "market_year_unavailable"}); dividend quality remains N/A.`,
       ])];
     }
   }
