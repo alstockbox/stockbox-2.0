@@ -91,6 +91,7 @@ describe("SEC REIT specialized provider", () => {
         <p>Portfolio Overview As of June 30, 2026</p>
         <p>98.8% occupancy</p>
         <p>Net Debt to Annualized Pro Forma Adjusted EBITDAre was 5.4x</p>
+        <p>The amount of monthly dividends paid per share increased 0.7% to $0.812 in the three months ended June 30, 2026, as compared to $0.806 during the three months ended June 30, 2025, representing 74.5% of our diluted AFFO per share of $1.09 during the three months ended June 30, 2026.</p>
         <table>
           <tr><th></th><th>Three Months Ended June 30, 2026</th><th>Three Months Ended June 30, 2025</th></tr>
           <tr><td>AFFO Payout %</td><td>74.5%</td><td>79.9%</td></tr>
@@ -124,6 +125,20 @@ describe("SEC REIT specialized provider", () => {
         filedAt: "2026-07-30",
         form: "8-K",
         accession: "0000000001-26-000010",
+      });
+      expect(result.data.dividendCoverage).toMatchObject({
+        value: 1.09 / 0.812,
+        unit: "ratio",
+        dataAsOf: "2026-06-30",
+      });
+      expect(result.data.dividendCoverage.provenance).toMatchObject({
+        provider: "sec-reit-filings",
+        valueKind: "derived",
+        periodEnd: "2026-06-30",
+        filedAt: "2026-07-30",
+        form: "8-K",
+        accession: "0000000001-26-000010",
+        inputs: ["adjustedFundsFromOperationsPerShare", "dividendsPaidPerShare"],
       });
       expect(result.data.occupancy.provenance).toMatchObject({
         provider: "sec-reit-filings",
