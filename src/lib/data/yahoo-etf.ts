@@ -5,6 +5,8 @@ import { yahooSymbolForCompany } from "./yahoo-fundamentals";
 const PROVIDER_ID = "yahoo-etf";
 const REQUEST_TIMEOUT_MS = 10_000;
 const HOLDINGS_HHI_MIN_REPRESENTED_WEIGHT = 0.95;
+const SECTOR_HHI_MIN_REPRESENTED_WEIGHT = 0.95;
+const SECTOR_HHI_MAX_REPRESENTED_WEIGHT = 1.05;
 
 type JsonObject = Record<string, unknown>;
 
@@ -116,9 +118,18 @@ function parseSectorHhi(topHoldings: JsonObject | null): number | null {
     return weight !== null && weight >= 0 ? [weight] : [];
   });
   if (!weights.length) return null;
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  if (total <= 0) return null;
-  return weights.reduce((sum, value) => sum + (value / total) ** 2, 0);
+  const rawTotal = weights.reduce((sum, value) => sum + value, 0);
+  if (rawTotal <= 0) return null;
+  const scale = rawTotal > 2 ? 100 : 1;
+  const normalized = weights.map((value) => value / scale);
+  const representedWeight = rawTotal / scale;
+  if (
+    representedWeight < SECTOR_HHI_MIN_REPRESENTED_WEIGHT
+    || representedWeight > SECTOR_HHI_MAX_REPRESENTED_WEIGHT
+  ) {
+    return null;
+  }
+  return normalized.reduce((sum, value) => sum + (value / representedWeight) ** 2, 0);
 }
 
 function holdingConcentration(holdings: EtfHolding[]) {
