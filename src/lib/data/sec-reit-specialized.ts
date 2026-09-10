@@ -68,6 +68,12 @@ const RULES: ParserRule[] = [
     priority: 100,
   },
   {
+    metric: "affoPayout",
+    pattern: /\brepresenting\s+(\d{1,3}(?:\.\d+)?)\s*%\s+of\s+(?:our\s+)?diluted\s+AFFO\s+per\s+(?:common\s+)?share\b/i,
+    scale: 0.01,
+    priority: 90,
+  },
+  {
     metric: "occupancy",
     pattern: /\boccupancy\s*-\s*by\s+number\s+of\s+properties(?:\(\d+\))?\s*(\d{1,3}(?:\.\d+)?)\s*%/i,
     scale: 0.01,
