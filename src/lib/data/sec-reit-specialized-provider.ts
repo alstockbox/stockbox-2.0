@@ -230,7 +230,7 @@ function buildReitMetrics(
     },
     fundsFromOperationsGrowth: emptyMetric(),
     adjustedFundsFromOperationsGrowth: emptyMetric(),
-    adjustedFundsFromOperationsPayout: emptyMetric(),
+    adjustedFundsFromOperationsPayout: metric("affoPayout"),
     dividendCoverage: emptyMetric(),
     occupancy: metric("occupancy"),
     sameStoreNoiGrowth: metric("sameStoreNoiGrowth"),
