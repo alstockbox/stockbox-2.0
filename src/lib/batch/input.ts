@@ -37,7 +37,7 @@ export function parseBatchInput(raw: string): ParsedBatchInput {
 
   for (const token of tokens) {
     if (HEADER_VALUES.has(token)) continue;
-    if (!/^[A-Z0-9^][A-Z0-9.^=-]{0,15}$/.test(token)) {
+    if (!/^[A-Z0-9^][A-Z0-9.^=-]{0,24}$/.test(token)) {
       invalid.push(token);
       continue;
     }
