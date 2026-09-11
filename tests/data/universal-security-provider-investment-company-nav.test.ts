@@ -1,0 +1,288 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  analyzeOperatingCompany: vi.fn(),
+  fetchConfiguredMarketData: vi.fn(),
+  fetchOfficialInvestmentCompanyNav: vi.fn(),
+  searchCompanies: vi.fn(),
+}));
+
+vi.mock("@/lib/data/enhanced-provider", () => ({
+  analyzeCompany: mocks.analyzeOperatingCompany,
+  fetchConfiguredMarketData: mocks.fetchConfiguredMarketData,
+  searchCompanies: mocks.searchCompanies,
+}));
+
+vi.mock("@/lib/data/official-investment-company-nav", () => ({
+  fetchOfficialInvestmentCompanyNav: mocks.fetchOfficialInvestmentCompanyNav,
+}));
+
+import { analyzeCompany, type UniversalSecurityReport } from "../../src/lib/data/universal-security-provider";
+
+const observedAt = "2026-09-06T18:00:00.000Z";
+
+function coreHoldingCompanyReport(): UniversalSecurityReport {
+  return {
+    id: "holding-fixture",
+    ticker: "INVE-B.ST",
+    companyName: "Investor AB",
+    analysisType: "summary",
+    investmentProfile: "balanced",
+    generatedAt: observedAt,
+    oneSentence: "fixture",
+    summary: "fixture",
+    recommendation: "No Rating",
+    shortTermAssessment: "fixture",
+    longTermAssessment: "fixture",
+    metrics: {
+      revenueGrowth1y: null,
+      revenueCagr3y: null,
+      epsGrowth1y: null,
+      grossMargin: null,
+      operatingMargin: null,
+      netMargin: null,
+      fcf: null,
+      fcfMargin: null,
+      cashConversion: null,
+      debtToEquity: null,
+      debtToAssets: null,
+      netDebt: null,
+      interestCoverage: null,
+      earningsYield: null,
+      fcfYield: null,
+      priceMomentum1y: null,
+      priceMomentum3m: null,
+    },
+    score: {
+      score: null,
+      personalizedScore: null,
+      confidence: 60,
+      dimensions: [],
+      missingData: [],
+    },
+    dcf: {
+      suitable: false,
+      reason: "fixture",
+      bear: null,
+      base: null,
+      bull: null,
+    },
+    redFlags: [],
+    greenFlags: [],
+    scenarios: [],
+    sources: [],
+    disclaimer: "fixture",
+    modelVersion: "fixture",
+    reportSchemaVersion: "fixture",
+    dataCoverage: 0,
+    dataStatus: "current",
+    providerDiagnostics: [],
+    analysisArchetype: "holding_company",
+    market: {
+      ticker: "INVE-B.ST",
+      price: 150,
+      currency: "SEK",
+      date: "2026-09-05",
+      volume: null,
+      marketCap: 450_000_000_000,
+      sharesOutstanding: 3_000_000_000,
+      yearHigh: null,
+      yearLow: null,
+      performance: { "1D": undefined, "1W": undefined, "1M": undefined, "3M": undefined, "6M": undefined, "YTD": undefined, "1Y": undefined },
+    },
+    engine: {
+      metrics: {
+        latestPeriod: {
+          fiscalYear: 2025,
+          periodEndDate: "2025-12-31",
+          cashAndEquivalents: 10_000_000_000,
+          totalDebt: 20_000_000_000,
+        },
+      },
+    } as UniversalSecurityReport["engine"],
+  };
+}
+
+function officialNavSuccess(navAsOf = "2026-09-05") {
+  return {
+    ok: true as const,
+    data: {
+      reportedNav: 600_000_000_000,
+      reportedNavPerShare: 200,
+      navAsOf,
+      source: {
+        name: "Investor AB official NAV disclosure",
+        url: "https://example.com/investor-nav",
+        accessedAt: observedAt,
+        freshness: "official fixture",
+        provider: "official-investment-company-nav",
+        capability: "specialized" as const,
+        dataAsOf: navAsOf,
+        version: "official-investment-company-nav-v2",
+      },
+      diagnostic: {
+        provider: "Official investment-company NAV",
+        capability: "specialized" as const,
+        status: "available" as const,
+        observedAt,
+      },
+    },
+  };
+}
+
+describe("investment-company official NAV production wiring", () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
+    const report = coreHoldingCompanyReport();
+    mocks.analyzeOperatingCompany.mockResolvedValue({
+      ok: true,
+      data: report,
+      sources: report.sources,
+      warnings: [],
+    });
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValue(officialNavSuccess());
+  });
+
+  it("uses verified official NAV/share in the investment-company model and preserves the 99% No Rating gate", async () => {
+    const company = {
+      ticker: "INVE-B.ST",
+      name: "Investor AB",
+      securityType: "Common Stock" as const,
+    };
+
+    const result = await analyzeCompany({
+      company,
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const analysis = report.securityAnalysis?.investmentCompany;
+    const navFactor = analysis?.score.factors.find((factor) => factor.key === "nav_valuation");
+
+    expect(mocks.fetchOfficialInvestmentCompanyNav).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchOfficialInvestmentCompanyNav).toHaveBeenCalledWith(company);
+    expect(analysis?.nav.source).toBe("reported_nav_per_share");
+    expect(analysis?.nav.perShare).toBe(200);
+    expect(analysis?.nav.discountPremium).toBeCloseTo(-0.25, 8);
+    expect(navFactor?.status).toBe("available");
+    expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
+    expect(result.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
+    expect(report.providerDiagnostics?.some((item) => item.provider === "Official investment-company NAV" && item.status === "available")).toBe(true);
+    expect(report.dataCoverage).toBeLessThan(0.99);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("accepts official NAV that is exactly 120 days older than the market price", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2026-05-08"));
+
+    const result = await analyzeCompany({
+      company: { ticker: "INVE-B.ST", name: "Investor AB", securityType: "Common Stock" },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const analysis = (result.data as UniversalSecurityReport).securityAnalysis?.investmentCompany;
+    expect(analysis?.nav.source).toBe("reported_nav_per_share");
+    expect(analysis?.score.factors.find((factor) => factor.key === "nav_valuation")?.status).toBe("available");
+  });
+
+  it("keeps stale official NAV as provenance but excludes it from NAV valuation coverage", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce(officialNavSuccess("2026-05-07"));
+
+    const result = await analyzeCompany({
+      company: { ticker: "INVE-B.ST", name: "Investor AB", securityType: "Common Stock" },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const analysis = report.securityAnalysis?.investmentCompany;
+    const navFactor = analysis?.score.factors.find((factor) => factor.key === "nav_valuation");
+
+    expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(true);
+    expect(analysis?.nav.source).toBe("unavailable");
+    expect(analysis?.nav.perShare).toBeNull();
+    expect(navFactor?.status).toBe("missing");
+    expect(report.score.missingData.some((item) => /official nav/i.test(item) && /stale|120 days/i.test(item))).toBe(true);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("fails closed when official NAV is unavailable without inventing a source or NAV value", async () => {
+    mocks.fetchOfficialInvestmentCompanyNav.mockResolvedValueOnce({
+      ok: false,
+      message: "No verified official NAV adapter is configured for this investment company yet.",
+      diagnostic: {
+        provider: "Official investment-company NAV",
+        capability: "specialized",
+        status: "unavailable",
+        reason: "official_nav_adapter_not_configured",
+        observedAt,
+      },
+    });
+
+    const result = await analyzeCompany({
+      company: {
+        ticker: "HOLD.ST",
+        name: "Diversified Investment Holding AB",
+        securityType: "Common Stock",
+      },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = result.data as UniversalSecurityReport;
+    const analysis = report.securityAnalysis?.investmentCompany;
+    const navFactor = analysis?.score.factors.find((factor) => factor.key === "nav_valuation");
+
+    expect(analysis?.nav.source).toBe("unavailable");
+    expect(analysis?.nav.perShare).toBeNull();
+    expect(navFactor?.status).toBe("missing");
+    expect(report.sources.some((source) => source.provider === "official-investment-company-nav")).toBe(false);
+    expect(report.providerDiagnostics?.some((item) => (
+      item.provider === "Official investment-company NAV"
+      && item.status === "unavailable"
+      && item.reason === "official_nav_adapter_not_configured"
+    ))).toBe(true);
+    expect(report.recommendation).toBe("No Rating");
+  });
+
+  it("does not call the official NAV adapter for an operating company", async () => {
+    const report = coreHoldingCompanyReport();
+    report.ticker = "OPER";
+    report.companyName = "Operating Company";
+    report.analysisArchetype = "standard";
+    mocks.analyzeOperatingCompany.mockResolvedValueOnce({
+      ok: true,
+      data: report,
+      sources: report.sources,
+      warnings: [],
+    });
+
+    const result = await analyzeCompany({
+      company: {
+        ticker: "OPER",
+        name: "Operating Company",
+        securityType: "Common Stock",
+      },
+      analysisType: "summary",
+      investmentProfile: "balanced",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.fetchOfficialInvestmentCompanyNav).not.toHaveBeenCalled();
+    if (!result.ok) return;
+    expect((result.data as UniversalSecurityReport).securityAnalysis?.investmentCompany).toBeUndefined();
+  });
+});

@@ -150,17 +150,26 @@ export function classifyCompany(input: {
     const source = startsWithAny(sic, SOFTWARE_SICS) ? "sic" : "description";
     return classified("technology", "software_growth", `${source === "sic" ? "SIC" : "Industry description"} identifies a software business.`, source, source === "sic" ? 0.93 : 0.82);
   }
+  const bdcOrSpecialtyLender = /\bbusiness development compan(?:y|ies)\b|\bbdc\b|\bspecialty lending\b/.test(text);
+  if (bdcOrSpecialtyLender) {
+    return classified(
+      "financials",
+      "unknown",
+      "Industry description identifies a BDC or specialty lender; a dedicated credit, NII, NAV, non-accrual and asset-coverage specialist model is required before StockBox can rate it.",
+      "description",
+      0.9,
+    );
+  }
   const investmentCompany = startsWithAny(sic, INVESTMENT_COMPANY_SICS)
     || /investment holding|holding compan|investment compan(?:y|ies)|diversified investments?/.test(text)
     || HOLDING_VEHICLE_NAME_PATTERN.test(text)
-    || (LEGAL_HOLDING_SUFFIX_PATTERN.test(text) && /asset management|investment management|financial services|investment/.test(description.toLowerCase()))
-    || /\bbusiness development compan(?:y|ies)\b|\bbdc\b|\bspecialty lending\b/.test(text);
+    || (LEGAL_HOLDING_SUFFIX_PATTERN.test(text) && /asset management|investment management|financial services|investment/.test(description.toLowerCase()));
   if (investmentCompany) {
     const source = startsWithAny(sic, INVESTMENT_COMPANY_SICS) ? "sic" : "description";
     return classified(
       "financials",
       "holding_company",
-      `${source === "sic" ? "SIC" : "Industry description"} identifies an investment company, BDC, specialty lender, or holding company that requires NAV/SOTP-style coverage.`,
+      `${source === "sic" ? "SIC" : "Industry description"} identifies an investment company or holding company that requires NAV/SOTP-style coverage.`,
       source,
       source === "sic" ? 0.92 : 0.86,
     );
@@ -276,6 +285,26 @@ function hasOperatingAssetManagerFinancialSignature(input: FinancialAnalysisInpu
   return operatingLike.length >= 2;
 }
 
+function hasDecisiveInvestmentHoldingOverride(input: FinancialAnalysisInput): boolean {
+  const periods = [...input.annualPeriods].filter((period) => period.fiscalYear !== undefined || period.periodEndDate).slice(-3);
+  if (periods.length < 2) return false;
+  const decisive = periods.filter((period) => {
+    if (
+      !isFiniteNumber(period.revenue)
+      || !isFiniteNumber(period.netIncome)
+      || !isFiniteNumber(period.totalAssets)
+      || !isFiniteNumber(period.totalEquity)
+      || period.totalAssets <= 0
+    ) return false;
+    const stronglyEquityHeavy = period.totalEquity / period.totalAssets >= 0.8;
+    const netIncomeExceedsRevenue = Math.abs(period.netIncome) >= Math.max(Math.abs(period.revenue), 1);
+    const lowOperatingCashConversion = !isFiniteNumber(period.operatingCashFlow)
+      || Math.abs(period.operatingCashFlow) <= Math.abs(period.netIncome) * 0.25;
+    return stronglyEquityHeavy && netIncomeExceedsRevenue && lowOperatingCashConversion;
+  });
+  return decisive.length >= 2;
+}
+
 function hasConventionalOperatingFinancialSignature(input: FinancialAnalysisInput): boolean {
   const diagnostics = input.company.classificationDiagnostics;
   if (diagnostics?.source !== "fallback" || diagnostics.ambiguous || diagnostics.confidence > 0.35) return false;
@@ -312,7 +341,7 @@ function hasConfidentUnresolvedSpecialistStop(input: FinancialAnalysisInput): bo
   const diagnostics = input.company.classificationDiagnostics;
   if (!diagnostics || diagnostics.ambiguous || diagnostics.confidence < 0.6) return false;
   if (diagnostics.candidates.some((candidate) => candidate !== "unknown")) return false;
-  return /capital-markets|credit-services|shell|acquisition company|diversified-financial|financial conglomerate/.test(
+  return /capital-markets|credit-services|shell|acquisition company|diversified-financial|financial conglomerate|bdc|specialty lender/.test(
     diagnostics.reason.toLowerCase(),
   );
 }
@@ -335,6 +364,11 @@ export function resolveFinancialClassificationDiagnostics(input: FinancialAnalys
 export function resolveFinancialArchetype(input: FinancialAnalysisInput): AnalysisArchetype {
   const base = resolveArchetype(input.company);
   if (base === "pre_revenue_biotech") return base;
+  if (
+    base === "asset_manager"
+    && hasOperatingAssetManagerFinancialSignature(input)
+    && !hasDecisiveInvestmentHoldingOverride(input)
+  ) return base;
   if ((base === "unknown" || base === "asset_manager") && hasInvestmentHoldingFinancialSignature(input)) return "holding_company";
   if (base === "unknown" && hasConfidentUnresolvedSpecialistStop(input)) return base;
   if (base === "unknown" && hasOperatingAssetManagerFinancialSignature(input)) return "asset_manager";

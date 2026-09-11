@@ -4,6 +4,7 @@ import type { AnalysisArchetype, CompanySearchResult } from "./types";
 export type UniversalSecurityKind =
   | "operating_company"
   | "investment_company"
+  | "business_development_company"
   | "bank"
   | "insurance"
   | "reit"
@@ -65,6 +66,7 @@ export type LookThroughHolding = {
 
 export type LookThroughMetrics = {
   coveredWeight: number;
+  qualityCoveredWeight: number;
   stockBoxQuality: number | null;
   revenueGrowth: number | null;
   epsGrowth: number | null;
@@ -109,6 +111,7 @@ export type InvestmentCompanyAnalysisInput = {
   cash?: number | null;
   debt?: number | null;
   otherLiabilities?: number | null;
+  holdingCompanyLeverageRatio?: number | null;
   navGrowth1y?: number | null;
   navGrowth3yCagr?: number | null;
   navGrowth5yCagr?: number | null;
@@ -142,7 +145,7 @@ export type InvestmentCompanyAnalysisResult = {
 export type EtfHolding = LookThroughHolding;
 
 export type EtfAnalysisInput = {
-  subtype?: Exclude<UniversalSecurityKind, "operating_company" | "investment_company" | "bank" | "insurance" | "reit" | "real_estate" | "utility" | "commodity_mining" | "pre_profit_growth">;
+  subtype?: Exclude<UniversalSecurityKind, "operating_company" | "investment_company" | "business_development_company" | "bank" | "insurance" | "reit" | "real_estate" | "utility" | "commodity_mining" | "pre_profit_growth">;
   expenseRatio?: number | null;
   trackingDifference?: number | null;
   trackingError?: number | null;
@@ -192,12 +195,22 @@ export type EtfAnalysisResult = {
 };
 
 const ETF_PATTERN = /\betf\b|exchange[-\s]traded|\bucits\b|\bindex fund\b|\btracker\b/i;
-const LEVERAGED_PATTERN = /\b(?:2x|3x|ultra|leveraged|inverse|short|bear)\b/i;
+const EXPLICIT_LEVERAGED_PATTERN = /\b(?:2x|3x|leveraged|inverse|bear|ultrashort)\b/i;
+const AMBIGUOUS_SHORT_LEVERAGE_PATTERN = /\b(?:short|ultra)\b/i;
+const SHORT_DURATION_PATTERN = /\b(?:short[-\s]+(?:term|duration|maturity)|ultra\s+short(?:\s+(?:term|duration|maturity|bond|income|credit))?)\b/i;
 const BOND_PATTERN = /\b(?:bond|treasury|fixed income|corporate debt|government debt|aggregate bond|high yield)\b/i;
 const COMMODITY_PATTERN = /\b(?:commodity|gold|silver|copper|oil|crude|natural gas|uranium|wheat|agriculture)\b/i;
 const FACTOR_PATTERN = /\b(?:factor|quality|value|momentum|minimum volatility|low volatility|multifactor|smart beta)\b/i;
 const SECTOR_PATTERN = /\b(?:technology|semiconductor|healthcare|financial|energy|utilities|industrials|materials|real estate|consumer|communication)\b/i;
-const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments|business development company|\bbdc\b)\b/i;
+const BDC_PATTERN = /\b(?:business development company|specialty lending|specialty finance|\bbdc\b)\b/i;
+const HOLDING_PATTERN = /\b(?:investment company|investmentbolag|investment holding|holding company|diversified investments)\b/i;
+const LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT = 0.80;
+const LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT = 0.95;
+
+function isLeveragedOrInverseFund(text: string): boolean {
+  if (EXPLICIT_LEVERAGED_PATTERN.test(text)) return true;
+  return AMBIGUOUS_SHORT_LEVERAGE_PATTERN.test(text) && !SHORT_DURATION_PATTERN.test(text);
+}
 
 export function classifyUniversalSecurity(input: {
   company?: Pick<CompanySearchResult, "securityType" | "name" | "ticker"> | null;
@@ -212,13 +225,22 @@ export function classifyUniversalSecurity(input: {
     .join(" ");
   const explicitFund = input.company?.securityType === "ETF/Fund" || /\bETF\b/i.test(input.quoteType ?? "") || ETF_PATTERN.test(text);
   if (explicitFund) {
-    if (LEVERAGED_PATTERN.test(text)) return { kind: "leveraged_inverse_etf", confidence: 0.96, reason: "Fund metadata or name identifies a leveraged/inverse exchange-traded product." };
+    if (isLeveragedOrInverseFund(text)) return { kind: "leveraged_inverse_etf", confidence: 0.96, reason: "Fund metadata or name identifies a leveraged/inverse exchange-traded product." };
     if (BOND_PATTERN.test(text)) return { kind: "bond_etf", confidence: 0.94, reason: "Fund metadata or name identifies fixed-income exposure." };
     if (COMMODITY_PATTERN.test(text)) return { kind: "commodity_etf", confidence: 0.9, reason: "Fund metadata or name identifies commodity exposure." };
     if (FACTOR_PATTERN.test(text)) return { kind: "factor_etf", confidence: 0.88, reason: "Fund metadata or name identifies systematic factor exposure." };
     if (SECTOR_PATTERN.test(text)) return { kind: "sector_etf", confidence: 0.82, reason: "Fund metadata or name identifies concentrated sector exposure." };
     if (/\b(?:s&p|nasdaq|msci|ftse|stoxx|index|benchmark)\b/i.test(text)) return { kind: "index_etf", confidence: 0.86, reason: "Fund metadata or name identifies benchmark/index tracking." };
     return { kind: "equity_etf", confidence: 0.72, reason: "Security is an ETF/fund and no more specific fund regime is reliably established." };
+  }
+
+  if (BDC_PATTERN.test(text)) {
+    return {
+      kind: "business_development_company",
+      confidence: 0.98,
+      reason: "Business development companies require a dedicated private-credit/NAV specialist model; holding-company NAV/SOTP and generic operating-company scoring are not applicable.",
+      analysisArchetype: "unknown",
+    };
   }
 
   if (input.analysisArchetype === "holding_company" || HOLDING_PATTERN.test(text)) {
@@ -245,6 +267,10 @@ export function classifyUniversalSecurity(input: {
 function normalizeFraction(value: number | null | undefined): number | null {
   if (!isFiniteNumber(value)) return null;
   return Math.abs(value) > 2 ? value / 100 : value;
+}
+
+function validHoldingCompanyLeverageRatio(value: number | null | undefined): number | null {
+  return isFiniteNumber(value) && value >= 0 && value < 1 ? value : null;
 }
 
 function percentageScore(value: number | null | undefined): number | null {
@@ -308,16 +334,43 @@ function harmonicMetric(holdings: LookThroughHolding[], getter: (holding: LookTh
   return denominator > 0 ? weight / denominator : null;
 }
 
+function perHoldingQualityScore(holding: LookThroughHolding): number | null {
+  if (isFiniteNumber(holding.stockBoxScore)) return clamp(holding.stockBoxScore, 0, 100);
+  const growth = isFiniteNumber(holding.epsGrowth) ? holding.epsGrowth : holding.revenueGrowth;
+  const components = [
+    scoreHigherIsBetter(holding.roic ?? null, 0.02, 0.2),
+    scoreHigherIsBetter(growth ?? null, -0.05, 0.15),
+    scoreHigherIsBetter(holding.operatingMargin ?? null, 0.04, 0.25),
+  ].filter(isFiniteNumber);
+  if (components.length < 2) return null;
+  return components.reduce((sum, score) => sum + score, 0) / components.length;
+}
+
+function portfolioQuality(holdings: LookThroughHolding[]): { score: number | null; coveredWeight: number } {
+  const scored = holdings.flatMap((holding) => {
+    const score = perHoldingQualityScore(holding);
+    return isFiniteNumber(score) ? [{ holding, score }] : [];
+  });
+  const rawCoveredWeight = scored.reduce((sum, item) => sum + item.holding.weight, 0);
+  const coveredWeight = Math.min(1, rawCoveredWeight);
+  if (coveredWeight < LOOK_THROUGH_QUALITY_MIN_REPRESENTED_WEIGHT || rawCoveredWeight <= 0) {
+    return { score: null, coveredWeight };
+  }
+  const score = scored.reduce((sum, item) => sum + item.score * item.holding.weight, 0) / rawCoveredWeight;
+  return { score, coveredWeight };
+}
+
 function hhiFromBuckets(values: Array<string | null | undefined>, weights: number[]): number | null {
   const buckets = new Map<string, number>();
+  let representedWeight = 0;
   values.forEach((value, index) => {
     const weight = weights[index];
     if (!value || !isFiniteNumber(weight) || weight <= 0) return;
+    representedWeight += weight;
     buckets.set(value, (buckets.get(value) ?? 0) + weight);
   });
-  const total = [...buckets.values()].reduce((sum, value) => sum + value, 0);
-  if (total <= 0) return null;
-  return [...buckets.values()].reduce((sum, value) => sum + (value / total) ** 2, 0);
+  if (representedWeight < LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT) return null;
+  return [...buckets.values()].reduce((sum, value) => sum + value ** 2, 0);
 }
 
 export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): LookThroughMetrics {
@@ -326,11 +379,13 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
   const normalized = totalWeight > 1.5
     ? validWeights.map((holding) => ({ ...holding, weight: holding.weight / 100 }))
     : validWeights;
-  const coveredWeight = normalized.reduce((sum, holding) => sum + holding.weight, 0);
+  const coveredWeight = Math.min(1, normalized.reduce((sum, holding) => sum + holding.weight, 0));
   const sortedWeights = normalized.map((holding) => holding.weight).sort((a, b) => b - a);
+  const quality = portfolioQuality(normalized);
   return {
     coveredWeight,
-    stockBoxQuality: weightedMetric(normalized, (holding) => holding.stockBoxScore),
+    qualityCoveredWeight: quality.coveredWeight,
+    stockBoxQuality: quality.score,
     revenueGrowth: weightedMetric(normalized, (holding) => holding.revenueGrowth),
     epsGrowth: weightedMetric(normalized, (holding) => holding.epsGrowth),
     roic: weightedMetric(normalized, (holding) => holding.roic),
@@ -342,7 +397,9 @@ export function computeLookThroughMetrics(holdings: LookThroughHolding[] = []): 
     dividendYield: weightedMetric(normalized, (holding) => holding.dividendYield),
     top10Weight: sortedWeights.length ? sortedWeights.slice(0, 10).reduce((sum, weight) => sum + weight, 0) : null,
     largestHoldingWeight: sortedWeights[0] ?? null,
-    holdingsHhi: sortedWeights.length ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0) : null,
+    holdingsHhi: coveredWeight >= LOOK_THROUGH_CONCENTRATION_MIN_REPRESENTED_WEIGHT
+      ? sortedWeights.reduce((sum, weight) => sum + weight ** 2, 0)
+      : null,
     sectorHhi: hhiFromBuckets(normalized.map((holding) => holding.sector), normalized.map((holding) => holding.weight)),
     countryHhi: hhiFromBuckets(normalized.map((holding) => holding.country), normalized.map((holding) => holding.weight)),
   };
@@ -353,13 +410,14 @@ export function computeSotP(
   options: { cash?: number | null; debt?: number | null; otherLiabilities?: number | null; dilutedShares?: number | null },
 ): SotPResult | null {
   if (!segments?.length) return null;
+  if (![options.cash, options.debt, options.otherLiabilities].every(isFiniteNumber)) return null;
+  const cash = options.cash as number;
+  const debt = options.debt as number;
+  const liabilities = options.otherLiabilities as number;
   const scenario = (field: "bearValue" | "baseValue" | "bullValue") => {
     const values = segments.map((segment) => segment[field]);
     if (!values.every(isFiniteNumber)) return null;
     const assets = values.reduce((sum, value) => sum + (value as number), 0);
-    const cash = isFiniteNumber(options.cash) ? options.cash : 0;
-    const debt = isFiniteNumber(options.debt) ? options.debt : 0;
-    const liabilities = isFiniteNumber(options.otherLiabilities) ? options.otherLiabilities : 0;
     return assets + cash - debt - liabilities;
   };
   const bear = scenario("bearValue");
@@ -387,18 +445,17 @@ function investmentNav(input: InvestmentCompanyAnalysisInput, sotp: SotPResult |
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? input.reportedNav / input.dilutedShares : null;
     return { total: input.reportedNav, perShare, source: "reported_nav" as const };
   }
-  const components = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
-  if ([input.listedHoldingsValue, input.unlistedHoldingsValue].some(isFiniteNumber)) {
-    const total = (isFiniteNumber(input.listedHoldingsValue) ? input.listedHoldingsValue : 0)
-      + (isFiniteNumber(input.unlistedHoldingsValue) ? input.unlistedHoldingsValue : 0)
-      + (isFiniteNumber(input.cash) ? input.cash : 0)
-      - (isFiniteNumber(input.debt) ? input.debt : 0)
-      - (isFiniteNumber(input.otherLiabilities) ? input.otherLiabilities : 0);
+  const componentInputs = [input.listedHoldingsValue, input.unlistedHoldingsValue, input.cash, input.debt, input.otherLiabilities];
+  if (componentInputs.every(isFiniteNumber)) {
+    const total = (input.listedHoldingsValue as number)
+      + (input.unlistedHoldingsValue as number)
+      + (input.cash as number)
+      - (input.debt as number)
+      - (input.otherLiabilities as number);
     const perShare = isFiniteNumber(input.dilutedShares) && input.dilutedShares > 0 ? total / input.dilutedShares : null;
     if (isFiniteNumber(total) && total > 0) return { total, perShare, source: "component_nav" as const };
   }
   if (isFiniteNumber(sotp?.baseEquityValue) && sotp!.baseEquityValue! > 0) return { total: sotp!.baseEquityValue, perShare: sotp!.baseNavPerShare, source: "sotp_base" as const };
-  void components;
   return { total: null, perShare: null, source: "unavailable" as const };
 }
 
@@ -414,7 +471,9 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
   const navGrowth = [input.navGrowth5yCagr, input.navGrowth3yCagr, input.navGrowth1y].find(isFiniteNumber) ?? null;
   const shareholderReturn = [input.shareholderReturn5yCagr, input.shareholderReturn3yCagr].find(isFiniteNumber) ?? null;
   const grossAssets = isFiniteNumber(nav.total) && isFiniteNumber(input.debt) ? nav.total + input.debt : null;
-  const grossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
+  const derivedGrossLeverageToNav = isFiniteNumber(input.debt) && isFiniteNumber(grossAssets) && grossAssets > 0 ? input.debt / grossAssets : null;
+  const explicitLeverage = validHoldingCompanyLeverageRatio(input.holdingCompanyLeverageRatio);
+  const grossLeverageToNav = explicitLeverage ?? derivedGrossLeverageToNav;
   const holdingsQuality = percentageScore(input.holdings?.length ? lookThrough.stockBoxQuality : null);
   const factors: WeightedSecurityFactor[] = [
     {
@@ -426,7 +485,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "holdings_quality", label: "Underlying holdings quality", weight: 0.18, value: lookThrough.stockBoxQuality,
       score: holdingsQuality, status: isFiniteNumber(holdingsQuality) ? "available" : "missing",
-      rationale: "Look-through quality is the portfolio-weighted quality of underlying holdings.",
+      rationale: "Look-through quality requires verified quality evidence across at least 80% of portfolio weight.",
     },
     {
       key: "nav_growth", label: "NAV/share growth", weight: 0.15, value: navGrowth,
@@ -446,7 +505,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
     {
       key: "leverage", label: "Holding-company leverage", weight: 0.08, value: grossLeverageToNav,
       score: scoreLowerIsBetter(grossLeverageToNav, 0.45, 0.05), status: isFiniteNumber(grossLeverageToNav) ? "available" : "missing",
-      rationale: "Holding-company leverage is measured relative to look-through asset value rather than operating EBITDA.",
+      rationale: "Holding-company leverage uses an explicit verified leverage ratio when available, otherwise a debt-to-gross-assets derivation from verified NAV and debt.",
     },
     {
       key: "governance", label: "Management / governance", weight: 0.06, value: input.managementGovernanceScore ?? null,
@@ -457,7 +516,7 @@ export function analyzeInvestmentCompany(input: InvestmentCompanyAnalysisInput):
       key: "diversification", label: "Diversification", weight: 0.05, value: input.diversificationScore ?? null,
       score: percentageScore(input.diversificationScore) ?? scoreByAnchors(lookThrough.holdingsHhi, [[0.03, 95], [0.07, 80], [0.15, 55], [0.3, 25]]),
       status: isFiniteNumber(input.diversificationScore) || isFiniteNumber(lookThrough.holdingsHhi) ? "available" : "missing",
-      rationale: "Diversification reflects actual portfolio concentration rather than raw holding count.",
+      rationale: "Diversification requires actual concentration evidence across at least 95% of portfolio weight.",
     },
     {
       key: "dividend_quality", label: "Dividend quality", weight: 0.04, value: input.dividendQualityScore ?? null,
@@ -485,14 +544,8 @@ function resolvedEtfConcentration(input: EtfAnalysisInput, lookThrough: LookThro
 }
 
 function etfHoldingsQuality(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
-  if (isFiniteNumber(lookThrough.stockBoxQuality)) return clamp(lookThrough.stockBoxQuality, 0, 100);
-  const roic = lookThrough.roic;
-  const growth = lookThrough.epsGrowth ?? lookThrough.revenueGrowth;
-  const margin = lookThrough.operatingMargin;
-  const scores = [scoreHigherIsBetter(roic, 0.02, 0.2), scoreHigherIsBetter(growth, -0.05, 0.15), scoreHigherIsBetter(margin, 0.04, 0.25)].filter(isFiniteNumber);
-  if (!scores.length) return null;
   void input;
-  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return isFiniteNumber(lookThrough.stockBoxQuality) ? clamp(lookThrough.stockBoxQuality, 0, 100) : null;
 }
 
 function etfValuationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
@@ -509,10 +562,15 @@ function etfValuationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetr
 
 function etfDiversificationScore(input: EtfAnalysisInput, lookThrough: LookThroughMetrics): number | null {
   const concentration = resolvedEtfConcentration(input, lookThrough);
+  const hasConcentrationEvidence = isFiniteNumber(concentration.holdingsHhi)
+    || isFiniteNumber(concentration.sectorHhi)
+    || isFiniteNumber(concentration.countryHhi);
+  if (!hasConcentrationEvidence) return null;
   const countScore = scoreByAnchors(input.numberOfHoldings ?? null, [[10, 20], [30, 50], [100, 80], [500, 95]]);
   const hhiScore = scoreByAnchors(concentration.holdingsHhi, [[0.02, 100], [0.05, 85], [0.1, 65], [0.2, 35], [0.4, 10]]);
   const sectorScore = scoreByAnchors(concentration.sectorHhi, [[0.1, 95], [0.2, 75], [0.4, 45], [0.7, 15]]);
-  const scores = [countScore, hhiScore, sectorScore].filter(isFiniteNumber);
+  const countryScore = scoreByAnchors(concentration.countryHhi, [[0.1, 95], [0.2, 75], [0.4, 45], [0.7, 15]]);
+  const scores = [countScore, hhiScore, sectorScore, countryScore].filter(isFiniteNumber);
   return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
 }
 
@@ -603,7 +661,7 @@ function leveragedEtfOverlay(input: EtfAnalysisInput): WeightedSecurityFactor[] 
   return [{
     key: "path_dependency", label: "Leverage / path dependency", weight: 0.20, value: leverage,
     score: structuralScore, status: isFiniteNumber(structuralScore) ? "available" : "missing",
-    rationale: "Daily reset, leverage and volatility decay are explicit structural risks; long-horizon compounding is not assumed to equal leverage times index return.",
+    rationale: "Daily reset, leverage and volatility decay are explicit structural risks; long-horizon compounding is not assumed to equal leverage times benchmark returns.",
   }];
 }
 
@@ -625,7 +683,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "holdings_quality", label: "Underlying holdings quality", weight: 0.20, value: lookThrough.stockBoxQuality,
       score: holdingsQuality, status: equityApplicable ? (isFiniteNumber(holdingsQuality) ? "available" : "missing") : "not_applicable",
-      rationale: "Equity ETF quality is computed look-through from actual holdings; it is not an ETF-level profitability ratio.",
+      rationale: "Equity ETF quality is computed only when verified look-through quality evidence represents at least 80% of portfolio weight.",
     },
     {
       key: "valuation", label: "Look-through valuation", weight: 0.15, value: input.weightedForwardPe ?? lookThrough.forwardPe,
@@ -640,7 +698,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "diversification", label: "Diversification", weight: 0.12, value: input.holdingsHhi ?? lookThrough.holdingsHhi,
       score: diversification, status: isFiniteNumber(diversification) ? "available" : "missing",
-      rationale: "Diversification uses concentration mathematics and exposure breadth, not holding count alone.",
+      rationale: "Diversification requires actual concentration evidence; holding count can refine a score but cannot establish coverage by itself.",
     },
     {
       key: "liquidity", label: "Liquidity / tradability", weight: 0.10, value: normalizeFraction(input.bidAskSpread),
@@ -660,7 +718,7 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     {
       key: "concentration", label: "Concentration risk", weight: 0.06, value: normalizeFraction(input.top10Weight) ?? lookThrough.top10Weight,
       score: concentration, status: isFiniteNumber(concentration) ? "available" : "missing",
-      rationale: "Top-holding concentration is scored separately from nominal diversification.",
+      rationale: "Top-holding concentration is scored separately from full-portfolio HHI and may remain observable from a partial holdings list.",
     },
     {
       key: "fund_stability", label: "Fund size / stability", weight: 0.04, value: input.assetsUnderManagement ?? null,
@@ -669,8 +727,8 @@ export function analyzeEtf(input: EtfAnalysisInput): EtfAnalysisResult {
     },
     {
       key: "structure_tax", label: "Structure / tax efficiency", weight: 0.03, value: input.structureTaxEfficiencyScore ?? null,
-      score: taxStructure, status: isFiniteNumber(taxStructure) ? "available" : "missing",
-      rationale: "Structure and tax efficiency are scored only from explicit jurisdiction/product evidence.",
+      score: taxStructure, status: isFiniteNumber(taxStructure) ? "available" : "not_applicable",
+      rationale: "Structure and tax efficiency are scored only when explicit investor-jurisdiction and product evidence is available; otherwise this context-dependent factor is excluded from specialist coverage.",
     },
   ];
 

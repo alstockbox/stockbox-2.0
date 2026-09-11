@@ -89,6 +89,10 @@ function visitorIdentity(event: any) {
   return event.user_id || event.anonymous_id || event.session_id || event.id || null;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function aggregateAttributedGrowth(ctx: Pick<GrowthV3Context, "db" | "now">) {
   const now = ctx.now ?? new Date();
   const since = startOfDayISO(addDays(now, -27));
@@ -100,7 +104,7 @@ export async function aggregateAttributedGrowth(ctx: Pick<GrowthV3Context, "db" 
   for (const event of events || []) {
     const contentId = String(event.utm_content || "").trim();
     const identity = visitorIdentity(event);
-    if (!contentId || !identity) continue;
+    if (!isUuid(contentId) || !identity) continue;
     if (!identities.has(contentId)) identities.set(contentId, new Set());
     identities.get(contentId)!.add(String(identity));
   }

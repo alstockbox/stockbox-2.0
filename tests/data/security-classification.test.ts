@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canAttemptConfiguredFundamentals, inferSecurityType } from "../../src/lib/data/security-classification";
 import type { CompanySearchResult } from "../../src/lib/analysis/types";
+import type { DepositaryReceiptRepresentation } from "../../src/lib/data/depositary-receipt";
 
 function company(overrides: Partial<CompanySearchResult> = {}): CompanySearchResult {
   return {
@@ -14,6 +15,8 @@ function company(overrides: Partial<CompanySearchResult> = {}): CompanySearchRes
   };
 }
 
+type DepositaryReceiptCompany = CompanySearchResult & { depositaryReceipt?: DepositaryReceiptRepresentation };
+
 describe("configured fundamentals eligibility", () => {
   it("allows a common stock even when its discovery provider has no fundamentals", () => {
     expect(canAttemptConfiguredFundamentals(company())).toBe(true);
@@ -22,10 +25,47 @@ describe("configured fundamentals eligibility", () => {
   it.each([
     ["Preferred", { ticker: "ACME-PB", canonicalTicker: "ACME-PB", name: "Acme Preferred Series B", securityType: "Preferred" }],
     ["ETF/Fund", { ticker: "SPY", canonicalTicker: "SPY", name: "State Street SPDR S&P 500 ETF Trust", securityType: "ETF/Fund" }],
-    ["ADR", { ticker: "BABA", canonicalTicker: "BABA", name: "Alibaba ADR", securityType: "ADR" }],
     ["Other", { ticker: "ROP.SW", canonicalTicker: "ROP.SW", name: "Roche Holding AG", securityType: "Other" }],
   ] as const)("blocks unsupported %s securities", (_label, overrides) => {
     expect(canAttemptConfiguredFundamentals(company(overrides))).toBe(false);
+  });
+
+  it("keeps an unmapped ADR blocked", () => {
+    expect(canAttemptConfiguredFundamentals(company({
+      ticker: "BABA",
+      canonicalTicker: "BABA",
+      name: "Alibaba ADR",
+      securityType: "ADR",
+      issuerId: "issuer-alibaba",
+    }))).toBe(false);
+  });
+
+  it("allows issuer fundamentals for an ADR only after verified issuer mapping", () => {
+    const mapped = company({
+      ticker: "NVO",
+      canonicalTicker: "NVO",
+      name: "Novo Nordisk A/S ADR",
+      securityType: "ADR",
+      issuerId: "issuer-novo",
+    }) as DepositaryReceiptCompany;
+    mapped.depositaryReceipt = {
+      kind: "ADR",
+      issuerId: "issuer-novo",
+      receiptTicker: "NVO",
+      primaryListingTicker: "NOVO-B.CO",
+      underlyingSharesPerReceipt: null,
+      issuerReportingCurrency: "DKK",
+      primaryListingCurrency: "DKK",
+      receiptTradingCurrency: "USD",
+      ratioSource: null,
+      ratioAsOf: null,
+      mappingVerified: true,
+      ratioVerified: false,
+      source: "issuer filing",
+      sourceAsOf: "2026-09-08",
+    };
+
+    expect(canAttemptConfiguredFundamentals(mapped)).toBe(true);
   });
 });
 

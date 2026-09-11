@@ -4,6 +4,7 @@ import type { FinancialAnalysisInput, ProviderSourceConflict } from "./types";
 const ALWAYS_BLOCKING_SOURCE_CONFLICT_METRICS = new Set([
   "reportingcurrency", "currency", "entityid", "issuerid", "securityid",
   "cik", "isin", "figi", "lei",
+  "marketprice", "marketcap", "sharebasis",
 ]);
 
 const CORPORATE_DECISION_CRITICAL_METRICS = new Set([

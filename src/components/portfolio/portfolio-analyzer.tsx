@@ -134,7 +134,10 @@ export function PortfolioAnalyzer({ portfolioId, holdings, locale, lastSnapshotA
             {stale.length ? ` · ${stale.length} ${sv ? "innehav behöver uppdateras" : "holdings need refresh"}` : holdings.length ? ` · ${sv ? "Analyserna är färska" : "Analyses are fresh"}` : ""}
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <a href={`/portfolio/ai?portfolioId=${encodeURIComponent(portfolioId)}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-[#e1cb95]/30 bg-[#e1cb95]/10 px-4 text-sm font-semibold text-[#f4e7c1] transition hover:bg-[#e1cb95]/15">
+            <Sparkles className="h-4 w-4" />{sv ? "Öppna Portfolio AI" : "Open Portfolio AI"}
+          </a>
           {holdings.length ? (
             <>
               <Button type="button" onClick={() => void run(false)} disabled={running} className="min-h-11">

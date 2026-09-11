@@ -2,9 +2,12 @@ import type { AnalysisReport, AnalysisSource, CompanySearchResult, ProviderDiagn
 import { applyVerifiedMarketHistoryEnrichment } from "@/lib/analysis/market-history-enrichment";
 import { augmentWithOfficialResearch } from "@/lib/analysis/official-research-augment";
 import { enforceReportHistoricalCurrencyIntegrity } from "@/lib/analysis/report-currency-integrity";
+import { getServerEnv } from "@/lib/env/server";
+import { applyTwelveDataEstimateSnapshot } from "./estimate-report-augment";
 import { analyzeCompany as analyzeCoreCompany, searchCompanies } from "./provider";
 import { runWithOfficialAnalysisContext } from "./official-analysis-context";
 import { fetchOfficialResearchBundle, type OfficialResearchBundle } from "./official-research";
+import { fetchTwelveDataEstimateSnapshot } from "./twelve-data-estimates";
 import { fetchYahooLongHistory } from "./yahoo-long-history";
 
 export { searchCompanies };
@@ -12,6 +15,7 @@ export * from "./provider";
 
 type AnalyzeCompanyArgs = Parameters<typeof analyzeCoreCompany>[0];
 type AnalyzeCompanyResult = Awaited<ReturnType<typeof analyzeCoreCompany>>;
+type EstimateResult = Awaited<ReturnType<typeof fetchTwelveDataEstimateSnapshot>>;
 
 function uniqueSources(sources: AnalysisSource[]): AnalysisSource[] {
   const seen = new Set<string>();
@@ -83,8 +87,35 @@ async function safeOfficialBundle(args: AnalyzeCompanyArgs): Promise<OfficialRes
   }
 }
 
+async function safeEstimateSnapshot(args: AnalyzeCompanyArgs): Promise<EstimateResult | null> {
+  const env = getServerEnv();
+  if (env.ESTIMATES_PROVIDER !== "twelve_data") return null;
+  try {
+    return await fetchTwelveDataEstimateSnapshot(args.company, env.TWELVE_DATA_API_KEY ?? "");
+  } catch {
+    // Licensed estimates are additive. An unavailable symbol, plan restriction or provider
+    // outage must not fail the core analysis or cause StockBox to fabricate forward data.
+    return null;
+  }
+}
+
+function refreshAdminQa(report: AnalysisReport) {
+  if (!report.adminQa) return;
+  report.adminQa.providerAttempts = uniqueDiagnostics([
+    ...report.adminQa.providerAttempts,
+    ...(report.providerDiagnostics ?? []),
+  ]);
+  report.adminQa.providerFailures = report.adminQa.providerAttempts.filter((item) => item.status === "unavailable");
+  report.adminQa.selectedProviders = [...new Set(
+    (report.sources ?? []).map((source) => source.provider).filter((provider): provider is string => Boolean(provider)),
+  )];
+}
+
 export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeCompanyResult> {
-  const bundle = await safeOfficialBundle(args);
+  const [bundle, estimateResult] = await Promise.all([
+    safeOfficialBundle(args),
+    safeEstimateSnapshot(args),
+  ]);
   const resolvedCompany = bundle?.company ?? args.company;
   const macro = bundle?.macro?.data;
   const result = await runWithOfficialAnalysisContext(
@@ -96,23 +127,28 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     () => analyzeCoreCompany({ ...args, company: resolvedCompany }),
   );
 
+  const enrichmentSources = bundle?.sources ?? [];
+  const enrichmentDiagnostics = uniqueDiagnostics([
+    ...(bundle?.diagnostics ?? []),
+    ...(estimateResult ? [estimateResult.diagnostic] : []),
+  ]);
+
   if (!result.ok) {
-    if (!bundle) return result;
     return {
       ...result,
-      sources: uniqueSources([...(result.sources ?? []), ...bundle.sources]),
-      providerDiagnostics: uniqueDiagnostics([...(result.providerDiagnostics ?? []), ...bundle.diagnostics]),
+      sources: uniqueSources([...(result.sources ?? []), ...enrichmentSources]),
+      providerDiagnostics: uniqueDiagnostics([...(result.providerDiagnostics ?? []), ...enrichmentDiagnostics]),
     };
   }
 
   const report = result.data;
-  if (bundle) {
-    report.sources = uniqueSources([...(report.sources ?? []), ...bundle.sources]);
-    report.providerDiagnostics = uniqueDiagnostics([
-      ...(report.providerDiagnostics ?? []),
-      ...bundle.diagnostics,
-    ]);
+  report.sources = uniqueSources([...(report.sources ?? []), ...enrichmentSources]);
+  report.providerDiagnostics = uniqueDiagnostics([
+    ...(report.providerDiagnostics ?? []),
+    ...enrichmentDiagnostics,
+  ]);
 
+  if (bundle) {
     // Enrichment must never invalidate a core analysis. This also keeps historical/test reports
     // that predate the research fields compatible with the current provider contract.
     try {
@@ -123,6 +159,16 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     }
   }
 
+  if (estimateResult?.ok) {
+    try {
+      const source = applyTwelveDataEstimateSnapshot(report, estimateResult.data);
+      report.sources = uniqueSources([...(report.sources ?? []), source]);
+    } catch {
+      // Keep the estimates diagnostic visible if optional report enrichment cannot be attached.
+      // Missing estimate presentation must never corrupt or fail the core analysis.
+    }
+  }
+
   try {
     await enrichVerifiedHistory(report, resolvedCompany, args);
   } catch {
@@ -130,6 +176,8 @@ export async function analyzeCompany(args: AnalyzeCompanyArgs): Promise<AnalyzeC
     // secondary data can be rendered, and a history-provider outage must not fail the analysis.
     enforceReportHistoricalCurrencyIntegrity(report);
   }
+
+  refreshAdminQa(report);
 
   return {
     ...result,

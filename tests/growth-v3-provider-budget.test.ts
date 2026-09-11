@@ -64,7 +64,7 @@ describe("growth v3 provider budget adapter", () => {
   });
 
   it("finalizes known usage through the idempotent ledger RPC", async () => {
-    const calls: any[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     await finalizeGrowthSpend({
       rpc: async (name, args) => { calls.push({ name, args }); return { ok: true }; },
       idempotencyKey: "voice:job-1",

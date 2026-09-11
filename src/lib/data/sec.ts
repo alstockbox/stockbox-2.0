@@ -880,6 +880,18 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
   if (!availableFactSets.length) {
     return { ok: false, reason: "upstream_error", message: "SEC Companyfacts could not be retrieved.", diagnostic: { provider: "SEC Companyfacts", capability: "fundamentals", status: "unavailable", reason: "upstream_error", observedAt } };
   }
+  const allowedSourceCiks = new Set(requestedCiks.map((sourceCik) => padCik(sourceCik)));
+  const mismatchedSourceCik = availableFactSets
+    .map((factSet) => padCik(factSet.cik))
+    .find((sourceCik) => !allowedSourceCiks.has(sourceCik));
+  if (mismatchedSourceCik) {
+    return {
+      ok: false,
+      reason: "invalid_row",
+      message: "SEC Companyfacts issuer identity does not match the requested canonical issuer CIK.",
+      diagnostic: providerDiagnostic("SEC Companyfacts", "fundamentals", "unavailable", "invalid_row"),
+    };
+  }
   const facts = mergeSecCompanyFacts(availableFactSets);
   const classification = classifyCompany({ sic: submissions?.sic, sicDescription: submissions?.sicDescription, name: identity ? company.name : facts.entityName || company.name });
   const { annualPeriods, trailingTwelveMonths, priorTrailingTwelveMonths } = resolveSecFinancialPeriods(
@@ -896,7 +908,7 @@ export async function fetchCompanyFundamentalsResult(company: CompanySearchResul
       name: identity ? company.name : facts.entityName || company.name,
       cik,
       sourceCiks: availableFactSets.map((factSet) => padCik(factSet.cik)),
-      entityId: identity?.canonicalId ?? company.entityId,
+      entityId: identity?.canonicalId ?? `sec:${cik}`,
       sector: classification.sector,
       industry: classification.industry,
       sic: submissions?.sic,

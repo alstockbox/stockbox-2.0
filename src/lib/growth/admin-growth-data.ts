@@ -3,18 +3,31 @@ import {
   GROWTH_BUDGET_TARGET_SEK,
 } from "@/lib/growth/budget-governor";
 import { classifyGrowthRun, type GrowthDiagnosticState } from "@/lib/growth/growth-diagnostics";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type GrowthAdminRow = Record<string, unknown> & {
+  metric_date?: string;
+  supporting_metrics?: Record<string, unknown> | null;
+  workflow?: string | null;
+  status?: string | null;
+  detail?: Record<string, unknown> | null;
+  source?: string | null;
+  error_type?: string | null;
+  message?: string | null;
+};
+type GrowthAdminClient = SupabaseClient;
 
 export type GrowthAdminDataSource = {
-  getMetrics(): Promise<any[]>;
-  getBudgetRows(): Promise<any[]>;
-  getReadyRenderJobs(): Promise<any[]>;
-  getContents(): Promise<any[]>;
-  getPassedAssets(): Promise<any[]>;
-  getReadyPackages(): Promise<any[]>;
-  getFounderScripts(): Promise<any[]>;
-  getLearningDecisions(): Promise<any[]>;
-  getWorkflowRuns(): Promise<any[]>;
-  getErrors(): Promise<any[]>;
+  getMetrics(): Promise<GrowthAdminRow[]>;
+  getBudgetRows(): Promise<GrowthAdminRow[]>;
+  getReadyRenderJobs(): Promise<GrowthAdminRow[]>;
+  getContents(): Promise<GrowthAdminRow[]>;
+  getPassedAssets(): Promise<GrowthAdminRow[]>;
+  getReadyPackages(): Promise<GrowthAdminRow[]>;
+  getFounderScripts(): Promise<GrowthAdminRow[]>;
+  getLearningDecisions(): Promise<GrowthAdminRow[]>;
+  getWorkflowRuns(): Promise<GrowthAdminRow[]>;
+  getErrors(): Promise<GrowthAdminRow[]>;
   getLegacyV2Count(): Promise<number>;
 };
 
@@ -121,7 +134,7 @@ function addDays(date: Date, days: number) {
   return copy;
 }
 
-function packageView(row: any): GrowthPlatformPackage {
+function packageView(row: GrowthAdminRow): GrowthPlatformPackage {
   return {
     id: String(row.id),
     platform: String(row.platform || "unknown"),
@@ -134,11 +147,11 @@ function packageView(row: any): GrowthPlatformPackage {
   };
 }
 
-function isReadyPrivateAsset(row: any) {
+function isReadyPrivateAsset(row: GrowthAdminRow) {
   return row?.bucket === "growth-ready-assets" && row?.qc_status === "passed";
 }
 
-function relatedErrorsForRun(run: any, errors: any[]) {
+function relatedErrorsForRun(run: GrowthAdminRow, errors: GrowthAdminRow[]) {
   const workflow = String(run?.workflow || "").toLowerCase();
   return (errors || []).filter((error) => {
     const source = String(error?.source || "").toLowerCase();
@@ -190,7 +203,7 @@ export async function loadGrowthAdminData(
   const previousStart = dateISO(addDays(now, -13));
   const previousEnd = dateISO(addDays(now, -7));
   const previousValues = (metrics || [])
-    .filter((row) => row.metric_date >= previousStart && row.metric_date <= previousEnd)
+    .filter((row) => typeof row.metric_date === "string" && row.metric_date >= previousStart && row.metric_date <= previousEnd)
     .map((row) => finite(row.qualified_unique_visitors))
     .filter((value): value is number => value !== null);
   const previous7d = previousValues.length
@@ -207,15 +220,15 @@ export async function loadGrowthAdminData(
   }, 0), 6);
 
   const contentById = new Map((contents || []).map((row) => [String(row.id), row] as const));
-  const assetsByJob = new Map<string, any[]>();
+  const assetsByJob = new Map<string, GrowthAdminRow[]>();
   for (const asset of assets || []) {
     if (!asset?.render_job_id || !isReadyPrivateAsset(asset)) continue;
     const jobId = String(asset.render_job_id);
     if (!assetsByJob.has(jobId)) assetsByJob.set(jobId, []);
     assetsByJob.get(jobId)!.push(asset);
   }
-  const packagesByJob = new Map<string, any[]>();
-  const packagesByContent = new Map<string, any[]>();
+  const packagesByJob = new Map<string, GrowthAdminRow[]>();
+  const packagesByContent = new Map<string, GrowthAdminRow[]>();
   for (const pkg of packages || []) {
     if (pkg?.status !== "ready") continue;
     if (pkg.render_job_id) {
@@ -329,7 +342,7 @@ export async function loadGrowthAdminData(
   };
 }
 
-export function createSupabaseGrowthAdminDataSource(client: any, now = new Date()): GrowthAdminDataSource {
+export function createSupabaseGrowthAdminDataSource(client: GrowthAdminClient, now = new Date()): GrowthAdminDataSource {
   const startOfMonth = monthStartISO(now);
   const today = dateISO(now);
   const minScriptExpiry = now.toISOString();

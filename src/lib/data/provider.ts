@@ -16,6 +16,17 @@ import type {
 } from "@/lib/analysis/types";
 import { getMarketDataProviderChain, getServerEnv, type ServerEnv } from "@/lib/env/server";
 import { searchCompanyCatalog } from "./company-search";
+import {
+  disableDepositaryReceiptValuationInputs,
+  gateDepositaryReceiptValuationInputs,
+  verifyDepositaryReceiptFundamentalsIdentity,
+} from "./depositary-receipt";
+import {
+  buildDepositaryReceiptPrimaryListingCompany,
+  reconcileDepositaryReceiptPrimaryListingPrice,
+} from "./depositary-receipt-primary-listing";
+import { depositaryReceiptFxSource, resolveDepositaryReceiptFxContext } from "./depositary-receipt-provider-fx";
+import { attachVerifiedDepositaryReceiptRepresentation } from "./depositary-receipt-registry";
 import { fetchCompanyFundamentalsResult } from "./sec";
 import { fetchSecSubmissionEvents } from "./sec-submissions";
 import { stooqMarketDataProvider } from "./stooq";
@@ -119,13 +130,15 @@ function normalizedProviderTicker(value: string | null | undefined): string | nu
 }
 
 function fundamentalsMatchCompany(company: CompanySearchResult, fundamentals: CompanyFundamentals): boolean {
-  if (normalizedProviderTicker(fundamentals.ticker) !== normalizedProviderTicker(company.ticker)) return false;
+  if (company.securityType === "ADR" && !verifyDepositaryReceiptFundamentalsIdentity(company, fundamentals).verified) return false;
+  if (company.securityType !== "ADR" && normalizedProviderTicker(fundamentals.ticker) !== normalizedProviderTicker(company.ticker)) return false;
   if (fundamentals.cik && company.cik) {
     const expected = company.cik.replace(/\D/g, "").padStart(10, "0");
     const actual = fundamentals.cik.replace(/\D/g, "").padStart(10, "0");
     const sourceCiks = (fundamentals.sourceCiks ?? []).map((cik) => cik.replace(/\D/g, "").padStart(10, "0"));
     if (expected !== actual && !sourceCiks.includes(expected)) return false;
   }
+  if (company.securityType === "ADR") return true;
   return !company.entityId || !fundamentals.entityId || company.entityId === fundamentals.entityId;
 }
 
@@ -822,8 +835,9 @@ export async function analyzeCompany({
   const accessedAt = new Date().toISOString();
   const sources: AnalysisSource[] = [];
   const warnings: string[] = [];
+  const analysisCompany = attachVerifiedDepositaryReceiptRepresentation(company);
 
-  if (!canAttemptConfiguredFundamentals(company)) {
+  if (!canAttemptConfiguredFundamentals(analysisCompany)) {
     return {
       ok: false,
       error: UNSUPPORTED_SECURITY_ERROR,
@@ -837,16 +851,15 @@ export async function analyzeCompany({
 
   const deepResearchRequested = analysisType === "deep" || analysisType === "research";
   const [fundamentalsResolution, marketResolution, filingsResult] = await Promise.all([
-    resolveConfiguredFundamentals(company),
-    resolveConfiguredMarketData(company),
-    deepResearchRequested && company.cik ? fetchSecSubmissionEvents(company) : Promise.resolve(null),
+    resolveConfiguredFundamentals(analysisCompany),
+    resolveConfiguredMarketData(analysisCompany),
+    deepResearchRequested && analysisCompany.cik ? fetchSecSubmissionEvents(analysisCompany) : Promise.resolve(null),
   ]);
-  const providerOrchestrationMs = Date.now() - startedAt;
   const fundamentalsResult = fundamentalsResolution.result;
   const marketResult = marketResolution.result;
   const fundamentals = fundamentalsResult.ok ? fundamentalsResult.data : null;
   const rawMarket = marketResult.ok ? marketResult.data : null;
-  const market = enrichMarketWithFundamentals(company, rawMarket, fundamentals, accessedAt);
+  const market = enrichMarketWithFundamentals(analysisCompany, rawMarket, fundamentals, accessedAt);
   const providerDiagnostics = [...fundamentalsResolution.diagnostics, ...marketResolution.diagnostics, ...(filingsResult ? [filingsResult.diagnostic] : [])];
 
   if (fundamentals) {
@@ -897,8 +910,55 @@ export async function analyzeCompany({
     };
   }
 
+  const depositaryReceiptFxContext = await resolveDepositaryReceiptFxContext(analysisCompany, market);
+  const fxSource = depositaryReceiptFxSource(depositaryReceiptFxContext, accessedAt);
+  if (fxSource) sources.push(fxSource);
+
+  let valuationInputs = gateDepositaryReceiptValuationInputs(
+    analysisCompany,
+    market,
+    fundamentals,
+    depositaryReceiptFxContext ?? undefined,
+  );
+  if (valuationInputs.warning) warnings.push(valuationInputs.warning);
+
+  const primaryListingCompany = buildDepositaryReceiptPrimaryListingCompany(
+    analysisCompany,
+    depositaryReceiptFxContext ?? undefined,
+  );
+  if (primaryListingCompany && valuationInputs.market?.price !== null) {
+    const primaryListingResolution = await resolveConfiguredMarketData(primaryListingCompany);
+    providerDiagnostics.push(...primaryListingResolution.diagnostics);
+    const primaryListingMarket = primaryListingResolution.result.ok ? primaryListingResolution.result.data : null;
+  if (primaryListingMarket && primaryListingResolution.source) {
+    sources.push({
+      ...primaryListingResolution.source,
+      accessedAt,
+      provider: primaryListingMarket.provider ?? primaryListingResolution.source.provider,
+      capability: "market_data",
+      dataAsOf: primaryListingMarket.date,
+      version: providerAdapterVersion(primaryListingMarket.provider ?? primaryListingResolution.source.provider),
+    });
+  }
+  const primaryListingReconciliation = reconcileDepositaryReceiptPrimaryListingPrice(
+    analysisCompany,
+    valuationInputs.market,
+    primaryListingMarket,
+  );
+  if (primaryListingReconciliation.status !== "aligned") {
+    valuationInputs = disableDepositaryReceiptValuationInputs(
+      market,
+      fundamentals,
+      primaryListingReconciliation.reason,
+    );
+    warnings.push(`ADR/ADS primary-listing reconciliation disabled valuation: ${primaryListingReconciliation.reason}`);
+  }
+  }
+
+  const providerOrchestrationMs = Date.now() - startedAt;
+
   const legacyInput = {
-    company,
+    company: analysisCompany,
     market,
     fundamentals,
     analysisType,
@@ -906,7 +966,11 @@ export async function analyzeCompany({
     providerDiagnostics,
     analysisDate: accessedAt,
   };
-  const canonicalInput = toFinancialAnalysisInput(legacyInput);
+  const canonicalInput = toFinancialAnalysisInput({
+    ...legacyInput,
+    market: valuationInputs.market,
+    fundamentals: valuationInputs.fundamentals,
+  });
   const engineResult = analyzeFinancials(canonicalInput);
   const report = presentAnalysisReport(legacyInput, canonicalInput, engineResult);
   report.sources = sources;
@@ -927,7 +991,7 @@ export async function analyzeCompany({
       confidence: 0,
       reason: filingsResult.message,
     } : undefined;
-    attachInstitutionalResearch(report, report.engine, canonicalInput, { market, filings });
+    attachInstitutionalResearch(report, report.engine, canonicalInput, { market: valuationInputs.market, filings });
     const failedCapabilities = new Set(
       providerDiagnostics.filter((item) => item.status === "unavailable").map((item) => item.capability),
     );

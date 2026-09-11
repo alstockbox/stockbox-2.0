@@ -1,3 +1,8 @@
+import {
+  SPECIALIST_COVERAGE_TARGET,
+  specialistCoverageGateMessage,
+  specialistCoverageMeetsTarget,
+} from "@/lib/analysis/specialist-coverage";
 import { analyzeInvestmentCompany, classifyUniversalSecurity } from "@/lib/analysis/universal-security";
 import type { Recommendation } from "@/lib/analysis/types";
 import {
@@ -14,7 +19,7 @@ type AnalyzeArgs = Parameters<typeof analyzeUniversalCompany>[0];
 type AnalyzeResult = Awaited<ReturnType<typeof analyzeUniversalCompany>>;
 
 function recommendationForScore(score: number | null, coverage: number): Recommendation {
-  if (score === null || coverage < 0.5) return "No Rating";
+  if (score === null || !specialistCoverageMeetsTarget(coverage)) return "No Rating";
   if (score >= 85) return "Strong Buy";
   if (score >= 70) return "Buy";
   if (score >= 45) return "Hold";
@@ -28,13 +33,48 @@ function appendUnique<T>(values: T[] | undefined, value: T, key: (item: T) => st
   return existing.some((item) => key(item) === valueKey) ? existing : [...existing, value];
 }
 
+function applyInvestmentCompanyCoverageGate(report: UniversalSecurityReport): UniversalSecurityReport {
+  const specialist = report.securityAnalysis?.investmentCompany;
+  if (!specialist) return report;
+
+  const coverage = specialist.score.coverage;
+  const specialistScore = specialist.score.score;
+  // Investment-company coverage and score must come from the same specialist model.
+  // Never let strong generic corporate coverage or a stale generic score mask missing
+  // NAV/look-through inputs after an issuer is routed into the investment-company regime.
+  report.dataCoverage = coverage;
+  report.recommendation = recommendationForScore(specialistScore, coverage);
+  report.score.score = specialistScore;
+  report.score.personalizedScore = specialistScore;
+  report.score.confidence = Math.round(Math.min(report.score.confidence, Math.max(0, coverage * 100)));
+
+  const gateMessage = specialistCoverageGateMessage("Investment-company", coverage);
+  if (gateMessage) {
+    report.score.missingData = [...new Set([...report.score.missingData, gateMessage])];
+  }
+  return report;
+}
+
 async function enrichWithOfficialInvestmentCompanyNav(
   report: UniversalSecurityReport,
   args: AnalyzeArgs,
 ): Promise<UniversalSecurityReport> {
-  if (report.analysisArchetype !== "holding_company") return report;
+  // The primary universal provider already performs the full investment-company enrichment
+  // (NAV history, holdings quality, shareholder return, governance, capital allocation, etc.).
+  // If that specialist result exists, it is authoritative. Re-running a NAV-only fallback here
+  // would discard verified factors and can incorrectly downgrade 99-100% coverage to No Rating.
+  if (report.securityAnalysis?.investmentCompany) {
+    return applyInvestmentCompanyCoverageGate(report);
+  }
 
+  const alreadyClassifiedAsHoldingCompany = report.analysisArchetype === "holding_company";
   const navResult = await fetchOfficialInvestmentCompanyNav(args.company);
+
+  // A verified official NAV adapter is itself strong evidence that the issuer belongs in the
+  // investment-company regime. This prevents a vague upstream industry/SIC label from routing
+  // a known investment company through the ordinary operating-company methodology.
+  if (!navResult.ok && !alreadyClassifiedAsHoldingCompany) return report;
+
   report.providerDiagnostics = appendUnique(
     report.providerDiagnostics,
     navResult.ok ? navResult.data.diagnostic : navResult.diagnostic,
@@ -46,9 +86,10 @@ async function enrichWithOfficialInvestmentCompanyNav(
       ...report.score.missingData,
       `Official investment-company NAV unavailable: ${navResult.message} StockBox keeps NAV-dependent factors as N/A and does not substitute consolidated book equity.`,
     ])];
-    return report;
+    return applyInvestmentCompanyCoverageGate(report);
   }
 
+  report.analysisArchetype = "holding_company";
   const latest = report.engine?.metrics.latestPeriod ?? null;
   const analysis = analyzeInvestmentCompany({
     sharePrice: report.market?.price ?? null,
@@ -73,23 +114,14 @@ async function enrichWithOfficialInvestmentCompanyNav(
     (item) => `${item.provider ?? item.name}|${item.url}|${item.dataAsOf ?? ""}`,
   );
 
-  const securityScore = analysis.score.score;
-  if (typeof securityScore === "number" && Number.isFinite(securityScore)) {
-    report.score.score = securityScore;
-    report.score.personalizedScore = securityScore;
-    report.score.confidence = Math.round(Math.min(report.score.confidence, analysis.score.coverage * 100));
-    report.dataCoverage = Math.max(report.dataCoverage ?? 0, analysis.score.coverage);
-    report.recommendation = recommendationForScore(securityScore, analysis.score.coverage);
-  }
-
   report.score.missingData = [...new Set([
     ...report.score.missingData.filter((item) => !item.startsWith("Investment-company model requires verified NAV/SOTP inputs")),
     ...analysis.score.missing,
   ])];
 
-  report.summary = `${report.summary} Verified official NAV${navResult.data.reportedNavPerShare !== null ? ` of ${navResult.data.reportedNavPerShare.toFixed(2)} per share` : ""}${navResult.data.navAsOf ? ` as of ${navResult.data.navAsOf}` : ""} is incorporated into the investment-company valuation model.`;
+  report.summary = `${report.summary} Verified official NAV${navResult.data.reportedNavPerShare !== null ? ` of ${navResult.data.reportedNavPerShare.toFixed(2)} per share` : ""}${navResult.data.navAsOf ? ` as of ${navResult.data.navAsOf}` : ""} is incorporated into the investment-company valuation model. A full StockBox rating requires at least ${(SPECIALIST_COVERAGE_TARGET * 100).toFixed(0)}% verified investment-company factor coverage.`;
 
-  return report;
+  return applyInvestmentCompanyCoverageGate(report);
 }
 
 export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> {
@@ -97,10 +129,12 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
   if (!result.ok) return result;
 
   const report = result.data as UniversalSecurityReport;
-  if (report.analysisArchetype !== "holding_company") return result;
 
   try {
     const enriched = await enrichWithOfficialInvestmentCompanyNav(report, args);
+    if (enriched === report && report.analysisArchetype !== "holding_company" && !report.securityAnalysis?.investmentCompany) {
+      return result;
+    }
     return {
       ...result,
       data: enriched,
@@ -108,10 +142,11 @@ export async function analyzeCompany(args: AnalyzeArgs): Promise<AnalyzeResult> 
       warnings: result.warnings,
     };
   } catch {
+    if (report.analysisArchetype !== "holding_company" && !report.securityAnalysis?.investmentCompany) return result;
     report.score.missingData = [...new Set([
       ...report.score.missingData,
       "Official investment-company NAV enrichment failed unexpectedly; NAV-dependent factors remain N/A and the base report is preserved.",
     ])];
-    return { ...result, data: report };
+    return { ...result, data: applyInvestmentCompanyCoverageGate(report) };
   }
 }

@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AnalysisReport, CompanySearchResult, ProviderDiagnostic, ScoreDimensionKey } from "../../src/lib/analysis/types";
 import { findExactBatchCompany, mapWithConcurrency, parseBatchInput } from "../../src/lib/batch/input";
-import { analyzeCompany, searchCompanies } from "../../src/lib/data/provider";
+import type { UniversalSecurityReport } from "../../src/lib/data/universal-security-provider";
+import { analyzeCompany, searchCompanies } from "../../src/lib/data/universal-security-live-provider";
 import { yahooMarketDataProvider } from "../../src/lib/data/yahoo-market";
 import {
   type BatchRootCause,
@@ -19,6 +20,7 @@ import {
   reportRootCauses,
   symbolNotFoundRootCauses,
 } from "./user-large-ticker-classification";
+import { buildGlobalAuditKpis, type GlobalAuditKpiInput } from "./user-large-ticker-kpis";
 
 const rawTickers = `
 FRSH, UEIC, JACO, SPRS, PRO, MKSI, HUBS, EGAN, MAXD, PDFS, WIRX, UCTT, CNTM, PRKR, FI, UTRX, BDC, WSTL, TDC, ELST, BELFB, INLX, CVLT, PPMH, TKCI, VHC, ENTG, SPDC, DIOD, KN, CSCO.BA, MTSI, MCHP, AMBA, POWI, CDNS, OSIS, SMRT, KTCC, BHE, GEN, VRNS, ILXP, APPS, CLFD, NVEC, CLRO, BLBX, RAC.F, ETCIA, XRX, ASTC, LDOS, VIDE, DAVE, FORM, SPI, ALOT, ANSS, VRNT, IOT, LTEC, CSGS, MLNK, SMCI, MFON, RMBS, DMRC, S, SYNA, FCUV, WEX, MSN, AGYS, BOX, IWSY, CTXV, SYPT, AKTS, SSNC, FALC, MEI, CATG, CGNX, WRAP, VSH, DEMO, LITE, ASPT, DDDX, HZHI, ACLS, AVRI, WK, TSLX, SWKH, 0GV.F, ADIA, NXN, CBCYB, HTGC, CCBG, ETER, TSI, FCAP, NCA, CFBK, CHCO, DHIL, NOM, HPI, AIZ, CCFN, HALL, BRKL, RMTN, CIA, PFBN, RBAZ, AXP, NDEV, PFBX, NKSH, CXCQ, BCBP, MSCI, FSGB, TYFG, RMT, BCSO, PRAA, RM, BANX, HMN, SAR, BIT, RBCAA, MBI, PNF, HMLN, CYFL, TRV, BLE, SSB, THVB, NBTB, JQC, TRST, FSRL, RGT, NAZ, GUT, BCV, SCBS, CNO, SUND, EXSR, TY, FNF, CHBH, ANAS, OFSI, IHAI, TYBT, KTHN, RILY, CHY, AFNL, ITPC, MVBF, PMHG, CXE, HYT, AMG, FCOB, PDI, GVYB, ATLC, WHCA, ALTI, CBOE, EVM, BENH, SFST, BAC, PML, BLW, BTCS, OCNB, WAFD, COLB, MCBK, NKX, CBWA, TWN, FFC, ANDC, PPAL, BGI-UN.TO, HUML, HVLM, UBAB, MC, NIMU, ACMTA, SOUL, FNB, GRX, ETX, IRNS, SRNN, CZNL, CVHL, ASA, ADX, BTT, PRU, TRY.F, CCD, FFBC, 36Z.F, CYBA, EDD, NBN, HAON, PGP, RCG, AMBC, ICE, GSBD, FBP, UNIB, BANC, USA, SNLC, NXP, ESBS, PLCE, MAJJ, GTIM, CHDN, PCE1.DE, CLY.F, MUSA, WWW, MOV, CTHR, AVEW, BOOT, HRB, W, BWMG, GME, ZUMZ, TILE, OESX, GEF-B, SBH, STRT, BJRI, ALYI, HZO, DXYN, ALSN, LIVE, AXL, ROL, CATO, LOGC, DIL1.F, GCFB, CRMT, NCLH, NTRP, IBP, CART
@@ -27,10 +29,7 @@ FRSH, UEIC, JACO, SPRS, PRO, MKSI, HUBS, EGAN, MAXD, PDFS, WIRX, UCTT, CNTM, PRK
 function loadAuditTickerSource(): { source: string; raw: string } {
   const tickerFile = process.env.STOCKBOX_TICKER_FILE?.trim();
   if (!tickerFile) return { source: "embedded-release-hardening-list", raw: rawTickers };
-  return {
-    source: tickerFile,
-    raw: readFileSync(tickerFile, "utf8"),
-  };
+  return { source: tickerFile, raw: readFileSync(tickerFile, "utf8") };
 }
 
 type TickerAudit = {
@@ -47,17 +46,14 @@ type TickerAudit = {
     ticker: string;
     companyName: string;
     archetype: string | null;
+    specialist: boolean;
     score: number | null;
     rating: string;
     confidence: number;
     dataCoverage: number | null;
     dataStatus: string | null;
     currencyAlignment: string | null;
-    dimensions: Partial<Record<ScoreDimensionKey, {
-      score: number | null;
-      coverage: number | null;
-      missing: string[];
-    }>>;
+    dimensions: Partial<Record<ScoreDimensionKey, { score: number | null; coverage: number | null; missing: string[] }>>;
     missingData: Array<{ field: string; reason: string; impact: string; severity: string }>;
     sourceConflicts: Array<{ metric: string; severity: string; reason: string }>;
     fallbacks: string[];
@@ -125,19 +121,19 @@ function dimensionSummary(report: AnalysisReport): NonNullable<TickerAudit["repo
     {
       score: dimension.score,
       coverage: dimension.coverage ?? null,
-      missing: dimension.contributors
-        ?.filter((item) => item.availability === "missing")
-        .map((item) => item.label) ?? [],
+      missing: dimension.contributors?.filter((item) => item.availability === "missing").map((item) => item.label) ?? [],
     },
   ])) as NonNullable<TickerAudit["report"]>["dimensions"];
 }
 
 function reportSummary(report: AnalysisReport): TickerAudit["report"] {
   const engine = report.engine;
+  const universal = report as AnalysisReport & Partial<Pick<UniversalSecurityReport, "securityAnalysis">>;
   return {
     ticker: report.ticker,
     companyName: report.companyName,
     archetype: report.analysisArchetype ?? engine?.analysisArchetype ?? null,
+    specialist: Boolean(universal.securityAnalysis?.investmentCompany || universal.securityAnalysis?.etf),
     score: report.score.score,
     rating: report.recommendation,
     confidence: report.score.confidence,
@@ -151,6 +147,32 @@ function reportSummary(report: AnalysisReport): TickerAudit["report"] {
   };
 }
 
+function marketBucket(item: TickerAudit): string {
+  const symbol = (
+    item.selectedCompany?.canonicalTicker
+    ?? item.report?.ticker
+    ?? item.selectedCompany?.ticker
+    ?? item.query
+  ).trim().toUpperCase();
+  const dot = symbol.lastIndexOf(".");
+  return dot >= 0 && dot < symbol.length - 1 ? symbol.slice(dot + 1) : "UNSUFFIXED";
+}
+
+function auditKpiInput(item: TickerAudit): GlobalAuditKpiInput {
+  return {
+    query: item.query,
+    status: item.status,
+    securityType: item.selectedCompany?.securityType ?? null,
+    market: marketBucket(item),
+    specialist: Boolean(item.report?.specialist)
+      || item.selectedCompany?.securityType === "ETF/Fund"
+      || item.report?.archetype === "holding_company",
+    coverage: item.report?.dataCoverage ?? null,
+    score: item.report?.score ?? null,
+    rating: item.report?.rating ?? null,
+  };
+}
+
 function exactTickerLikeQuery(query: string): boolean {
   return /^[A-Z0-9][A-Z0-9.-]{0,24}$/i.test(query.trim()) && !query.includes(" ");
 }
@@ -158,11 +180,7 @@ function exactTickerLikeQuery(query: string): boolean {
 async function noExactMatchProviderDiagnostics(query: string): Promise<ProviderDiagnostic[]> {
   if (!exactTickerLikeQuery(query)) return [];
   const symbol = query.trim().toUpperCase();
-  const result = await yahooMarketDataProvider.fetchMarketData({
-    ticker: symbol,
-    canonicalTicker: symbol,
-    name: symbol,
-  });
+  const result = await yahooMarketDataProvider.fetchMarketData({ ticker: symbol, canonicalTicker: symbol, name: symbol });
   return [result.diagnostic];
 }
 
@@ -342,12 +360,7 @@ function providerFailureDiagnostics(results: TickerAudit[], limit = 50): Provide
   for (const item of results) {
     for (const diagnostic of item.providerDiagnostics.filter((entry) => entry.status !== "available")) {
       const reason = diagnostic.reason ?? "unspecified";
-      const key = [
-        diagnostic.provider,
-        diagnostic.capability,
-        diagnostic.status,
-        reason,
-      ].join("\u0000");
+      const key = [diagnostic.provider, diagnostic.capability, diagnostic.status, reason].join("\u0000");
       const group = groups.get(key) ?? {
         provider: diagnostic.provider,
         capability: diagnostic.capability,
@@ -389,10 +402,7 @@ describe("User large ticker diagnostic classification", () => {
     writeFileSync(file, "VOLV-B.ST, SEB-A.ST\n");
     process.env.STOCKBOX_TICKER_FILE = file;
 
-    expect(loadAuditTickerSource()).toEqual({
-      source: file,
-      raw: "VOLV-B.ST, SEB-A.ST\n",
-    });
+    expect(loadAuditTickerSource()).toEqual({ source: file, raw: "VOLV-B.ST, SEB-A.ST\n" });
   });
 
   it("does not classify generic selected-period score gaps as TTM period gaps", () => {
@@ -460,6 +470,7 @@ describe("User large ticker live audit", () => {
     const qualityAvailable = completed.filter((item) => item.report?.dimensions.quality?.score !== null).length;
     const valuationAvailable = completed.filter((item) => item.report?.dimensions.valuation?.score !== null).length;
     const allRootCauses = results.flatMap((item) => item.rootCauses);
+    const kpis = buildGlobalAuditKpis(results.map(auditKpiInput));
     const output = {
       generatedAt: new Date().toISOString(),
       startedAt,
@@ -472,6 +483,7 @@ describe("User large ticker live audit", () => {
       invalid: parsed.invalid,
       results,
       summary: {
+        kpis,
         statuses: countBy(results.map((item) => item.status)),
         rootCauses: countBy(allRootCauses),
         statusByArchetype: countNestedByArchetype(results, (item) => [item.status]),
@@ -498,6 +510,7 @@ describe("User large ticker live audit", () => {
     );
 
     expect(output.summary).toEqual(expect.objectContaining({
+      kpis: expect.any(Object),
       statusByArchetype: expect.any(Object),
       rootCausesByArchetype: expect.any(Object),
       topMissingData: expect.any(Array),
